@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28); and R6, the video and sound effects (expanded 2026-09-30); and R7, the paid and model nodes that replace the local AI models (expanded 2026-09-30); and R8, the mini apps on the runner (expanded 2026-10-01) — and outlines R9–R11 (R4.1 is built).
+**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28); and R6, the video and sound effects (expanded 2026-09-30); and R7, the paid and model nodes that replace the local AI models (expanded 2026-09-30); and R8, the mini apps on the runner (expanded 2026-10-01); and R9–R11, the Timeline's browser-only export, the engine plumbing taken out of the app, the leftovers and every named stop-gap, ending with the divorce check (expanded 2026-10-01). R4.1 is built.
 
 **Architecture:** a runner node's results become per-slot *values* (`NodeRecord.values`): files as today, plus masks, text, numbers, true/false, JSON text and 3D model addresses. At a node's turn, every wire that brings a value is replaced by that value before the node's request is built, so every existing builder, check and prompt sees a plain value, as ComfyUI's `execute()` does. Prices keep reading the workflow as sent (a wired input is priced at its most expensive, as today). Bytes the runner makes itself are kept by sha256 in a run-scoped folder beside the run store. Which wires may carry values is one shared table (`shared/runner/`), read by the browser and the server. New cards run as a new `derive` plan kind: computed on the server, no provider, no charge.
 
@@ -79,8 +79,14 @@ New files:
 | `frontend/shared/runner/samInput.ts` | R7.4: SAM 3's payload, shared by `/api/inpaint/segment` and the runner (moved from `server/utils/samInput.ts`). |
 | `frontend/server/utils/depthModel.ts`, `frontend/server/runner/effects/core/lens.ts`, `frontend/server/runner/cards/lensBlur.ts` | R7.9: the in-process depth model (shared with `/api/depth/estimate`), the lens blur core, and Lens · Depth of field's plan. |
 | `frontend/server/api/runs/quote.post.ts`, `frontend/app/composables/useAppRun.ts` | R8.0: the free price quote (the start's own checks and hold calculation, nothing held), and the mini apps' one way to quote, run, wait for results and stop. |
+| `frontend/shared/runner/localOnly.ts` | R10.2: decision 4's local-only class set, the only classes that may go to the local engine. |
+| `frontend/server/media/split.ts` | R11.5: cutting a long sound at its quietest points, for the vocals and Whisper plans. |
+| `frontend/server/runner/generators/tiles.ts` | R11.6: Upscale's overlapping tiles and their weighted blend. |
+| a native read-only `/global_subgraphs` under `frontend/server/native/` | R10.6: the blueprint list with ComfyUI off. |
 
-Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`. R6 also modifies `server/media/run.ts` (the lease), `server/media/values.ts`, `server/runner/keptBytes.ts`, `compositor/worker.ts`, `effects/core/kernels.ts` (`gridSample3d`), `shared/runner/media.ts` and `scripts/runner_effect_rows.py`. R7 also modifies `shared/pricing/paidRates.ts` and `paidSettings.ts`, `shared/runner/retired.ts`, `server/api/depth/estimate.post.ts`, `server/api/inpaint/segment.post.ts`, `app/lib/nodeCreditEstimate.ts`, `scripts/runner_paid_fixtures.py` (groups `local-*`) and `scripts/runner_effects_fixtures.py` (group `lens`). R8 also modifies `server/runner/engine.ts` (`quoteRun`), `app/lib/runner/awaitRunnerResult.ts` (`awaitRunnerOutputs`), Blend scene's row and `compositor/keep.ts` (a mask from Image to mask), Caption track's row and `video/table.ts`, `video/text.ts` (wired captions), and the app files under `app/components/apps/` and `LoraTrainerSurface.vue`.
+Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`. R6 also modifies `server/media/run.ts` (the lease), `server/media/values.ts`, `server/runner/keptBytes.ts`, `compositor/worker.ts`, `effects/core/kernels.ts` (`gridSample3d`), `shared/runner/media.ts` and `scripts/runner_effect_rows.py`. R7 also modifies `shared/pricing/paidRates.ts` and `paidSettings.ts`, `shared/runner/retired.ts`, `server/api/depth/estimate.post.ts`, `server/api/inpaint/segment.post.ts`, `app/lib/nodeCreditEstimate.ts`, `scripts/runner_paid_fixtures.py` (groups `local-*`) and `scripts/runner_effects_fixtures.py` (group `lens`). R8 also modifies `server/runner/engine.ts` (`quoteRun`), `app/lib/runner/awaitRunnerResult.ts` (`awaitRunnerOutputs`), Blend scene's row and `compositor/keep.ts` (a mask from Image to mask), Caption track's row and `video/table.ts`, `video/text.ts` (wired captions), and the app files under `app/components/apps/` and `LoraTrainerSurface.vue`. R9–R11 also modify `shared/runner/retired.ts`, `needsEngine.ts`, `messages.ts`, `eligibility.ts`, `lipSync.ts`, `localModels.ts`, `media.ts`; `server/runner/generators/localModels.ts`, `server/runner/localModelStart.ts`, `server/utils/graphInputPixels.ts`, `server/runner/video/shapes.ts`, `server/media/values.ts`; `app/layouts/default.vue`, `useDirectExecution.ts`, `useNodeSearch.ts`, `NodesSidebar.vue`, `ComfyGateNode.vue`, `TimelineEditor.vue`, `studioVideoExport.ts` and its six callers, `ToolboxPanel.vue`, `SettingsModal.vue`; `server/api/image-fetch.post.ts`, `server/api/scene3d/gen-3d.post.ts`, `server/routes/history/*`, `server/templates/safeFetch.ts`, `server/middleware/comfyui-proxy.ts`, `server/utils/{engineGate,enginePath,authGuard}.ts`, `server/native/{engineHealth,smallRoutes}.ts`; `Dockerfile`, `start.sh`, `.dockerignore`.
+
+Deleted (R9–R10): `TimelineModal.vue`, `lib/serverFrameRenderer.ts`, `lib/engine/encodeVideo.ts`, `server/utils/comfyWorkerPool.ts`, `server/api/pool/ensure.post.ts`, `useModelDownloads.ts`, `ModelBundlesPanel.vue`, `server/native/modelBundles.ts`, and (if nothing local needs them) `server/utils/workerRoute.ts` and `server/utils/meterGraphRun.ts`. Python files stay.
 
 ---
 
@@ -5555,45 +5561,422 @@ All are small. R8.0 is the largest, since the quote must share the start's code.
 
 ---
 
-# R9–R11 — outline tasks (to be expanded before they are built)
+# R9–R11 — Timeline, removing the engine plumbing, and leftovers
 
-(R4.1 stays below for the record: it was built on 2026-09-28. R5, R6, R7 and R8 are expanded above.)
+Expanded 2026-10-01. R9 makes the Timeline export in the browser only. R11 closes the last gaps in classes the runner half-takes, and every stop-gap earlier stages named. R10 then takes the engine plumbing out of the app, so nothing silently needs ComfyUI. The last task proves it. `.superpowers/sdd/2026-09-26-engine-free-step3/r9-r11-expansion-report.md` lists the corrections to the outline and why. In short:
 
-Each outline task becomes a full task (tests and code) when its slice starts. Every paid family: its own switch, off by default; priced in `frontend/shared/pricing/` before switch-on; the backup rule; a live paid check with the user's go.
+- **The Timeline editor already exports in the browser first.** A local server fallback remains: no WebGL2, no encoder, an encoder failure, or the `Sailor.VideoExport=server` switch (`TimelineEditor.vue:1161-1280`, `renderOnServer` at `:1291`). Hosted already has no server route. So R9 is a refusal for the in-graph node, plus deletions.
+- **The LoRA trainer already opens on Cloud** when the engine is down or in hosted (R8.5, `13e74fd4b`). Only the Local branch and its base downloads are left to delete (R10.7).
+- **Rate limits by person are done** (`6b37e9c69`). No task.
+- **The outline missed six engine ties:**
+  - the canvas itself: a runner decline goes to `/prompt` silently (`layouts/default.vue:970-974`);
+  - server routes that call `:8188` directly: `api/image-fetch.post.ts:54`, `api/scene3d/gen-3d.post.ts:50`, `routes/history/*`, and Frame render's loopback `/view` (`server/templates/safeFetch.ts:89`);
+  - the hosted proxy, which still forwards `/prompt`, `/ws` and `/global_subgraphs` to ComfyUI;
+  - the Fly image, which still installs ComfyUI, torch, opencv and PyAV (`Dockerfile:92-101`, `start.sh`);
+  - the Toolbox, which still downloads local model bundles (`bgremove`, `upscale`, `whisper`…) before adding a node, though R7 moved those classes to hosted calls;
+  - the many small "leave it to the engine" exits in R2–R8 (odd text, exotic formats, unsizeable sources, hosted work caps).
+- **Order.** R9 can go any time. R11.1–R11.8 come next. R11.9 then closes the long tail. R10.0 switches every family on. Only then R10.1–R10.10, and last R11.10, the divorce check. R10 goes after R11 on purpose: removing the fallback before the gaps are closed would make working local graphs fail.
 
-### Task R4.1: Retire the 182 partner nodes (decision 3)
+**For the record:** R4.1 (retire the 182 partner nodes, decision 3) was built on 2026-09-28. `RETIRED_CLASSES` in `shared/runner/retired.ts` refuses them on both paths before any charge.
 
-Add every class billed through api.comfy.org (the inventory's list; mechanically, every `comfy_api_nodes/nodes_*.py` class except `nodes_replicate.py`) to a shared `RETIRED_CLASSES` (`frontend/shared/runner/retired.ts`). They leave the Actions panel and the Legacy toggle (`app/data/action-catalog.ts`, `GeneratorsPanel.vue:41-46`), node search (`useNodeSearch.ts:87-140`), the agent and start-modal catalogues, and are refused on both paths before any charge (`blockedModels.ts`' shape: a 400 like ComfyUI's `node_errors`, "This node was retired. Pick another way to make this."). The Python files stay (not edited by this programme). Acceptance: a guard test that every `api.comfy.org`-billed class in `objectInfo.baseline.json.gz` is retired; a saved workflow with one opens, shows the node as retired, and is refused before the hold.
+## Rules every R9–R11 task follows
 
-### Task R9.1: Timeline, browser export only (decision 5)
+1. **Money, never relaxed.** The hold is the ceiling. Only delivered calls are charged. The price shown covers the hold in each place. A refusal comes before the hold. Where one node now makes several calls (pieces, tiles, segments), the hold is the most calls it can make × the price, and a failure partway charges only what was delivered.
+2. **Pre-run checks are true upper bounds.** Sizes come from file headers, lengths from the probe. A source that can't be sized is held at the cap, never guessed.
+3. **Hosted safety.** Names are checked before any disk access, and must be the person's own. Results go under the person's subfolder.
+4. **Switching on never makes a working graph fail.** Until R10, a family that is off behaves as before.
+5. **Stop leaves nothing.** No `ffmpeg`, no provider call we can cancel, no partial file.
+6. **No silent engine.** A task that can't close a case says so, and the case gets plain words (R11.9) or a ruling. "Needs the local engine" is allowed only for decision 4's classes, locally.
+7. **Matching rule (USER, 2026-09-30).** Cheap stays exact. Hard ports only need to look the same. Fix Python's bugs.
+8. **Copy.** Sentence case, plain words, no identifiers, no "ComfyUI" in hosted copy. Hints are tooltips.
+9. **Tests and run line** as R8 rule 10 and 11. Report, no commit.
 
-The in-graph Timeline node becomes a browser export: in a workflow it is refused with "Export this timeline from the Timeline editor", and the Timeline editor's Export is the one path (`TimelineEditor.vue:1161-1279` loses its server branches; the `Sailor.VideoExport=server` switch goes). Delete `renderOnServer` (`TimelineEditor.vue:1291-1400`), `TimelineModal.vue` (mounted nowhere), `lib/serverFrameRenderer.ts` and `pages/timeline-harness.vue`'s server comparison, and the native/proxy handling of `/sailor/render_timeline_stream`, `/sailor/render_timeline` and `/sailor/timeline/render_frame`. Acceptance: no frontend reference to the deleted routes; the 19 saved projects with a Timeline node open and say how to export; `nodes_timeline.py` stays (Python is not edited).
+---
 
-### Task R10.1: Engine plumbing out of the app
+# R9 — Timeline, browser export only (decision 5)
 
-Delete the worker pool (`/api/pool/ensure`, `server/utils/comfyWorkerPool.ts`, `useDirectExecution.ts:544,627`), the engine-only `/gate/resume` path in `ComfyGateNode.vue:92` (runner gates already use `sailor:runnerGateAction`), and the Space Type server encode fallback (`lib/engine/encodeVideo.ts:55` and its `serverFallback` callers in ArtifactFrameNode.vue, Scene3DStudioSurface.vue, GradientStudioSurface.vue, ShaderStudioSurface.vue, CompositorModal.vue, SpaceTypeSurface; spec ruling 7). Acceptance: builds clean; no reference left; exports work through mediabunny as today.
+### Task R9.1: The Timeline node in a workflow says how to export
 
-### Task R10.2: Local-only classes and blueprints hidden in hosted (decision 4)
+- The `Timeline` class (`comfy_extras/nodes_timeline.py:588`) is refused on both paths, before the hold. Words: "Export this timeline from the Timeline editor."
+- Use R7.10's per-class retired message, with advice, so every refusal route says the same.
+- The node still opens the editor. A saved project with one still opens.
 
-In hosted: node search (`useNodeSearch.ts`) offers no class outside the runner's known set plus the cards; `/global_subgraphs` returns an empty list; `NodesSidebar.vue:23-73` hides the blueprint section. Locally with ComfyUI off: blueprints list natively from `blueprints/*.json` (a native `/global_subgraphs`, read-only) and say "needs the local engine" when run. Acceptance: hosted route-guard tests green; a local blueprint still loads with ComfyUI up.
+**Files:** `shared/runner/retired.ts` (or a sibling `editorOnly` list read the same way), `shared/runner/needsEngine.ts`. Test: `runner-timeline-node.unit.spec.ts`.
 
-### Task R10.3: LoRA trainer cloud only (decision 6)
+**Tests:** refused on the runner and the ComfyUI path, before any hold; the words name the node; the saved projects with a Timeline node (19 in the outline's count; recount) open and list it as refused.
 
-Remove the local mode of `LoraTrainerSurface.vue` (:1026-1137) and its base-checkpoint downloads (`/sailor/models/download` callers in `useModelDownloads.ts` for the trainer); keep `/api/cloud-train`. `models/download` remains only if R7 keeps a local model (none planned: then remove it and `models/status`' local bundles). Acceptance: the trainer offers cloud only; no call to `/prompt` from it.
+**Acceptance:** no run with a Timeline node reaches `/prompt`.
 
-### Task R11.1: Relight and Generate a video leftovers
+**Live check:** none.
 
-Relight's wired `light` (JSON from the gimbal) and `instructions` (text) as value inputs (R0), with `parseLight`'s tolerant read of a wired value; Generate a video's wired `model_options` (priced at its most expensive, as the price module already does for a link) and `fabric-1.0` with a linked sound (the sound hand-off already exists). Acceptance: request fixtures for each; the hold at the ceiling, the charge from the same calculation.
+### Task R9.2: The Timeline editor exports in the browser only
 
-### Task R11.2: Lip-sync engines and unpriced image models
+- `exportTimeline` loses its server branch. A failure shows its plain words in both places, as hosted does today.
+- `renderOnServer` (`TimelineEditor.vue:1291`) goes, with its `motion_bake` and sound-mix upload helpers if nothing else uses them.
+- The `Sailor.VideoExport=server` switch no longer reaches the Timeline.
 
-Lip-sync a character's Fabric and auto engines, and `sync` below sync-3 (measured-length pricing as sync-3); the three Recraft SVG models (the runner saves the SVG; a reader that needs a picture refuses it plainly), `seedream-5-pro` and `reve-create` once priced (each needs its price and a live check; otherwise they stay hidden). Acceptance: request fixtures; no model switched on without a verified price.
+**Files:** `TimelineEditor.vue`. Test: `timeline-export-browser-only.unit.spec.ts` (a guard over the source: no `/sailor/render_timeline*` fetch; the failure words).
+
+**Acceptance:** export works as today in a WebCodecs browser; without one it says why and makes nothing.
+
+**Live check:** none.
+
+### Task R9.3: The dead Timeline pieces go
+
+- Delete `TimelineModal.vue` (mounted nowhere), `lib/serverFrameRenderer.ts`, and the server comparison in `pages/timeline-harness.vue`.
+- Delete the proxy and hosted-gate entries for `/sailor/render_timeline_stream`, `/sailor/render_timeline` and `/sailor/timeline/render_frame` (`server/utils/enginePath.ts:247-248`).
+- `nodes_timeline.py` stays (Python is not edited).
+
+**Files:** the three app files, `server/utils/enginePath.ts`. Test: a guard that no frontend file names the three routes.
+
+**Acceptance:** builds clean; the guard is green.
+
+**Live check:** none.
+
+---
+
+# R11 — Leftovers, and the named stop-gaps
+
+R11 comes before R10. Each task closes a case that would otherwise need the engine.
+
+### Task R11.1: Relight takes a wired light and instructions
+
+- `RelightNode`'s row (`eligibility.ts:566`) gains `valueInputs: { light: ['text'], instructions: ['text'] }`, and drops them from `mustNotLink`.
+- A wired `light` goes through `parseLight`'s tolerant read. Unreadable is Python's default light.
+- Wired `instructions` are moderated (R0.5). Prices don't read wires: the price is unchanged.
+
+**Files:** `shared/runner/eligibility.ts`, the Relight builder. Test: `runner-relight-wired.unit.spec.ts` (request fixtures from the Python, for a gimbal JSON, a broken JSON and wired text).
+
+**Acceptance:** the requests equal Python's; the hold is unchanged.
+
+**Live check:** none (same model, same price; fixtures prove the request).
+
+### Task R11.2: Generate a video — wired options, and Fabric with a sound
+
+- `model_options` takes a text wire. The price already reads a wired input at its dearest. The request reads the value at the node's turn.
+- `fabric-1.0` joins `RUNNER_REPLICATE_VIDEO_MODEL_IDS` with a linked sound (the hand-off exists). The hold reads the sound's measured length, or its maker's bound (R11.8).
+
+**Files:** `shared/runner/eligibility.ts` (`:820`, `:860`, `:383`), the video builder. Test: `runner-video-leftovers.unit.spec.ts`.
+
+**Acceptance:** request fixtures equal Python's; the hold is the ceiling; the charge is the same calculation.
+
+**Live check:** one 5-second Fabric clip at 480p, $0.40.
+
+### Task R11.3: Lip-sync's other engines
+
+- Fabric (`veed/fabric-1.0`) and Kling (`kwaivgi/kling-lip-sync`), resolved as `_lipsync_resolve_engine` does (`clipSettings.ts:509`).
+- A sound from a Load or Record audio card into Lip-sync (R5.3 case A): handed on as the runner's own WAV, checked on the live call.
+- Sync lips' `silence` mode: priced on the face video's measured length, which bounds what it bills (ruling (o)).
+
+**Files:** `shared/runner/eligibility.ts` (`LipSyncNode`, `:925`), `shared/runner/lipSync.ts`, the lip-sync builder. Test: `runner-lipsync-engines.unit.spec.ts`.
+
+**Acceptance:** each engine's request equals Python's; hold and charge as rule 1.
+
+**Live check:** Fabric 5 s at 480p ($0.40) and Kling 5 s ($0.07). About $0.47.
+
+### Task R11.4: SVG and unpriced image models
+
+- The three Recraft SVG models (`recraft-v4-pro-svg`, `recraft-v4-svg`, `recraft-v3-svg`): the runner saves the SVG and hands on its address. A reader that needs pixels refuses plainly: "This node needs a picture, not an SVG."
+- `seedream-5-pro` on Generate an image and `reve-create` stay hidden and refused until each has a verified price (ruling (p)).
+
+**Files:** `shared/runner/eligibility.ts` (`:360`), `shared/runner/values.ts` (an `svg` file kind), the image builder. Test: `runner-image-svg.unit.spec.ts`.
+
+**Acceptance:** an SVG lands in Save image's folder; a picture reader refuses before the hold; no unpriced model can run.
+
+**Live check:** one each: v4 SVG ($0.08), v3 SVG ($0.08), v4 Pro SVG ($0.30). About $0.46.
+
+### Task R11.5: Long sounds in pieces
+
+- One shared splitter (`server/media/split.ts`): cut at the quietest point near each limit, using ffmpeg's `silencedetect`, never past the limit.
+- Vocal separator: songs over the cap (hosted 10 minutes, local 20) run as pieces of at most 10 minutes, one Demucs call each, stems joined. The hold is pieces × price, counted from the probe before the hold.
+- Whisper transcribe: sounds over the cap (hosted 30 minutes, local one hour) run as pieces of at most 30 minutes; times offset and texts joined.
+- Karaoke's local `VOCALS_WORDS.tooLong` stop-gap and Auto subtitle's `RUNNER_SOUND_TOO_LONG` stop-gap then never fire. Their tests change to "runs in pieces".
+- A hard ceiling stays (hosted 60 minutes of song, 3 hours of speech), refused plainly before the hold.
+
+**Files:** `server/media/split.ts`, the vocals and Whisper plans in `server/runner/generators/localModels.ts`. Test: `runner-long-sound.unit.spec.ts` (fake Replicate and fal; join points; offsets; Stop between pieces releases the rest of the hold).
+
+**Acceptance:** an over-cap song and an over-cap sound run with ComfyUI off; hold = pieces × price; a failure in piece 2 charges piece 1 only.
+
+**Live check:** a 12-minute song (two Demucs calls, about $0.07 at the card) and a 31-minute sound through Wizper (about $0.19). About $0.26.
+
+### Task R11.6: Upscale (2×) over 1440p, in tiles
+
+- A picture over 2560 × 1440 is split into overlapping tiles under the cap. One Real-ESRGAN call per tile. The 2× tiles are blended back with weighted overlap, as Python's `_tiled_forward`. It looks the same side by side (rule 7).
+- Tiles are counted from the size bound before the hold. Hold = tiles × the per-tile price.
+- A generator whose stated largest is over 3.7 MP is tiled the same way, not left.
+
+**Files:** `server/runner/generators/localModels.ts` (Upscale), a small `tiles.ts` beside it. Test: `runner-upscale-tiles.unit.spec.ts`.
+
+**Acceptance:** a 3840 × 2160 picture upscales with ComfyUI off; no seam visible in a fixed test picture; the hold is the tile count's price.
+
+**Live check:** one 4K picture, about $0.03.
+
+### Task R11.7: Clips past the caps
+
+- **Slow motion (AI):** a clip over 240 frames runs as 240-frame segments sharing their boundary frame, one RIFE call each. Output past R5's batch caps is written in segments. Local frames over 4K are refused plainly (ruling (j)). Hosted 1080p on the minterpolate path: measure its memory on Fly, then count it truly.
+- **Per-frame classes** (Background remove, Object removal, Subject mask, Mask by text): masks kept as one FFV1 grey batch, and the input batch let go once read. Raise the caps (300 hosted, 900 local) only after a Fly measurement. Over the cap: refused plainly with the cap in words.
+- A still picture into Slow motion (AI) is handed on as Python does (one frame, no call).
+
+**Files:** `server/runner/generators/localModels.ts`, `shared/runner/localModels.ts`, `server/media/values.ts`. Test: `runner-clip-caps.unit.spec.ts`.
+
+**Acceptance:** a 300-frame clip runs slow motion in two segments with ComfyUI off; hold = segments × price; over-cap clips refuse before the hold.
+
+**Live check:** one 300-frame clip, two RIFE calls, about $0.09.
+
+### Task R11.8: Every source has a bound
+
+- Each runner source declares its bound in `pictureBound` / `pictureRule` (count and size) and the sound and clip shape tables: the R2 effects' output sizes, R7's classes (`same`, Upscale 2×), Text mask, Painter, the mask effects, music and speech.
+- A source still unknown is held at the cap, never left (ruling (k)).
+- Generate speech: bounded by characters ÷ the slowest rate the live check measures. Clone a singing voice: bounded by its input's 60 s, confirmed live.
+- Music or speech into Create video or a sound effect is then taken (R5.4, R6.9).
+- R7.7's parked cap+1 threshold: refuse at bound > cap; +1 s only with a header source.
+
+**Files:** `server/utils/graphInputPixels.ts` (`pictureRule`), `server/runner/localModelStart.ts` (`pictureBound`), `shared/runner/media.ts`, `shared/runner/localModels.ts`, `server/runner/video/shapes.ts`. Test: `runner-source-bounds.unit.spec.ts` (each maker's bound ≥ its real output over the fixtures).
+
+**Acceptance:** no maker sends a workflow to the engine for want of a size; every bound holds against the fixtures.
+
+**Live check:** one long Generate speech call and one Clone a singing voice call, to measure length; about $0.10 at the cards (estimate).
+
+### Task R11.9: Close every named stop-gap
+
+Each case below either has its task, or gets plain words here. A shared guard test lists them all and fails if any still leaves to the engine.
+
+| # | Stop-gap (where named) | Plan | Closed by |
+|---|---|---|---|
+| 1 | Apps' local `/prompt` with families off (R8 ruling (d)) | gone; "This app is switched off right now." | R10.1 |
+| 2 | Songs over Karaoke's cap (R8 ruling (i), R7.8) | pieces at quiet points | R11.5 |
+| 3 | Whisper over the local hour (R7.7 case 1, R8.3) | pieces of 30 minutes | R11.5 |
+| 4 | Upscale over 1440p, or a generator over 3.7 MP (R7.2) | tiles | R11.6 |
+| 5 | Slow motion (AI): over 240 frames, past batch caps, past R6.6's limits, local over 4K (R7.6) | segments; over 4K refused (ruling (j)) | R11.7 |
+| 6 | Clip caps and hosted kept room for per-frame classes (R7.1, R7.5) | FFV1 masks, measured caps, plain refusal over | R11.7 |
+| 7 | Unsizeable makers: pictures, masks, music, speech, unknown clip length (R7.1–R7.3, R6.9, R5.4) | every source bounded, else held at the cap | R11.8 |
+| 8 | Generate speech and Clone a singing voice length (R7.7) | measured bounds | R11.8 |
+| 9 | Motion blur (time) refused on clips over one frame (R6.2) | user's call, ruling (c) | here |
+| 10 | Face swap's provider (fal Easel 503 on 2026-10-01, R8.6) | user's call, ruling (b) | R10.0 |
+| 11 | Animated Shader effect on the engine (R2 ruling (f)) | user's call, ruling (d) | here |
+| 12 | Lip-sync Fabric, Kling, card sound, silence mode (R3.10, R5.3) | ported | R11.3 |
+| 13 | Fabric video with sound, wired `model_options` | ported | R11.2 |
+| 14 | Relight's wired light and instructions | ported | R11.1 |
+| 15 | A clip's batch read by a picture-only reader (R7.1 case 3) | Save image and Preview image save each frame, as Python; other picture readers refuse plainly | here |
+| 16 | SAM 3 typed points: labels −1, 2, 3; NaN text; bad points (R7.4) | drop −1, send 2/3 as a box; refuse the rest with `SAM_MASK_WORDS.pointsFail` | here |
+| 17 | Wired settings the runner reads as widgets (Demucs `model`/`shifts`, Whisper `model_size`, R5.5, R6.4, R7.9) | refuse plainly: "Type this setting in; it can't be wired." | here |
+| 18 | Odd text Python reads its own way: colour text, NaN, 300-digit numbers, deep JSON, Painter names, Moodboard non-text readings (R2.4–R2.10, spec ruling 3) | refuse plainly, naming the field (ruling (e)) | here |
+| 19 | Letters outside the glyph atlas, U+2800 (R2.6) | refuse plainly (ruling (e)) | here |
+| 20 | Video formats neither sniffer nor build reads: RealMedia, MXF, DV, NUT, IVF, Y4M, raw streams; ProRes card export (R5.4) | refuse plainly; ProRes encodes if our build has `prores_ks`, else refused (ruling (e)) | here |
+| 21 | LUT outside the folders or over 16 MiB in hosted (R6.4); sound over 384 kHz (R6.7) | refuse plainly (ruling (e)) | here |
+| 22 | Typed captions over 200,000 characters (R8.3) | refuse plainly; lifting the cap is parked | here |
+| 23 | Hosted work and kept-room caps (R6.1, R6.6, R6.9) | refuse plainly with "too much work for one run here" | here |
+| 24 | Missing tools: media tools, depth model, bundled font (R5.3, R7.9, R6.8) | the image ships them (R10.10); if absent, "This isn't installed on this server." | here, R10.10 |
+| 25 | A family that is off | "*Name* is switched off right now." | here |
+| 26 | Timeline node in a workflow | advice to use the editor | R9.1 |
+| 27 | Local LoRA training | removed | R10.7 |
+| 28 | Stock local-diffusion classes and blueprints (decision 4) | "This needs the local engine" locally; absent in hosted | R10.2, R10.6 |
+
+**Builds:** every `RUNNER_NOT_ELIGIBLE` exit in `eligibility.ts`, the start passes and the plans carries a reason code with plain words. `needsEngineReasons` returns them. Words live in `shared/runner/messages.ts`.
+
+**Files:** `shared/runner/messages.ts`, `needsEngine.ts`, `eligibility.ts`, the start passes; `server/runner/generators/localModels.ts` (SAM points); the Save image and Preview image cards. Test: `runner-stop-gaps.unit.spec.ts` (one case per row; each either runs through the kit or refuses with its words before the hold).
+
+**Acceptance:** with every family on, no row leaves to the engine; each refusal names the node and says why.
+
+**Live check:** none.
+
+---
+
+# R10 — The engine plumbing out of the app
+
+R10 starts only when R11.1–R11.9 are in and R10.0 has switched every family on.
+
+### Task R10.0: Every family on, in both places (controller, not delegated)
+
+- [ ] The owed live checks, with the user's go: the R3 families (R3.18's list, $7.70 at most; the task reports' lists come to less), `image-repair` among them; Face swap after ruling (b) ($0.05 on Easel, about $0.001 on `fal-ai/face-swap`); R11's own checks.
+- [ ] The hosted-by-hand checks R5.7 owed (HLS named `.mp4`, a 4097 px frame, another person's file), on the hosted server with fakes. Free.
+- [ ] Every family in `ALL_RUNNER_FAMILIES` and `LOCAL_MODEL_FAMILIES` on, locally and in hosted's config (ruling (a)).
+- [ ] Record each price with its source and date.
+
+**Live check:** about $7.75 (the owed R3 and Face swap checks); R11's own are counted in their tasks.
+
+### Task R10.1: The mini apps lose the engine fallback
+
+- Product shot, Karaoke and Auto subtitle stop sending to `/prompt` with their families off. They say "This app is switched off right now." everywhere, as hosted does today.
+- Karaoke's and Auto subtitle's over-cap stop-gaps go (R11.5 runs them in pieces).
+- `useAppRun`'s `declined` path is the only one left.
+
+**Files:** `ProductShotApp.vue`, `KaraokeMakerApp.vue`, `AutoSubtitleApp.vue`, `app/composables/useAppRun.ts`. Test: the three `app-*-run.unit.spec.ts` (decline shows the words; a guard: no `/prompt` or `/history` in `app/components/apps/`).
+
+**Acceptance:** with ComfyUI off and the families on, each app runs; with a family off, each says it is off; no app calls the engine.
+
+**Live check:** none.
+
+### Task R10.2: The canvas never falls back silently
+
+- In `layouts/default.vue`, a runner decline goes to `/prompt` only when:
+  - this is local, not hosted;
+  - the engine is up;
+  - every node the runner refuses is in decision 4's local-only set.
+- Otherwise the run is refused with the runner's words (R11.9), naming each node.
+- The local-only set is one shared list (`shared/runner/localOnly.ts`): the stock classes in `objectInfo.baseline.json.gz` that the runner doesn't take and that aren't retired.
+- The old "This workflow needs the local engine" toast is kept only for those classes.
+
+**Files:** `app/layouts/default.vue` (`:892-990`), `shared/runner/needsEngine.ts`, create `shared/runner/localOnly.ts`. Test: `runner-no-silent-engine.unit.spec.ts` (a declined Sailor class never reaches `queueSmart`; a KSampler graph does, locally, with the engine up; hosted never does).
+
+**Acceptance:** no Sailor class can reach ComfyUI.
+
+**Live check:** none.
+
+### Task R10.3: The worker pool and the engine Gate resume go
+
+- Delete `server/utils/comfyWorkerPool.ts`, `server/api/pool/ensure.post.ts`, `server/utils/workerRoute.ts` if only the pool uses it, and the pool parts of `useDirectExecution.ts` (`queueSmart`'s spill, `queueParallel`, per-worker sockets). One main socket stays for the local-only path.
+- Delete `ComfyGateNode.vue`'s `/gate/resume` path (`:97`) and its proxy entry (`enginePath.ts`, F1). Runner Gates already use `sailor:runnerGateAction`.
+
+**Files:** the files above; `app/layouts/default.vue` (the pool toasts at `:1017-1027`). Test: a guard that nothing names `/api/pool/ensure`, `comfyWorker` or `/gate/resume`; `useDirectExecution`'s own specs trimmed to the main path.
+
+**Acceptance:** builds clean; Gates pause and resume on the runner.
+
+**Live check:** none.
+
+### Task R10.4: Studio video exports in the browser only (spec ruling 7)
+
+- `studioVideoExport.ts` loses `serverFallback`. A failure says why, in both places.
+- Its six callers drop their fallback: `ArtifactFrameNode.vue`, `Scene3DStudioSurface.vue`, `GradientStudioSurface.vue`, `ShaderStudioSurface.vue`, `CompositorModal.vue`, `SpaceTypeSurface.vue`.
+- Delete `lib/engine/encodeVideo.ts`, `prefersServerVideoExport` and `VIDEO_EXPORT_PREF_KEY`, and the `/sailor/spacetype_encode` entries in `enginePath.ts`.
+
+**Files:** the above. Test: `studio-video-export.unit.spec.ts` (no server route; failure words); a guard that nothing names `spacetype_encode`.
+
+**Acceptance:** exports work through mediabunny as today.
+
+**Live check:** none.
+
+### Task R10.5: Model downloads go
+
+- Delete Settings → Models (`ModelBundlesPanel.vue`) and the Toolbox's download gate (`ToolboxPanel.vue:106-156`). Adding a node no longer downloads anything.
+- Delete `useModelDownloads.ts`, the native `/sailor/models/status` (`server/native/modelBundles.ts`) and the `models/download` proxy entries.
+- The depth model is the only local model left. The depth route fills `NUXT_DEPTH_MODEL_DIR` itself, locally (R7.9's plan); the image ships it (R10.10).
+- `requiresModels` leaves `app/data/toolbox-items.ts`.
+
+**Files:** the above; `SettingsModal.vue`; `server/native/smallRoutes.ts`; `server/utils/enginePath.ts`. Test: a guard that nothing names `models/status` or `models/download`; the Toolbox adds a node at once.
+
+**Acceptance:** builds clean; Lens · Depth of field still works with a fresh model folder.
+
+**Live check:** none.
+
+### Task R10.6: Local-only classes and blueprints (decision 4)
+
+- **Hosted:** node search (`useNodeSearch.ts`) offers only classes the runner takes, plus the cards. `/global_subgraphs` leaves `HOSTED_RAW_ALLOW` and answers an empty list. `NodesSidebar.vue` hides the blueprint section.
+- **Locally:** a native, read-only `/global_subgraphs` lists `blueprints/*.json` (37 files) with ComfyUI off. A blueprint runs on Sailor when all its classes do; otherwise R10.2's words apply.
+
+**Files:** `useNodeSearch.ts`, `NodesSidebar.vue`, `server/utils/enginePath.ts`, `server/utils/authGuard.ts`, a new native route under `server/native/`. Test: hosted route-guard tests; the native list equals ComfyUI's for the 37 files.
+
+**Acceptance:** hosted offers no local-only class or blueprint; locally the blueprints list with ComfyUI off.
+
+**Live check:** none.
+
+### Task R10.7: The LoRA trainer is cloud only (decision 6)
+
+- Delete the Local branch of `LoraTrainerSurface.vue`: `buildTrainingPrompt` (`:1028`), `startTraining`'s local path (`:1136`), `pollForTrainingResult` (`:1178`), `extractComfyError`, the base-checkpoint probe and downloads (`:105-170`) and the Local/Cloud switch.
+- Keep `saveCaptionsToDisk` only if Cloud uses it; `/sailor/lora/save_captions` stays native.
+- `lib/lora/trainerCompute.ts` keeps only what Cloud needs.
+- Before editing, check R8.5's hunk is still in HEAD (progress.md's 10-01 risk: `git show HEAD:frontend/app/components/LoraTrainerSurface.vue | grep trainerCompute`).
+
+**Files:** `LoraTrainerSurface.vue`, `lib/lora/trainerCompute.ts`. Test: `app-trainers-engine.unit.spec.ts` becomes "no `/prompt` or `/history` at all".
+
+**Acceptance:** the trainer offers Cloud only; a cloud job starts with fake Replicate.
+
+**Live check:** none.
+
+### Task R10.8: The server stops calling the engine's port
+
+- `api/image-fetch.post.ts`: write through the native upload (`dispatchUpload`), not `:8188/upload/image`.
+- `api/scene3d/gen-3d.post.ts`: read a `/view` path through the native view, not `:8188`.
+- `routes/history/*`: serve the runner's records and the cache. Read the engine only for a local-only run, and only when it is up.
+- `server/templates/safeFetch.ts`: the loopback `/view` exception reads the file natively, by name, under the same checks.
+- The admin console's engine link shows only when the engine is up.
+
+**Files:** the above. Test: a guard that no server file outside the local-only proxy names `127.0.0.1:8188` or `SAILOR_COMFY_ORIGIN`; each route's own spec with the engine unreachable.
+
+**Acceptance:** each route works with nothing on `:8188`.
+
+**Live check:** none.
+
+### Task R10.9: Hosted never reaches the engine
+
+- The hosted proxy refuses every engine path (`/prompt`, `/ws`, `/history` from the engine, `/interrupt`, `/queue`, `/object_info` from the engine) with a plain 404. `HOSTED_RAW_ALLOW` empties.
+- The hosted engine-path metering (`server/utils/meterGraphRun.ts` and the gate's `/prompt` branch) is deleted if nothing local imports it.
+- `engineHealth` answers "down" in hosted without a request.
+
+**Files:** `server/middleware/comfyui-proxy.ts`, `server/utils/engineGate.ts`, `server/utils/enginePath.ts`, `server/utils/meterGraphRun.ts`, `server/native/engineHealth.ts`. Test: hosted route-guard spec: every engine path refused, no socket opened to `:8188`.
+
+**Acceptance:** in hosted, no request can reach ComfyUI; the runner and native routes serve everything.
+
+**Live check:** none.
+
+### Task R10.10: The Fly image without Python
+
+- `Dockerfile`'s runtime stage: Node 22, the media tools and the depth model only. No torch, opencv, PyAV, `requirements.txt` or ComfyUI source.
+- `start.sh` starts only the Nitro server. The volume links stay. The ComfyUI flags go.
+- The runtime base no longer needs `python:3.12-slim`; the media-tools stage keeps its own pinned base (it must match glibc).
+- Ship `server/runner/video/fonts/` and `server/runner/effects/asciiGlyphs.bin` in the output (R6.8's concern).
+- `fly.toml`'s VM size stays until measured (ruling (l)).
+
+**Files:** `Dockerfile`, `start.sh`, `.dockerignore`, `fly.toml` (comment only). Test: a guard on the Dockerfile (no `pip`, no `main.py`); `docker build` on a machine with Docker (owed: none on this Mac).
+
+**Acceptance:** the image builds; it starts with no Python; `/system_stats` is native; Lens · Depth of field, a video effect and a caption run in it with fakes.
+
+**Live check:** none (no deploy in this task).
+
+---
+
+### Task R11.10: The divorce check (controller, not delegated)
+
+With ComfyUI fully stopped and its routes unreachable (nothing on `:8188`; `SAILOR_COMFY_ORIGIN` pointed at a closed port):
+
+- [ ] **Every saved project opens**, locally and in hosted (fakes): each one loads, shows its nodes and its results. A script walks every saved graph (884 at R2.10's count) and records any that fails to open.
+- [ ] **Every node runs on Sailor, or says plainly why it can't.** For every class in the saved graphs and in the node catalogue: it is runner-taken with every family on (proved through the kit), or it refuses before the hold with words from R11.9's list. Locally, decision 4's classes say "This needs the local engine". In hosted, none is offered.
+- [ ] **No silent engine:** the browser's network log and the server's log show no request to `:8188`; the guards of R9.3, R10.3–R10.5 and R10.8 are green; no `/prompt` is sent.
+- [ ] **Money:** for one graph per paid family, with fakes, the price shown equals the hold, and the charge equals the same calculation.
+- [ ] **Stop:** a run with a video effect and a paid call stopped midway leaves no `ffmpeg` and releases the hold.
+- [ ] The full unit suite green with the keys unset; the typecheck within its baselines.
+- [ ] Record the result in `progress.md` and `docs/STATE.md`, with every class that only refuses, for the user.
+
+**Live check:** none beyond the earlier tasks'. An optional live smoke of one saved project per paid family, with the user's go, about $1.
+
+---
+
+### Controller rulings needed before R9–R11 are built
+
+Rulings marked **USER** are the user's: they decide what the product does, or spend money.
+
+- **(a) USER — The owed live checks, and switching on in hosted.** *Recommend:* one batch with the user's go (R10.0), then every family on in both places. *Cost:* about $7.75 for the owed checks, plus R11's own (about $1.80). Without it, R10 can't start.
+- **(b) USER — Face swap's provider.** fal's `easel-ai/advanced-face-swap` answered 503 twice on 2026-10-01. *Recommend:* retry Easel once; if it is still down, switch to `fal-ai/face-swap` ($0.001 a picture, read from fal's price API on 2026-09-26, but hidden from fal's gallery), after its own live check. *Cost:* one family re-routed and one check ($0.001–0.05). A hidden model may vanish.
+- **(c) USER — Motion blur (time).** Python raises on every clip over one frame; the runner refuses it plainly today. *Recommend:* build a simple working blur (each frame the mean of its N neighbours, a "shutter" setting), judged by eye, free. *Cost:* one small task; nothing to prove it against, so the look is the user's. The alternative is retiring the node.
+- **(d) USER — Animated Shader effect.** It runs only on the engine today (R2 ruling (f)). *Recommend:* the browser bakes every frame, as it bakes one now, and hands the runner a frame batch. *Cost:* a medium task. The alternative, a plain refusal ("Animated shaders can't run here yet."), loses a local feature.
+- **(e) USER — Refusing the long tail.** Rows 17–23 of R11.9: odd text Python reads its own way, exotic video formats, ProRes export, LUTs outside the folders, glyphs outside the atlas, wired settings, hosted work caps. *Recommend:* refuse each plainly, naming the field; no ports. *Cost:* a few hand-edited or exotic local projects that ran on ComfyUI now refuse, with words.
+- **(f) Keep the local engine for decision 4's classes only.** *Recommend:* yes, as an explicit path for the local-only set, never a fallback (R10.2). *Cost:* `/prompt`, one socket and the local proxy stay in code.
+- **(g) The Timeline node in a saved project.** *Recommend:* refused in a run with advice; it still opens the editor (R9.1). *Cost:* a workflow that rendered a timeline inside a run now needs one click in the editor.
+- **(h) Long sounds in pieces.** *Recommend:* cut at the quietest point near each limit; hold = pieces × price (R11.5). *Cost:* a word cut at a join is possible in dense speech; a hard ceiling stays.
+- **(i) Upscale in tiles.** *Recommend:* weighted-overlap tiles, as Python (R11.6). *Cost:* tiles × price; a seam is possible on flat colour, judged by eye.
+- **(j) Clips past the caps.** *Recommend:* RIFE in 240-frame segments; per-frame classes keep their caps until Fly measurements; local Slow motion (AI) over 4K refused plainly. *Cost:* a 5K clip that ran on ComfyUI locally now refuses.
+- **(k) Unknown sources held at the cap.** *Recommend:* every source declares a bound; an unknown one is held at the cap, never left (R11.8). *Cost:* some holds are larger than the real cost; the charge is still only what was delivered.
+- **(l) The hosted image drops Python.** *Recommend:* yes (R10.10); keep the VM size until measured. *Cost:* a rollback is a redeploy of the old image, not a flag.
+- **(m) Model downloads.** *Recommend:* delete the panel and the Toolbox gate; the depth model is the only local model (R10.5). *Cost:* none a user needs; the panel's figures go.
+- **(n) Blueprints locally.** *Recommend:* a native read-only list; a blueprint runs on Sailor when all its classes do (R10.6). *Cost:* one small native route.
+- **(o) Sync lips' silence mode.** *Recommend:* price it on the face video's measured length, which bounds the bill (R11.3). *Cost:* a dearer quote than the sound alone suggests.
+- **(p) SVG and unpriced image models.** *Recommend:* the runner saves Recraft's SVG; picture readers refuse plainly; `seedream-5-pro` (Generate) and `reve-create` stay hidden until priced (R11.4). *Cost:* $0.46 of checks.
+- **(q) A clip batch into Save image or Preview image.** *Recommend:* save each frame, as Python does (R11.9 row 15). *Cost:* many files from one node, under the run's kept room.
+
+### R9–R11 size
+
+Twenty-four small tasks:
+- R9: three (one refusal, two deletions).
+- R11: ten. Four port the last half-taken classes (R11.1–R11.4). Four close stop-gaps with real work (R11.5 pieces, R11.6 tiles, R11.7 segments, R11.8 bounds). One closes the long tail with plain words (R11.9). One is the divorce check (R11.10).
+- R10: eleven. One controller switch-on (R10.0), then ten deletions or reroutes, each with a guard test.
+
+The largest are R11.5 (the splitter) and R10.2 (the canvas route). No new paid class except Fabric, Kling lip-sync and Recraft SVG. The live checks come to about **$9.55**: about $7.75 already owed (R3's families and Face swap) and about $1.80 new (R11.2 $0.40, R11.3 $0.47, R11.4 $0.46, R11.5 $0.26, R11.6 $0.03, R11.7 $0.09, R11.8 about $0.10). Each needs the user's go.
 
 ---
 
 ## Self-review (done while writing)
 
-- **Spec coverage.** Decision 1 → R7.1–R7.10; 2 → Open question 1, R8.4 (Face swap on fal Easel, already on the runner since 2026-09-27); 3 → R4.1; 4 → R10.2; 5 → R9.1; 6 → R10.3; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.0–R8.5. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
+- **Spec coverage.** Decision 1 → R7.1–R7.10; 2 → Open question 1, R8.4 (Face swap on fal Easel, already on the runner since 2026-09-27); 3 → R4.1; 4 → R10.2, R10.6; 5 → R9.1–R9.3; 6 → R10.7; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.0–R8.5. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
 - **Types used across tasks.** `RunnerValue` (R0.1) with `mask.files` everywhere; `slotValue`, `filesOf`, `filesOfValues`, `literalOf`, `checkValue`, `withWiredValues` (values.ts); `KeptBytes.put(runId, bytes, ext)`; `DeriveIO` / `Derived` / `staticDerive` (R0.4) — `saveAsset` gains `subfolder?`/`folder?` in R1.5 by name; `ResultEntry` (R0.6); `outputKind`, `valueInputsOf`, `valueWiresAllowed`, `STATIC_VALUES`, `staticValueOf`, `staticWiredTexts` (R0.3).
 - **R2 (expanded 2026-09-26).** Decision 8 → R2 rule 10 (exact / library classes) and R2.9 (Add noise); decision 9 → R2.10; the ledger's rulings → R2 rules 7–9 (worker, one file at a time, per-node cap, start-of-take refusals), 11 (fixtures from real Python, byte-identical, multi-threaded torch) and 12 (families-off invariant); the 78 inventory classes → R2.1 (3) + R2.4 (26) + R2.5 (13) + R2.6 (4) + R2.7 (15) + R2.8 (6) + R2.9 (11); Painter (spec ruling 4) → R2.8; the ~45 live-preview classes' engine runs → R2.11. Rulings the controller still owes: R2 (a)–(f).
 - **R3 (expanded 2026-09-27).** Spec money rules 1–5 → R3 rules 7, 9, 13, 14; parity ("paid nodes: the request is identical") → rules 4–5; spec ruling 1 (3D address) → R3.9; the 38 classes → R3.3 (7) + R3.4 (4) + R3.5 (5) + R3.6 (3) + R3.7 (1) + R3.8 (2) + R3.9 (2) + R3.10 (4) + R3.11 (1, the preset path) + R3.12 (3) + R3.13 (2) + R3.14 (1) + R3.15 (2) + R3.16/R3.17 (1), with nine hidden twins. Rulings the controller still owes: R3 (a)–(t).
@@ -5601,4 +5984,5 @@ Lip-sync a character's Fabric and auto engines, and `sync` below sync-3 (measure
 - **R6 (expanded 2026-09-30).** The outline's 20 + 12 classes → 34: R6.1 (3) + R6.2 (4) + R6.3 (2) + R6.4 (5) + R6.5 (1) + R6.6 (1) + R6.7 (2) + R6.8 (2) + R6.9 (12, with Save audio (Opus), which R5 missed) + R6.10 (1); Text clip (from `nodes_text.py`) and Audio waveform (from R5) counted in; Slow motion (AI) → R7.3. The parity rules → R6 rule 5 (exact, library, band, visual) and rule 4 (8-bit batches, ruling (a)); "switching on never breaks a working graph" → rule 3 (the start pass sends anything the runner can't do to the engine); hosted file names judged by name → rule 8; kept values read back under their caps → rule 10; per-person media slots → rule 7 (one lease per node); kept bytes never read whole → rule 6; Stop leaves no ffmpeg → rule 7 and R6.11. The hard ports named → R6.6 (Farneback), R6.8 (text), R6.3 (glitch), R6.10 (noisereduce), R6.7 (Pillow's drawing). Rulings the controller still owes: R6 (a)–(q).
 - **R7 (expanded 2026-09-30).** Decision 1 → R7.1 (Background remove), R7.2 (Upscale), R7.3 (Object removal), R7.4 (Mask by text, Mask extractor), R7.6 (Slow motion (AI)), R7.7 (Whisper), R7.8 (Vocal separator), R7.9 (Lens, free); Face restoration and Wav2Lip, already deleted on 2026-09-27 → R7.10 (retirement message only); Open question 2 (Subject mask) → R7.5, still pictures; Open question 6 (Demucs price) → R7.8's live check. The user's matching rule → R7 rule 2 (the provider's look judged by eye; the steps around each call exact against Python, given the same answer). Money rules → R7 rule 4; "never fails a working graph" → rules 3, 5 and 6; hosted safety → rule 7; Stop → rule 8. Rulings the controller still owes: R7 (a)–(l).
 - **R8 (expanded 2026-10-01).** Decision 10 → R8.0 (one helper and a free quote for every app), R8.1 (Product shot), R8.2 (Karaoke), R8.3 (Auto subtitle, with Caption track's wired captions, R7.7's case 2), R8.4 (Face swap), R8.5 (the trainers kept off the engine; LoRA local mode stays R10.3's). "Its price shows before the run" → R8 rule 2 and ruling (b) (the quote shares the start's code, so the price shown is the hold); money → rule 3; true bounds → rule 4 and R8.3's frame-count bound; hosted safety → rule 6; Stop → rule 7 and ruling (e); the engine as a stop-gap → rule 8 and each task's "Engine cases left". Rulings the controller still owes: R8 (a)–(i).
+- **R9–R11 (expanded 2026-10-01).** Decision 5 → R9.1 (the node refused with advice), R9.2 (the editor's server branch gone), R9.3 (dead pieces and routes); decision 4 → R10.2 (no silent fallback; the local engine only for the local-only set) and R10.6 (hosted search and blueprints); decision 6 → R10.7; spec ruling 7 → R10.4; the spec's R10 list → R10.3 (pool, Gate resume), R10.5 (model downloads), plus R10.8–R10.10, which the outline missed (server calls to `:8188`, the hosted proxy, the Fly image without Python or PyAV, with the depth model). The outline's R11.1 → R11.1 and R11.2; its R11.2 → R11.3 and R11.4. The USER direction "the engine is a stop-gap" → R11.5–R11.9 (each named stop-gap listed in R11.9's table with its plan) and R11.10 (the divorce check). Money → rule 1 (hold = most calls × price for pieces, tiles and segments); true bounds → rule 2 and R11.8; Stop → rule 5 and R11.10. Rulings the controller still owes: R9–R11 (a)–(q); (a)–(e) are the user's.
 - **Known gaps, deliberate:** JPEG/WebP EXIF metadata not written (R1.5); Get image size's progress text not shown (R1.4); Gate choices on a text value (spec ruling 2).
