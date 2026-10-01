@@ -20,7 +20,9 @@ import { effectiveCasts, effectiveLift, effectiveLit } from './settings'
 
 /** Lift is stored in the map as lift / LIFT_SCALE (prototype HSCALE). */
 export const LIFT_SCALE = 0.16
-export const MAP_MAX_EDGE = 2048
+/** Long-edge cap of both maps (device px). Light and shadow are soft; 1024 is plenty and keeps
+ *  stamping and upload cheap. */
+export const MAP_MAX_EDGE = 1024
 
 export interface LightingStamp {
   /** The (folded) layer drawn, or null for a wired item — lit, never casts. */
@@ -39,6 +41,10 @@ export interface LightingMaps {
   height: number
   /** Bumped on every (re)stamp — the GPU pass re-uploads a map only when this changes. */
   version: number
+  /** The tallest point the lift map can hold here: the sum of every casting layer's lift (plus
+   *  one 8-bit step each for rounding), capped at LIFT_SCALE. 0 ⇒ nothing casts. The shadow walk
+   *  stops once the ray is above it. */
+  maxLift: number
 }
 
 export interface StampOptions {
@@ -81,6 +87,13 @@ function plan(stamps: readonly LightingStamp[], backgroundLit: boolean): Planned
   return out
 }
 
+/** See LightingMaps.maxLift. */
+export function plannedMaxLift(planned: readonly { lift: number }[]): number {
+  let sum = 0, n = 0
+  for (const p of planned) if (p.lift > 0) { sum += p.lift; n++ }
+  return n === 0 ? 0 : Math.min(LIFT_SCALE, sum + n * (LIFT_SCALE / 255))
+}
+
 let _stamps = 0
 let _version = 0
 
@@ -100,7 +113,7 @@ function stampInto(maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }, pl
   liftCtx.fillRect(0, 0, mw, mh)
   if (!planned.length) return true
 
-  const scratch = make(mw, mh)
+  const scratch = scratchFor(make, mw, mh)
   const sctx = scratch.getContext('2d') as CanvasRenderingContext2D | null
   if (!sctx) return false
   for (const p of planned) {
@@ -131,6 +144,18 @@ function stampInto(maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }, pl
   return true
 }
 
+// One scratch canvas for every stamp, kept between paints (no device-size allocation per paint).
+let _scratch: { make: (w: number, h: number) => HTMLCanvasElement; c: HTMLCanvasElement } | null = null
+function scratchFor(make: (w: number, h: number) => HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
+  if (_scratch && _scratch.make === make) {
+    const c = _scratch.c
+    if (c.width === w && c.height === h) return c
+    if (make === defaultMake) { c.width = w; c.height = h; return c }
+  }
+  _scratch = { make, c: make(w, h) }
+  return _scratch.c
+}
+
 /** Stamp fresh maps (no cache). Null when a canvas cannot be made. */
 export function stampLightingMaps(
   stamps: readonly LightingStamp[], W: number, H: number, devW: number, devH: number, opts: StampOptions,
@@ -138,18 +163,20 @@ export function stampLightingMaps(
   const { w, h } = lightingMapSize(devW, devH)
   const make = opts.makeCanvas ?? defaultMake
   const maps = { lit: make(w, h), lift: make(w, h) }
-  if (!stampInto(maps, plan(stamps, opts.backgroundLit), W, H, w, h, opts.backgroundLit, make)) return null
+  const planned = plan(stamps, opts.backgroundLit)
+  if (!stampInto(maps, planned, W, H, w, h, opts.backgroundLit, make)) return null
   _stamps++
-  return { ...maps, width: w, height: h, version: ++_version }
+  return { ...maps, width: w, height: h, version: ++_version, maxLift: plannedMaxLift(planned) }
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
 // A few entries, because several surfaces paint the same Frame in turn (editor, card, tiles).
-// Each entry holds two maps of up to 2048² — kept small on purpose.
+// Each entry holds two maps of up to MAP_MAX_EDGE² — kept small on purpose.
 const CACHE_MAX = 3
 const _cache = new Map<string, LightingMaps>()
 let _epoch = 0
 let _uncacheable = 0
+let _uncached: { make: (w: number, h: number) => HTMLCanvasElement; lit: HTMLCanvasElement; lift: HTMLCanvasElement } | null = null
 
 /** Fonts and images load after a first paint without changing any layer: anything that can
  *  change a silhouette that way bumps this, so the next paint re-stamps. */
@@ -207,20 +234,30 @@ export function cachedLightingMaps(
     _cache.delete(k); _cache.set(k, hit) // most recent last
     return hit
   }
-  // Re-use the oldest entry's canvases when they are the right size (no 2×16 MB churn per edit).
-  let reuse: LightingMaps | undefined
-  if (_cache.size >= CACHE_MAX) {
-    const oldest = _cache.keys().next().value as string
-    reuse = _cache.get(oldest)
-    _cache.delete(oldest)
-  }
   const make = opts.makeCanvas ?? defaultMake
-  const maps = reuse && reuse.width === w && reuse.height === h
-    ? { lit: reuse.lit, lift: reuse.lift }
-    : { lit: make(w, h), lift: make(w, h) }
+  let maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }
+  if (key == null) {
+    // Uncacheable (a wired item over an unlit layer, a live stroke, a playing clip…): ONE pair,
+    // re-stamped in place every such paint — never a fresh allocation per paint.
+    if (!_uncached || _uncached.make !== make || _uncached.lit.width !== w || _uncached.lit.height !== h) {
+      _uncached = { make, lit: make(w, h), lift: make(w, h) }
+    }
+    maps = _uncached
+  } else {
+    // Re-use the oldest entry's canvases when they are the right size (no churn per edit).
+    let reuse: LightingMaps | undefined
+    if (_cache.size >= CACHE_MAX) {
+      const oldest = _cache.keys().next().value as string
+      reuse = _cache.get(oldest)
+      _cache.delete(oldest)
+    }
+    maps = reuse && reuse.width === w && reuse.height === h
+      ? { lit: reuse.lit, lift: reuse.lift }
+      : { lit: make(w, h), lift: make(w, h) }
+  }
   if (!stampInto(maps, planned, W, H, w, h, opts.backgroundLit, make)) return null
   _stamps++
-  const out: LightingMaps = { ...maps, width: w, height: h, version: ++_version }
+  const out: LightingMaps = { lit: maps.lit, lift: maps.lift, width: w, height: h, version: ++_version, maxLift: plannedMaxLift(planned) }
   if (key != null) _cache.set(k, out)
   return out
 }

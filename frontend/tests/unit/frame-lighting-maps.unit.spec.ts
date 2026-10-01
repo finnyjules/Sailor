@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  stampLightingMaps, cachedLightingMaps, LIFT_SCALE, lightingMapSize, __lightingMapStamps, bumpLightingMapEpoch,
+  stampLightingMaps, cachedLightingMaps, LIFT_SCALE, MAP_MAX_EDGE, lightingMapSize, __lightingMapStamps, bumpLightingMapEpoch,
   type LightingStamp,
 } from '~/lib/frame/lighting/maps'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
@@ -149,9 +149,35 @@ describe('stampLightingMaps — what stamps nothing', () => {
 })
 
 describe('map size and cache', () => {
-  it('device-sized, long edge capped at 2048', () => {
-    expect(lightingMapSize(1080, 1350)).toEqual({ w: 1080, h: 1350 })
-    expect(lightingMapSize(2160, 2700)).toEqual({ w: Math.round(2160 * 2048 / 2700), h: 2048 })
+  it('device-sized, long edge capped at 1024', () => {
+    expect(MAP_MAX_EDGE).toBe(1024)
+    expect(lightingMapSize(800, 600)).toEqual({ w: 800, h: 600 })
+    expect(lightingMapSize(1080, 1350)).toEqual({ w: Math.round(1080 * 1024 / 1350), h: 1024 })
+    expect(lightingMapSize(2160, 2700)).toEqual({ w: Math.round(2160 * 1024 / 2700), h: 1024 })
+  })
+
+  it('maxLift: 0 when nothing casts, else the stacked lifts (plus rounding), capped at LIFT_SCALE', () => {
+    expect(stampLightingMaps([stamp(rectLayer('a', { castsShadow: false }), 0, 4)], W, H, W, H, opts)!.maxLift).toBe(0)
+    const m = stampLightingMaps([stamp(rectLayer('a', { lift: 0.04 }), 0, 3), stamp(rectLayer('b', { lift: 0.06 }), 1, 2)], W, H, W, H, opts)!
+    expect(m.maxLift).toBeGreaterThanOrEqual(0.1)
+    expect(m.maxLift).toBeLessThan(0.1 + 3 * LIFT_SCALE / 255)
+    const big = Array.from({ length: 5 }, (_, i) => stamp(rectLayer('x' + i, { lift: 0.15 }), 0, 4))
+    expect(stampLightingMaps(big, W, H, W, H, opts)!.maxLift).toBe(LIFT_SCALE)
+  })
+
+  it('no per-paint allocations: one scratch canvas, one uncached pair, reused', () => {
+    let made = 0
+    const counting = (w: number, h: number) => { made++; return makeCanvas(w, h) }
+    const o = { backgroundLit: true, makeCanvas: counting }
+    const unc = { ...stamp(rectLayer('a', { lit: false }), 0, 2), sig: null }
+    const m1 = cachedLightingMaps([unc], W, H, W, H, o)!
+    const afterFirst = made
+    const m2 = cachedLightingMaps([unc], W, H, W, H, o)!
+    const m3 = cachedLightingMaps([unc], W, H, W, H, o)!
+    expect(made).toBe(afterFirst)           // no canvas made after the first paint
+    expect(m2.lit).toBe(m1.lit)
+    expect(m3.lift).toBe(m1.lift)
+    expect(m3.version).toBeGreaterThan(m2.version) // re-stamped in place ⇒ re-uploaded
   })
 
   it('keeps the maps when only the lights change; re-stamps when a layer changes', () => {

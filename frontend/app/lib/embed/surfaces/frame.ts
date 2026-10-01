@@ -40,6 +40,9 @@ import {
 import { applyStackPost, chainActive } from '~/lib/compositor/postEffects'
 import '~/lib/motion/paint' // registers the per-layer animation painter paintLayerStack relies on
 import { slotPhase01 } from '~/lib/compositor/masterClock'
+import { readFrameLighting, visibleLights } from '~/lib/frame/lighting/settings'
+import { lightingAvailable } from '~/lib/frame/lighting/lightingPass'
+import { bleedAmbientAlpha } from '../frame/bleed'
 import { resolveNestedSurface, nestedDeviceSize } from '../nested'
 import { wiredSourceLongSide, type WiredDrawLayer } from '../frame/wiredDraw'
 
@@ -283,6 +286,14 @@ const frameSurface: EmbedSurface = {
       }
 
       const layers = v.layers as LocalLayer[]
+      // Light layers: the art is lit (ambient darkened by Darkness); the bleed outside it is the
+      // background alone, so it gets the same ambient darkening or the artboard edge shows. Light
+      // glow does not reach into the bleed (stage 1). 0 ⇒ nothing to do.
+      const bleedDark = (() => {
+        if (!visibleLights(layers).length) return 0
+        const lighting = readFrameLighting({ sailor_localLighting: v.lighting })
+        return lighting.backgroundLit && lightingAvailable() ? bleedAmbientAlpha(lighting.darkness) : 0
+      })()
       await ensureLayerImages(layers, { keep: true })
       if (!(await ensureRevealShadersReady(v.motion?.behaviours))) throw new Error('embed: a transition shader did not become ready')
 
@@ -384,6 +395,10 @@ const frameSurface: EmbedSurface = {
         if (v.background != null) {
           paintBackground(ctx, s, tSec, u, 0, 0)
           ctx.setTransform(1, 0, 0, 1, 0, 0)
+          if (bleedDark > 0) {
+            ctx.fillStyle = `rgba(0,0,0,${bleedDark})`
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
+          }
           ctx.clearRect(rx, ry, aw, ah)
         }
         ctx.drawImage(art, rx, ry)

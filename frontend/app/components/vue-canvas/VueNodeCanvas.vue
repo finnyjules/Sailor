@@ -6087,6 +6087,8 @@ async function injectCompositorOverlays(workflow: any): Promise<void> {
     // runs so the backend can apply the mode per layer.
     const injectRun = async (run: LocalLayer[], z: number, blend = 'normal') => {
       if (!run.length || !(W > 0 && H > 0)) return
+      // A run of only light layers draws nothing: no transparent PNG to bake, upload and wire.
+      if (run.every(l => l.kind === 'light')) return
       // Finishes lit as in the editor, and the Frame's light layers light every run: a run is
       // only part of the stack, so the Frame's visible lights ride along with each one (a light
       // draws nothing itself). Stage 1: a run's layers shadow only layers of the same run.

@@ -133,3 +133,35 @@ export function shadePixel(albedo: Vec3, lights: readonly PackedLight[], P: Vec3
     return Math.pow(toned, 1 / 2.2)
   }) as Vec3
 }
+
+/** The walk's constants, shared with the GLSL (a test greps LIGHTING_FRAG for each). */
+export const WALK_STEPS = 56
+export const WALK_STEP = 0.0075
+
+/**
+ * The screen-space shadow toward one light — the shader's walk, mirrored. `L` is the unit
+ * direction toward the light, `maxT` the walk's reach (Frame widths; 2 for a sun), `height(u, v)`
+ * the lift field in Frame widths at Frame fractions, `maxLift` the tallest lift on the Frame.
+ * The walk stops once the ray is above `maxLift` (nothing left to hit) — exact, not a guess:
+ * past that point `above` is negative for every sample and the soft term is 0.
+ * Returns the shadow factor (1 = lit, 0.15 = fully shadowed).
+ */
+export function shadowWalk(
+  P: Vec3, L: Vec3, maxT: number, height: (u: number, v: number) => number, aspect: number, maxLift: number, jitter = 0,
+): number {
+  let sh = 1
+  const lxy = Math.hypot(L[0], L[1])
+  if (!(maxLift > 0) || !(lxy > 1e-4)) return sh
+  const dir = [L[0] / lxy, L[1] / lxy], slope = L[2] / lxy
+  for (let k = 1; k <= WALK_STEPS; k++) {
+    const t = (k - jitter) * WALK_STEP
+    if (t > maxT) break
+    if (P[2] + t * slope > maxLift) break
+    const qx = P[0] + dir[0]! * t, qy = P[1] + dir[1]! * t
+    const u = qx, v = qy / aspect
+    if (u < 0 || u > 1 || v < 0 || v > 1) break
+    const above = height(u, v) - (P[2] + t * slope)
+    sh = Math.min(sh, 1 - smoothstep(0, 0.02 + t * 0.25, above) * 0.85)
+  }
+  return sh
+}

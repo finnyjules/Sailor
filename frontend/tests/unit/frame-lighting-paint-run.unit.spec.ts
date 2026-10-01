@@ -94,4 +94,29 @@ describe('paintLayerStack lighting — with the pass available', () => {
     expect(stamps[0]!.layer).toBeNull()
     expect(stamps[0]!.sig).toBeNull()
   })
+
+  it('a light hidden by its group does not light the Frame (the loop\'s own visibility)', () => {
+    const lamp = { ...newLightLayer('lamp'), groupId: 'g' } as unknown as LocalLayer
+    const ls = [rect('a'), lamp]
+    paintLayerStack(stubCtx(), 20, 20, itemsOf(ls), ls, undefined, undefined, undefined, undefined, undefined, [{ id: 'g', hidden: true }] as any)
+    expect(lightFrame).not.toHaveBeenCalled()
+  })
+
+  it('only the lights the loop reaches are passed, in stack order', () => {
+    const a = newLightLayer('lamp') as unknown as LocalLayer
+    const b = { ...newLightLayer('sun'), groupId: 'g' } as unknown as LocalLayer
+    const c = newLightLayer('spot') as unknown as LocalLayer
+    const ls = [a, b, c]
+    paintLayerStack(stubCtx(), 20, 20, itemsOf(ls), ls, undefined, undefined, undefined, undefined, undefined, [{ id: 'g', hidden: true }] as any)
+    expect((lightFrame.mock.calls[0]![4] as LocalLayer[]).map(l => l.id)).toEqual([a.id, c.id])
+  })
+
+  it('a layer whose content is still loading stamps with no signature (never cached stale)', () => {
+    const img = { id: 'i', kind: 'image', filename: 'not-loaded.png', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1, castsShadow: true } as unknown as LocalLayer
+    const ls = [img, newLightLayer('lamp') as unknown as LocalLayer]
+    paintLayerStack(stubCtx(), 20, 20, itemsOf(ls), ls)
+    const stamps = lightFrame.mock.calls[0]![3] as LightingStamp[]
+    expect(stamps[0]!.layer?.id).toBe('i')
+    expect(stamps[0]!.sig).toBeNull()
+  })
 })

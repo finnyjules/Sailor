@@ -145,6 +145,7 @@ import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/s
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
+import { lightingDragging } from '~/lib/frame/lighting/drag'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
@@ -6370,7 +6371,9 @@ watch(
     await ensureLayerFonts(localLayers.value, canvasDisplay.w)
     await ensureLayerImages(localLayers.value)
     const afterAssets = performance.now()
-    renderStack()
+    // A light / Darkness drag repaints through the live, resolution-capped path; one full
+    // repaint follows when it ends (the watch just below).
+    renderStack(undefined, lightingDragging.value)
     if (w && t0 != null && !w.__openLogged) {
       w.__openLogged = true
       setTimeout(() => { w.__openLogged = false }, 1000)
@@ -6379,6 +6382,7 @@ watch(
   },
   { immediate: true },
 )
+watch(lightingDragging, (on) => { if (!on) renderStack() })
 
 // ── Layer-row thumbnails (Task 5) ────────────────────────────────────────────
 // Every text/shape/line/brush/path row (and a group's first child) shows a small

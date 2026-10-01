@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { lightAt, packLight, packLightUniforms, shadePixel, type PackedLight } from '~/lib/frame/lighting/shade'
+import { lightAt, packLight, packLightUniforms, shadePixel, shadowWalk, WALK_STEP, WALK_STEPS, type PackedLight } from '~/lib/frame/lighting/shade'
+import { LIGHTING_FRAG, frameDeviceRect } from '~/lib/frame/lighting/lightingPass'
 import { newLightLayer, LIGHT_DEFAULTS, DEFAULT_LIGHTING } from '~/lib/frame/lighting/settings'
 import type { LightLayer } from '~/lib/frame/lighting/settings'
 
@@ -70,5 +71,62 @@ describe('shadePixel — Darkness', () => {
   it('Darkness 1 with no light reaching is darker than the picture', () => {
     const out = shadePixel([0.8, 0.8, 0.8], [], at(0.5, 0.5), 1)
     expect(out[0]).toBeLessThan(0.8)
+  })
+})
+
+describe('shadowWalk — the walk stops above the tallest layer', () => {
+  // A 0.05-high block occupying u in [0.4, 0.5], everything else flat.
+  const block = (u: number) => (u >= 0.4 && u <= 0.5 ? 0.05 : 0)
+  const field = (u: number, _v: number) => block(u)
+  const toLight: [number, number, number] = (() => { const v = [-0.6, 0, 0.3]; const l = Math.hypot(...v); return v.map(x => x / l) as [number, number, number] })()
+
+  it('a layer between the pixel and the light shadows it; with no casters the walk is skipped', () => {
+    expect(shadowWalk([0.55, 0.5, 0], toLight, 2, field, 1, 0.05)).toBeLessThan(0.5)
+    expect(shadowWalk([0.55, 0.5, 0], toLight, 2, field, 1, 0)).toBe(1)
+  })
+
+  it('stopping above maxLift changes nothing (exact early out)', () => {
+    for (const u of [0.3, 0.52, 0.55, 0.6, 0.7, 0.9]) {
+      for (const j of [0, 0.37, 0.9]) {
+        const full = shadowWalk([u, 0.5, 0], toLight, 2, field, 1, 1e9, j)
+        const early = shadowWalk([u, 0.5, 0], toLight, 2, field, 1, 0.05, j)
+        expect(early).toBe(full)
+      }
+    }
+  })
+})
+
+describe('LIGHTING_FRAG and shade.ts cannot drift', () => {
+  it('the shader carries every constant the TS mirror uses', () => {
+    for (const c of ['uDark * 0.92', '* 0.85 + 0.15', 'dist * dist * 3.0', `* ${WALK_STEP}`, `k <= ${WALK_STEPS}`, 'col * 0.18', 'smoothstep(0.0, 0.02 + t * 0.25, above) * 0.85', 'P.z + t * slope > uMaxLift', 'pow(src.rgb, vec3(2.2))']) {
+      expect(LIGHTING_FRAG, c).toContain(c)
+    }
+    expect(WALK_STEP).toBe(0.0075)
+    expect(WALK_STEPS).toBe(56)
+  })
+})
+
+describe('frameDeviceRect — tiles round independently', () => {
+  it('within a pixel of the whole canvas is the whole canvas (no crop)', () => {
+    expect(frameDeviceRect({ a: 1.333, d: 1.333, e: 0, f: 0 }, 300, 375, 400, 501)).toEqual({ x: 0, y: 0, w: 400, h: 501, whole: true })
+    expect(frameDeviceRect({ a: 2, d: 2, e: 0, f: 0 }, 1081, 1350, 2162, 2700).whole).toBe(true)
+  })
+  it('a Frame inside a bigger canvas is cropped', () => {
+    const r = frameDeviceRect({ a: 1, d: 1, e: 10, f: 20 }, 100, 100, 200, 200)
+    expect(r).toEqual({ x: 10, y: 20, w: 100, h: 100, whole: false })
+    expect(frameDeviceRect({ a: 1, d: 1, e: 0, f: 0 }, 100, 100, 104, 100).whole).toBe(false)
+  })
+})
+
+describe('web-export bleed darkening', () => {
+  it('matches what the pass does to an unlit-by-any-light background pixel', async () => {
+    const { bleedAmbientAlpha } = await import('~/lib/embed/frame/bleed')
+    expect(bleedAmbientAlpha(0)).toBeCloseTo(0, 10)
+    for (const d of [0.2, 0.45, 0.9]) {
+      for (const c of [0.2, 0.6, 0.95]) {
+        const passed = shadePixel([c, c, c], [], at(0.5, 0.5), d)[0]
+        expect(c * (1 - bleedAmbientAlpha(d))).toBeCloseTo(passed, 6)
+      }
+    }
   })
 })

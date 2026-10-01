@@ -16,6 +16,7 @@ import { readWiredTreatments } from '~/composables/useWiredTreatments'
 import type { Cloner } from '~/composables/useCloner'
 import CompositorInlineToolbar from '~/components/vue-canvas/CompositorInlineToolbar.vue'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
+import { lightingDragging } from '~/lib/frame/lighting/drag'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { onCanvasOcclusion, createOcclusionRepaintGate } from '~/lib/studio/occlusion'
@@ -655,7 +656,8 @@ function renderStack(t?: number, live = false) {
   // never `live`, so they keep full device resolution — exported quality is unchanged.
   // Trade-off: post-effects look slightly softer WHILE the card is playing, sharp at rest.
   const hasPost = !!editor.postEffects.value?.some((e: any) => e?.visible)
-  const dpr = (live && hasPost)
+  // A light / Darkness drag is capped the same way (one full repaint follows on release).
+  const dpr = (live && (hasPost || lightingDragging.value))
     ? Math.max(1, Math.min(deviceDpr, Math.sqrt(LIVE_PREVIEW_MAXPX / Math.max(1, W * H))))
     : deviceDpr
   // Resize ONLY when the size actually changes. Assigning canvas.width/height reallocates
@@ -948,10 +950,11 @@ watch(
     }
     await ensureLayerFonts(editor.localLayers.value, box.value.w)
     await ensureLayerImages(editor.localLayers.value)
-    renderStack()
+    renderStack(undefined, lightingDragging.value)
   },
   { immediate: true },
 )
+watch(lightingDragging, (on) => { if (!on) renderStack() })
 const hasAnyLayer = computed(() => wiredLayers.value.length > 0 || editor.localLayers.value.length > 0)
 
 // ── Inline add-toolbar (image upload) ───────────────────────────────────────

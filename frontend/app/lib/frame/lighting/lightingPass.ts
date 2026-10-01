@@ -43,6 +43,7 @@ uniform vec4 uA[6];   // x, y*aspect, z, type (1 lamp, 2 spot, 3 sun; sun: direc
 uniform vec4 uB[6];   // linear r, g, b * brightness, reach
 uniform vec4 uC[6];   // aimX, aimY*aspect, cosOuter, cosInner
 uniform float uCount, uDark, uAspect, uLiftScale;
+uniform float uMaxLift;  // the tallest stacked lift on the Frame; 0 = nothing casts
 
 // Textures are FLIP_Y-uploaded, so vUv.y = 1 is the top; lighting runs top-down like the prototype.
 vec2 G(vec2 uv) { return vec2(uv.x, 1.0 - uv.y); }
@@ -81,12 +82,13 @@ void main() {
     // screen-space shadow: walk toward the light over the lift field
     float sh = 1.0;
     float lxy = length(L.xy);
-    if (lxy > 1e-4) {
+    if (uMaxLift > 0.0 && lxy > 1e-4) {
       vec2 dir = L.xy / lxy; float slope = L.z / lxy;
       float j = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
       for (int k = 1; k <= 56; k++) {
         float t = (float(k) - j) * 0.0075;
         if (t > maxT) break;
+        if (P.z + t * slope > uMaxLift) break;   // the ray is above every layer: nothing left to hit
         vec2 q = P.xy + dir * t;
         vec2 quv = vec2(q.x, q.y / uAspect);
         if (quv.x < 0.0 || quv.x > 1.0 || quv.y < 0.0 || quv.y > 1.0) break;
@@ -115,6 +117,8 @@ class LightingGl {
   /** The map (canvas + version) currently in each texture: maps are cached between paints, so a
    *  light drag uploads only the colour. Forgotten with the context. */
   private litIn: { c: HTMLCanvasElement; v: number } | null = null
+  /** Size of the colour texture's storage: same size ⇒ texSubImage2D (no reallocation). */
+  private colorSize: { w: number; h: number } | null = null
   private liftIn: { c: HTMLCanvasElement; v: number } | null = null
   private failed = false
   private reason = ''
@@ -135,7 +139,7 @@ class LightingGl {
   private drop() {
     this.canvas = null; this.gl = null; this.program = null
     this.texColor = null; this.texLit = null; this.texLift = null
-    this.loc = {}; this.litIn = null; this.liftIn = null
+    this.loc = {}; this.litIn = null; this.liftIn = null; this.colorSize = null
   }
 
   private die(reason: string) {
@@ -181,13 +185,13 @@ class LightingGl {
     this.canvas = canvas; this.gl = gl; this.program = program
     this.texColor = mkTex(); this.texLit = mkTex(); this.texLift = mkTex()
     gl.useProgram(program)
-    for (const n of ['uColor', 'uLit', 'uLift', 'uA', 'uB', 'uC', 'uCount', 'uDark', 'uAspect', 'uLiftScale']) {
+    for (const n of ['uColor', 'uLit', 'uLift', 'uA', 'uB', 'uC', 'uCount', 'uDark', 'uAspect', 'uLiftScale', 'uMaxLift']) {
       this.loc[n] = gl.getUniformLocation(program, n)
     }
-    this.litIn = null; this.liftIn = null
+    this.litIn = null; this.liftIn = null; this.colorSize = null
   }
 
-  render(color: CanvasImageSource, maps: LightingMaps, w: number, h: number, u: Uniforms): HTMLCanvasElement | null {
+  render(color: CanvasImageSource, maps: LightingMaps, w: number, h: number, u: Uniforms & { uMaxLift: number }): HTMLCanvasElement | null {
     if (this.gl?.isContextLost()) this.drop()
     this.init()
     const { gl, program, canvas } = this
@@ -196,8 +200,9 @@ class LightingGl {
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
     if (Math.round(w) > maxTex || Math.round(h) > maxTex) return null
 
-    canvas.width = Math.max(1, Math.round(w))
-    canvas.height = Math.max(1, Math.round(h))
+    const cw = Math.max(1, Math.round(w)), ch = Math.max(1, Math.round(h))
+    if (canvas.width !== cw) canvas.width = cw
+    if (canvas.height !== ch) canvas.height = ch
     gl.viewport(0, 0, canvas.width, canvas.height)
     gl.useProgram(program)
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
@@ -205,7 +210,12 @@ class LightingGl {
 
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.texColor)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, color as TexImageSource)
+    if (this.colorSize?.w === cw && this.colorSize.h === ch) {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, color as TexImageSource)
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, color as TexImageSource)
+      this.colorSize = { w: cw, h: ch }
+    }
 
     // The maps are data, not pictures: no colour-space conversion. Restored after.
     const prevCs = gl.getParameter(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL)
@@ -229,6 +239,7 @@ class LightingGl {
     gl.uniform4fv(L.uA!, u.uA); gl.uniform4fv(L.uB!, u.uB); gl.uniform4fv(L.uC!, u.uC)
     gl.uniform1f(L.uCount!, u.uCount); gl.uniform1f(L.uDark!, u.uDark)
     gl.uniform1f(L.uAspect!, u.uAspect); gl.uniform1f(L.uLiftScale!, u.uLiftScale)
+    gl.uniform1f(L.uMaxLift!, u.uMaxLift)
 
     gl.drawArrays(gl.TRIANGLES, 0, 3)
     gl.finish() // load-bearing: without it drawImage() reads stale pixels
@@ -253,6 +264,24 @@ export function __lightingLastMs(): number { return _lastMs }
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
 /**
+ * The Frame's rectangle on the device canvas, in whole pixels. Within a pixel of the whole canvas
+ * (a tile or a bake canvas rounds its size independently of W·scale) it IS the whole canvas — no
+ * crop copy, no one-pixel seam.
+ */
+export function frameDeviceRect(
+  tf: { a: number; d: number; e: number; f: number }, W: number, H: number, devW: number, devH: number,
+): { x: number; y: number; w: number; h: number; whole: boolean } {
+  const x = Math.round(tf.e), y = Math.round(tf.f)
+  let w = Math.round(W * tf.a), h = Math.round(H * tf.d)
+  const whole = x === 0 && y === 0 && Math.abs(w - devW) <= 1 && Math.abs(h - devH) <= 1
+  if (whole) { w = devW; h = devH }
+  return { x, y, w, h, whole }
+}
+
+// One crop canvas, kept: no device-size allocation per paint when a Frame doesn't fill its canvas.
+let _crop: HTMLCanvasElement | null = null
+
+/**
  * Light the composite on `ctx` in place. `W`×`H` is the Frame in the context's current units;
  * the context's transform must be axis-aligned (scale + translate — every Frame painter's is).
  * Returns false — and leaves the composite untouched — when there is no light, no WebGL2, a lost
@@ -273,24 +302,27 @@ export function lightFrame(
   const tf = ctx.getTransform()
   if (Math.abs(tf.b) > 1e-6 || Math.abs(tf.c) > 1e-6) return false
   const dev = ctx.canvas
-  const rx = Math.round(tf.e), ry = Math.round(tf.f)
-  const rw = Math.round(W * tf.a), rh = Math.round(H * tf.d)
-  if (rw < 1 || rh < 1) return false
-  const maps = cachedLightingMaps(stamps, W, H, rw, rh, { backgroundLit: lighting.backgroundLit })
+  const r = frameDeviceRect(tf, W, H, dev.width, dev.height)
+  if (r.w < 1 || r.h < 1) return false
+  const maps = cachedLightingMaps(stamps, W, H, r.w, r.h, { backgroundLit: lighting.backgroundLit })
   if (!maps) return false
 
   // The Frame's own device rectangle: the whole canvas for every current painter; a cropped copy
   // otherwise (the light positions are Frame fractions, so the pass must see exactly the Frame).
   let color: CanvasImageSource = dev
-  if (rx !== 0 || ry !== 0 || rw !== dev.width || rh !== dev.height) {
-    const crop = document.createElement('canvas')
-    crop.width = rw; crop.height = rh
+  if (!r.whole) {
+    const crop = (_crop ??= document.createElement('canvas'))
+    if (crop.width !== r.w) crop.width = r.w
+    if (crop.height !== r.h) crop.height = r.h
     const cctx = crop.getContext('2d')
     if (!cctx) return false
-    cctx.drawImage(dev, rx, ry, rw, rh, 0, 0, rw, rh)
+    cctx.setTransform(1, 0, 0, 1, 0, 0)
+    cctx.globalCompositeOperation = 'copy'
+    cctx.drawImage(dev, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h)
+    cctx.globalCompositeOperation = 'source-over'
     color = crop
   }
-  const out = p.render(color, maps, rw, rh, packLightUniforms(lights, lighting, H / W, LIFT_SCALE))
+  const out = p.render(color, maps, r.w, r.h, { ...packLightUniforms(lights, lighting, H / W, LIFT_SCALE), uMaxLift: maps.maxLift })
   if (!out) return false
 
   // Copy semantics: the lit picture replaces the Frame's pixels (alpha included).
@@ -300,8 +332,8 @@ export function lightFrame(
   ctx.globalAlpha = 1
   ctx.filter = 'none'
   ctx.shadowColor = 'transparent'
-  ctx.clearRect(rx, ry, rw, rh)
-  ctx.drawImage(out, rx, ry)
+  ctx.clearRect(r.x, r.y, r.w, r.h)
+  ctx.drawImage(out, r.x, r.y)
   ctx.restore()
   _lastMs = now() - t0
   return true
