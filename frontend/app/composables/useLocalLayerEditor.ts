@@ -37,7 +37,7 @@ import { textSnapY, baselineRoundDy, resnapReach, type TextMarks } from '~/lib/f
 import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
-import { MAX_LIGHTS, newLightLayer, readFrameLighting, sanitizeLighting, type FrameLighting, type LightType } from '~/lib/frame/lighting/settings'
+import { MAX_LIGHTS, newLightLayer, readFrameLighting, sanitizeLighting, storedLighting, type FrameLighting, type LightType } from '~/lib/frame/lighting/settings'
 import { relightLightsToLayers, hasLegacyRelightLights, setupToLightLayers, isRelightPhoto } from '~/lib/frame/lighting/convertRelight'
 import { relightSetup, type RelightSetupName } from '~/lib/relight/presets'
 import { effectStackOf, addEffect, writeStackToLayer, type EffectInstance } from '~/lib/compositor/effectStack'
@@ -480,7 +480,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!hasLegacyRelightLights(layers)) return null
     const props = n.data.properties as Record<string, unknown> | undefined
     const { w, h } = size ?? dims()
-    const r = relightLightsToLayers(layers, props?.sailor_localLighting ? lighting.value : null, w, h)
+    const r = relightLightsToLayers(layers, storedLighting(props?.sailor_localLighting ? lighting.value : null), w, h)
     if (!r.changed) return null
     recordHistory()
     commit(r.layers)
@@ -499,7 +499,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (addEffect(before0, 'relight') === before0) return null
     const { w, h } = dims()
     const props = node()?.data?.properties as Record<string, unknown> | undefined
-    const conv = relightLightsToLayers(localLayers.value, props?.sailor_localLighting ? lighting.value : null, w, h)
+    const conv = relightLightsToLayers(localLayers.value, storedLighting(props?.sailor_localLighting ? lighting.value : null), w, h)
     const base = conv.layers
     const layer = base.find(l => l.id === layerId)!
     const before = effectStackOf(layer as { effects?: unknown[] })
@@ -513,11 +513,17 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     return fresh.id
   }
   /** A Relight Setup: replace ALL the Frame's light layers with the setup's arrangement around
-   *  this photo, and set its Original light — ONE undo step. false (nothing written) when the
-   *  layer has no Relight effect. */
+   *  this photo, and set its Original light — ONE undo step. A Frame that still has old Relight
+   *  lights is converted first (as `addRelight`), in the same step. false (nothing written) when
+   *  the layer has no Relight effect. */
   function applyRelightSetup(layerId: string, name: RelightSetupName): boolean {
-    const layer = localLayers.value.find(l => l.id === layerId)
-    if (!layer || !isRelightPhoto(layer)) return false
+    const layer0 = localLayers.value.find(l => l.id === layerId)
+    if (!layer0 || !isRelightPhoto(layer0)) return false
+    const { w, h } = dims()
+    const props = node()?.data?.properties as Record<string, unknown> | undefined
+    const conv = relightLightsToLayers(localLayers.value, storedLighting(props?.sailor_localLighting ? lighting.value : null), w, h)
+    const base = conv.layers
+    const layer = base.find(l => l.id === layerId)!
     const setup = relightSetup(name)
     const stack = effectStackOf(layer as { effects?: unknown[] }).map((e) => {
       if (e.type !== 'relight') return e
@@ -525,11 +531,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       return { ...rest, keep: setup.keep } as EffectInstance
     })
     const photo = { ...layer, ...writeStackToLayer(stack) } as LocalLayer
-    const { w, h } = dims()
     const lamps = setupToLightLayers(name, photo, w, h)
     recordHistory()
-    const kept = localLayers.value.filter(l => l.kind !== 'light').map(l => (l.id === layerId ? photo : l))
+    const kept = base.filter(l => l.kind !== 'light').map(l => (l.id === layerId ? photo : l))
     commitBoth([...kept, ...lamps], localGroups.value)
+    if (conv.changed) writeLighting(conv.lighting)
     return true
   }
   /** Tell the host about any `wired` layers a delete is about to remove, so it
