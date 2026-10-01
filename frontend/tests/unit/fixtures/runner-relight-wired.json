@@ -1,0 +1,258 @@
+{
+  "cases": [
+    {
+      "name": "a gimbal JSON",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\":95,\"elevation\":50,\"intensity\":0.9}",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a dramatic, high-contrast key light from the right, positioned high above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "a gimbal JSON with spaces and extra keys",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{ \"azimuth\": -140, \"elevation\": -60, \"intensity\": 0.2, \"colour\": \"red\" }",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a soft, diffused key light from the back-left, positioned below. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "a broken JSON",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\": 95, \"elevation\":",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "plain words, not JSON",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "warm light from the left",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "JSON that is not an object",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "[95, 50, 0.9]",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "blank text",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "an intensity of 0 (Python's `or` reads it as 0.6)",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\":30,\"elevation\":0,\"intensity\":0}",
+        "keep_background": true,
+        "instructions": ""
+      },
+      "wired": [
+        "light"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front-right. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "wired instructions",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "keep_background": true,
+        "instructions": "make it moodier"
+      },
+      "wired": [
+        "instructions"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Additional direction: make it moodier. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "wired instructions with spaces",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "keep_background": true,
+        "instructions": "   add a teal rim light  "
+      },
+      "wired": [
+        "instructions"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Additional direction: add a teal rim light. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "wired blank instructions",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "keep_background": true,
+        "instructions": "   "
+      },
+      "wired": [
+        "instructions"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "both wired",
+      "inputs": {
+        "preset": "Golden hour",
+        "light": "{\"azimuth\":95,\"elevation\":50,\"intensity\":0.9}",
+        "keep_background": true,
+        "instructions": "keep the shadows soft"
+      },
+      "wired": [
+        "light",
+        "instructions"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Relight the image with a dramatic, high-contrast key light from the right, positioned high above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are — change ONLY the lighting and the shadows it casts. Additional direction: keep the shadows soft. Output only the edited image.",
+        "image_urls": [
+          "IMG:image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    }
+  ]
+}

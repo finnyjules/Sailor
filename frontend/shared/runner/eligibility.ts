@@ -563,7 +563,10 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   },
   DevelopImageNode: { family: 'fal-edit', mustLink: ['input_image'] },
   // With no `image` Python makes a blank no-op; the runner leaves that to Python.
-  RelightNode: { family: 'fal-edit', mustLink: ['image'], mustNotLink: ['light', 'instructions'] },
+  // R11.1: a wired light (the gimbal's JSON as text, read as tolerantly as a
+  // typed one: unreadable is the default light) and wired instructions arrive
+  // as if typed. The price reads neither, so a wire never changes it.
+  RelightNode: { family: 'fal-edit', mustLink: ['image'], valueInputs: { light: ['text'], instructions: ['text'] } },
   // The Nano Banana mode is Replicate (nano-actions, Task B5). Nano Banana 2
   // (model line-up F11) is runner-only, its own family: the nano actions'
   // call. A linked keep_subject (Task F11b) is taken for every model when it

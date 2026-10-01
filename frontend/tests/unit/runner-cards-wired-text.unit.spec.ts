@@ -291,10 +291,10 @@ describe('the refusals that stay', () => {
     expect(runnerTakesNode(wire(p, 'prompt'), 'n', CARDS)).toBe(true)
   })
 
-  it('Relight: light and instructions (R11)', () => {
+  it('Relight: light and instructions are taken since R11.1 (runner-relight-wired)', () => {
     const p = baseline('RelightNode')
     expect(runnerTakesNode(p, 'n', EVERY)).toBe(true)
-    for (const name of ['light', 'instructions']) expect(runnerTakesNode(wire(p, name), 'n', EVERY), name).toBe(false)
+    for (const name of ['light', 'instructions']) expect(runnerTakesNode(wire(p, name), 'n', EVERY), name).toBe(true)
   })
 
   // The media nodes need a measured file or a sound card to be taken at all;
