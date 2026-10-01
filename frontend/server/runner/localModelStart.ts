@@ -16,6 +16,14 @@
  * the engine (RUNNER_NOT_ELIGIBLE), never a refusal: switching a family on
  * never makes a working graph fail. Both are stop-gaps while ComfyUI exists
  * (R7.1's report says how each closes).
+ *
+ * R7.2: a class whose service states a largest picture (LOCAL_MODEL_MAX_PIXELS,
+ * Upscale (2×)'s Real-ESRGAN) is sized here too, as a true upper bound: a
+ * clip by its frame shape, a picture by the hosted gate's own walk
+ * (../utils/graphInputPixels.ts linkPictureBound: a loaded file's header, an
+ * Image card, Empty image, the Frame, a generator's stated largest…). One
+ * larger, or one whose size can't be known, leaves the workflow to the engine
+ * the same way (a stop-gap named in R7.2's report).
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
@@ -23,9 +31,14 @@ import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY, PAID_PICTURE_SLOTS, outputKi
 import { EFFECT_PICTURE_OUTPUTS, effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
 import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
-import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, localModelOn } from '#shared/runner/localModels'
+import {
+  LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, UPSCALE_2X_WORDS, localModelOn, overCapWords,
+} from '#shared/runner/localModels'
+import { linkPictureBound, pictureSize } from '../utils/graphInputPixels'
 import type { FrameShape } from './video/table'
 import { keptPeak } from './video/start'
+import { parseInputFileRef } from './inputs'
+import type { OutputFile } from './types'
 
 /** Sources that hand on one picture (a provider's first answer, a loader's first frame, a render). */
 const ONE_PICTURE: ReadonlySet<string> = new Set(['LoadImage', 'Compositor', 'Scene3DStudio', 'TextOnPath', 'TextMask', 'ShaderEffect'])
@@ -125,6 +138,20 @@ export function maskBytesBound(s: FrameShape): number {
   return s.count * (2 * s.w * s.h + s.h + 64 * 1024)
 }
 
+/** Whether a class hands on a mask per picture (a mask slot in LOCAL_MODEL_OUTPUT_KINDS). */
+function keepsMasks(classType: string): boolean {
+  const row = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_OUTPUT_KINDS, classType) ? LOCAL_MODEL_OUTPUT_KINDS[classType]! : {}
+  return Object.values(row).includes('mask')
+}
+
+/** A gate file reader over the run's store: a file value as the runner names it (LoadImage, an Image card) → its header's size. */
+function readerOf(read: ((f: OutputFile) => Promise<Uint8Array>) | undefined) {
+  return async (value: string) => {
+    const f = read ? parseInputFileRef(value) : null
+    return f && read ? pictureSize(await read(f)) : null
+  }
+}
+
 /** Whether the prompt has an R7 picture node the runner takes with these families on. */
 export function hasLocalModelPicture(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): boolean {
   return Object.values(prompt).some(n => localModelOn(n.class_type, families) && Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type))
@@ -136,7 +163,11 @@ export function hasLocalModelPicture(prompt: ApiPrompt, families: ReadonlySet<Ru
  */
 export async function localModelStartProblems(
   prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>,
-  o: { hosted: boolean; shapes: () => Promise<ReadonlyMap<string, FrameShape>> },
+  o: {
+    hosted: boolean; shapes: () => Promise<ReadonlyMap<string, FrameShape>>
+    /** A file of the run's store (a loaded picture's header, for LOCAL_MODEL_MAX_PIXELS). Absent: a loaded picture can't be sized. */
+    read?: (f: OutputFile) => Promise<Uint8Array>
+  },
 ): Promise<LocalModelStart> {
   const counts: Record<string, number> = {}
   const cap = o.hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local
@@ -148,17 +179,28 @@ export async function localModelStartProblems(
     const link = n.inputs?.[LOCAL_MODEL_PICTURE_INPUT[n.class_type]!]
     if (!isLink(link)) continue
     let count: number | null
+    const maxPixels = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_MAX_PIXELS, n.class_type) ? LOCAL_MODEL_MAX_PIXELS[n.class_type]! : null
+    let pixels: number | null = null
     if (outputKind(prompt, link, kinds) === 'frames') {
       shapes ??= await o.shapes()
       const s = shapes.get(`${link[0]}:${link[1]}`)
       count = s?.count ?? null
-      if (s) masks += maskBytesBound(s)
+      // A class with a mask slot (Background remove) keeps a mask per frame too.
+      if (s && keepsMasks(n.class_type)) masks += maskBytesBound(s)
+      if (s) pixels = s.w * s.h
     }
-    else count = pictureBound(prompt, link, families)
+    else {
+      count = pictureBound(prompt, link, families)
+      if (maxPixels) pixels = await linkPictureBound(prompt, link, readerOf(o.read))
+    }
     if (count === null || !Number.isFinite(count) || count < 0) {
       return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId, classType: n.class_type } }
     }
-    if (count > cap) return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.overCap, nodeId, classType: n.class_type } }
+    if (count > cap) return { counts, keptBytes: 0, problem: { message: overCapWords(n.class_type), nodeId, classType: n.class_type } }
+    if (maxPixels) {
+      if (pixels === null || !Number.isFinite(pixels) || pixels <= 0) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.unknownSize, nodeId, classType: n.class_type } }
+      if (pixels > maxPixels) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.tooLarge, nodeId, classType: n.class_type } }
+    }
     counts[nodeId] = Math.max(1, count)
   }
   if (!shapes) return { counts, keptBytes: 0, problem: null }

@@ -1,0 +1,52 @@
+{
+  "endpoint": "nightmareai/real-esrgan",
+  "fetchedAt": "2026-09-30",
+  "sources": {
+    "schema": "https://replicate.com/nightmareai/real-esrgan/api/schema"
+  },
+  "versionId": "e1f4a2081605342caf55ba4294914cf266dcdf738397cf8826b48cdae516137c",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "image"
+        ],
+        "properties": {
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "description": "Input image"
+          },
+          "scale": {
+            "type": "number",
+            "title": "Scale",
+            "default": 4,
+            "maximum": 10,
+            "minimum": 0,
+            "description": "Factor to scale image by"
+          },
+          "face_enhance": {
+            "type": "boolean",
+            "title": "Face Enhance",
+            "default": false,
+            "description": "Run GFPGAN face enhancement along with upscaling"
+          }
+        }
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

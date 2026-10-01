@@ -83,6 +83,8 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
  */
 export const KIND_FOLLOWS_INPUT: Readonly<Record<string, { slot: number; input: string }>> = {
   BackgroundRemove: { slot: 0, input: 'frames' },
+  // R7.2: Upscale (2×), the same (a picture 2× each side, or a clip's frames 2× each side).
+  UpscaleImage: { slot: 0, input: 'frames' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

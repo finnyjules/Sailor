@@ -149,6 +149,8 @@ const PROVIDER_KEPT_SLOTS: Readonly<Record<string, readonly number[]>> = {
   OutpaintImageNode: [0],
   // The background (its fill, alpha dropped); the subject (slot 0) is the remover's file.
   SplitPhotoLayersNode: [1],
+  // R7.2: Upscale (2×)'s picture is an 8-bit RGB PNG of Python's tensor (generators/localModels.ts).
+  UpscaleImage: [0],
 }
 
 /** Provider classes whose later slot is a provider's file too (Separate background and foreground's subject is slot 0). */

@@ -25,18 +25,34 @@
  * the first picture (save_live_preview(unique=True): a new name per run).
  * A clip's batch is RGB: a video holds no alpha (Python's own encoder raises
  * on a 4-channel batch: the user's fix-bugs rule); its alpha is the mask.
+ *
+ * Upscale (2×) (R7.2, family `upscale-2x`; comfy_extras/nodes_upscale.py
+ * :113-136): one call per picture to Replicate's Real-ESRGAN, R3.5's builder
+ * at scale 2 (`{image, scale: 2, face_enhance: false}`; `tile_size` only
+ * splits Python's own work and is not sent), its first answer URL. The answer
+ * is kept as downloaded when it is 2W × 2H (an 8-bit RGB PNG; anything else
+ * is kept as the RGB PNG of its pixels); any other size is resized to 2W × 2H with R0's
+ * bilinear (../pixels/core.ts), so later nodes see Python's size. The live
+ * preview is the first picture's (save_live_preview(unique=True), RGB,
+ * compress level 1). A picture larger than the service's stated largest
+ * (UPSCALE_2X_MAX_PIXELS) never reaches the call: the start of the run leaves
+ * such a workflow to the engine, and the turn refuses one before any call.
  */
 import sharp from 'sharp'
 import { isLink, type ApiLink } from '#shared/runner/graph'
+import { NO_FAMILIES } from '#shared/runner/families'
 import { pyFloatOf } from '#shared/runner/pyText'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
-  BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, isLocalModelClass, type BgRemoveOutput,
+  BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS,
+  UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass, type BgRemoveOutput,
 } from '#shared/runner/localModels'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { pixelsInWorker } from '../compositor/worker'
-import { pilRgba } from '../pictures/pythonView'
+import { pictureMeta, pilRgba, pngColourType } from '../pictures/pythonView'
+import { pixels as pixelOps } from '../pixels/core'
+import { loaderSourceOf } from '../pictureHandoff'
 import { encodeMask } from '../pictures/mask'
 import { png8 } from '../effects/plan'
 import { onlySavesRead } from '../cards/utilities'
@@ -44,7 +60,7 @@ import { framesQuantOf } from '../video/plan'
 import { MediaError, mediaLease } from '../../media/run'
 import { framesOf, framesSink } from '../../media/values'
 import type { CutoutMode, CutoutResult } from '../pixels/cutout'
-import { firstOutputUrl } from './repair'
+import { firstOutputUrl, upscaleInput } from './repair'
 
 type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
 
@@ -63,6 +79,7 @@ export function isLocalModelPlan(classType: string): boolean {
 export function planLocalModel(ctx: PlanContext): NodePlan {
   const cls = ctx.prompt[ctx.nodeId]!.class_type
   if (cls === BG_REMOVE_CLASS) return planBackgroundRemove(ctx)
+  if (cls === UPSCALE_2X_CLASS) return planUpscale2x(ctx)
   throw new Error(`The runner cannot run a ${cls} node`)
 }
 
@@ -306,6 +323,201 @@ export function planBackgroundRemove(ctx: PlanContext): NodePlan {
       })
       if (io.signal.aborted) throw new MediaError('stopped')
       return { values: { 0: made, 1: { kind: 'mask', files: masks } }, ui }
+    },
+  }
+}
+
+// ── Upscale (2×) (R7.2) ──
+
+/** The call's input: R3.5's Real-ESRGAN builder at scale 2, no face enhance (against the saved schema). */
+export function upscale2xInput(image: string): Record<string, unknown> {
+  return upscaleInput({ model: 'Real-ESRGAN', scale_factor: 2, face_enhance: false }, image).payload
+}
+
+/**
+ * An 8-bit RGB PNG (IHDR bit depth 8, colour type 2): exactly Python's 3-channel
+ * tensor, so an answer in it is kept as it was downloaded. Any other answer is
+ * kept as the RGB PNG of its pixels (Python's tensor has 3 channels).
+ */
+function isRgb8Png(b: Uint8Array): boolean {
+  return b.length > 26 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[24] === 8 && pngColourType(b) === 2
+}
+
+/** An answer's pixels as Python's tensor takes them (PIL's RGBA, the first three channels): RGB8 and its size. */
+async function answerRgb(bytes: Uint8Array): Promise<{ rgb: Uint8Array; w: number; h: number }> {
+  const { data, info: { width: w, height: h } } = await pilRgba(bytes)
+  const rgb = new Uint8Array(w * h * 3)
+  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+    rgb[i] = data[j]!
+    rgb[i + 1] = data[j + 1]!
+    rgb[i + 2] = data[j + 2]!
+  }
+  return { rgb, w, h }
+}
+
+/**
+ * RGB8 resized to `dw` × `dh` with R0's bilinear (torch's F.interpolate,
+ * align_corners=False, on the `/255` float), then 8 bits by `quant` (round:
+ * the hand-off's round-half-even; trunc: Save image's).
+ */
+export function resizeRgb8(rgb: Uint8Array, w: number, h: number, dw: number, dh: number, quant: 'round' | 'trunc'): Uint8Array {
+  const f = Math.fround
+  const n = w * h
+  const planes = new Float32Array(3 * n)
+  for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) planes[c * n + i] = f(rgb[i * 3 + c]! / 255)
+  const out = pixelOps.bilinear(planes, 3, h, w, dh, dw, true)
+  const m = dw * dh
+  const px = new Uint8Array(m * 3)
+  for (let i = 0; i < m; i++) {
+    for (let c = 0; c < 3; c++) {
+      const x = f(255 * out[c * m + i]!)
+      const v = quant === 'trunc' ? Math.trunc(x) : pixelOps.roundHalfEven(x)
+      px[i * 3 + c] = Math.min(255, Math.max(0, v))
+    }
+  }
+  return px
+}
+
+/** A picture file's size as Python's tensor has it: a loader's file turned by its EXIF orientation (LoadImage's exif_transpose); any other as stored. */
+async function tensorSize(bytes: Uint8Array, turned: boolean): Promise<{ w: number; h: number }> {
+  const meta = await pictureMeta(bytes)
+  if (!meta.width || !meta.height) throw new Error(UPSCALE_2X_WORDS.noPicture)
+  return turned && (meta.orientation ?? 1) >= 5 ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
+}
+
+interface UpAnswer { rgb: Uint8Array | null; w: number; h: number; file?: OutputFile }
+
+export function planUpscale2x(ctx: PlanContext): NodePlan {
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const link = inputs.frames
+  if (!isLink(link)) throw new Error(UPSCALE_2X_WORDS.noPicture)
+  const usd = paidCallUsd({ endpoint: UPSCALE_2X_SLUG })
+  if (usd == null) throw new Error('Upscale has no price yet')
+  const incoming = incomingOf(ctx, link)
+  const held = heldPictures(ctx)
+  const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
+  if (count < 1) throw new Error(UPSCALE_2X_WORDS.noPicture)
+  // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
+  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  const clip = incoming.kind === 'frames'
+  // A clip's frames are all one size: over the service's largest, refused before any call (the start leaves it to the engine).
+  if (clip && incoming.value.w * incoming.value.h > UPSCALE_2X_MAX_PIXELS) throw new Error(UPSCALE_2X_WORDS.tooLarge)
+  const quant = clip ? framesQuantOf(ctx.prompt, ctx.nodeId, 0, ctx.families) : onlySavesRead(ctx.prompt, ctx.nodeId, 0) ? 'trunc' : 'round'
+  const turned = !clip && !!loaderSourceOf(ctx.prompt, link, ctx.families ?? NO_FAMILIES)
+
+  /**
+   * One picture's call and its answer at 2W × 2H. A picture's answer is kept
+   * for the run (resumed: not fetched again), as downloaded when it is a PNG of
+   * that size; a frame's is not (a clip's hundreds would fill the kept room).
+   */
+  const upOne = async (io: PipelineIO, p: InPicture & { w: number; h: number }): Promise<UpAnswer> => {
+    const key = `up-${p.index}`
+    const dw = 2 * p.w
+    const dh = 2 * p.h
+    const image = await p.url()
+    const got = await io.call({ key, provider: 'replicate', endpoint: UPSCALE_2X_SLUG, payload: upscale2xInput(image), media: 'image', usd })
+    const url = firstOutputUrl(got.result)[0]
+    if (!url) {
+      // Its answer named no file: nothing delivered, so not charged (R3.17 fix round 1).
+      await io.undelivered?.(key, 'no-file')
+      throw new Error(UPSCALE_2X_WORDS.noAnswer)
+    }
+    if (clip) {
+      const a = await answerRgb((await io.download(url)).bytes)
+      return { rgb: a.w === dw && a.h === dh ? a.rgb : resizeRgb8(a.rgb, a.w, a.h, dw, dh, quant), w: dw, h: dh }
+    }
+    const fresh: { rgb?: Uint8Array } = {}
+    const file = await io.savedOnce(key, 'answer', async () => {
+      const bytes = (await io.download(url)).bytes
+      const a = await answerRgb(bytes)
+      if (a.w === dw && a.h === dh) {
+        fresh.rgb = a.rgb
+        return io.keep(isRgb8Png(bytes) ? bytes : await png8(a.rgb, dw, dh, 3, 6), 'png')
+      }
+      fresh.rgb = resizeRgb8(a.rgb, a.w, a.h, dw, dh, quant)
+      return io.keep(await png8(fresh.rgb, dw, dh, 3, 6), 'png')
+    })
+    // The preview needs the pixels only for the first picture.
+    const rgb = fresh.rgb ?? (p.index === 0 ? (await answerRgb(await io.read(file))).rgb : null)
+    return { rgb, w: dw, h: dh, file }
+  }
+
+  /** The first picture's live preview (save_live_preview(unique=True): RGB, compress level 1). */
+  const previewOf = async (io: PipelineIO, a: UpAnswer): Promise<Record<string, unknown> | null> => {
+    if (!a.rgb) return null
+    const png = await png8(a.rgb, a.w, a.h, 3, 1)
+    // Checked immediately before the write (R1.6's rule): a stopped node never writes a preview.
+    if (io.signal.aborted) throw new MediaError('stopped')
+    const f = await io.savePreview(png, { nodeId: ctx.nodeId })
+    return { images: [{ filename: f.filename, subfolder: f.subfolder, type: f.type }], animated: [false] }
+  }
+
+  const fileUrl = (f: OutputFile) => () => (ctx.imageToUrl ? ctx.imageToUrl(f, link) : ctx.toUrl(f))
+  const frameUrl = (io: PipelineIO, png: Uint8Array, index: number) => {
+    const name = `upscale_frame_${index}.png`
+    return ctx.bytesToUrl ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)
+  }
+
+  return {
+    kind: 'pipeline', prefix: 'upscale',
+    run: async (io: PipelineIO) => {
+      let ui: Record<string, unknown> | null = null
+      if (incoming.kind === 'files') {
+        const files = incoming.files
+        // Each picture's size as Python's tensor has it, read first: one over the service's largest is refused before any call.
+        const sizes: { w: number; h: number }[] = []
+        for (const f of files) {
+          const s = await tensorSize(await io.read(f), turned)
+          if (s.w * s.h > UPSCALE_2X_MAX_PIXELS) throw new Error(UPSCALE_2X_WORDS.tooLarge)
+          sizes.push(s)
+        }
+        const out: OutputFile[] = []
+        async function* each(): AsyncIterable<InPicture & { w: number; h: number }> {
+          for (const [index, f] of files.entries()) yield { index, url: fileUrl(f), ...sizes[index]! }
+        }
+        await inOrder(each(), p => upOne(io, p as InPicture & { w: number; h: number }), async (a, p) => {
+          out.push(a.file!)
+          if (p.index === 0) ui = await previewOf(io, a)
+        }, io.signal)
+        return { values: { 0: { kind: 'files', files: out } }, ui }
+      }
+      // A clip (ruling (f)): its frames decoded one at a time, each sent and upscaled, the batch written in order at 2W × 2H.
+      const v = incoming.value
+      const media = io.media
+      if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+      const made = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
+        const sink = framesSink(2 * v.w, 2 * v.h, media, lease)
+        let finished = false
+        try {
+          const frames = framesOf(v, media, lease)[Symbol.asyncIterator]()
+          async function* each(): AsyncIterable<InPicture> {
+            try {
+              for (let index = 0; ; index++) {
+                const g = await frames.next()
+                if (g.done) return
+                const rgb = g.value as Uint8Array
+                yield { index, w: v.w, h: v.h, url: async () => frameUrl(io, await framePng(rgb, v.w, v.h), index) }
+              }
+            }
+            finally {
+              await frames.return?.().catch(() => undefined)
+            }
+          }
+          const n = await inOrder(each(), p => upOne(io, p as InPicture & { w: number; h: number }), async (a, p) => {
+            await sink.put(a.rgb!)
+            if (p.index === 0) ui = await previewOf(io, a)
+          }, io.signal)
+          if (n !== v.count) throw new MediaError('failed')
+          const out = await sink.done()
+          finished = true
+          return out
+        }
+        finally {
+          if (!finished) await sink.abort()
+        }
+      })
+      if (io.signal.aborted) throw new MediaError('stopped')
+      return { values: { 0: made }, ui }
     },
   }
 }

@@ -91,6 +91,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   SplitPhotoLayersNode: { image: LINK, background_fill: 'LaMa (fast)', mask_grow: 12 },
   // Background remove (R7.1): one picture; its first call is its cut-out.
   BackgroundRemove: { frames: LINK, output: 'transparent', edge_softness: 0 },
+  // Upscale (2×) (R7.2): one picture; its call is Real-ESRGAN at scale 2.
+  UpscaleImage: { frames: LINK, tile_size: 512 },
   // Music and speech (R3.8): the text; the rest at the node's defaults.
   GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },

@@ -76,6 +76,11 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'ShaderEffect':
       if (slot === 0) return 'tensor'
       break
+    // Upscale (2×) (R7.2, taken only while `upscale-2x` is on): an RGB PNG of Python's tensor
+    // (the answer as downloaded, or its pixels at 2W × 2H), read with its own channels.
+    case 'UpscaleImage':
+      if (slot === 0) return 'tensor'
+      break
     default:
       // An effect's picture (R2.1): the tensor it made, kept with its own channels.
       if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) {

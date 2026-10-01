@@ -2303,6 +2303,8 @@ export function createEngine(deps: EngineDeps) {
       const counted = await localModelStartProblems(p, families, {
         hosted: deps.hosted(),
         shapes: () => frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count: true })),
+        // R7.2: a loaded picture's header, for a service's largest picture (Upscale (2×)).
+        read: f => files.read(f),
       })
       if (counted.problem) throw refuse(counted.problem.message, 400, { nodeId: counted.problem.nodeId, classType: counted.problem.classType, reason: RUNNER_NOT_ELIGIBLE })
       localKept += counted.keptBytes

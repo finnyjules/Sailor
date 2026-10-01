@@ -92,6 +92,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   ...MEDIA_EFFECT_OUTPUT_NODES,
   // R7.1: Background remove is an output node (is_output_node=True).
   'BackgroundRemove',
+  // R7.2: Upscale (2×) is an output node (is_output_node=True).
+  'UpscaleImage',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

@@ -28,7 +28,7 @@
 import { MEDIA_EFFECT_SCHEMAS, type MediaEffectSchema, type MediaEffectSchemaFamily } from './mediaEffectSchemas.generated'
 import { familyOn, type RunnerFamily } from './families'
 import { GATE_CLASS } from './graph'
-import { BG_REMOVE_CLASS, isLocalModelClass, localModelOn } from './localModels'
+import { BG_REMOVE_CLASS, UPSCALE_2X_CLASS, isLocalModelClass, localModelOn } from './localModels'
 import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 
@@ -124,6 +124,8 @@ export const FRAMES_LINK_SOURCES: readonly (readonly [string, number])[] = [
   // R7 ruling (f): Background remove hands on a frame batch when a clip comes in (its picture
   // otherwise, which the value kinds keep out of a frame-batch input), only while `bg-remove` is on.
   [BG_REMOVE_CLASS, 0],
+  // R7.2: Upscale (2×) the same, only while `upscale-2x` is on.
+  [UPSCALE_2X_CLASS, 0],
 ]
 
 /** The classes that only encode a batch they read (rule 4: a batch only they read is kept as trunc-8). */

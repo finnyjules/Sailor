@@ -43,14 +43,33 @@ export type BgRemoveOutput = typeof BG_REMOVE_OUTPUTS[number]
 /** `edge_softness`: IO.Float.Input(default=0.0, min=0.0, max=10.0, step=0.5). */
 export const BG_REMOVE_EDGE_SOFTNESS = { default: 0, min: 0, max: 10 } as const
 
+// ── Upscale (2×) (R7.2, family `upscale-2x`) ──
+
+/** comfy_extras/nodes_upscale.py UpscaleNode's node_id. */
+export const UPSCALE_2X_CLASS = 'UpscaleImage'
+/** Replicate's Real-ESRGAN (R3.5's Upscale engine 'Real-ESRGAN', its card in editRates.ts). */
+export const UPSCALE_2X_SLUG = 'nightmareai/real-esrgan'
+/** `tile_size`: IO.Int.Input(default=512, min=0, max=2048, step=64). Not sent: it only splits Python's own work. */
+export const UPSCALE_2X_TILE_SIZE = { default: 512, min: 0, max: 2048 } as const
+/**
+ * The largest picture (pixels) handed to Real-ESRGAN: the model page's "Max
+ * recommended input image resolution is 1440p" (replicate.com/nightmareai/
+ * real-esrgan, read 2026-09-30), taken as 2560 × 1440. A larger one (or one
+ * whose size can't be known before the run) leaves the workflow to the
+ * engine (rule 6) — a stop-gap named in R7.2's report.
+ */
+export const UPSCALE_2X_MAX_PIXELS = 2560 * 1440
+
 /** Every moved class's family (each task adds its row once its port exists). */
 export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [BG_REMOVE_CLASS]: 'bg-remove',
+  [UPSCALE_2X_CLASS]: 'upscale-2x',
 }
 
 /** The service each moved class calls (ruling (b): the price's tooltip names it). Null: none (Lens, in the server). */
 export const SERVICE_OF: Readonly<Record<string, LocalModelService | null>> = {
   [BG_REMOVE_CLASS]: 'replicate',
+  [UPSCALE_2X_CLASS]: 'replicate',
 }
 
 /** The tooltip on the price (ruling (b)): sentence case, plain, no node copy. */
@@ -90,16 +109,25 @@ export function serviceTooltip(classType: string, families: ReadonlySet<RunnerFa
  */
 export const LOCAL_MODEL_PICTURE_INPUT: Readonly<Record<string, string>> = {
   [BG_REMOVE_CLASS]: 'frames',
+  [UPSCALE_2X_CLASS]: 'frames',
 }
 
 /** Each picture class's picture slots (a picture to the runner only while its family is on, eligibility.ts carriesImage). */
 export const LOCAL_MODEL_PICTURE_SLOTS: Readonly<Record<string, readonly number[]>> = {
   [BG_REMOVE_CLASS]: [0],
+  [UPSCALE_2X_CLASS]: [0],
 }
 
 /** What each moved class's other slots carry (applied only while its family is on, eligibility.ts outputKindsFor). */
 export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = {
   [BG_REMOVE_CLASS]: { 1: 'mask' },
+  // Its one slot follows its input (values.ts KIND_FOLLOWS_INPUT); the row is there so that applies while it is on.
+  [UPSCALE_2X_CLASS]: {},
+}
+
+/** The largest picture each class's service takes (pixels), where its page states one (rule 6). */
+export const LOCAL_MODEL_MAX_PIXELS: Readonly<Record<string, number>> = {
+  [UPSCALE_2X_CLASS]: UPSCALE_2X_MAX_PIXELS,
 }
 
 /**
@@ -121,6 +149,24 @@ export const LOCAL_MODEL_WORDS = {
   needsRun: 'This node needs a full run.',
 } as const
 
+/** Upscale (2×)'s own words (R7.2), where Background remove's above speak of a cut-out. */
+export const UPSCALE_2X_WORDS = {
+  noPicture: 'There is no picture to upscale.',
+  overCap: 'This clip is too long to upscale here.',
+  tooLarge: 'This picture is too large to upscale here.',
+  unknownSize: 'The size of the picture to upscale can’t be known before the run.',
+  noAnswer: 'The service sent back no upscaled picture.',
+} as const
+
+/** What the start of the run says of a clip over the frame cap, in the class's own words. */
+export function overCapWords(classType: string): string {
+  return classType === UPSCALE_2X_CLASS ? UPSCALE_2X_WORDS.overCap : LOCAL_MODEL_WORDS.overCap
+}
+
+const UPSCALE_2X_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  tile_size: { type: 'INT', required: true, min: UPSCALE_2X_TILE_SIZE.min, max: UPSCALE_2X_TILE_SIZE.max },
+}
+
 const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   output: { type: 'COMBO', required: true, options: BG_REMOVE_OUTPUTS },
   edge_softness: { type: 'FLOAT', required: true, min: BG_REMOVE_EDGE_SOFTNESS.min, max: BG_REMOVE_EDGE_SOFTNESS.max },
@@ -141,12 +187,31 @@ export function localModelRows(): Record<string, RunnerNodeRule> {
       inputCheck: 'local-model-source',
       widgets: BG_REMOVE_WIDGETS,
     },
+    // R7.2: the picture or clip, and `tile_size` as ComfyUI validates it (not sent).
+    [UPSCALE_2X_CLASS]: {
+      family: 'upscale-2x',
+      mustLink: ['frames'],
+      required: ['frames'],
+      valueInputs: { frames: ['files', 'frames'] },
+      inputCheck: 'local-model-source',
+      widgets: UPSCALE_2X_WIDGETS,
+    },
   }
 }
 
 /** The classes that exist for the runner only while their family is on (eligibility.ts SWITCHED_CLASSES). */
 export function localModelSwitchedClasses(): Record<string, RunnerFamily> {
   return { ...LOCAL_MODEL_FAMILY_OF }
+}
+
+/**
+ * The endpoint each per-picture class calls once per picture or frame. Upscale
+ * (2×)'s is R3.5's Real-ESRGAN card (editRates.ts, `per_image` $0.002, verified):
+ * a flat price per output picture, whatever its size.
+ */
+const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
+  [BG_REMOVE_CLASS]: BG_REMOVE_SLUG,
+  [UPSCALE_2X_CLASS]: UPSCALE_2X_SLUG,
 }
 
 /**
@@ -157,7 +222,8 @@ export function localModelSwitchedClasses(): Record<string, RunnerFamily> {
  * one measurement serves both.
  */
 export function localModelCalls(classType: string, frames: number | null | undefined): PaidCalls {
-  if (classType !== BG_REMOVE_CLASS) return { refused: `${classType} has no price yet` }
+  const endpoint = has(LOCAL_MODEL_SLUG, classType) ? LOCAL_MODEL_SLUG[classType]! : null
+  if (!endpoint) return { refused: `${classType} has no price yet` }
   const times = typeof frames === 'number' && Number.isFinite(frames) ? Math.max(1, Math.trunc(frames)) : 1
-  return { steps: [{ call: { endpoint: BG_REMOVE_SLUG }, times }] }
+  return { steps: [{ call: { endpoint }, times }] }
 }
