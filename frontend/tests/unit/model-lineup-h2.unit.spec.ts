@@ -341,6 +341,8 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     'shared/runner/eligibility.ts': ['fabric-1.0'],
     // Turntable's fixed models, as Python's node hard-codes them: Luma Ray 2 for the front spin, Seedance 2.0 per arc (R3.16).
     'shared/runner/turntable.ts': ['luma-ray-2-720p', 'seedance-2.0'],
+    // Upscale (2×) names the model its Python node runs; the runner calls Replicate's Real-ESRGAN for it (R7.2).
+    'server/runner/generators/localModels.ts': ['Real-ESRGAN'],
   }
 
   it('every model literal outside dev/ is on the list, and none of them is hidden or discontinued', () => {
@@ -370,7 +372,8 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     expect(flagged.has('Flux Kontext Pro')).toBe(true)
     /** A flagged literal allowed on purpose, with its reason above. */
     // Turntable's front spin is Luma Ray 2 because Python's node hard-codes it, though Ray 2 is hidden from the video menu (R3.16).
-    const FLAGGED_ON_PURPOSE = new Set(['app/components/apps/ProductShotApp.vue Flux Kontext Pro', 'shared/runner/turntable.ts luma-ray-2-720p'])
+    // Upscale (2×) runs Real-ESRGAN on Replicate, though Real-ESRGAN is hidden from the edit menu (R7.2).
+    const FLAGGED_ON_PURPOSE = new Set(['app/components/apps/ProductShotApp.vue Flux Kontext Pro', 'shared/runner/turntable.ts luma-ray-2-720p', 'server/runner/generators/localModels.ts Real-ESRGAN'])
     for (const [file, values] of Object.entries(ALLOWED)) {
       if (file === 'app/data/action-catalog.ts') continue // display text; 'Nano Banana' there is Sketch to image's engine
       for (const v of values) expect(flagged.has(v) && !FLAGGED_ON_PURPOSE.has(`${file} ${v}`), `${file} ${v}`).toBe(false)
