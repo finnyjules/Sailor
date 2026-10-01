@@ -36,10 +36,24 @@ uniform vec4 uW[6];   // finish world space (y up): lamp/spot position, sun dire
 uniform float uCount, uDark;
 `
 
-/** FINISH_COMMON with the hidden light swapped for the light layers. */
+/**
+ * One gain on every light's radiance, in the finish shaders only (the lighting pass is untouched).
+ * The lighting pass's falloff gives a lamp about 0.35–0.5 of its brightness across a Frame, where
+ * the hidden light lit the finishes at a weight of 1; this brings the toolbar's default lamp
+ * (white, brightness 1.6) at the hidden light's default spot, Darkness 0.45, back to today's
+ * gold foil: opaque mean luminance 138 against today's 149 (−8%). Spot UV comes out brighter than
+ * today at this gain (its own match is nearer 1.25). Measured in a Chromium harness, stage-3 Task 1
+ * report, fix round 1.
+ */
+export const FINISH_LIGHT_GAIN = 2
+
+/** FINISH_COMMON with the hidden light swapped for the light layers; '' if FINISH_COMMON no
+ *  longer declares the hidden light as expected (then the lit shaders are empty, `applyFinishLit`
+ *  answers false so the caller falls back, and the unit tests fail loudly). Never throws at import. */
 function litCommon(): string {
-  if (!FINISH_COMMON.includes(HIDDEN_LIGHT_DECL)) throw new Error('finishLights: FINISH_COMMON no longer declares uLight as expected')
-  return FINISH_COMMON.replace(HIDDEN_LIGHT_DECL, LIGHTS_DECL) + `float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+  if (!FINISH_COMMON.includes(HIDDEN_LIGHT_DECL)) return ''
+  return FINISH_COMMON.replace(HIDDEN_LIGHT_DECL, LIGHTS_DECL) + `const float LIGHT_GAIN = ${FINISH_LIGHT_GAIN.toFixed(4)};
+float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // Light i at frame uv fu (y up) and world point P: its radiance (linear rgb), and L, the world
 // direction toward it. Falloff and cone are LIGHTING_FRAG's, in the lighting pass's own space.
 vec3 lightE(int i, vec2 fu, vec3 P, out vec3 L) {
@@ -59,14 +73,14 @@ vec3 lightE(int i, vec2 fu, vec3 P, out vec3 L) {
       att *= smoothstep(uC[i].z, uC[i].w, c);
     }
   }
-  return uB[i].rgb * att;
+  return uB[i].rgb * att * LIGHT_GAIN;
 }
 `
 }
 
 const COMMON_LIT = litCommon()
 
-export const FOIL_LIT_FRAG = `${COMMON_LIT}
+export const FOIL_LIT_FRAG = !COMMON_LIT ? '' : `${COMMON_LIT}
 uniform vec3 uM0;
 uniform vec3 uM1;
 uniform vec3 uM2;
@@ -115,7 +129,7 @@ void main() {
   fragColor = vec4(min(c, vec3(1.0)), smoothstep(0.3, 0.7, src.a + ero * 0.3));
 }`
 
-export const SPOT_UV_LIT_FRAG = `${COMMON_LIT}
+export const SPOT_UV_LIT_FRAG = !COMMON_LIT ? '' : `${COMMON_LIT}
 uniform float uGloss;
 uniform float uRaised;
 uniform float uVarnishOnly;
@@ -133,6 +147,7 @@ void main() {
   float sp = mix(90.0, 1200.0, uGloss);
   vec3 lit = vec3(amb);
   vec3 shine = vec3(0.0);
+  float edge = 0.0, wsum = 0.0;   // varnish-only: today's flat-normalised edge term, light-weighted
   int count = int(uCount + 0.5);
   for (int i = 0; i < 6; i++) {
     if (i >= count) break;
@@ -140,6 +155,9 @@ void main() {
     vec3 E = lightE(i, fu, P, L);
     float rl = dot(R, L);
     lit += max(dot(N, L), 0.0) * E;
+    float w = lum(E);
+    edge += w * (max(dot(N, L), 0.0) - max(L.z, 0.0));
+    wsum += w;
     float box = smoothstep(1.0 - k, 1.0 - k * 0.45, rl);   // the lamp's reflection
     float sharp = pow(max(rl, 0.0), sp);
     float emx = max(E.r, max(E.g, E.b));
@@ -150,7 +168,10 @@ void main() {
   shine += vec3(fres * 0.2 * amb);
   if (uVarnishOnly > 0.5) {
     float lift = clamp(lum(shine), 0.0, 1.0);
-    float dk = clamp(0.06 + max(1.0 - lum(lit), 0.0) * 0.5, 0.0, 1.0);
+    // The dark term is today's, relative to a flat surface (flat = exactly 0.06): the coat is drawn
+    // over a picture the lighting pass already darkened, so Darkness and distance never add a veil.
+    float flatLit = 1.0 + 0.4 * (wsum > 1e-5 ? edge / wsum : 0.0);
+    float dk = clamp(0.06 + max(1.0 - flatLit, 0.0) * 0.5, 0.0, 1.0);
     fragColor = vec4(vec3(lift / max(lift + dk, 1e-4)), max(lift, dk) * src.a);
   } else {
     vec3 wet = pow(src.rgb, vec3(1.15)) * 1.04 * lit + shine;
@@ -166,6 +187,21 @@ export function finishLightWorld(layer: LightLayer, aspect: number): Vec3 {
     return [p[0], -p[1], p[2]]
   }
   return [layer.x - 0.5, (0.5 - layer.y) * aspect, 0.3 + layer.light.height * 1.7]
+}
+
+/**
+ * TS mirror of the varnish-only Spot UV dark term: `0.06 + max(1 − flatLit, 0)·0.5`, flatLit =
+ * `1 + 0.4·Σ ŵ_i·(max(N·L_i, 0) − max(L_i.z, 0))` with ŵ_i each light's luminance weight
+ * normalised over the lights. A flat surface is exactly 0.06 whatever the Darkness or distance.
+ */
+export function varnishDarkTerm(N: Vec3, lights: readonly { L: Vec3; weight: number }[]): number {
+  let edge = 0, wsum = 0
+  for (const { L, weight } of lights) {
+    edge += weight * (Math.max(N[0] * L[0] + N[1] * L[1] + N[2] * L[2], 0) - Math.max(L[2], 0))
+    wsum += weight
+  }
+  const flatLit = 1 + 0.4 * (wsum > 1e-5 ? edge / wsum : 0)
+  return Math.min(1, Math.max(0, 0.06 + Math.max(1 - flatLit, 0) * 0.5))
 }
 
 const TYPE_CODE = { lamp: 1, spot: 2, sun: 3 } as const
@@ -227,6 +263,7 @@ export function applyFinishLit(
 ): boolean {
   const w = off.width, h = off.height
   if (w < 1 || h < 1) return false
+  if (!FOIL_LIT_FRAG || !SPOT_UV_LIT_FRAG) return false
   const uniforms = { ...dialUniforms(kind, dials, w, h, scale, frame), ...finishLightUniforms(lights, lighting, w, h, scale, frame) }
   const out = (kind === 'gold_foil' ? getFoil() : getUv()).render(off, unusedDepth(), w, h, uniforms)
   if (!out) return false

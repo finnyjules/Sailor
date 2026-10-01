@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { FOIL_FRAG, SPOT_UV_FRAG } from '~/lib/compositor/finishPass'
-import { FOIL_LIT_FRAG, SPOT_UV_LIT_FRAG, finishLightUniforms, finishLightWorld } from '~/lib/compositor/finishLights'
+import { FOIL_LIT_FRAG, SPOT_UV_LIT_FRAG, FINISH_LIGHT_GAIN, finishLightUniforms, finishLightWorld, varnishDarkTerm } from '~/lib/compositor/finishLights'
 import { DEFAULT_FRAME_LIGHT, lightWorld } from '~/lib/compositor/frameLight'
 import { packLightUniforms } from '~/lib/frame/lighting/shade'
 import { newLightLayer, DEFAULT_LIGHTING, type LightLayer } from '~/lib/frame/lighting/settings'
@@ -39,9 +39,14 @@ describe('lit finish shaders', () => {
   it('declare every uniform the builder sends', () => {
     const u = finishLightUniforms([hiddenTwin()], DEFAULT_LIGHTING, 100, 125, 2)
     for (const k of Object.keys(u)) {
+      const arr = /\[\d+\]$/.test(k)
       const name = k.replace(/\[\d+\]$/, '')
-      expect(FOIL_LIT_FRAG).toContain(name)
-      expect(SPOT_UV_LIT_FRAG).toContain(name)
+      // A real declaration: `uniform <type> name;`, `uniform vec4 name[6];`, or one of a list.
+      const decl = arr
+        ? new RegExp(`uniform vec4 ${name}\\[6\\];`)
+        : new RegExp(`uniform \\w+ (?:\\w+, )*${name}\\b[^\\[]`)
+      expect(FOIL_LIT_FRAG).toMatch(decl)
+      expect(SPOT_UV_LIT_FRAG).toMatch(decl)
     }
   })
   it('keep the foil\'s dials (metal ramp, brushed, pressed, grain) and Spot UV\'s (gloss, raised, varnish only)', () => {
@@ -121,5 +126,45 @@ describe('finishLightUniforms', () => {
     expect(w[1]).toBeCloseTo(-a[1]!, 6)
     expect(w[2]).toBeCloseTo(a[2]!, 6)
     expect(w[1]).toBeGreaterThan(0)
+  })
+})
+
+describe('fix round 1', () => {
+  it('scale every light\'s radiance by FINISH_LIGHT_GAIN, in the finish shaders only', () => {
+    expect(FINISH_LIGHT_GAIN).toBeGreaterThan(1)
+    for (const f of [FOIL_LIT_FRAG, SPOT_UV_LIT_FRAG]) {
+      expect(f).toContain(`const float LIGHT_GAIN = ${FINISH_LIGHT_GAIN.toFixed(4)};`)
+      expect(f).toContain('return uB[i].rgb * att * LIGHT_GAIN;')
+    }
+  })
+  it('varnish-only keeps today\'s flat-normalised dark term (never from Darkness or distance)', () => {
+    expect(SPOT_UV_LIT_FRAG).not.toContain('1.0 - lum(lit)')
+    expect(SPOT_UV_LIT_FRAG).toContain('edge += w * (max(dot(N, L), 0.0) - max(L.z, 0.0));')
+    expect(SPOT_UV_LIT_FRAG).toContain('float flatLit = 1.0 + 0.4 * (wsum > 1e-5 ? edge / wsum : 0.0);')
+    expect(SPOT_UV_LIT_FRAG).toContain('float dk = clamp(0.06 + max(1.0 - flatLit, 0.0) * 0.5, 0.0, 1.0);')
+  })
+  it('a flat region far from every lamp, at Darkness 1, gets the faint 0.06 dark term', () => {
+    const flat: [number, number, number] = [0, 0, 1]
+    // Far lamps: grazing directions, tiny weights (Darkness never enters the term).
+    const far = [{ L: [0.97, 0, 0.243] as [number, number, number], weight: 0.002 }, { L: [-0.6, 0.79, 0.1] as [number, number, number], weight: 0.0005 }]
+    expect(varnishDarkTerm(flat, far)).toBeCloseTo(0.06, 10)
+    expect(varnishDarkTerm(flat, [])).toBeCloseTo(0.06, 10)
+    // A bevel facing away from the light deepens, as today.
+    const tilted: [number, number, number] = [-0.6, 0, 0.8]
+    expect(varnishDarkTerm(tilted, [{ L: [0.6, 0, 0.8], weight: 1 }])).toBeGreaterThan(0.06)
+  })
+  it('a drifted FINISH_COMMON never throws at import: the lit shaders are empty and applyFinishLit falls back', async () => {
+    vi.resetModules()
+    vi.doMock('~/lib/compositor/finishPass', async (orig) => ({ ...(await orig<object>()), FINISH_COMMON: '#version 300 es\n// no hidden light here\n' }))
+    try {
+      const m = await import('~/lib/compositor/finishLights')
+      expect(m.FOIL_LIT_FRAG).toBe('')
+      expect(m.SPOT_UV_LIT_FRAG).toBe('')
+      const off = { width: 10, height: 10 } as HTMLCanvasElement
+      expect(m.applyFinishLit(off, 'gold_foil', { metal: 'gold', brushed: 0, pressed: 0, grain: 0 }, [], DEFAULT_LIGHTING, 1)).toBe(false)
+    } finally {
+      vi.doUnmock('~/lib/compositor/finishPass')
+      vi.resetModules()
+    }
   })
 })
