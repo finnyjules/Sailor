@@ -317,6 +317,157 @@ test.describe('Relight surfaces (stage 2)', () => {
   })
 })
 
+// 1×1 transparent PNG — a valid, tiny stand-in for the "Finish" result (same fixture shape as
+// shot-director-models.spec.ts).
+const TINY_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+
+/** `/upload/image` (multipart `FormData`): echo back the real filename the client picked, so a
+ *  test that checks the result's name for the `relightfinish_` prefix is checking the app's own
+ *  naming, not a name this mock made up. */
+async function mockUpload(page: Page) {
+  const state = { count: 0 }
+  await page.route('**/upload/image', async (route) => {
+    state.count++
+    const body = route.request().postData() ?? ''
+    const m = body.match(/filename="([^"]+)"/)
+    const name = m?.[1] ?? 'relightfinish_unknown.png'
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name, subfolder: '', type: 'input' }) })
+  })
+  return state
+}
+
+/** `/api/inpaint/relight-finish` — the one route Task 4 exercises. `off: true` answers 503
+ *  `{ off: true }` (the kill switch / hosted refusal), matching the real route's shape.
+ *  A 1 s delay gives the tests something to observe ("Finishing…", the disabled button) before
+ *  the result lands, the same way the real Nano Banana 2 call takes real time. */
+function mockRelightFinish(page: Page, opts: { off?: boolean } = {}) {
+  const state = { count: 0, bodies: [] as any[] }
+  page.route('**/api/inpaint/relight-finish', async (route) => {
+    state.count++
+    state.bodies.push(route.request().postDataJSON())
+    if (opts.off) {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ off: true }) })
+      return
+    }
+    await new Promise((r) => setTimeout(r, 1_000))
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images: [TINY_PNG_DATA_URL], model: 'fal-ai/nano-banana-2/edit' }) })
+  })
+  return state
+}
+
+const relightRow = (page: Page) => page.locator('[data-testid="effect-row"][data-effect-kind="relight"]')
+const layerFilename = (page: Page) => page.evaluate(() => (window as any).__compositorLayers()[0]?.filename)
+const finishBtn = (page: Page) => page.getByTestId('relight-finish')
+
+test.describe('Relight Finish (stage 3, Task 4)', () => {
+  test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
+
+  test('Finish → Finishing… → pending bar → Relight row gone + filename changed → Undo restores it', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await mockUpload(page)
+    const finish = mockRelightFinish(page)
+    const origFilename = await layerFilename(page)
+    await expect(relightRow(page)).toHaveCount(1)
+
+    await expect(finishBtn(page)).toHaveText(/Finish · ~\$0\.10/)
+    await finishBtn(page).click()
+    await expect(finishBtn(page)).toHaveText('Finishing…')
+    await expect(finishBtn(page)).toBeDisabled()
+
+    await expect(page.locator('[data-edit-result-bar]')).toBeVisible({ timeout: 10_000 })
+    expect(finish.count).toBe(1)
+    // The Relight row is gone, and the layer got a fresh, relightfinish_-prefixed photo — both
+    // written by the SAME setLocal (finishApplyPatch).
+    await expect(relightRow(page)).toHaveCount(0)
+    const finishedFilename = await layerFilename(page)
+    expect(finishedFilename).not.toBe(origFilename)
+    expect(finishedFilename).toMatch(/^relightfinish_/)
+    // The effect panel closed with it (selectedEffect cleared on success).
+    await expect(page.getByTestId('relight-light-handle')).toHaveCount(0)
+
+    await page.getByTestId('edit-result-revert').click()
+    await expect(page.locator('[data-edit-result-bar]')).toHaveCount(0)
+    expect(await layerFilename(page)).toBe(origFilename)
+    await expect(relightRow(page)).toHaveCount(1)
+  })
+
+  test('Finish → Keep clears the bar; one global undo returns to the relit layer', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await mockUpload(page)
+    mockRelightFinish(page)
+    const origFilename = await layerFilename(page)
+
+    await finishBtn(page).click()
+    await expect(page.locator('[data-edit-result-bar]')).toBeVisible({ timeout: 10_000 })
+
+    await page.getByTestId('edit-result-validate').click()
+    await expect(page.locator('[data-edit-result-bar]')).toHaveCount(0)
+
+    await page.keyboard.press('Meta+z')
+    await expect.poll(() => layerFilename(page)).toBe(origFilename)
+    await expect(relightRow(page)).toHaveCount(1)
+  })
+
+  test('the route answering 503 { off: true } hides the Finish button for the session', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await mockUpload(page)
+    const finish = mockRelightFinish(page, { off: true })
+    await expect(finishBtn(page)).toHaveCount(1)
+
+    await finishBtn(page).click()
+    await expect(finishBtn(page)).toHaveCount(0, { timeout: 10_000 })
+    expect(finish.count).toBe(1)
+    // The row is untouched — an "off" answer changes nothing about the layer.
+    await expect(relightRow(page)).toHaveCount(1)
+  })
+
+  test('a fast double-click sends exactly one Finish request', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await mockUpload(page)
+    const finish = mockRelightFinish(page)
+
+    // Two synchronous native clicks: `runRelightFinish`'s single-click guard is set (a plain ref
+    // write) before its first `await`, so the second call sees it already armed regardless of
+    // whether Vue has re-rendered the (now-disabled) button yet.
+    await page.locator('[data-testid="relight-finish"]').evaluate((el: HTMLButtonElement) => { el.click(); el.click() })
+    await expect(page.locator('[data-edit-result-bar]')).toBeVisible({ timeout: 10_000 })
+    expect(finish.count).toBe(1)
+  })
+
+  test('Try again sends one more request, changes the filename again, and the row stays gone', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await mockUpload(page)
+    const finish = mockRelightFinish(page)
+
+    await finishBtn(page).click()
+    await expect(page.locator('[data-edit-result-bar]')).toBeVisible({ timeout: 10_000 })
+    expect(finish.count).toBe(1)
+    const afterFirst = await layerFilename(page)
+
+    await page.getByTestId('edit-result-reroll').click()
+    await expect.poll(() => finish.count, { timeout: 10_000 }).toBe(2)
+    await expect(page.locator('[data-edit-result-bar]')).toBeVisible()
+    await expect.poll(() => layerFilename(page)).not.toBe(afterFirst)
+    await expect(relightRow(page)).toHaveCount(0)
+  })
+
+  // Not covered here: "Relight isn't ready yet" (renderRelightPair returning null because the
+  // depth field hasn't loaded) — by the time addRelight() resolves, the GPU pass has already run
+  // at least once, which requires the depth field to be present. There is no deterministic way
+  // from this harness to click Finish in the narrow window before that first pass without racing
+  // a timer, so per the brief this case is skipped rather than faked.
+})
+
 type Halves = { top: number; bottom: number }
 
 /** Golden key (one light) dragged near the top, then near the bottom, then Compare held for the
