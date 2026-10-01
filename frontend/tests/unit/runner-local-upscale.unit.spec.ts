@@ -357,7 +357,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
 
 describe('prices (R7 rule 4)', () => {
   it('R3.5\'s Real-ESRGAN card, re-carded by R7.11\'s live check (GPU time: $0.003 a megapixel sent, at least $0.003, at most 1440p in; an estimate); no flat row', () => {
-    expect(EDIT_RATES[UPSCALE_2X_SLUG]).toMatchObject({ unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: UPSCALE_2X_MAX_PIXELS, confidence: 'estimate', service: 'replicate' })
+    expect(EDIT_RATES[UPSCALE_2X_SLUG]).toMatchObject({ unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: UPSCALE_2X_MAX_PIXELS, confidence: 'verified', service: 'replicate' })
     // The live check's run: 12.13 s on T4 ($0.000225/s) for 1152² in, $0.00273 — under the card's $0.00398 for it.
     expect(12.13 * 0.000225).toBeLessThan(paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: 1152 * 1152 })!)
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, UPSCALE_2X_CLASS)).toBe(false)

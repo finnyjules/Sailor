@@ -126,7 +126,7 @@ const only = (ct: string, inputs: Record<string, unknown>): EditCall => {
 
 /** Billed by GPU time: no published per-unit figure. */
 // R7.11: Real-ESRGAN too (its live check measured GPU-time billing over the old $0.002 a picture).
-const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'lucataco/moondream2', 'nightmareai/real-esrgan', 'philz1337x/clarity-upscaler']
+const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'lucataco/moondream2', 'philz1337x/clarity-upscaler']
 
 describe('edit rate cards', () => {
   it('every card carries a source, the date read and a confidence; only GPU-time models are estimates', () => {

@@ -86,6 +86,6 @@ export function nodeCreditEstimate(nodeType: string, inputs: NodeInputs | null |
  * Replicate", "Runs on fal"); null for every other node, or with its family
  * off. No new copy on the node itself (hints are tooltips).
  */
-export function nodePriceTooltip(nodeType: string, families: ReadonlySet<RunnerFamily> | undefined): string | null {
-  return serviceTooltip(nodeType, families)
+export function nodePriceTooltip(nodeType: string, families: ReadonlySet<RunnerFamily> | undefined, inputs?: { output_mode?: unknown } | null): string | null {
+  return serviceTooltip(nodeType, families, inputs)
 }

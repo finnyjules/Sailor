@@ -466,6 +466,15 @@ describe('prices (R7 rule 4)', () => {
     expect(upstreamPictureCount({ id: 'x', data: { nodeType: MASK_EXTRACTOR_CLASS, inputs: [] } }, [], [])).toBe(1)
   })
 
+  it('Subject mask\'s tooltip names the services its mode calls', () => {
+    for (const mode of ['best', 'largest', undefined]) {
+      expect(serviceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT, { output_mode: mode })).toBe('Runs on Replicate and fal')
+      expect(nodePriceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT, { output_mode: mode })).toBe('Runs on Replicate and fal')
+    }
+    expect(serviceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT, { output_mode: 'smallest' })).toBe('Runs on fal')
+    expect(serviceTooltip(SUBJECT_MASK_CLASS, new Set(['cards']), { output_mode: 'best' })).toBeNull()
+  })
+
   it('Mask by text\'s words are moderated, Mask extractor sends none; the tooltip names fal while the family is on; no backup', () => {
     expect(PAID_TEXT_INPUTS[MASK_BY_TEXT_CLASS]).toEqual(['prompt'])
     expect(Object.prototype.hasOwnProperty.call(PAID_TEXT_INPUTS, MASK_EXTRACTOR_CLASS)).toBe(false)
@@ -906,7 +915,8 @@ describe('Subject mask: price, family, rows', () => {
     expect(RUNNER_OUTPUT_CLASSES.has(SUBJECT_MASK_CLASS)).toBe(false)
     expect(outputKindsFor(ON_SUBJECT)[SUBJECT_MASK_CLASS]).toEqual({ 0: 'mask' })
     expect(SERVICE_OF[SUBJECT_MASK_CLASS]).toBe('fal')
-    expect(nodePriceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT)).toBe('Runs on fal')
+    expect(nodePriceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT)).toBe('Runs on Replicate and fal')
+    expect(nodePriceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT, { output_mode: 'smallest' })).toBe('Runs on fal')
     expect(nodePriceTooltip(SUBJECT_MASK_CLASS, new Set(['cards']))).toBeNull()
     expect(RUNNER_ROUTES[SUBJECT_MASK_CLASS]).toMatchObject({ first: 'replicate', backup: null })
     const pt = (w: Record<string, unknown>): ApiPrompt => ({ l: LOAD, n: subjectNode(w) })

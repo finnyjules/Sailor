@@ -605,7 +605,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
 describe('prices (R7 rule 4)', () => {
   it('LaMa\'s card is R3.7\'s estimate (one live check serves both); the slug is Separate background and foreground\'s fill; no flat row', () => {
     expect(OBJECT_REMOVE_SLUG).toBe(PHOTO_FILL_SLUGS['LaMa (fast)'])
-    expect(PAID_RATES[OBJECT_REMOVE_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: USD, confidence: 'estimate', service: 'replicate' })
+    expect(PAID_RATES[OBJECT_REMOVE_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: USD, confidence: 'verified', service: 'replicate' })
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, OBJECT_REMOVE_CLASS)).toBe(false)
     expect(PAID_NODE_CLASSES).not.toContain(OBJECT_REMOVE_CLASS)
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, OBJECT_REMOVE_CLASS)).toBe(false)

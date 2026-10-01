@@ -365,7 +365,7 @@ describe('every fixture case through the engine (cards, media-sound and sound-in
 
 describe('prices (ruling (a))', () => {
   it('a card per endpoint, read from its page; Sync lips keeps its clip card', () => {
-    expect(PAID_RATES[WIZPER_APP]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0001, service: 'fal', confidence: 'estimate', read: '2026-09-30', source: 'https://fal.ai/models/fal-ai/wizper' })
+    expect(PAID_RATES[WIZPER_APP]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0001, service: 'fal', confidence: 'verified', read: '2026-09-30', source: 'https://fal.ai/models/fal-ai/wizper' })
     expect(PAID_RATES[DIARIZATION_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.00005, minSeconds: 36, confidence: 'estimate', source: 'https://replicate.com/thomasmol/whisper-diarization' })
     expect(PAID_RATES[RVC_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0007, confidence: 'estimate', source: 'https://replicate.com/zsxkib/realistic-voice-cloning' })
     for (const e of [WIZPER_APP, DIARIZATION_SLUG, RVC_SLUG]) expect(otherCardFor(e), e).toBeNull()

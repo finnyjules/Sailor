@@ -508,9 +508,9 @@ describe('the start of the run: the clip counted and sized for the hold; past a 
 // ── Prices ───────────────────────────────────────────────────────────────────
 
 describe('prices (R7 rule 4, ruling (j))', () => {
-  it('RIFE video’s card: fal, read from the page, an estimate (it blocks switch-on until the live check measures it)', () => {
+  it('RIFE video’s card: fal, read from the page, measured 2026-10-01 (18.6 s for 119 frames out)', () => {
     const card = PAID_RATES[RIFE_VIDEO_SLUG]!
-    expect(card).toMatchObject({ unit: 'gpu_per_output_megapixel_frame', service: 'fal', confidence: 'estimate', read: '2026-10-01' })
+    expect(card).toMatchObject({ unit: 'gpu_per_output_megapixel_frame', service: 'fal', confidence: 'verified', read: '2026-10-01' })
     expect(SCHEMA.pricingText).toContain('$0.0013')
     // The live check's clip: 2 s of 854 × 480 at 30 fps, ×2: 119 frames, about $0.044.
     expect(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: 119, outputPixels: rifePricedPixels(854, 480) })).toBeCloseTo(0.0444, 3)

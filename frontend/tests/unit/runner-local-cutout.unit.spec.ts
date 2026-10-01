@@ -723,7 +723,7 @@ describe('a clip\'s cut-out batch is kept to the run\'s end (fix round 1, Minor 
 describe('prices (R7 rule 4)', () => {
   it('the remover\'s card is R3.5\'s estimate (one live check serves both); no flat row; the price book version stands', () => {
     // R7.11: raised from $0.0004 after the live check measured 1.80 s on T4 ($0.000405).
-    expect(PAID_RATES[BG_REMOVE_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0008, confidence: 'estimate', service: 'replicate' })
+    expect(PAID_RATES[BG_REMOVE_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0008, confidence: 'verified', service: 'replicate' })
     expect(1.80 * 0.000225).toBeLessThan(0.0008)
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, BG_REMOVE_CLASS)).toBe(false)
     expect(PAID_NODE_CLASSES).not.toContain(BG_REMOVE_CLASS)

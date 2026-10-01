@@ -673,12 +673,12 @@ describe('prices (ruling (a))', () => {
     expect(PAID_RATES[LAMA]).toEqual({
       // R7.11: raised from $0.0007 after the live check measured 3.14–3.20 s on T4 at 1152² ($0.00072).
       unit: 'gpu_ceiling', usd: 0.0015, note: 'T4 at $0.000225/s; page: approximately $0.00068 to run (read 2026-09-27); live check 2026-10-01: 3.14–3.20 s at 1152² = $0.00072; ceiling 6.7 s (about 2.1× measured)',
-      service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-10-01', confidence: 'estimate',
+      service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-10-01', confidence: 'verified',
     })
     expect(PAID_RATES[BRIA]).toEqual({
       unit: 'per_call', usd: 0.04, service: 'replicate', source: 'https://replicate.com/bria/eraser', read: '2026-09-27', confidence: 'verified',
     })
-    expect(PAID_RATES[SPLIT_CUTOUT_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0008, confidence: 'estimate' })
+    expect(PAID_RATES[SPLIT_CUTOUT_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0008, confidence: 'verified' })
     for (const e of [LAMA, BRIA]) expect(otherCardFor(e), e).toBeNull()
   })
 

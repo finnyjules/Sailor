@@ -322,9 +322,15 @@ export function serviceOn(classType: string, families: ReadonlySet<RunnerFamily>
 }
 
 /** The price's tooltip for a class with these families on ("Runs on Replicate"), or null. */
-export function serviceTooltip(classType: string, families: ReadonlySet<RunnerFamily> | undefined): string | null {
+export function serviceTooltip(classType: string, families: ReadonlySet<RunnerFamily> | undefined, inputs?: { output_mode?: unknown } | null): string | null {
   const s = serviceOn(classType, families)
-  return s ? SERVICE_WORDS[s] : null
+  if (!s) return null
+  // Subject mask: best and largest call Replicate's background remover first, with SAM 3 on fal as the fallback; smallest calls fal only.
+  if (classType === SUBJECT_MASK_CLASS) {
+    const kinds = subjectCallKinds(inputs?.output_mode)
+    if (kinds.includes('cutout')) return 'Runs on Replicate and fal'
+  }
+  return SERVICE_WORDS[s]
 }
 
 /**

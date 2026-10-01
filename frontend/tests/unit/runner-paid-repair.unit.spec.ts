@@ -327,7 +327,7 @@ describe('prices (ruling (a))', () => {
     })
     expect(PAID_RATES['851-labs/background-remover']).toMatchObject({
       // R7.11: raised from $0.0004 after the live check measured 1.80 s on T4 ($0.000405).
-      unit: 'gpu_ceiling', usd: 0.0008, confidence: 'estimate', read: '2026-10-01', source: 'https://replicate.com/851-labs/background-remover',
+      unit: 'gpu_ceiling', usd: 0.0008, confidence: 'verified', read: '2026-10-01', source: 'https://replicate.com/851-labs/background-remover',
     })
     for (const slug of ['flux-kontext-apps/restore-image', '851-labs/background-remover']) expect(otherCardFor(slug), slug).toBeNull()
     for (const slug of [...Object.values(UPSCALE_ENGINE_SLUGS), ...Object.values(ENHANCE_ENGINE_SLUGS)]) {

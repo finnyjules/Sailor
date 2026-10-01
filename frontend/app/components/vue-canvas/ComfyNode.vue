@@ -152,7 +152,7 @@ const pricedInputs = computed(() => {
 })
 
 // The price's tooltip: which service runs a node moved off this computer (R7 ruling (b)).
-const priceTitle = computed(() => nodePriceTooltip(props.data.nodeType as string, badgeFamilies))
+const priceTitle = computed(() => nodePriceTooltip(props.data.nodeType as string, badgeFamilies, pricedInputs.value))
 
 // Extract the minimum USD price from the price badge expression
 const priceLabel = computed(() => {

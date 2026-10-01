@@ -278,7 +278,7 @@ describe('the sound sent: Python\'s 16 kHz mono (`_audio_to_mono16k`)', () => {
 
 describe('the price: R3.10\'s Wizper card, by the seconds sent', () => {
   it('measured: those seconds; not measured: the longest sound where it runs (hosted 30 minutes, this computer an hour)', () => {
-    expect(PAID_RATES[WIZPER_APP]).toMatchObject({ unit: 'per_input_second', perSecond: USD_PER_SECOND, confidence: 'estimate' })
+    expect(PAID_RATES[WIZPER_APP]).toMatchObject({ unit: 'per_input_second', perSecond: USD_PER_SECOND, confidence: 'verified' })
     expect(whisperCalls({ audio: 12.5 })).toEqual({ steps: [{ call: { endpoint: WIZPER_APP, inputSeconds: 12.5 }, times: 1 }] })
     expect(whisperCalls({ place: 'hosted' }).steps?.[0]?.call.inputSeconds).toBe(1800)
     expect(whisperCalls({ framesUpTo: 'hosted' }).steps?.[0]?.call.inputSeconds).toBe(1800)

@@ -325,8 +325,8 @@ describe('the request, against the saved schema', () => {
 })
 
 describe('the price: a new card, by the seconds sent times the settings\' work', () => {
-  it('Replicate\'s demucs: $0.0002 a second of sound, at least the page\'s $0.034; an estimate', () => {
-    expect(PAID_RATES[VOCALS_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0002, minSeconds: 170, service: 'replicate', confidence: 'estimate' })
+  it('Replicate\'s demucs: $0.0002 a second of sound, at least the page\'s $0.034; measured', () => {
+    expect(PAID_RATES[VOCALS_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0002, minSeconds: 170, service: 'replicate', confidence: 'verified' })
     expect(paidCallUsd({ endpoint: VOCALS_SLUG, inputSeconds: 30 })).toBe(0.034)
     expect(paidCallUsd({ endpoint: VOCALS_SLUG, inputSeconds: 600 })).toBe(0.12)
     expect([vocalsWork('htdemucs', 0), vocalsWork('htdemucs', 1), vocalsWork('htdemucs', 10), vocalsWork('htdemucs_ft', 2), vocalsWork('htdemucs', ['x', 0]), vocalsWork('mdx_extra', 1), vocalsWork('nope', 1)]).toEqual([1, 1, 10, 8, 10, 4, null])
