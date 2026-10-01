@@ -64,6 +64,9 @@ export interface FrameAssets {
   fonts: FrameFontAsset[]
   shaders: EffectDef[]
   depth: { ref: DepthRef; dataUrl: string }[]
+  /** Relight photos' surfaces (MoGe-2 normals PNG), when the editor had them. Absent in files
+   *  made before Relight travelled with exports. */
+  surfaces?: { ref: DepthRef; dataUrl: string }[]
 }
 
 export type FrameNoticeGroup = 'fonts' | 'live' | 'still' | 'leftOut' | 'blocked'

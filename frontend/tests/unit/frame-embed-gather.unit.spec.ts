@@ -133,6 +133,31 @@ describe('buildFrameSnapshot', () => {
     expect(cached.assets.depth).toEqual([{ ref: 'p.png', dataUrl: 'data:image/png;base64,IMG4096' }])
   })
 
+  // Light layers stage 2: Relight travels with the file — depth map and, when cached, surfaces.
+  it('a Relight photo ships its depth map and surfaces; without surfaces it is lit from depth only, and says so', async () => {
+    const img = createImageLayer('p.png', 1, {})
+    ;(img as any).effects = [{ ...createEffect('relight'), visible: true }]
+    const depthImg = { width: 2, height: 2 } as any, normals = { width: 3, height: 3 } as any
+    const full = await buildFrameSnapshot(plan([img]), v([img]), fakeIO({ depthImage: vi.fn(() => depthImg), surfacesImage: vi.fn(() => normals) }))
+    expect(full.assets.depth).toEqual([{ ref: 'p.png', dataUrl: 'data:image/png;base64,IMG4096' }])
+    expect(full.assets.surfaces).toEqual([{ ref: 'p.png', dataUrl: 'data:image/png;base64,IMG4096' }])
+    expect(full.notices.filter(n => n.text.includes('Relight'))).toEqual([])
+    const depthOnly = await buildFrameSnapshot(plan([img]), v([img]), fakeIO({ depthImage: vi.fn(() => depthImg) }))
+    expect(depthOnly.assets.depth).toHaveLength(1)
+    expect(depthOnly.assets.surfaces).toBeUndefined()
+    expect(depthOnly.notices).toContainEqual({ group: 'leftOut', text: 'Relight on Image · surfaces not read — lit from depth only', layerId: img.id })
+    const none = await buildFrameSnapshot(plan([img]), v([img]), fakeIO())
+    expect(none.assets.depth).toEqual([])
+    expect(none.notices).toContainEqual({ group: 'leftOut', text: 'Relight on Image · needs a depth map', layerId: img.id })
+  })
+
+  it('Depth blur and Relight on the same photo ship its depth map once', async () => {
+    const img = createImageLayer('p.png', 1, {})
+    ;(img as any).effects = [{ ...createEffect('dof'), visible: true }, { ...createEffect('relight'), visible: true }]
+    const snap = await buildFrameSnapshot(plan([img]), v([img]), fakeIO({ depthImage: vi.fn(() => ({ width: 2, height: 2 } as any)) }))
+    expect(snap.assets.depth).toHaveLength(1)
+  })
+
   it('shader definitions and their textures are inlined', async () => {
     const io = fakeIO({ shaderDefs: vi.fn(() => [{ id: 'fx', textures: [{ uniform: 'u_atlas', file: 'atlas.png', v: '3' }] } as any]) })
     const p = plan([]); p.shaderIds = ['fx']

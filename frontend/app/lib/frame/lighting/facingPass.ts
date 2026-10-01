@@ -45,6 +45,7 @@ precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 uniform sampler2D uColor, uDepth, uNormals;
+uniform sampler2D uLow;      // Original light: the photo resampled to a fixed power-of-two grid (mipmapped)
 uniform vec2 uDepthTexel, uImgTexel;
 uniform vec4 uDepthRect;     // the part of the source the layer box shows: u0, v0, du, dv (top-down)
 uniform float uAspect, uRelief, uDetail, uShadows, uHasNormals;
@@ -142,7 +143,9 @@ void main() {
     // toward the photo's mean by (1 - keep): detail and colour stay, the baked gradient goes.
     // Mip lookups average transparent pixels as black, so they are divided by their own alpha.
     vec3 Wl = vec3(0.299, 0.587, 0.114);
-    vec4 lo = textureLod(uColor, vUv, uBlurLod), mn = textureLod(uColor, vUv, uMeanLod);
+    // Read from uLow, the photo on a fixed power-of-two grid (ORIGINAL_LIGHT_GRID), so the
+    // estimate is the same whatever size the box is painted at: editor, Render and export agree.
+    vec4 lo = textureLod(uLow, vUv, uBlurLod), mn = textureLod(uLow, vUv, uMeanLod);
     float lb = dot(toLin(lo.rgb / max(lo.a, 1e-3)), Wl);
     float lm = dot(toLin(mn.rgb / max(mn.a, 1e-3)), Wl);
     float k = clamp(lm / max(lb, 1e-4), 0.5, 2.0);
@@ -172,9 +175,25 @@ export function depthRectUniforms(rect: DepthRect, dw: number, dh: number): { uD
 /** Mip levels for Original light: the baked light is read at ~1/4 of the box — only its broad
  *  gradients (a spotlight's falloff, a vignette, a lit side), so a subject's own brightness is
  *  not mistaken for light — and the mean at the top level. */
-export function originalLightLods(w: number, h: number): { uBlurLod: number; uMeanLod: number } {
-  const long = Math.max(1, w, h)
-  return { uBlurLod: Math.max(0, Math.log2(long / 4)), uMeanLod: Math.ceil(Math.log2(long)) }
+/** Original light's grid: the photo is resampled to this many texels on its long side (and the
+ *  nearest power of two on the short side) before its low frequencies are read. A fixed
+ *  power-of-two grid makes the estimate independent of the size the box is painted at — a
+ *  box-sized non-power-of-two mip chain floors each level differently at every size, so the
+ *  editor (a screen-sized box) and a Render or web export (the Frame's own size) disagreed. */
+export const ORIGINAL_LIGHT_GRID = 64
+
+/** The grid Original light reads, for a w×h box: ORIGINAL_LIGHT_GRID on the long side, the
+ *  nearest power of two (≥ 1) keeping the aspect on the short side. */
+export function originalLightGrid(w: number, h: number): { w: number; h: number } {
+  const long = Math.max(1, w, h), short = Math.max(1, Math.min(w, h))
+  const s = Math.max(1, Math.min(ORIGINAL_LIGHT_GRID, 2 ** Math.round(Math.log2(ORIGINAL_LIGHT_GRID * short / long))))
+  return w >= h ? { w: ORIGINAL_LIGHT_GRID, h: s } : { w: s, h: ORIGINAL_LIGHT_GRID }
+}
+
+/** Mip levels on that grid: the low frequencies at 1/4 of the long side (a 4-texel level), the
+ *  mean at 1×1. Fixed, so they never depend on the box size. */
+export function originalLightLods(_w?: number, _h?: number): { uBlurLod: number; uMeanLod: number } {
+  return { uBlurLod: Math.log2(ORIGINAL_LIGHT_GRID / 4), uMeanLod: Math.log2(ORIGINAL_LIGHT_GRID) }
 }
 
 /** The facing tile's uniforms — the old pass's, minus the lights, plus the rotation. */
@@ -205,6 +224,7 @@ class FacingGl {
   private texColor: WebGLTexture | null = null
   private texDepth: WebGLTexture | null = null
   private texNormals: WebGLTexture | null = null
+  private texLow: WebGLTexture | null = null
   private depthIn: FloatDepth | CanvasImageSource | null = null
   private normalsIn: CanvasImageSource | null = null
   private failed = false
@@ -227,14 +247,14 @@ class FacingGl {
 
   private drop() {
     this.canvas = null; this.gl = null; this.program = null
-    this.texColor = null; this.texDepth = null; this.texNormals = null
+    this.texColor = null; this.texDepth = null; this.texNormals = null; this.texLow = null
     this.depthIn = null; this.normalsIn = null
   }
 
   release() {
     const gl = this.gl
     if (gl && !gl.isContextLost()) {
-      gl.deleteTexture(this.texColor); gl.deleteTexture(this.texDepth); gl.deleteTexture(this.texNormals)
+      gl.deleteTexture(this.texColor); gl.deleteTexture(this.texDepth); gl.deleteTexture(this.texNormals); gl.deleteTexture(this.texLow)
       gl.deleteProgram(this.program)
       gl.getExtension('WEBGL_lose_context')?.loseContext()
     }
@@ -292,12 +312,16 @@ class FacingGl {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]))
     this.texNormals = mkTex(gl.LINEAR)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 255, 255]))
+    this.texLow = mkTex(gl.LINEAR_MIPMAP_LINEAR)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]))
+    gl.generateMipmap(gl.TEXTURE_2D)
     this.depthIn = null; this.normalsIn = null
   }
 
   render(
     color: CanvasImageSource, w: number, h: number, uniforms: Record<string, Uniform>,
     depth: FloatDepth | CanvasImageSource | null, normals: CanvasImageSource | null,
+    low: CanvasImageSource | null = null,
   ): HTMLCanvasElement | null {
     if (this.gl?.isContextLost()) this.drop()
     this.init()
@@ -347,6 +371,14 @@ class FacingGl {
       this.normalsIn = normals
     }
     gl.uniform1i(gl.getUniformLocation(program, 'uNormals'), 2)
+
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, this.texLow)
+    if (low) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, low as TexImageSource)
+      gl.generateMipmap(gl.TEXTURE_2D)
+    }
+    gl.uniform1i(gl.getUniformLocation(program, 'uLow'), 3)
 
     for (const [name, value] of Object.entries(uniforms)) {
       const loc = gl.getUniformLocation(program, name)
@@ -405,5 +437,12 @@ export const originalLightActive = (keep: number): boolean => keep < 0.999
  */
 export function renderOriginalLight(color: CanvasImageSource, keep: number, w: number, h: number): HTMLCanvasElement | null {
   if (!originalLightActive(keep)) return null
-  return getPass().render(color, w, h, { uMode: 0, uKeep: Math.max(0, Math.min(1, keep)), ...originalLightLods(w, h) }, null, null)
+  const g = originalLightGrid(w, h)
+  const low = document.createElement('canvas'); low.width = g.w; low.height = g.h
+  const lx = low.getContext('2d')
+  if (!lx) return null
+  lx.imageSmoothingEnabled = true
+  lx.imageSmoothingQuality = 'high'
+  lx.drawImage(color, 0, 0, g.w, g.h)
+  return getPass().render(color, w, h, { uMode: 0, uKeep: Math.max(0, Math.min(1, keep)), ...originalLightLods() }, null, null, low)
 }

@@ -30,6 +30,7 @@ import { registerAssetResolver } from '~/lib/compositor/assetScope'
 import { addShaderFxEffects } from '~/lib/shaderfx/catalogStore'
 import { whenFieldEffectReady } from '~/lib/shaderfill/field'
 import { seedDepthImage } from '~/lib/compositor/depthRegistry'
+import { seedSurfacesImage } from '~/lib/compositor/surfacesRegistry'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import { warmPaperBoolean, isPaperWarm } from '~/lib/compositor/booleanGeometry'
 import { warmCompositorFont } from '~/lib/compositor/textOutline'
@@ -258,6 +259,7 @@ const frameSurface: EmbedSurface = {
       if (!ready.every(Boolean)) throw new Error('embed: a shader did not become ready')
 
       for (const d of snap.assets.depth) seedDepthImage(d.ref, await loadImage(d.dataUrl))
+      for (const d of snap.assets.surfaces ?? []) seedSurfacesImage(d.ref, await loadImage(d.dataUrl))
 
       const stills = new Map<number, HTMLImageElement>()
       const clips = new Map<number, { frames: HTMLImageElement[]; duration: number }>()

@@ -15,7 +15,7 @@ import { compositorFontToken } from '~/lib/compositor/textOutline'
 import { effectStackOf, isGeometryKind } from '~/lib/compositor/effectStack'
 import { layersNeedPaper, frameNeedsFullBundle } from './needs'
 import { formatBytes } from '../formatBytes'
-import type { DepthRef } from '~/lib/compositor/depthRegistry'
+import { depthKey, type DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import { MY_EFFECT_ID_BODY } from '~~/shared/myEffects/record'
 import type { FontWeightSpec } from '../fontFace'
@@ -64,6 +64,8 @@ export interface FrameExportIO {
    *  not load an asset, no frames and the failures. */
   wiredFrames(slot: number, count: number, maxPx: number, encode: (frame: CanvasImageSource) => Promise<string>): Promise<WiredFrames>
   depthImage(ref: DepthRef): CanvasImageSource | null
+  /** A Relight photo's surfaces (MoGe-2 normals) when the editor holds them, else null. */
+  surfacesImage?(ref: DepthRef): CanvasImageSource | null
   shaderDefs(ids: string[]): EffectDef[]
   /** A My effect's own name by any of its ids, when the user's library still knows it. */
   shaderName?(id: string): string | null
@@ -233,6 +235,27 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
     if (img) depth.push({ ref: d.ref, dataUrl: await io.imageToDataUrl(img, DEPTH_MAX_PX, 'image/png') })
     else notices.push({ group: 'leftOut', text: `Depth blur on ${d.label} · needs a depth map`, layerId: d.layerId })
   }
+  // Relight: the depth map (shared with Depth blur when both use it) and the surfaces. The file
+  // builds the depth field from the map and lights the photo as the editor does; without
+  // surfaces it uses normals from depth alone, and the sheet says so. Both are PNG: they are data.
+  const surfaces: NonNullable<FrameSnapshot['assets']['surfaces']> = []
+  const seenDepth = new Set(depth.map(d => depthKey(d.ref)))
+  const seenSurfaces = new Set<string>()
+  for (const r of plan.relight ?? []) {
+    const key = depthKey(r.ref)
+    if (!seenDepth.has(key)) {
+      const img = io.depthImage(r.ref)
+      if (!img) { notices.push({ group: 'leftOut', text: `Relight on ${r.label} · needs a depth map`, layerId: r.layerId }); continue }
+      depth.push({ ref: r.ref, dataUrl: await io.imageToDataUrl(img, DEPTH_MAX_PX, 'image/png') })
+      seenDepth.add(key)
+    }
+    if (seenSurfaces.has(key)) continue
+    const normals = io.surfacesImage?.(r.ref) ?? null
+    if (normals) {
+      surfaces.push({ ref: r.ref, dataUrl: await io.imageToDataUrl(normals, DEPTH_MAX_PX, 'image/png') })
+      seenSurfaces.add(key)
+    } else notices.push({ group: 'leftOut', text: `Relight on ${r.label} · surfaces not read — lit from depth only`, layerId: r.layerId })
+  }
 
   const wired: Record<number, WiredEntry> = {}
   for (const w of plan.wiredStills) {
@@ -289,7 +312,7 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
 
   return {
     version: 1, fit: plan.fit, duration: plan.duration, still: plan.still,
-    variants: [variant], assets: { urls, fonts, shaders, depth }, wired,
+    variants: [variant], assets: { urls, fonts, shaders, depth, ...(surfaces.length ? { surfaces } : {}) }, wired,
     notices: [...notices.filter(n => n.group === 'fonts'), ...liveNotices, ...notices.filter(n => n.group !== 'fonts')],
     // Brush tips, Pixel reveal, Relight and Morph are not in frame-lean.js either: same full bundle.
     needsOutlines: computeNeedsOutlines(plan, variant) || frameNeedsFullBundle(variant.layers, variant.motion?.behaviours) !== null,

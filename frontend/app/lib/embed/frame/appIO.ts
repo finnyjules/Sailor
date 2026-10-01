@@ -3,6 +3,7 @@ import { compositorFontToken } from '~/lib/compositor/textOutline'
 import { parseVtFontToken, vtFontFileUrl } from '~/lib/vectortype/fontToken'
 import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
 import { depthImageFor } from '~/lib/compositor/depthRegistry'
+import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
 import type { UploadedFontEntry } from '~/composables/useUploadedFonts'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import { myEffectIdOf } from '~/lib/myEffects/defs'
@@ -197,6 +198,7 @@ export function createAppFrameExportIO(opts: {
     wiredStill: opts.wiredStill,
     wiredFrames: opts.wiredFrames ?? (async () => { throw new Error('no wired frame source') }),
     depthImage: ref => depthImageFor(ref),
+    surfacesImage: ref => surfacesImageFor(ref),
     shaderDefs: ids => opts.catalog.filter(d => ids.includes(d.id)),
     shaderName: id => myEffectRecordById(myEffectIdOf(id) ?? '')?.name ?? null,
     wiredEmbed: opts.wiredEmbed,

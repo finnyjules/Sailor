@@ -53,6 +53,9 @@ export interface FramePlan {
   fonts: { family: string; weight: number; text: string; outline: boolean }[]
   shaderIds: string[]
   depth: { ref: DepthRef; layerId: string; label: string }[]
+  /** Relight photos: their depth map (the depth field is built from it in the file) and, when
+   *  the editor has them, their surfaces (the MoGe-2 normals). One entry per photo source. */
+  relight: { ref: DepthRef; layerId: string; label: string }[]
   wiredStills: { slot: number; maxPx: number }[]
   /** Animated wired slots, baked at export into `round(duration × fps)` frames. */
   wiredClips: { slot: number; maxPx: number; fps: number; duration: number; label: string; layerId: string }[]
@@ -181,6 +184,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
   const images: FramePlan['images'] = []
   const clips: FramePlan['clips'] = []
   const depth: FramePlan['depth'] = []
+  const relight: FramePlan['relight'] = []
   const wiredStills: FramePlan['wiredStills'] = []
   const wiredClips: FramePlan['wiredClips'] = []
   const fontMap = new Map<string, FramePlan['fonts'][number]>()
@@ -232,17 +236,23 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
         if (info?.animated) notices.push({ group: 'still', text: `${info.label} · shown as a still in this version`, layerId: l.id })
       }
     }
+    // The painter's own depth ref for a layer (useCompositorLayers `dofRef`): DOF and Relight share it.
+    const depthRef: DepthRef | null = l.kind === 'image'
+      ? (l as { filename: string }).filename
+      : l.kind === 'wired' ? depthSourceFromViewUrl((l as { depthKey?: string }).depthKey) : null
     const hasDof = effectStackOf(l as any).some(e => e.type === 'dof' && (e as { visible?: boolean }).visible !== false)
       || (l.kind === 'wired' && !!v.wiredTreatments[`l:${l.id}`]?.dof)
     if (hasDof) {
-      const ref: DepthRef | null = l.kind === 'image'
-        ? (l as { filename: string }).filename
-        : l.kind === 'wired' ? depthSourceFromViewUrl((l as { depthKey?: string }).depthKey) : null
-      if (ref) depth.push({ ref, layerId: l.id, label: layerLabel(l) })
+      if (depthRef) depth.push({ ref: depthRef, layerId: l.id, label: layerLabel(l) })
       else notices.push({ group: 'leftOut', text: `Depth blur on ${layerLabel(l)} · needs a depth map`, layerId: l.id })
     }
+    // Relight travels with the file: the photo's depth map (the file builds the depth field from
+    // it) and its surfaces when the editor has them — the gatherer collects both (gather.ts).
     const hasRelight = effectStackOf(l as any).some(e => e.type === 'relight' && (e as { visible?: boolean }).visible !== false)
-    if (hasRelight) notices.push({ group: 'leftOut', text: `Relight on ${layerLabel(l)} · shown without it in this version`, layerId: l.id })
+    if (hasRelight) {
+      if (depthRef) relight.push({ ref: depthRef, layerId: l.id, label: layerLabel(l) })
+      else notices.push({ group: 'leftOut', text: `Relight on ${layerLabel(l)} · needs a depth map`, layerId: l.id })
+    }
   }
 
   const strings = new Set<string>()
@@ -286,6 +296,6 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
     fillImages: collectFillImageSrcs(layers),
     fonts: [...fontMap.values()],
     shaderIds: [...shaderIds],
-    depth, wiredStills, wiredClips, notices,
+    depth, relight, wiredStills, wiredClips, notices,
   }
 }

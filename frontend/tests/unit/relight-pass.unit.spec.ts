@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { relightShouldRun, RELIGHT_FRAG } from '~/lib/relight/relightPass'
 import {
-  FACING_FRAG, facingUniforms, originalLightLods, originalLightActive, FACING_CONTACT_DIRS, FACING_CONTACT_ELEVATION,
+  FACING_FRAG, facingUniforms, originalLightLods, originalLightGrid, originalLightActive, FACING_CONTACT_DIRS, FACING_CONTACT_ELEVATION,
 } from '~/lib/frame/lighting/facingPass'
 import { sanitizeRelight } from '~/lib/relight/settings'
 import { FULL_DEPTH_RECT } from '~/lib/relight/depthFieldCore'
@@ -79,8 +79,13 @@ describe('Original light', () => {
     expect(originalLightActive(0)).toBe(true)
   })
   it('reads the baked light at ~1/4 of the box and the mean at the top mip', () => {
-    expect(originalLightLods(1024, 512)).toEqual({ uBlurLod: 8, uMeanLod: 10 })
-    expect(originalLightLods(4, 4).uBlurLod).toBe(0)
+    // A fixed power-of-two grid: the same levels at every box size (editor, Render, export agree).
+    expect(originalLightLods(1024, 512)).toEqual({ uBlurLod: 4, uMeanLod: 6 })
+    expect(originalLightLods(325, 325)).toEqual(originalLightLods(600, 600))
+    expect(originalLightGrid(1024, 512)).toEqual({ w: 64, h: 32 })
+    expect(originalLightGrid(300, 1000)).toEqual({ w: 16, h: 64 })
+    expect(originalLightGrid(5000, 10)).toEqual({ w: 64, h: 1 })
+    expect(FACING_FRAG).toContain('textureLod(uLow, vUv, uBlurLod)')
   })
   it('flattens toward the mean by (1 − keep), clamped, keeping alpha', () => {
     expect(FACING_FRAG).toContain('float k = clamp(lm / max(lb, 1e-4), 0.5, 2.0);')

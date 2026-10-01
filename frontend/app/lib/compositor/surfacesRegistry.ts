@@ -47,6 +47,12 @@ export function surfacesStatusFor(ref: DepthRef): Status {
   return entries.get(depthKey(ref))?.status ?? 'idle'
 }
 
+/** An exported file's surfaces, carried as an asset: ready at once (no request, no price). */
+export function seedSurfacesImage(ref: DepthRef, img: HTMLImageElement): void {
+  entries.set(depthKey(ref), { status: 'ready', img, paid: false })
+  notify()
+}
+
 /** Synchronous by design — safe to call from inside a paint. */
 export function surfacesImageFor(ref: DepthRef): HTMLImageElement | null {
   const e = entries.get(depthKey(ref))

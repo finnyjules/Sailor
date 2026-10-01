@@ -169,6 +169,16 @@ describe('planFrameExport', () => {
     expect(p.depth).toEqual([{ ref: 'photo.png', layerId: img.id, label: 'Image' }])
   })
 
+  it('Relight lists its photo for the depth map and surfaces, and is no longer left out', () => {
+    const img = createImageLayer('photo.png', 1, {})
+    ;(img as any).effects = [{ ...createEffect('relight'), visible: true }]
+    const p = planFrameExport(input(variant([img])))
+    expect(p.relight).toEqual([{ ref: 'photo.png', layerId: img.id, label: 'Image' }])
+    expect(p.notices.filter(n => n.text.includes('Relight'))).toEqual([])
+    ;(img as any).effects = [{ ...createEffect('relight'), visible: false }]
+    expect(planFrameExport(input(variant([img]))).relight).toEqual([])
+  })
+
   // I1: the painter outlines a boolean/morph PARTNER itself (the sibling resolver), even when that
   // text draws with fillText — so its font needs outline bytes, whatever the effect's visibility.
   it('a text layer used as a boolean partner asks for outline bytes', () => {
