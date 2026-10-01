@@ -472,6 +472,15 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 
 **Known limits for slice 2:** layer blur, torn edge, grain and `localLayerBox` still ride the unscaled device scale; members of a rigid unit share the unit's motion map (exact for edge and centre pins, drifts for a manually relative-pinned or Keep-size group); a re-wrapped text's reported box uses the design height when its vertical pin is centre or relative. The three review findings above all landed, so slice 2 inherits nothing new from them.
 
+### Sailor without ComfyUI, step 3 — stage R6 BUILT (video and sound effects in Sailor), nine families ON locally, OFF in hosted — 2026-09-30 (plan R6 section; ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`)
+
+- **34 classes, nine families:** `video-time` (Trim, Reverse, Frame trail, Slit scan, Time displacement, Speed ramp; Motion blur (time) refused before the hold where ComfyUI itself crashes), `video-join` (Crossfade, Transition with a stable seeded glitch), `video-look` (Ken Burns, Aspect convert, Chroma key, LUT, 3-way color), `video-stabilize` (+ a shared FFT), `video-flow` (Slow motion on ffmpeg's minterpolate), `video-draw` (Animated noise, Audio waveform), `video-text` (Text clip, Caption track; DejaVu Sans Bold bundled), `sound-effects` (the sound effects, Silence cut, Save audio Opus), `sound-denoise`.
+- **The user's matching rule (09-30)** now governs R6–R11: cheap stays exact, hard ports only need to look the same, fix Python's bugs. Fixed rather than copied: slow motion's double image, the squeezed stereo waveform, the LUT that silently did nothing, Silence cut dropping loud runs, denoise's NaN on silence.
+- **Machinery:** one media slot per node; a start pass whose checks are true upper bounds (doubt → the engine, never fail after paid nodes); frames streamed through the worker; kept batches let go early; a fix in `run.ts` so an early-left job always drains and closes (it had hung a node for 2 h in testing).
+- **Proven live (ComfyUI stopped):** six workflows covering every family, nothing charged, Stop leaves no ffmpeg.
+
+**Owed:** work rates and memory were measured on this Mac only (re-measure on Fly; 1080p slow motion and long effect chains go to the engine in hosted until then); a flaky take-ordering test (B10) is flagged as its own task. **Next:** R7 (expand first).
+
 ### Sailor without ComfyUI, step 3 — stage R5 BUILT (video and sound on Sailor's own server), `media-sound` + `media-video` ON locally, OFF in hosted — 2026-09-28/30 (`fb908069b`..`3030f8263`, non-contiguous; plan R5 section of `docs/superpowers/plans/2026-09-26-engine-free-step3.md`, ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`)
 
 - **Tools:** Sailor builds its own ffmpeg (FFmpeg 8.0.3-sailor1, LGPL only, OpenH264/LAME/Opus/dav1d/zlib; `scripts/media-tools/build.sh` into git-ignored `frontend/.media-tools/`), found only through `mediaTools()`, never Homebrew. File and pipe protocols only; option, filter and bitstream-filter allow-lists; file-opening filters compiled out.
