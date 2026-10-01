@@ -38,6 +38,9 @@ import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
 import { MAX_LIGHTS, newLightLayer, readFrameLighting, sanitizeLighting, type FrameLighting, type LightType } from '~/lib/frame/lighting/settings'
+import { relightLightsToLayers, hasLegacyRelightLights, setupToLightLayers, isRelightPhoto } from '~/lib/frame/lighting/convertRelight'
+import { relightSetup, type RelightSetupName } from '~/lib/relight/presets'
+import { effectStackOf, addEffect, writeStackToLayer, type EffectInstance } from '~/lib/compositor/effectStack'
 
 interface EditorOpts {
   node: () => any                       // the compositor node (reactive)
@@ -463,6 +466,61 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       layer.light = { ...layer.light, aimX: Math.min(1.5, Math.max(-0.5, at.aimX)), aimY: Math.min(1.5, Math.max(-0.5, at.aimY)) }
     }
     addLocal(layer)
+    return true
+  }
+  // ── Relight and the Frame's lights (light layers stage 2) ──────────────────────────────
+  /** Persist the conversion of old Relight lights (an effect's own `lights`) into Frame light
+   *  layers — once, as ONE undo step. Returns how many old lights were left out by the
+   *  MAX_LIGHTS cap, or `null` when there was nothing to convert (no history written): no old
+   *  lights, or the Frame already has a light layer (lib/frame/lighting/convertRelight). */
+  function convertLegacyRelight(): number | null {
+    const n = node(); if (!n) return null
+    const layers = localLayers.value
+    if (!hasLegacyRelightLights(layers)) return null
+    const props = n.data.properties as Record<string, unknown> | undefined
+    const { w, h } = dims()
+    const r = relightLightsToLayers(layers, props?.sailor_localLighting ? lighting.value : null, w, h)
+    if (!r.changed) return null
+    recordHistory()
+    commit(r.layers)
+    writeLighting(r.lighting)
+    return r.dropped
+  }
+  /** Add Relight to an image/wired layer, plus a Lamp at Golden key's place when the Frame has
+   *  no light yet — ONE undo step. Returns the new effect's id, or `null` when nothing was added
+   *  (no such layer, a layer that cannot take Relight, or one that already has it). */
+  function addRelight(layerId: string): string | null {
+    const layer = localLayers.value.find(l => l.id === layerId)
+    if (!layer || (layer.kind !== 'image' && layer.kind !== 'wired')) return null
+    const before = effectStackOf(layer as { effects?: unknown[] })
+    const next = addEffect(before, 'relight')
+    if (next === before) return null
+    const fresh = next.find(e => e.type === 'relight')!
+    const withFx = { ...layer, ...writeStackToLayer(next) } as LocalLayer
+    const { w, h } = dims()
+    const lamps = lightCount() === 0 ? setupToLightLayers('Golden key', withFx, w, h) : []
+    recordHistory()
+    commit([...localLayers.value.map(l => (l.id === layerId ? withFx : l)), ...lamps])
+    return fresh.id
+  }
+  /** A Relight Setup: replace ALL the Frame's light layers with the setup's arrangement around
+   *  this photo, and set its Original light — ONE undo step. false (nothing written) when the
+   *  layer has no Relight effect. */
+  function applyRelightSetup(layerId: string, name: RelightSetupName): boolean {
+    const layer = localLayers.value.find(l => l.id === layerId)
+    if (!layer || !isRelightPhoto(layer)) return false
+    const setup = relightSetup(name)
+    const stack = effectStackOf(layer as { effects?: unknown[] }).map((e) => {
+      if (e.type !== 'relight') return e
+      const { lights: _old, ...rest } = e as EffectInstance & { lights?: unknown }
+      return { ...rest, keep: setup.keep } as EffectInstance
+    })
+    const photo = { ...layer, ...writeStackToLayer(stack) } as LocalLayer
+    const { w, h } = dims()
+    const lamps = setupToLightLayers(name, photo, w, h)
+    recordHistory()
+    const kept = localLayers.value.filter(l => l.kind !== 'light').map(l => (l.id === layerId ? photo : l))
+    commitBoth([...kept, ...lamps], localGroups.value)
     return true
   }
   /** Tell the host about any `wired` layers a delete is about to remove, so it
@@ -1448,6 +1506,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     postEffects, setPostEffects,
     frameLight, setFrameLight,
     lighting, setLighting, addLight,
+    convertLegacyRelight, addRelight, applyRelightSetup,
     layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging, gridSnapLines,
     undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,

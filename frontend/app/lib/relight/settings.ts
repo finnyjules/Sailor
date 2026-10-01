@@ -1,8 +1,12 @@
 /**
- * Relight: the stored shape of the effect. Positions are fractions of the LAYER (0,0 = its
- * top left), not of the Frame, and may sit past its edges because a light can be outside the
- * picture. Height below 0 puts the light behind the subject (rim light).
- * Spec: docs/superpowers/specs/2026-09-30-relight-layer-effect-design.md
+ * Relight: the stored shape of the effect. Since Frame light layers stage 2 the effect holds
+ * only how the photo takes light (Original light, Depth, Texture, Shine, Shadows); the lights
+ * themselves are the Frame's light layers (lib/frame/lighting). Old saved effects still carry a
+ * `lights` list — `RelightLight`, positions in fractions of the LAYER box (0,0 = its top left,
+ * may sit past its edges), height below 0 = behind the subject (rim light). Only the
+ * conversion (lib/frame/lighting/convertRelight) reads them, through `readLegacyRelightLights`.
+ * Specs: docs/superpowers/specs/2026-09-30-relight-layer-effect-design.md,
+ * docs/superpowers/specs/2026-10-01-frame-light-layers-design.md
  */
 export interface RelightLight {
   id: string
@@ -18,7 +22,6 @@ export interface RelightLight {
 export interface RelightEffect {
   type: 'relight'
   visible: boolean
-  lights: RelightLight[]
   /** Original light: how much of the photo's own lighting stays as the base level. */
   keep: number
   /** Depth: how strongly the photo's shape bends the light. */
@@ -66,28 +69,47 @@ export function sanitizeLight(raw: unknown): RelightLight {
   }
 }
 
-// Golden key, inlined rather than imported from presets.ts to keep the two modules acyclic.
-// presets.ts owns the table; a unit test pins that this default equals applySetup(…, 'Golden key').
+// Golden key's Original light, inlined rather than imported from presets.ts to keep the two
+// modules acyclic. presets.ts owns the table; a unit test pins that this default equals it.
 export function defaultRelightSettings(): Omit<RelightEffect, 'type' | 'visible'> {
-  return {
-    lights: [{ id: newLightId(), x: 0.85, y: 0.3, height: 0.4, color: '#ffcf94', brightness: 3.2, reach: 1.4, on: true }],
-    keep: 0.12, depth: 4, texture: 2, shine: 0, shadows: true,
-  }
+  return { keep: 0.12, depth: 4, texture: 2, shine: 0, shadows: true }
 }
 
+/** The effect as it is stored today: no `lights` (an old effect's list is dropped here and read
+ *  only by the conversion, through `readLegacyRelightLights`). */
 export function sanitizeRelight(raw: unknown): RelightEffect {
   if (!raw || typeof raw !== 'object') return { type: 'relight', visible: true, ...defaultRelightSettings() }
   const r = raw as Record<string, unknown>
   const d = defaultRelightSettings()
-  const lights = Array.isArray(r.lights) ? r.lights.slice(0, RELIGHT_MAX_LIGHTS).map(sanitizeLight) : d.lights
   return {
     type: 'relight',
     visible: r.visible !== false,
-    lights,
     keep: num(r.keep, 0, 1, d.keep),
     depth: num(r.depth, 0, 20, d.depth),
     texture: num(r.texture, 0, 8, d.texture),
     shine: num(r.shine, 0, 1, d.shine),
     shadows: typeof r.shadows === 'boolean' ? r.shadows : d.shadows,
   }
+}
+
+/** An old saved effect's own lights (layer-box fractions), clamped, at most RELIGHT_MAX_LIGHTS.
+ *  `[]` when the effect has none — a stage 2 effect never does. Read only by the conversion. */
+export function readLegacyRelightLights(raw: unknown): RelightLight[] {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return Array.isArray(r.lights) ? r.lights.slice(0, RELIGHT_MAX_LIGHTS).map(sanitizeLight) : []
+}
+
+// ── Temporary bridge (light layers stage 2, Task 1 → Tasks 2/3) ────────────────────────────
+// Until the painter lights photos through the Frame's lights (Task 2) and the Relight panel
+// drops its per-light controls (Task 3), those two still read an effect WITH its own lights,
+// exactly as before stage 2: the stored list, or Golden key's one light when there is none.
+/** @deprecated Stage 2 bridge only — removed by Tasks 2/3. */
+export type LegacyRelightEffect = RelightEffect & { lights: RelightLight[] }
+/** @deprecated Stage 2 bridge only — removed by Tasks 2/3. */
+export function sanitizeRelightWithLegacyLights(raw: unknown): LegacyRelightEffect {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const lights = Array.isArray(r.lights)
+    ? readLegacyRelightLights(r)
+    : [{ id: newLightId(), x: 0.85, y: 0.3, height: 0.4, color: '#ffcf94', brightness: 3.2, reach: 1.4, on: true }]
+  return { ...sanitizeRelight(raw), lights }
 }

@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
-import { sanitizeRelight } from '~/lib/relight/settings'
+import { sanitizeRelightWithLegacyLights as sanitizeRelight } from '~/lib/relight/settings'
 import { applySetup, setupOf } from '~/lib/relight/presets'
 
 const mk = (fx = sanitizeRelight(null)) => mount(RelightControls, { props: { fx, selectedLight: fx.lights[0]!.id, depthStatus: 'ready' } })

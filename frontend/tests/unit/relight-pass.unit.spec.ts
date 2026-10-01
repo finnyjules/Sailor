@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { packLights, relightShouldRun, RELIGHT_FRAG } from '~/lib/relight/relightPass'
-import { sanitizeRelight } from '~/lib/relight/settings'
+import { sanitizeRelightWithLegacyLights as sanitizeRelight } from '~/lib/relight/settings'
 import { applySetup } from '~/lib/relight/presets'
 
 describe('relight pass', () => {

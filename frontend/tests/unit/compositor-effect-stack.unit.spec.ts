@@ -584,10 +584,10 @@ describe('relight kind', () => {
     expect(regionOf('relight')).toBe('backdrop')
     expect(EFFECT_ORDER.indexOf('relight')).toBe(EFFECT_ORDER.indexOf('dof') + 1)
   })
-  it('creates a fresh Golden key effect each time (lights never shared)', () => {
+  it('creates a fresh effect each time, with no lights of its own (the Frame\'s lights light it)', () => {
     const a = createEffect('relight') as any, b = createEffect('relight') as any
-    expect(a.lights).toHaveLength(1)
-    expect(a.lights).not.toBe(b.lights)
+    expect('lights' in a).toBe(false)
+    expect(a).not.toBe(b)
     expect(a).toMatchObject({ type: 'relight', visible: true, keep: 0.12, depth: 4 })
   })
   it('refuses a second Relight on the same layer', () => {

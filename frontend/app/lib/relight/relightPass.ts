@@ -5,7 +5,7 @@
  */
 import { GpuPost } from '~/lib/compositor/gpuPost'
 import { FULL_DEPTH_RECT, type DepthRect, type FloatDepth } from './depthFieldCore'
-import type { RelightEffect } from './settings'
+import type { LegacyRelightEffect, RelightEffect } from './settings'
 
 export const RELIGHT_FRAG = `#version 300 es
 precision highp float;
@@ -123,7 +123,8 @@ const rgb = (hex: string): [number, number, number] => {
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]
 }
 
-export function packLights(fx: RelightEffect) {
+// Stage 2 bridge: the pass still takes an effect WITH lights until Task 2 retires it.
+export function packLights(fx: LegacyRelightEffect) {
   const on = fx.lights.filter(l => l.on).slice(0, 3)
   const uLightPos = new Float32Array(6), uLightHR = new Float32Array(6), uLightRG = new Float32Array(6), uLightBP = new Float32Array(6)
   on.forEach((l, i) => {
@@ -165,7 +166,7 @@ export function depthRectUniforms(rect: DepthRect, dw: number, dh: number): { uD
 export function applyRelight(
   color: CanvasImageSource,
   depth: FloatDepth | CanvasImageSource,
-  fx: RelightEffect,
+  fx: LegacyRelightEffect,
   w: number,
   h: number,
   rect: DepthRect = FULL_DEPTH_RECT,

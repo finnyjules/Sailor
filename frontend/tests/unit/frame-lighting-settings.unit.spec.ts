@@ -161,3 +161,91 @@ describe('lights elsewhere', () => {
     expect(layerPaints(rect)).toEqual(['#fff', ''])
   })
 })
+
+describe('editor: Relight and the Frame\'s lights (stage 2)', () => {
+  // dims 680 × 680 (makeEditor). A 0.5 × 0.25 box (Frame widths) centred: 340 × 170 px.
+  const photo = (effects: unknown[] = []): any => ({ id: 'p', kind: 'image', filename: 'a.png', x: 0.5, y: 0.5, w: 0.5, h: 0.25, rotation: 0, opacity: 1, effects })
+  const oldFx = (lights: unknown[]) => ({ id: 'fx:relight:0', type: 'relight', visible: true, keep: 0.12, depth: 4, texture: 2, shine: 0, shadows: true, lights })
+  const oldLight = (over: Record<string, unknown> = {}) => ({ id: 'o1', x: 1, y: 0.5, height: 0.4, color: '#ffcf94', brightness: 2, reach: 1.4, on: true, ...over })
+  const layersOf = (node: any) => node.data.properties.sailor_localLayers as any[]
+  const lightsIn = (node: any) => layersOf(node).filter(l => l.kind === 'light')
+  const relightOf = (node: any) => layersOf(node).find(l => l.id === 'p').effects.find((e: any) => e.type === 'relight')
+  const rect: any = { id: 'r', kind: 'rect', x: 0.2, y: 0.2, rotation: 0, opacity: 1, w: 0.1, h: 0.1 }
+
+  it('convertLegacyRelight persists the conversion as one undo step and reports the drop count', () => {
+    const { node, ed } = makeEditor({ sailor_localLayers: [rect, photo([oldFx([oldLight()])])] })
+    expect(ed.convertLegacyRelight()).toBe(0)
+    expect(lightsIn(node)).toHaveLength(1)
+    expect(lightsIn(node)[0].x).toBeCloseTo(0.75, 9)
+    expect(lightsIn(node)[0].y).toBeCloseTo(0.5, 9)
+    expect(layersOf(node).find(l => l.id === 'r')).toMatchObject({ lit: false, castsShadow: false })
+    expect('lights' in relightOf(node)).toBe(false)
+    expect((node.data.properties as any).sailor_localLighting).toEqual({ darkness: 0.45, backgroundLit: true })
+    ed.undo()
+    expect(lightsIn(node)).toHaveLength(0)
+    expect(relightOf(node).lights).toHaveLength(1)
+    expect('sailor_localLighting' in node.data.properties).toBe(false)
+    expect(ed.canUndo.value).toBe(false)
+  })
+  it('convertLegacyRelight does nothing (no history) when there is nothing to convert', () => {
+    const { ed } = makeEditor({ sailor_localLayers: [photo([oldFx([])])] })
+    expect(ed.convertLegacyRelight()).toBeNull()
+    expect(ed.canUndo.value).toBe(false)
+  })
+  it('convertLegacyRelight reports lights left out beyond six', () => {
+    const three = [oldLight({ id: 'a' }), oldLight({ id: 'b' }), oldLight({ id: 'c' })]
+    const ps = ['p1', 'p2', 'p3'].map(id => ({ ...photo([oldFx(three)]), id }))
+    const { node, ed } = makeEditor({ sailor_localLayers: ps })
+    expect(ed.convertLegacyRelight()).toBe(3)
+    expect(lightsIn(node)).toHaveLength(MAX_LIGHTS)
+  })
+
+  it('addRelight adds the effect and a Golden key lamp in one undo step', () => {
+    const { node, ed } = makeEditor({ sailor_localLayers: [photo()] })
+    const id = ed.addRelight('p')
+    expect(id).toBeTruthy()
+    expect(relightOf(node)).toMatchObject({ id, type: 'relight', keep: 0.12 })
+    expect('lights' in relightOf(node)).toBe(false)
+    const ls = lightsIn(node)
+    expect(ls).toHaveLength(1)
+    // Golden key (0.85, 0.3) of a 340 × 170 box centred at 340 px → (459, 306) px
+    expect(ls[0].x).toBeCloseTo(459 / 680, 9); expect(ls[0].y).toBeCloseTo(306 / 680, 9)
+    expect(ls[0].light).toMatchObject({ type: 'lamp', height: 0.4, color: '#ffcf94' })
+    ed.undo()
+    expect(layersOf(node)).toHaveLength(1)
+    expect(relightOf(node)).toBeUndefined()
+    expect(ed.canUndo.value).toBe(false)
+  })
+  it('addRelight brings no lamp when the Frame already has a light', () => {
+    const { node, ed } = makeEditor({ sailor_localLayers: [photo(), newLightLayer('sun')] })
+    expect(ed.addRelight('p')).toBeTruthy()
+    expect(lightsIn(node)).toHaveLength(1)
+    expect(lightsIn(node)[0].light.type).toBe('sun')
+  })
+  it('addRelight refuses a second Relight and a layer that cannot take one', () => {
+    const { ed } = makeEditor({ sailor_localLayers: [photo(), rect] })
+    expect(ed.addRelight('p')).toBeTruthy()
+    expect(ed.addRelight('p')).toBeNull()
+    expect(ed.addRelight('r')).toBeNull()
+    expect(ed.addRelight('nope')).toBeNull()
+  })
+
+  it('applyRelightSetup replaces every light layer and sets Original light, in one undo step', () => {
+    const fx = { id: 'fx:relight:0', type: 'relight', visible: true, keep: 0.5, depth: 9, texture: 1, shine: 0.3, shadows: false }
+    const { node, ed } = makeEditor({ sailor_localLayers: [photo([fx]), newLightLayer('sun'), newLightLayer('spot')] })
+    expect(ed.applyRelightSetup('p', 'Neon')).toBe(true)
+    const ls = lightsIn(node)
+    expect(ls.map(l => l.light.color)).toEqual(['#ff3fb4', '#29d8ff'])
+    expect(relightOf(node)).toMatchObject({ keep: 0.15, depth: 9, texture: 1, shine: 0.3, shadows: false })
+    ed.undo()
+    expect(lightsIn(node).map(l => l.light.type)).toEqual(['sun', 'spot'])
+    expect(relightOf(node).keep).toBe(0.5)
+    expect(ed.canUndo.value).toBe(false)
+  })
+  it('applyRelightSetup needs a Relight photo', () => {
+    const { ed } = makeEditor({ sailor_localLayers: [photo(), rect] })
+    expect(ed.applyRelightSetup('p', 'Rim')).toBe(false)
+    expect(ed.applyRelightSetup('r', 'Rim')).toBe(false)
+    expect(ed.canUndo.value).toBe(false)
+  })
+})

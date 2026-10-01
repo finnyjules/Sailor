@@ -3,7 +3,8 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
-import { RELIGHT_MAX_LIGHTS, RELIGHT_SWATCHES, newLightId, type RelightEffect, type RelightLight } from '~/lib/relight/settings'
+// Stage 2 bridge (until Task 3): the panel still edits the effect's own (legacy) lights.
+import { RELIGHT_MAX_LIGHTS, RELIGHT_SWATCHES, newLightId, type LegacyRelightEffect as RelightEffect, type RelightLight } from '~/lib/relight/settings'
 import { RELIGHT_SETUP_NAMES, applySetup, setupOf, type RelightSetupName } from '~/lib/relight/presets'
 
 const props = withDefaults(defineProps<{

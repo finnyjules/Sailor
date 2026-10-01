@@ -109,7 +109,9 @@ import {
 import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
 import { depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, type DepthRef } from '~/lib/compositor/depthRegistry'
 import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
-import { sanitizeRelight } from '~/lib/relight/settings'
+// Stage 2 bridge (Task 1 → Task 2): the painter lights a Relight photo from the effect's own
+// (legacy) lights, exactly as before stage 2, until Task 2 moves it onto the Frame's lights.
+import { sanitizeRelightWithLegacyLights, type LegacyRelightEffect } from '~/lib/relight/settings'
 import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
 import { canFinishRelight, finishBoxSize } from '~/lib/relight/finish'
@@ -3025,7 +3027,7 @@ function paintLayer(
     : layer.kind === 'wired' ? depthSourceFromViewUrl((layer as WiredLayer).depthKey) : undefined
   const dof = dofRef ? (pinnedEffect(stack, 'dof') as DofEffect | undefined) : undefined
   const relightRaw = dofRef ? pinnedEffect(stack, 'relight') : undefined
-  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelight(relightRaw) : undefined
+  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelightWithLegacyLights(relightRaw) : undefined
   // (background_blur is a stack-level effect — paintLayerStack applies it
   // against the backdrop before this layer paints.)
 
@@ -7388,7 +7390,7 @@ function relightLitFrom(
   wiredLive: WiredLive | null | undefined,
   dofRef: DepthRef,
   depth: HTMLImageElement,
-  relight: RelightEffect,
+  relight: LegacyRelightEffect,
   src: HTMLCanvasElement,
   bw: number,
   bh: number,
@@ -7452,7 +7454,7 @@ export async function renderRelightPair(
 
   const stack = effectStackOf(layer).filter(e => e.visible)
   const relightRaw = pinnedEffect(stack, 'relight')
-  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelight(relightRaw) : undefined
+  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelightWithLegacyLights(relightRaw) : undefined
   if (!relight || !relightAvailable()) return null
 
   const depth = depthImageFor(dofRef)
@@ -7524,7 +7526,7 @@ export function drawWiredImageLayer(
   // uploaded one must expose the same features — a gap between them reads as a bug.
   dof?: DofEffect | null,
   depthImg?: CanvasImageSource | null,
-  relight?: RelightEffect | null,
+  relight?: RelightEffect | null,   // re-read below with its legacy lights (stage 2 bridge)
   relightKey?: string,
   // Surfaces normal map for this layer's photo, read synchronously (surfacesRegistry.ts).
   // The caller passes what it already has from computing `relightKey`'s source — this
@@ -7561,7 +7563,7 @@ export function drawWiredImageLayer(
   // source itself (only on a cache miss); the whole image is drawn, so no crop rect.
   if (relight && depthImg && relightKey && relightAvailable() && relight.visible !== false) {
     const field = relightDepthFieldFor(relightKey, depthImg as CanvasImageSource & { width?: number; height?: number }, img)
-    const lit = field ? applyRelight(src, field, sanitizeRelight(relight), iw, ih, undefined, normals) : null
+    const lit = field ? applyRelight(src, field, sanitizeRelightWithLegacyLights(relight), iw, ih, undefined, normals) : null
     if (lit) {
       const owned = document.createElement('canvas'); owned.width = iw; owned.height = ih
       owned.getContext('2d')?.drawImage(lit, 0, 0)

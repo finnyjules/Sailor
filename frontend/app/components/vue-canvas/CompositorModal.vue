@@ -141,7 +141,8 @@ import {
   surfacesWasPaidFor, surfacesMessageFor, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
-import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
+// Stage 2 bridge (until Task 3): the Relight panel and handles still edit the effect's own lights.
+import { sanitizeRelightWithLegacyLights as sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
