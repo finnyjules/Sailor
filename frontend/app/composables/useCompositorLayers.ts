@@ -23,8 +23,8 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // Type-only imports are erased at runtime, so they don't create a cycle
 // (evaluate.ts/types.ts don't import this file).
 import { DEFAULT_FRAME_LIGHT, type FrameLight } from '~/lib/compositor/frameLight'
-import { DEFAULT_LIGHTING, MAX_LIGHTS, type FrameLighting } from '~/lib/frame/lighting/settings'
-import { lightFrame, lightingAvailable } from '~/lib/frame/lighting/lightingPass'
+import { DEFAULT_LIGHTING, MAX_LIGHTS, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
+import { lightFrame, lightingAvailable, lightBoxWithFrameLights } from '~/lib/frame/lighting/lightingPass'
 import { bumpLightingMapEpoch, layerSig, onLightingRelease, type LightingStamp } from '~/lib/frame/lighting/maps'
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
@@ -7635,6 +7635,10 @@ export async function renderRelightPair(
   W: number,
   H: number,
   maxEdge = 1536,
+  /** The Frame the photo sits in: its layers (for the visible lights), groups and lighting record.
+   *  The guide is the photo's box lit by those lights. Without it, or with no visible light, the
+   *  guide is the photo with Original light only. */
+  frame?: { layers: readonly LocalLayer[]; groups?: readonly LayerGroup[] | null; lighting?: FrameLighting },
 ): Promise<{ original: HTMLCanvasElement; guide: HTMLCanvasElement; w: number; h: number } | null> {
   if (!canFinishRelight(layer)) return null
   const dofRef: DepthRef = (layer as ImageLayer).filename
@@ -7680,13 +7684,19 @@ export async function renderRelightPair(
   // The guide is rendered at SOURCE resolution (up to maxEdge), not the on-screen box size.
   // Texture relief is measured in texels, so the box-space facing tile (rotation 0) picks up
   // finer detail than the preview shows. Accepted: the model takes only the lighting.
-  // Light layers stage 2: Relight no longer lights the photo by itself. Until Finish takes the
-  // Frame's lights (stage 2 Task 4, through `lightBoxWithFrameLights` with `out.tile`), the guide
-  // is the photo with Original light applied. Null until the depth field has landed, as before.
+  // Light layers stage 2: Relight no longer lights the photo by itself; the guide takes the
+  // Frame's lights (below, through `lightBoxWithFrameLights` with `out.tile`). Null until the
+  // depth field has landed, as before.
   const out = relightPhotoFor(layer, Weff, undefined, dofRef, depth, relight, src, bw, bh, true, true, 0)
   if (!out.tile) return null
-  // Copied: the result never aliases a cached or reused canvas.
-  const guide = copyCanvas(out.paint ?? src)
+  // The Frame's visible lights, mapped Frame -> box, lit through the same pass with the photo's
+  // own facing tile (no other layers, so no cast shadows). No light, or no WebGL2 for the lighting
+  // pass: the guide is the photo with Original light, as before. Always a fresh canvas.
+  const lights = frame ? visibleLights(frame.layers, frame.groups) : []
+  const lit = lights.length
+    ? lightBoxWithFrameLights(out.paint ?? src, out.tile, bw, bh, layer, lights, frame?.lighting ?? DEFAULT_LIGHTING, W, H, relight.shine)
+    : null
+  const guide = lit ?? copyCanvas(out.paint ?? src)
   if (!guide) return null
 
   return { original: src, guide, w: bw, h: bh }

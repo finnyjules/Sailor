@@ -7276,7 +7276,7 @@ async function runRelightFinish() {
     // Before the cost confirm: a cut-out is refused without paying anything.
     if (await photoIsCutOut(layer.filename).catch(() => false)) { toast('Finish works on photos without a cut-out'); return }
     if (!(await confirmFinishCost())) return
-    const cv = await renderRelightPair(layer, canvasDisplay.w, canvasDisplay.h)
+    const cv = await renderRelightPair(layer, canvasDisplay.w, canvasDisplay.h, undefined, { layers: localLayers.value as LocalLayer[], groups: localGroups.value, lighting: frameLighting.value })
     if (!cv) { toast('Relight isn\'t ready yet'); return }
     const pair: FinishPair = { original: cv.original.toDataURL('image/png'), guide: cv.guide.toDataURL('image/png'), w: cv.w, h: cv.h }
     const origFilename: string = layer.filename
