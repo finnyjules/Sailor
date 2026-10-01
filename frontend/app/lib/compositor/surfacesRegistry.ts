@@ -125,6 +125,7 @@ export function requestSurfaces(ref: DepthRef): void {
  *  already asked about; the button (`requestSurfaces`) is what moves 'absent' onward. At most
  *  one peek runs per key at a time. */
 const peeking = new Set<string>()
+const decoding = new Set<string>()
 
 export function peekSurfacesFor(ref: DepthRef): void {
   const src = asSource(ref)
@@ -160,10 +161,35 @@ export function peekSurfacesFor(ref: DepthRef): void {
     const url = surfacesUrl(res.normalsFilename, res.subfolder)
     const img = new Image()
     img.crossOrigin = 'anonymous'
-    img.onload = () => { entries.set(key, { status: 'ready', img, paid: false }); notify() }
-    img.onerror = () => fail(key, 'surfaces map could not be decoded')
+    // A cached map is still on its way until it decodes (no entry yet): the export waits for it.
+    decoding.add(key)
+    img.onload = () => { decoding.delete(key); entries.set(key, { status: 'ready', img, paid: false }); notify() }
+    img.onerror = () => { decoding.delete(key); fail(key, 'surfaces map could not be decoded') }
     img.src = url
   })()
+}
+
+/** True while any photo's surfaces are on their way: a read ('loading'), a free peek, or a
+ *  cached map still decoding. */
+export function surfacesInFlight(): boolean {
+  if (peeking.size || decoding.size) return true
+  for (const e of entries.values()) if (e.status === 'loading') return true
+  return false
+}
+
+/** Resolves once no surfaces are in flight, or after `timeoutMs` — whichever is first. The web
+ *  export waits on this before planning, so a read about to land travels with the file. */
+export function surfacesSettled(timeoutMs = 20_000): Promise<void> {
+  if (!surfacesInFlight()) return Promise.resolve()
+  return new Promise((resolve) => {
+    let off: () => void = () => {}
+    const done = () => { clearInterval(poll); clearTimeout(timer); off(); resolve() }
+    const check = () => { if (!surfacesInFlight()) done() }
+    off = onSurfacesChange(check)
+    // A peek that finds an entry already set answers without a change event: poll too.
+    const poll = setInterval(check, 200)
+    const timer = setTimeout(done, timeoutMs)
+  })
 }
 
 /** Retries an 'error' entry — the only way an error is ever requested again. Does nothing
@@ -183,4 +209,5 @@ export function __resetSurfacesRegistry(): void {
   entries = new Map()
   listeners = new Set()
   peeking.clear()
+  decoding.clear()
 }

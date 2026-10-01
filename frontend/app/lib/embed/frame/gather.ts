@@ -80,6 +80,9 @@ const ORIGIN_LABEL: Record<FrameFontOrigin, string> = {
   uploaded: 'uploaded', google: 'Google', library: 'library', variable: 'Google, variable',
 }
 const DEPTH_MAX_PX = 4096
+/** Relight's depth and surfaces maps: never bigger than the photo is exported, and at most this.
+ *  The depth field and the normals are smooth data — past ~1k they only add file size. */
+export const RELIGHT_MAP_MAX_PX = 1024
 
 /** Size of a data URL's payload, for the sheet. */
 function dataUrlBytes(u: string): number {
@@ -241,20 +244,27 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
   const surfaces: NonNullable<FrameSnapshot['assets']['surfaces']> = []
   const seenDepth = new Set(depth.map(d => depthKey(d.ref)))
   const seenSurfaces = new Set<string>()
+  // One map per photo source, sized for the largest copy of it: min(its export size, 1024).
+  const mapPx = new Map<string, number>()
+  for (const r of plan.relight ?? []) {
+    const key = depthKey(r.ref), px = r.maxPx > 0 ? r.maxPx : RELIGHT_MAP_MAX_PX
+    mapPx.set(key, Math.max(mapPx.get(key) ?? 0, Math.min(RELIGHT_MAP_MAX_PX, px)))
+  }
   for (const r of plan.relight ?? []) {
     const key = depthKey(r.ref)
+    const px = mapPx.get(key) ?? RELIGHT_MAP_MAX_PX
     if (!seenDepth.has(key)) {
       const img = io.depthImage(r.ref)
       if (!img) { notices.push({ group: 'leftOut', text: `Relight on ${r.label} · needs a depth map`, layerId: r.layerId }); continue }
-      depth.push({ ref: r.ref, dataUrl: await io.imageToDataUrl(img, DEPTH_MAX_PX, 'image/png') })
+      depth.push({ ref: r.ref, dataUrl: await io.imageToDataUrl(img, px, 'image/png') })
       seenDepth.add(key)
     }
     if (seenSurfaces.has(key)) continue
     const normals = io.surfacesImage?.(r.ref) ?? null
     if (normals) {
-      surfaces.push({ ref: r.ref, dataUrl: await io.imageToDataUrl(normals, DEPTH_MAX_PX, 'image/png') })
+      surfaces.push({ ref: r.ref, dataUrl: await io.imageToDataUrl(normals, px, 'image/png') })
       seenSurfaces.add(key)
-    } else notices.push({ group: 'leftOut', text: `Relight on ${r.label} · surfaces not read — lit from depth only`, layerId: r.layerId })
+    } else notices.push({ group: 'leftOut', text: `Relight on ${r.label} · shape not read — lit from depth only`, layerId: r.layerId })
   }
 
   const wired: Record<number, WiredEntry> = {}

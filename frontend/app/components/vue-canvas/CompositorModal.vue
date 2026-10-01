@@ -137,7 +137,7 @@ import {
   onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, depthStatusFor,
 } from '~/lib/compositor/depthRegistry'
 import {
-  onSurfacesChange, peekSurfacesFor, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesStatusFor,
+  onSurfacesChange, peekSurfacesFor, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesSettled, surfacesStatusFor,
   surfacesWasPaidFor, surfacesMessageFor, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
@@ -5803,6 +5803,10 @@ async function buildWebExport() {
     // (currentShaderEffects) below, not from this promise's result: that is a snapshot from the
     // first fetch and misses every My effect and project copy registered since (spec §7.4).
     await fetchShaderFxCatalog()
+    // A Relight photo's surfaces still on their way (a read, a peek, a decode) travel with the
+    // file if they land within 20 s; otherwise the sheet says it is lit from depth only.
+    await surfacesSettled(20_000)
+    if (gen !== webExportGen) return
     const variant = webExportVariant()
     webExport.artAspect = variant.width / variant.height
     // A wired layer's `slot` is 0-based; the modal's per-slot records (`layers`) number from 1 —

@@ -55,7 +55,7 @@ export interface FramePlan {
   depth: { ref: DepthRef; layerId: string; label: string }[]
   /** Relight photos: their depth map (the depth field is built from it in the file) and, when
    *  the editor has them, their surfaces (the MoGe-2 normals). One entry per photo source. */
-  relight: { ref: DepthRef; layerId: string; label: string }[]
+  relight: { ref: DepthRef; layerId: string; label: string; maxPx: number }[]
   wiredStills: { slot: number; maxPx: number }[]
   /** Animated wired slots, baked at export into `round(duration × fps)` frames. */
   wiredClips: { slot: number; maxPx: number; fps: number; duration: number; label: string; layerId: string }[]
@@ -200,9 +200,12 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
 
   const partners = outlinePartnerIds(layers, v.motion?.behaviours)
   for (const l of layers) {
+    // The photo's own export size (its pixels' cap): Relight's depth and surfaces maps follow it.
+    let photoPx = 0
     if (l.kind === 'image') {
       const img = l as LocalLayer & { filename: string; standIn?: boolean; clip?: ImageClip; w: number; h: number }
       const maxPx = Math.ceil(2 * drawnLongSide(img, v.width))
+      photoPx = maxPx
       if (img.filename) images.push(img.standIn ? { filename: img.filename, maxPx, optional: true } : { filename: img.filename, maxPx })
       if (img.clip && img.clip.frames > 0) clips.push({ clip: img.clip, maxPx, layerId: l.id })
     }
@@ -221,6 +224,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
       // portrait box is drawn far wider than the box. `lastAspect` is the content's aspect here
       // (the host keeps it so for every layer that is not unlinked). Capped at MAX_WIRED_PX.
       const maxPx = Math.min(MAX_WIRED_PX, Math.ceil(2 * wiredSourceLongSide(wl, v.width)))
+      photoPx = maxPx
       const info = input.wiredSlots.find(s => s.layerId === l.id)
       const fps = Number(info?.fps), duration = Number(info?.duration)
       if (info?.animated && fps > 0 && duration > 0) {
@@ -250,7 +254,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
     // it) and its surfaces when the editor has them — the gatherer collects both (gather.ts).
     const hasRelight = effectStackOf(l as any).some(e => e.type === 'relight' && (e as { visible?: boolean }).visible !== false)
     if (hasRelight) {
-      if (depthRef) relight.push({ ref: depthRef, layerId: l.id, label: layerLabel(l) })
+      if (depthRef) relight.push({ ref: depthRef, layerId: l.id, label: layerLabel(l), maxPx: photoPx })
       else notices.push({ group: 'leftOut', text: `Relight on ${layerLabel(l)} · needs a depth map`, layerId: l.id })
     }
   }
