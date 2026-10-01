@@ -19,9 +19,12 @@
  * explicitly, and they win), so it changes nothing here either.
  *
  * Caps (rule 7), from the headers before any pixel is decoded: each picture
- * within the effects' cap, and the work (LENS_WORK_PER_TAP over the five
- * levels' kernel rows at the largest radius the aperture allows, plus the
- * per-pixel steps and the model) within EFFECT_MAX_WORK.
+ * within the effects' cap (a memory cap, everywhere). Hosted only, the work
+ * (LENS_WORK_PER_TAP over the five levels' kernel rows at the largest radius
+ * the aperture allows, plus the per-pixel steps and the model) within
+ * EFFECT_MAX_WORK, by the fast path where Python's blur is over it. On this
+ * computer (R7.9 fix round 2, R6.1's ruling) there is no work or time limit:
+ * Python's full-size blur always, ended only by Stop.
  */
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
@@ -106,15 +109,23 @@ export function lensWork(aperture: number, px: number, model: boolean, scale = 1
 /** Reading and writing the pictures (the effects' I/O count): the picture, the depth wired in, the output. */
 const lensIoWork = (px: number, dpx: number) => EFFECT_IO_WORK_PER_VALUE * WORK_CHANNELS * (px + dpx + px)
 
+let workBudget = EFFECT_MAX_WORK
+
+/** Tests: the hosted work budget (a small picture stands in for a large one); null puts EFFECT_MAX_WORK back. */
+export function __setLensWorkBudgetForTests(n: number | null): void { workBudget = n ?? EFFECT_MAX_WORK }
+
 /**
- * The blur's scale for a picture of `px` pixels (and a depth of `dpx`): 1
- * (Python's) when that fits EFFECT_MAX_WORK, else the smallest reduction of
- * the blurred levels that does (the fast path, R7.9 fix round 1), or null
- * when none up to LENS_MAX_SCALE does.
+ * The blur's scale for a picture of `px` pixels (and a depth of `dpx`).
+ * On this computer always 1, Python's full-size blur: a local node has no
+ * work or time limit (R7.9 fix round 2, R6.1's ruling). Hosted: 1 when that
+ * fits EFFECT_MAX_WORK, else the smallest reduction of the blurred levels
+ * that does (the fast path, R7.9 fix round 1), or null when none up to
+ * LENS_MAX_SCALE does.
  */
-export function lensScale(aperture: number, px: number, dpx: number, model: boolean): number | null {
+export function lensScale(aperture: number, px: number, dpx: number, model: boolean, hosted: boolean): number | null {
+  if (!hosted) return 1
   for (let scale = 1; scale <= LENS_MAX_SCALE; scale++) {
-    if (lensWork(aperture, px, model, scale) + lensIoWork(px, dpx) <= EFFECT_MAX_WORK) return scale
+    if (lensWork(aperture, px, model, scale) + lensIoWork(px, dpx) <= workBudget) return scale
   }
   return null
 }
@@ -266,9 +277,9 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
       if (px + dpx + px > CARD_MAX_PIXELS) throw new Error(EFFECT_PICTURES_TOO_LARGE)
       // The model runs for a picture of more than one pixel with no depth wired in (one pixel's normalised depth is 0).
       const runsModel = !!image && !depthIn && px > 1
-      // Python's blur when it fits the work budget, else the fast path's smallest reduction that does
-      // (checked before the hold too, lensStartRefusal; this is the backstop).
-      const scale = image ? lensScale(params.aperture as number, px, dpx, runsModel) : 1
+      // Hosted: Python's blur when it fits the work budget, else the fast path's smallest reduction that
+      // does (checked before the hold too, lensStartRefusal; this is the backstop). Locally: Python's, always.
+      const scale = image ? lensScale(params.aperture as number, px, dpx, runsModel, io.hosted) : 1
       if (scale === null) throw new Error(EFFECT_TOO_MUCH_WORK)
       const work = (image ? lensWork(params.aperture as number, px, runsModel, scale) : 0) + lensIoWork(image ? px : 0, dpx)
       io.spendWork?.(work)
@@ -299,6 +310,7 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
           depthBytes = null
         }
       }
+      // Hosted: the effects' watchdog. Locally: none (a local node has no whole-node time limit, R6.1); Stop ends it.
       const made = await pixelsInWorker(io.signal, async (worker) => {
         // Checked immediately before every write, after its encode: a stopped node never writes.
         const stopped = () => { if (worker.live.aborted || io.signal.aborted) throw new Error('Stopped') }
@@ -326,7 +338,7 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
           return { picture, tensor, preview }
         }
         catch (e) { throw plain(e) }
-      }, EFFECT_TIMEOUT_MESSAGE)
+      }, EFFECT_TIMEOUT_MESSAGE, io.hosted)
       const values: Record<number, RunnerValue> = {
         0: { kind: 'files', files: [made.picture], ...(made.tensor ? { tensors: [made.tensor] } : {}) },
       }
@@ -342,8 +354,8 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
  * the hold from the largest its picture (and depth) can be
  * (graphInputPixels.ts linkPictureBound: a loaded file's header, a sized
  * maker's settings): a picture over the effects' cap, more pixels than a
- * card reads in all, or a blur that no reduction up to LENS_MAX_SCALE brings
- * within the work budget is refused now, in plain words, never sent to the
+ * card reads in all, or (hosted only) a blur that no reduction up to
+ * LENS_MAX_SCALE brings within the work budget is refused now, in plain words, never sent to the
  * engine. A picture whose size can't be bounded before the run (an
  * unsized maker: the report names them) is left to the turn's same check, the backstop.
  */
@@ -375,7 +387,7 @@ export async function lensStartRefusal(
     if (px + dpx + px > CARD_MAX_PIXELS) return refused(EFFECT_PICTURES_TOO_LARGE)
     const aperture = lensParamsOf(inputs).aperture
     if (typeof aperture !== 'number') continue
-    if (lensScale(aperture, px, dpx, !isLink(inputs.depth)) === null) return refused(EFFECT_TOO_MUCH_WORK)
+    if (lensScale(aperture, px, dpx, !isLink(inputs.depth), o.hosted) === null) return refused(EFFECT_TOO_MUCH_WORK)
   }
   return null
 }

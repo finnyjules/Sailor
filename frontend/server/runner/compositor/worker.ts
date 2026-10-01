@@ -388,7 +388,12 @@ function workerBackend(t: Thread, protect: boolean): FrameBackend<Preview8> {
  * job's turn is over: a job whose turn ended (it failed or was stopped while
  * its own main-thread work went on) sees it and writes nothing more.
  */
-function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: Thread, live: AbortSignal) => Promise<T>): Promise<T> {
+/**
+ * `limit`: the watchdog (the Frame's 2 minutes by default); `false` (R7.9 fix
+ * round 2: Lens · Depth of field on this computer, R6.1's ruling that a local
+ * node has no whole-node time limit) sets none, so only Stop ends the job.
+ */
+function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: Thread, live: AbortSignal) => Promise<T>, limit = true): Promise<T> {
   const run = async (): Promise<T> => {
     if (signal?.aborted) throw new Error('Stopped')
     const t = thread()
@@ -398,6 +403,7 @@ function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: 
     signal?.addEventListener('abort', onAbort, { once: true })
     let timer: ReturnType<typeof setTimeout> | undefined
     const watchdog = new Promise<never>((_, reject) => {
+      if (!limit) return
       timer = setTimeout(() => {
         live.abort()
         t.dead = timeout
@@ -587,9 +593,10 @@ function ownRaw(raw: PilRaw): PilRaw {
 /**
  * A picture utility's pixel work on the Frame's worker, in the same queue,
  * under the same watchdog and Stop: `job` decodes and encodes on this thread
- * and hands each picture's pixels to the worker, one at a time.
+ * and hands each picture's pixels to the worker, one at a time. `limit`
+ * false: no watchdog, Stop only (onWorker).
  */
-export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: PixelsWorker) => Promise<T>, timeout: string = PIXELS_TIMEOUT_MESSAGE): Promise<T> {
+export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: PixelsWorker) => Promise<T>, timeout: string = PIXELS_TIMEOUT_MESSAGE, limit = true): Promise<T> {
   return onWorker(signal, timeout, async (t, live) => {
     const w: PixelsWorker = {
       live,
@@ -703,7 +710,7 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
     }
     try { return await job(w) }
     finally { if (!t.dead) void call(t, { op: 'drop' }, []).catch(() => {}) }
-  })
+  }, limit)
 }
 
 /** The longest one sound effect may take on the worker (the Frame's limit, per call). */

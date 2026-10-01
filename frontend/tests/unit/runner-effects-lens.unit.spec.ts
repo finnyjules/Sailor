@@ -22,12 +22,13 @@ import {
 import { effectCores } from '~~/server/runner/effects/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { decodeRaw, type PictureSource } from '~~/server/runner/compositor/decode'
-import { __setLensDepthModelForTests, LENS_MAX_SCALE, lensFocusOf, lensParamsOf, lensScale, lensStartRefusal, lensWork } from '~~/server/runner/cards/lensBlur'
+import { __setLensDepthModelForTests, __setLensWorkBudgetForTests, LENS_MAX_SCALE, lensFocusOf, lensParamsOf, lensScale, lensStartRefusal, lensWork } from '~~/server/runner/cards/lensBlur'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { runnerFamilies } from '~~/server/runner/config'
 import { DEPTH_MODEL, DEPTH_MODEL_FILES, DEPTH_MODEL_MAX_SIDE, depthModelReady } from '~~/server/utils/depthModel'
 import { GRAPH_NODE_CREDITS, priceGraph } from '~~/server/utils/priceBook'
 import { EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_PICTURE_TOO_LARGE_HOSTED, EFFECT_TOO_MUCH_WORK } from '#shared/runner/effects'
+import { EFFECT_TIMEOUT_MESSAGE } from '~~/server/runner/compositor/worker'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ALL_RUNNER_FAMILIES, LOCAL_MODEL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
@@ -310,18 +311,19 @@ describe('Lens · Depth of field through the runner', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('a picture no reduction brings within the budget is refused at its turn before any decode or model run (the backstop)', async () => {
+  it('hosted, a picture no reduction brings within the budget is refused at its turn before any decode or model run (the backstop)', async () => {
     expect(lensWork(1, 4096 * 4096, true)).toBeGreaterThan(EFFECT_MAX_WORK)
     expect(lensWork(0.4, 4096 * 4096, true)).toBeLessThan(EFFECT_MAX_WORK)
-    // Locally an 8192² picture's own full-size steps are over the budget, whatever the reduction.
-    expect(lensScale(0, 8192 * 8192, 0, true)).toBeNull()
     const spy = vi.fn(async () => { throw new Error('the model ran') })
     __setLensDepthModelForTests(spy)
-    const c = caseNamed('the model\'s depth, resized and normalised')
-    const big = await sharp({ create: { width: 8192, height: 8192, channels: 3, background: { r: 9, g: 9, b: 9 } } }).png({ compressionLevel: 1 }).toBuffer()
-    const file = c.inputs.image!.files[0]!
-    await expect(runPlan(withWidgets(c, { aperture: 1 }), { files: { [file]: new Uint8Array(big) } })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
-    expect(spy).not.toHaveBeenCalled()
+    // A small picture stands in for one over the budget: the budget is lowered past every reduction.
+    __setLensWorkBudgetForTests(1)
+    try {
+      const c = caseNamed('the model\'s depth, resized and normalised')
+      await expect(runPlan(withWidgets(c, { aperture: 1 }), { hosted: true })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
+      expect(spy).not.toHaveBeenCalled()
+    }
+    finally { __setLensWorkBudgetForTests(null) }
   })
 
   it('Stop: nothing is kept, the model is not asked', async () => {
@@ -564,9 +566,9 @@ describe('with `lens-blur` off, nothing changes', () => {
 
 describe('fix round 1: the blur\'s work before the hold, and the fast path', () => {
   it('Python\'s blur where it fits; the smallest reduction that fits where it doesn\'t (hosted 4096², aperture 1)', () => {
-    expect(lensScale(1, 48 * 40, 0, true)).toBe(1)
-    expect(lensScale(0.4, 4096 * 4096, 0, true)).toBe(1)
-    const s = lensScale(1, 4096 * 4096, 0, true)!
+    expect(lensScale(1, 48 * 40, 0, true, true)).toBe(1)
+    expect(lensScale(0.4, 4096 * 4096, 0, true, true)).toBe(1)
+    const s = lensScale(1, 4096 * 4096, 0, true, true)!
     expect(s).toBeGreaterThan(1)
     expect(s).toBeLessThanOrEqual(LENS_MAX_SCALE)
     expect(lensWork(1, 4096 * 4096, true, s)).toBeLessThan(EFFECT_MAX_WORK)
@@ -617,9 +619,13 @@ describe('fix round 1: the blur\'s work before the hold, and the fast path', () 
     expect(await lensStartRefusal(p('big.png'), ON, { hosted: true, read })).toEqual({ message: EFFECT_PICTURE_TOO_LARGE_HOSTED, nodeId: 'n', classType: LENS_BLUR_CLASS })
     // Family off: nothing to check.
     expect(await lensStartRefusal(p('big.png'), new Set(['cards']), { hosted: true, read })).toBeNull()
-    // An EmptyImage's size is its settings: 8192² locally, aperture 1, refused (no reduction fits).
+    // An EmptyImage's size is its settings: 8192², aperture 1. Locally not refused (no work limit, fix round 2); hosted over the cap.
     const empty: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 8192, height: 8192, batch_size: 1, color: 0 } }, n: lensNode({ aperture: 1 }, ['e', 0]) }
-    expect((await lensStartRefusal(empty, ON, { hosted: false, read }))?.message).toBe(EFFECT_TOO_MUCH_WORK)
+    expect(await lensStartRefusal(empty, ON, { hosted: false, read })).toBeNull()
+    expect((await lensStartRefusal(empty, ON, { hosted: true, read }))?.message).toBe(EFFECT_PICTURE_TOO_LARGE_HOSTED)
+    // Locally, past the effects' 8192² picture cap (a memory cap) is still refused before the hold.
+    const over: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 8193, height: 8192, batch_size: 1, color: 0 } }, n: lensNode({ aperture: 1 }, ['e', 0]) }
+    expect(await lensStartRefusal(over, ON, { hosted: false, read })).not.toBeNull()
     // A maker whose size can't be known before the run (a Frame baked for motion): left to the turn.
     const unsized: ApiPrompt = { f: { class_type: 'Compositor', inputs: { width: ['w', 0], height: 512 } }, w: { class_type: 'PrimitiveInt', inputs: { value: 9000 } }, n: lensNode({ aperture: 1 }, ['f', 0]) }
     expect(await lensStartRefusal(unsized, ON, { hosted: true, read })).toBeNull()
@@ -694,5 +700,72 @@ describe('fix round 1: the blur\'s work before the hold, and the fast path', () 
       if (d) expect(d === 1 && Math.abs(py[i]! * 255 - Math.round(py[i]! * 255)) < LENS_EPS, `byte ${i}`).toBe(true)
     }
     expect(k.fal.submitted()).toEqual([])
+  })
+})
+
+// ── Fix round 2: on this computer, no work or time limit (R6.1's ruling) ─────
+
+describe('fix round 2: locally, Python\'s full-size blur, never refused for work or time', () => {
+  it('a local 8192² picture of known size at aperture 1: not refused before the hold, scale 1 (full size)', async () => {
+    expect(lensScale(1, 8192 * 8192, 0, true, false)).toBe(1)
+    expect(lensScale(1, 8192 * 8192, 8192 * 8192, true, false)).toBe(1)
+    // Hosted the same work would need the fast path (and 8192² is over the hosted cap anyway).
+    expect(lensScale(1, 4096 * 4096, 0, true, true)).toBeGreaterThan(1)
+    const files: Record<string, Uint8Array> = {}
+    const read = async (f: { filename: string }) => files[f.filename]!
+    // A LoadImage whose header says 8192 × 8192 (a real PNG of that size, its pixels one colour).
+    files['huge.png'] = new Uint8Array(await sharp({ create: { width: 8192, height: 8192, channels: 3, background: { r: 4, g: 5, b: 6 } } }).png({ compressionLevel: 1 }).toBuffer())
+    const p: ApiPrompt = { l: { ...LOAD, inputs: { image: 'huge.png', upload: 'image' } }, n: lensNode({ aperture: 1 }) }
+    expect(await lensStartRefusal(p, ON, { hosted: false, read })).toBeNull()
+    expect(await lensStartRefusal(p, ON, { hosted: true, read })).toEqual({ message: EFFECT_PICTURE_TOO_LARGE_HOSTED, nodeId: 'n', classType: LENS_BLUR_CLASS })
+  })
+
+  it('a stand-in for a picture over the budget: locally runs Python\'s full-size blur; hosted takes the fast path', async () => {
+    const c = caseNamed('everything at once, hexagonal')
+    const full = await runCore(c)
+    const px = 48 * 40
+    // The budget lowered so this picture is "over" it at full size but fits at scale 2 (hosted).
+    __setLensWorkBudgetForTests(lensWork(0.8, px, false, 2) + 6 * 4 * (px + 32 * 24 + px))
+    try {
+      expect(lensScale(0.8, px, 32 * 24, false, true)).toBe(2)
+      const local = await runPlan(c)
+      const hosted = await runPlan(c, { hosted: true })
+      const pixelsOf = async (r: Awaited<ReturnType<typeof runPlan>>) => (await pngPixels(r.mem.bytes(filesOfValue(r.made.values[0])[0]!))).px
+      const want = py8(interleave(full), 'round')
+      // Locally: the full-size blur's bytes, exactly as the core makes them at scale 1 (Python's, within the band, above).
+      expect(sha256(await pixelsOf(local))).toBe(sha256(want))
+      // Hosted: the fast path's (scale 2), which differs.
+      const inputs: Record<string, Tensor> = { image: (await tensorIn(c, 'image'))!, depth: (await tensorIn(c, 'depth'))! }
+      const reduced = lens.LensBlur(inputs, { ...lensParamsOf(c.widgets), scale: 2 }).outputs[0]!
+      expect(sha256(await pixelsOf(hosted))).toBe(sha256(py8(interleave(reduced), 'round')))
+      expect(sha256(await pixelsOf(hosted))).not.toBe(sha256(want))
+      // And with the budget past every reduction: hosted refused, local still runs.
+      __setLensWorkBudgetForTests(1)
+      await expect(runPlan(c, { hosted: true })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
+      expect(sha256(await pixelsOf(await runPlan(c)))).toBe(sha256(want))
+    }
+    finally { __setLensWorkBudgetForTests(null) }
+  })
+
+  it('locally no whole-node time limit (Stop only); hosted the effects\' watchdog', async () => {
+    const g = globalThis as { __sailorFrameTimeoutMs?: number }
+    const was = g.__sailorFrameTimeoutMs
+    g.__sailorFrameTimeoutMs = 1
+    try {
+      const c = caseNamed('everything at once, hexagonal')
+      const local = await runPlan(c)
+      expect(filesOfValue(local.made.values[0])).toHaveLength(1)
+      await expect(runPlan(c, { hosted: true })).rejects.toThrow(EFFECT_TIMEOUT_MESSAGE)
+    }
+    finally { g.__sailorFrameTimeoutMs = was }
+    // Stop still ends a local run, with nothing kept.
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const c = caseNamed('defaults')
+    const pic = pictureOf(c as FxCase)
+    const mem = memoryIO(pic.files, c.node_id, { signal: ctrl.signal })
+    const plan = await planNode({ prompt: pic.prompt, nodeId: c.node_id, families: ON, gateOpen: false, filesFrom: pic.filesOf, toUrl: async () => '' })
+    await expect((plan as Extract<NodePlan, { kind: 'derive' }>).derive(mem.io)).rejects.toThrow('Stopped')
+    expect(mem.kept()).toBe(0)
   })
 })
