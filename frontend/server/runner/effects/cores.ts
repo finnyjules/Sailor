@@ -25,6 +25,7 @@ import { pilPixelsCore } from '../pixels/pilPixels'
 import { cutoutCore } from '../pixels/cutout'
 import { eraseCore } from '../pixels/erase'
 import { samMaskCore } from '../pixels/samMask'
+import { lensCore } from './core/lens'
 
 export interface EffectCoreEntry {
   /** The name the worker (and an op) knows the built core by. */
@@ -63,15 +64,17 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   // R7.4: Mask by text's and Mask extractor's work after SAM 3's answer (union, threshold, feather, invert,
   // preview): a helper the worker's `px.samMask` op calls, not an effect op.
   { name: 'sam', fn: samMaskCore as EffectCoreEntry['fn'], args: ['kn', 'px'] },
+  // R7.9: Lens · Depth of field's blur given a depth (resizes, grid_sample, the bokeh kernels by row spans).
+  { name: 'lens', fn: lensCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
-export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells', 'warp', 'mask', 'noise']
+export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells', 'warp', 'mask', 'noise', 'lens']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
   const kn = kernelsCore(tk, pixels)
   const rng = rngCore()
-  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng, blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn), mask: maskCore(tk, kn, pixels), noise: noiseCore(tk, kn, rng), cut: cutoutCore(kn), erase: eraseCore(), sam: samMaskCore(kn, pixels) }
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng, blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn), mask: maskCore(tk, kn, pixels), noise: noiseCore(tk, kn, rng), cut: cutoutCore(kn), erase: eraseCore(), sam: samMaskCore(kn, pixels), lens: lensCore(tk, kn) }
 })()

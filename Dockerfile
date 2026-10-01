@@ -44,6 +44,31 @@ RUN MEDIA_TOOLS_WORK=/tmp/media-tools-work scripts/media-tools/build.sh /opt/med
  && rm -rf /tmp/media-tools-work
 
 ###############################################################################
+# Stage 2b — Lens · Depth of field's depth model (step 3, R7.9): Depth Anything
+# V2 Small's ONNX files (99.1 MB) at a pinned revision, each checked against its
+# sha256 (frontend/server/utils/depthModel.ts DEPTH_MODEL_FILES holds the same).
+# Fetched here at build time only: the server reads them from
+# NUXT_DEPTH_MODEL_DIR and never downloads a model at run time in hosted.
+###############################################################################
+FROM ${PYTHON_BASE} AS depth-model
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ARG DEPTH_MODEL_REV=4472b7362082ad9968fee890ca0f1e5aca36b93d
+WORKDIR /opt/depth-model/onnx-community/depth-anything-v2-small
+RUN set -eu; \
+    base="https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/${DEPTH_MODEL_REV}"; \
+    mkdir -p onnx; \
+    curl -fsSL "$base/config.json" -o config.json; \
+    curl -fsSL "$base/preprocessor_config.json" -o preprocessor_config.json; \
+    curl -fsSL "$base/onnx/model.onnx" -o onnx/model.onnx; \
+    printf '%s  %s\n' \
+      3aee5b9bc4f711ee885c2526d871f0c8c6c8c4b26b8e04253d0167f6a83264f5 config.json \
+      03576db3c13dd0471fdf5f5e1428befcb95de063fe699879150b293dc9e0a2c6 preprocessor_config.json \
+      afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c onnx/model.onnx \
+      | sha256sum -c -
+
+###############################################################################
 # Stage 3 — runtime: ComfyUI (Python, CPU-only) + Nuxt server (Node)
 ###############################################################################
 FROM ${PYTHON_BASE} AS runtime
@@ -78,6 +103,10 @@ RUN pip install opencv-python-headless
 # The video tools, with their licences and sources (licenses/SOURCES.md) beside them.
 COPY --from=media-tools /opt/media-tools /opt/media-tools
 ENV NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin
+
+# Lens · Depth of field's depth model (R7.9), read only from here (never downloaded at run time).
+COPY --from=depth-model /opt/depth-model /opt/depth-model
+ENV NUXT_DEPTH_MODEL_DIR=/opt/depth-model
 
 # ComfyUI source + the sailor bridge custom node + LoRA sidecars/covers.
 # .dockerignore keeps models/loras/*.json + *.cover.* but drops the heavy

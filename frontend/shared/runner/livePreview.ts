@@ -14,6 +14,7 @@ import { GATE_CLASS, isLink, linksOf, type ApiPrompt } from './graph'
 import { familyOn, type RunnerFamily } from './families'
 import { EFFECT_FAMILY_OF, effectFamilyOn, effectSchemaOf } from './effects'
 import { outputKindsFor, runnerTakesNode, type RunnerEligibilityOptions } from './eligibility'
+import { LENS_BLUR_CLASS } from './lensBlur'
 import { outputKind } from './values'
 
 /** A file the canvas shows: never one of the runner's kept files. */
@@ -39,14 +40,19 @@ export const PREVIEW_MAX_NODES = 16
 /** The most files one pinned node may bring. */
 export const PREVIEW_MAX_PINNED_FILES = 16
 
-/** Whether a node can be a preview's target: an effect that writes `live_preview_<id>.png` (Painter writes no such file). */
+/**
+ * Whether a node can be a preview's target: an effect that writes
+ * `live_preview_<id>.png` (Painter writes no such file), or Lens · Depth of
+ * field (R7.9: its depth is cached by the picture, so a drag redoes only the blur).
+ */
 export function previewTarget(classType: string): boolean {
-  return !!effectSchemaOf(classType) && classType !== 'Painter'
+  return (!!effectSchemaOf(classType) && classType !== 'Painter') || classType === LENS_BLUR_CLASS
 }
 
 /**
  * Whether a preview works this node out itself: an effect whose family is on
- * (never the Shader effect, which needs the browser's bake), or a card the
+ * (never the Shader effect, which needs the browser's bake), Lens · Depth of
+ * field with `lens-blur` on (R7.9), or a card the
  * runner computes with no provider (an Image card fed by a wire, an open
  * Gate, Empty image, Image to mask), and the runner's own rule takes it.
  */
@@ -56,10 +62,11 @@ export function previewComputes(prompt: ApiPrompt, id: string, families: Readonl
   const inputs = n.inputs ?? {}
   const cls = n.class_type
   const local = cls === 'ShaderEffect' ? false
-    : effectSchemaOf(cls) ? effectFamilyOn(cls, families)
-      : cls === 'Image' ? isLink(inputs.images)
-        : cls === GATE_CLASS ? inputs.bypass === true
-          : cls === 'EmptyImage' || cls === 'ImageToMask'
+    : cls === LENS_BLUR_CLASS ? familyOn('lens-blur', families)
+      : effectSchemaOf(cls) ? effectFamilyOn(cls, families)
+        : cls === 'Image' ? isLink(inputs.images)
+          : cls === GATE_CLASS ? inputs.bypass === true
+            : cls === 'EmptyImage' || cls === 'ImageToMask'
   return local && runnerTakesNode(prompt, id, families, opts)
 }
 

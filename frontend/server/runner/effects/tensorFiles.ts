@@ -18,7 +18,8 @@
 import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { EFFECT_PICTURE_OUTPUTS, effectFamilyOn } from '#shared/runner/effects'
 import { OBJECT_REMOVE_CLASS, localModelOn } from '#shared/runner/localModels'
-import type { RunnerFamily } from '#shared/runner/families'
+import { familyOn, type RunnerFamily } from '#shared/runner/families'
+import { LENS_BLUR_CLASS } from '#shared/runner/lensBlur'
 import type { PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { keyOf } from './io'
@@ -33,7 +34,8 @@ export function maskTensorBytes(m: { w: number; h: number; data: Float32Array })
  * Whether this node, reading on this input, takes the float tensor, and runs
  * on the runner with these families on (R2.8 fix round 2: a tensor is kept
  * only for a reader that will read it):
- *   - an effect (its family and `cards` on), on any input;
+ *   - an effect (its family and `cards` on), on any input; Lens · Depth of
+ *     field (`lens-blur` on, R7.9), on its picture and its depth;
  *   - a picture: the Frame (`frame` on); Image to mask's `image` and Text
  *     mask's `source` (`cards` on), which work on the float as Python does;
  *   - a mask: not the Frame, which reads only LoadImage's MASK and rebuilds
@@ -42,6 +44,8 @@ export function maskTensorBytes(m: { w: number; h: number; data: Float32Array })
  */
 function readsFloat(classType: string, input: string, families: ReadonlySet<RunnerFamily>, kind: 'picture' | 'mask'): boolean {
   if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, classType)) return effectFamilyOn(classType, families)
+  // R7.9: Lens · Depth of field works on the float as an effect does (its picture and its depth).
+  if (classType === LENS_BLUR_CLASS) return kind === 'picture' && familyOn('lens-blur', families)
   // R7.3: Object removal truncates the mask's float to 8 bits (`uint8(255·m)`): LoadImage's 1 − a/255
   // sits just below k/255, which its 16-bit PNG can't carry, so it reads the tensor while it is on.
   if (classType === OBJECT_REMOVE_CLASS && input === 'mask') return localModelOn(classType, families)
@@ -83,6 +87,8 @@ function effectBehind(prompt: ApiPrompt, link: ApiLink, depth = 0): ApiLink | nu
   if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) {
     return EFFECT_PICTURE_OUTPUTS[node.class_type]!.includes(link[1]) ? link : null
   }
+  // R7.9: Lens · Depth of field keeps its picture's float as an effect does.
+  if (node.class_type === LENS_BLUR_CLASS) return link[1] === 0 ? link : null
   if (node.class_type === 'Image' && isLink(inputs.images)) return effectBehind(prompt, inputs.images, depth + 1)
   if (node.class_type === GATE_CLASS && isLink(inputs.data_in)) return effectBehind(prompt, inputs.data_in, depth + 1)
   return null

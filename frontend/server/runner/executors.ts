@@ -129,6 +129,7 @@ import { planShaderEffect } from './cards/shaderEffect'
 import { effectSpec } from './effects/table'
 import { planEffect } from './effects/plan'
 import { planPainter } from './effects/painter'
+import { planLensBlur } from './cards/lensBlur'
 import { planLlm } from './generators/llm'
 import { planDescribe } from './generators/describe'
 import { planRepair } from './generators/repair'
@@ -1351,6 +1352,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     // ── shader-bake (step 3, R2.10): the Shader effect replays the browser's bake ──
     case 'ShaderEffect': return planShaderEffect(ctx)
+
+    // ── lens-blur (step 3, R7.9): Lens · Depth of field, free, its depth model and blur in the server ──
+    case 'LensBlur': return planLensBlur(ctx)
 
     case 'Video': {
       // With media-video on (R5.4): the card's export and made videos, as Python's execute. Off, exactly as before.

@@ -13,6 +13,7 @@
  */
 import { LOCAL_MODEL_TOOL_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
 import { mediaToolsReady } from '../media/tools'
+import { depthModelReady } from '../utils/depthModel'
 
 function truthy(v: string | undefined): boolean {
   if (typeof v !== 'string') return false
@@ -31,11 +32,14 @@ const TOOL_FAMILIES: readonly RunnerFamily[] = [...MEDIA_TOOL_FAMILIES, ...MEDIA
  * The families switched on, server side. None while the runner itself is off.
  * The media families (MEDIA_TOOL_FAMILIES, R5.3; R6's MEDIA_EFFECT_TOOL_FAMILIES)
  * answer as off while the video tools are missing or refused (R5 rule 1): their
- * classes go to the engine.
+ * classes go to the engine. `lens-blur` (R7.9) answers as off while the depth
+ * model's files are missing (server/utils/depthModel.ts depthModelReady).
  */
 export function runnerFamilies(): ReadonlySet<RunnerFamily> {
   if (!runnerEnabled()) return NO_FAMILIES
-  const on = parseFamilies(process.env.NUXT_RUNNER_FAMILIES)
+  let on = parseFamilies(process.env.NUXT_RUNNER_FAMILIES)
+  // R7.9: Lens · Depth of field only while its depth model's files are on disk (never fetched in hosted).
+  if (on.has('lens-blur') && !depthModelReady()) on = new Set([...on].filter(f => f !== 'lens-blur'))
   if (mediaToolsReady() || !TOOL_FAMILIES.some(f => on.has(f))) return on
   return new Set([...on].filter(f => !TOOL_FAMILIES.includes(f)))
 }

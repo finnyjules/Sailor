@@ -9,8 +9,10 @@
  * subfolder as its own query param — a slash inside `filename` does not resolve.
  *
  * Runs Depth Anything V2 locally via transformers.js — no API call, no per-preview
- * bill. The pipeline is a module-level singleton so weights load once (~3.5s) and stay
- * warm; inference is ~1s. A cache hit never touches the model at all.
+ * bill. The pipeline is server/utils/depthModel.ts's singleton (shared with the runner's
+ * Lens · Depth of field, R7.9), so weights load once (~3.5s) and stay warm; inference is
+ * ~1s. Hosted, the model's files ship in the image and are never downloaded. A cache hit
+ * never touches the model at all.
  *
  * Output convention: BRIGHT = NEAR (it's inverse depth / disparity, not distance).
  *
@@ -22,8 +24,8 @@ import { join } from 'node:path'
 
 import { depthCacheKey, depthCacheName, assetType, safeAssetRelPath } from '~~/server/utils/depthCache'
 import { assertInputOwned } from '~~/server/utils/inputOwnership'
+import { depthPipeline } from '~~/server/utils/depthModel'
 
-const MODEL = 'onnx-community/depth-anything-v2-small'
 const COMFY_ROOT = join(process.cwd(), '..')
 const INPUT_DIR = join(COMFY_ROOT, 'input')
 const CACHE_SUBDIR = 'sailor_depth'
@@ -34,16 +36,6 @@ const CACHE_DIR = join(INPUT_DIR, CACHE_SUBDIR)
 /** Depth drives a blur radius, not detail — full resolution buys nothing and costs
  *  cache size plus texture-upload time. Sources here run to 4k. */
 const MAX_EDGE = 1024
-
-let pipePromise: Promise<any> | null = null
-function depthPipeline(): Promise<any> {
-  if (!pipePromise) {
-    pipePromise = import('@huggingface/transformers')
-      .then(({ pipeline }) => pipeline('depth-estimation', MODEL))
-      .catch((err) => { pipePromise = null; throw err }) // let the next request retry
-  }
-  return pipePromise
-}
 
 const exists = (p: string) => access(p).then(() => true, () => false)
 

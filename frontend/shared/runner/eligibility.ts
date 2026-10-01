@@ -18,6 +18,7 @@ import {
 } from './effects'
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
 import { parseMaskPoints } from './samInput'
+import { LENS_BLUR_CLASS, LENS_BLUR_WIDGETS } from './lensBlur'
 import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
   LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_SLOTS, LOCAL_MODEL_SOURCE_INPUT, VOCALS_CLASS, localModelOn, localModelRows, localModelSwitchedClasses,
@@ -453,6 +454,8 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   // is on. A clip they hand on is a frame batch, not a picture: the value kinds refuse it where a
   // picture is read (./values.ts KIND_FOLLOWS_INPUT).
   ...Object.fromEntries(Object.keys(LOCAL_MODEL_PICTURE_SLOTS).map(c => [c, LOCAL_MODEL_FAMILY_OF[c]!])),
+  // R7.9: Lens · Depth of field's one picture, only while `lens-blur` is on (free: the runner computes it).
+  [LENS_BLUR_CLASS]: 'lens-blur',
 }
 
 /**
@@ -1605,6 +1608,19 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f));
   // R7.7's Whisper transcribe and R7.8's Vocal separator a sound from SOUND_OUTPUTS.
   ...localModelRows(FRAMES_LINK_SOURCES, SOUND_OUTPUTS),
+  // ── R7.9: Lens · Depth of field, free, in the server (./lensBlur.ts, server/runner/cards/lensBlur.ts) ──
+  // A local render (no provider, nothing held or charged); its picture wired in, its depth optional (a
+  // picture too; unwired, the depth model runs in the server); its widgets as ComfyUI validates them; its
+  // preview save_live_preview's `live_preview_<node id>.png`.
+  [LENS_BLUR_CLASS]: {
+    family: 'lens-blur',
+    local: 'render',
+    mustLink: ['image'],
+    required: ['image'],
+    imageInputs: ['image', 'depth'],
+    widgets: LENS_BLUR_WIDGETS,
+    inputCheck: 'effect-preview-name',
+  },
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -1694,6 +1710,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   SaveAudioOpus: 'sound-effects',
   // R7: each local-model node moved onto a paid service, by its family.
   ...localModelSwitchedClasses(),
+  // R7.9: Lens · Depth of field, free, in the server.
+  [LENS_BLUR_CLASS]: 'lens-blur',
 }
 
 /**

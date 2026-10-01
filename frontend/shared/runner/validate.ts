@@ -98,6 +98,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'ObjectRemove',
   // R7.4: Mask by text and Mask extractor are output nodes (is_output_node=True).
   'MaskByText', 'MaskExtractor',
+  // R7.9: Lens · Depth of field is an output node (is_output_node=True).
+  'LensBlur',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

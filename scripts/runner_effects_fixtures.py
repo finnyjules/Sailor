@@ -131,6 +131,19 @@ Groups:
               mid-grey ramp (both types, mono and colour, three global seeds)
               as PNGs into DIR for the controller's eyes (writes nothing into
               the repo).
+  lens      — (R7.9) Lens · Depth of field with its depth WIRED (no model
+              runs here: the depth the model would make is fed through the
+              `depth` input, so the blur is checked given the same depth):
+              every preset and bokeh shape; aperture 0 / 0.4 / 1;
+              focus_offset ±1; chromatic aberration, vignette and focal
+              length at 0 and at their ends; good and bad `focus_point` text
+              (where Python raises on the text, `fixed` records what it makes
+              with the centre, the runner's fix); a 4-channel picture and
+              depth; a depth of the picture's size; Python's 1×1 blank; no
+              picture (16 × 16 black); a picture too small for its blur
+              (Python's raise). Outputs as the tone group keeps a library
+              class's (float32 zlib'd, its 8-bit hashes), the preview as a
+              sha256.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -3765,7 +3778,152 @@ def e2e_addnoise(out_dir: str) -> None:
     print(f"wrote {len(rows)} Add noise pictures → {out_dir}")
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise, "shader": shader, "e2e": e2e}
+# ── lens (R7.9): Lens · Depth of field, its depth wired ──────────────────────
+
+# The runner's blur sums each kernel row from float64 prefix sums (library); every value is
+# recorded as a float, so the spec measures the worst |Δ| itself. Bands at this ε.
+LENS_EPS = 1.3e-3  # worst 3.19e-4 (R7.9 report)
+
+
+class LensGroup(ToneGroup):
+    """The lens group's cases: as the tone group keeps a library class's (every output's float32
+    zlib'd), the preview as a sha256. `image` may be absent (Python's no-picture branch). Where
+    Python raises on its `focus_point` text (a JSON value that isn't an object, a non-finite
+    coordinate), `fixed` records the node's outputs with the centre, the runner's fix."""
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False, fix: bool = False) -> None:
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = {}
+        for key, (source, files) in inputs.items():
+            tensors[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        try:
+            outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message (or its fix) is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            if fix:
+                outs, _ui = run_node(cls, node_id, **tensors, **{**widgets, "focus_point": "{}"})
+                row["fixed"] = [record_tone_output(t, False, LENS_EPS) for t in outs]
+            self.cases.append(row)
+            return
+        row["outputs"] = [record_tone_output(t, False, LENS_EPS) for t in outs]
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        self.cases.append(row)
+
+    def model_case(self, name: str, cls, class_type: str, widgets: dict, file: str, raw: np.ndarray) -> None:
+        """The depth NOT wired: the node's own estimate_depth, with the model swapped for a stand-in
+        that answers `raw` (its predicted_depth, 1 × h × w float32), so its bicubic resize and its
+        min–max normalisation run for real. `raw` is kept (`depth_raw`) for the runner to be fed."""
+        import types
+        from unittest import mock
+        from comfy_extras import _depth
+        import comfy_extras.nodes_lens as nodes_lens
+
+        class Inputs(dict):
+            def to(self, _device):
+                return self
+
+        def proc(images=None, return_tensors=None):
+            return Inputs()
+
+        def model(**_kw):
+            return types.SimpleNamespace(predicted_depth=torch.from_numpy(raw.copy()))
+        _depth._DEPTH_CACHE.clear()
+        with mock.patch.object(_depth, "_get_depth_model", lambda: (proc, model)), mock.patch.object(nodes_lens, "_depth_ready", lambda: True):
+            self.case(name, cls, class_type, widgets, {"image": ("rgb", [file])})
+        _depth._DEPTH_CACHE.clear()
+        self.cases[-1]["depth_raw"] = {"w": int(raw.shape[2]), "h": int(raw.shape[1]), "f32": b64(raw.astype("<f4").tobytes())}
+
+    def depth(self, name: str, w: int, h: int, channels: int = 3) -> str:
+        """A depth picture (an asset of its own name): a diagonal ramp with a bright disc and a dark
+        bar, so near, far and hard edges all meet; on 4 channels a partly see-through alpha."""
+        y, x = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+        v = (x * 255 // max(1, w - 1) * 0.6 + y * 255 // max(1, h - 1) * 0.4)
+        v = np.where((x - w * 0.62) ** 2 + (y - h * 0.4) ** 2 < (min(w, h) * 0.22) ** 2, 240, v)
+        v = np.where((x > w * 0.15) & (x < w * 0.3), 20, v).astype(np.uint8)
+        px = np.repeat(v[:, :, None], 3, axis=2)
+        if channels == 3:
+            px[:, :, 1] = np.clip(v.astype(np.int32) + (x % 7) - 3, 0, 255).astype(np.uint8)
+        else:
+            px = np.concatenate([px, ((x * 13 + y * 7) % 256).astype(np.uint8)[:, :, None]], axis=2)
+        buf = io.BytesIO()
+        PILImage.fromarray(px, "RGBA" if channels == 4 else "RGB").save(buf, format="PNG")
+        self.assets.setdefault(name, buf.getvalue())
+        return name
+
+
+# Focus text (R7.9 brief): good, malformed, and what Python reads but fails on (`fix`: a JSON value
+# that isn't an object, a non-finite coordinate; the runner takes the centre instead).
+LENS_FOCUS_TEXT = [
+    ('{"x":0.2,"y":0.8}', False), ('{"x":0.81,"y":0.33}', False), ('', False), ('not json', False),
+    ('{"x":"0.3","y":" 0.6 "}', False), ('{"x":true,"y":null}', False), ('{"x":-3,"y":7}', False),
+    ('{"y":0.1}', False), ('{"x":0.7,"y":"zz"}', False), ('{"x":1,"y":1,"x":0.1}', False),
+    ('{"x":1e-3,"y":0.999}', False), ('{"x":"1_0","y":0.25}', False),
+    ('[0.2,0.8]', True), ('"0.3"', True), ('null', True), ('7', True), ('{"x":NaN,"y":0.5}', True),
+    ('{"x":Infinity,"y":0.5}', True),
+]
+
+
+def lens() -> dict:
+    from comfy_extras.nodes_lens import LensBlurNode
+    from comfy_extras import _lens
+    g = LensGroup()
+    cls, ct = LensBlurNode, "LensBlur"
+    pic = g.picture(48, 40, 3, 11)
+    pic4 = g.picture(48, 40, 4, 12)
+    small = g.picture(23, 19, 3, 13)
+    wide = g.picture(96, 64, 3, 14)
+    depth = g.depth("depth_32x24.png", 32, 24)
+    depth_same = g.depth("depth_48x40.png", 48, 40)
+    depth4 = g.depth("depth_40x30_rgba.png", 40, 30, 4)
+    defaults = {"focus_point": '{"x":0.5,"y":0.5}', "focus_offset": 0.0, "aperture": 0.4, "lens_preset": "Custom",
+                "bokeh_shape": "circular", "highlight_bokeh": 0.3, "chromatic_aberration": 0.0, "vignette": 0.0, "focal_length": 0.0}
+    base = {"image": ("rgb", [pic]), "depth": ("rgb", [depth])}
+
+    def case(label: str, over: dict, inputs: dict | None = None, fix: bool = False) -> None:
+        g.case(f"{ct}: {label}", cls, ct, {**defaults, **over}, inputs or base, fix=fix)
+
+    case("defaults", {})
+    for preset in _lens.PRESETS:
+        for shape in ("circular", "hexagonal", "anamorphic"):
+            case(f"{preset}, {shape}", {"lens_preset": preset, "bokeh_shape": shape, "aperture": 0.7, "focus_point": '{"x":0.3,"y":0.6}'})
+    for a in (0.0, 0.4, 1.0):
+        case(f"aperture {a}", {"aperture": a})
+    for o in (-1.0, 1.0):
+        case(f"focus_offset {o}", {"focus_offset": o})
+    for name, ends in (("chromatic_aberration", (0.0, 1.0)), ("vignette", (0.0, 1.0)), ("focal_length", (-1.0, 0.0, 1.0)), ("highlight_bokeh", (0.0, 1.0))):
+        for v in ends:
+            case(f"{name} {v}", {name: v})
+    case("everything at once, hexagonal", {"bokeh_shape": "hexagonal", "aperture": 0.8, "highlight_bokeh": 0.9, "chromatic_aberration": 0.5,
+                                           "vignette": 0.6, "focal_length": 0.4, "focus_point": '{"x":0.62,"y":0.4}', "focus_offset": -0.2})
+    case("focal_length −0.7 off-centre, anamorphic", {"bokeh_shape": "anamorphic", "aperture": 0.9, "focal_length": -0.7, "focus_point": '{"x":0.1,"y":0.9}'})
+    for text, fix in LENS_FOCUS_TEXT:
+        case(f"focus_point {text!r}", {"focus_point": text, "aperture": 0.6, "focal_length": 0.5}, fix=fix)
+    case("4-channel picture", {"aperture": 0.7, "highlight_bokeh": 0.8, "chromatic_aberration": 0.6, "vignette": 0.4},
+         {"image": ("provider", [pic4]), "depth": ("rgb", [depth])})
+    case("4-channel depth", {"aperture": 0.7, "focus_point": '{"x":0.62,"y":0.4}'}, {"image": ("rgb", [pic]), "depth": ("provider", [depth4])})
+    case("depth of the picture's size", {"aperture": 0.7, "bokeh_shape": "hexagonal"}, {"image": ("rgb", [pic]), "depth": ("rgb", [depth_same])})
+    case("card picture, wider", {"aperture": 1.0, "focal_length": 0.8, "chromatic_aberration": 0.3},
+         {"image": ("card", [wide]), "depth": ("rgb", [depth])})
+    case("a batch: the first picture only", {"aperture": 0.6}, {"image": ("rgb", [pic, g.picture(48, 40, 3, 15)]), "depth": ("rgb", [depth])})
+    case("Python's 1×1 blank", {"aperture": 1.0, "focus_offset": 0.5}, {"image": ("blank", []), "depth": ("rgb", [depth])})
+    case("the 1×1 blank, in focus", {"aperture": 1.0}, {"image": ("blank", []), "depth": ("rgb", [depth])})
+    case("no picture", {}, {"depth": ("rgb", [depth])})
+    case("too small for its blur", {"aperture": 1.0, "focus_offset": 1.0}, {"image": ("rgb", [small]), "depth": ("rgb", [depth])})
+    case("small, a blur that fits", {"aperture": 0.3}, {"image": ("rgb", [small]), "depth": ("rgb", [depth])})
+    # The depth not wired: the model's answer (a stand-in) resized and normalised by the node itself.
+    y, x = np.meshgrid(np.arange(19), np.arange(25), indexing="ij")
+    raw = (2.5 + 1.7 * np.sin(x / 4.0) * np.cos(y / 5.0) + 0.08 * x).astype(np.float32)[None]
+    g.model_case(f"{ct}: the model's depth, resized and normalised", cls, ct, {**defaults, "aperture": 0.8, "focus_point": '{"x":0.3,"y":0.7}'}, pic, raw)
+    g.model_case(f"{ct}: the model's depth, wider picture, hexagonal", cls, ct, {**defaults, "aperture": 0.6, "bokeh_shape": "hexagonal", "focal_length": 0.5}, wide, raw)
+    g.model_case(f"{ct}: the model's flat depth (all zeros)", cls, ct, {**defaults, "aperture": 1.0, "focus_offset": 0.3}, pic, np.full((1, 7, 9), 3.25, dtype=np.float32))
+    return {"assets": {k: b64(v) for k, v in sorted(g.assets.items())}, "cases": g.cases, "library_eps": LENS_EPS}
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise, "shader": shader, "e2e": e2e, "lens": lens}
 
 
 def blur_sweep_run() -> int:
