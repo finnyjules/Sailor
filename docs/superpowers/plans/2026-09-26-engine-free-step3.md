@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28); and R6, the video and sound effects (expanded 2026-09-30) — and outlines R7–R11 (R4.1 is built).
+**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28); and R6, the video and sound effects (expanded 2026-09-30); and R7, the paid and model nodes that replace the local AI models (expanded 2026-09-30) — and outlines R8–R11 (R4.1 is built).
 
 **Architecture:** a runner node's results become per-slot *values* (`NodeRecord.values`): files as today, plus masks, text, numbers, true/false, JSON text and 3D model addresses. At a node's turn, every wire that brings a value is replaced by that value before the node's request is built, so every existing builder, check and prompt sees a plain value, as ComfyUI's `execute()` does. Prices keep reading the workflow as sent (a wired input is priced at its most expensive, as today). Bytes the runner makes itself are kept by sha256 in a run-scoped folder beside the run store. Which wires may carry values is one shared table (`shared/runner/`), read by the browser and the server. New cards run as a new `derive` plan kind: computed on the server, no provider, no charge.
 
@@ -74,8 +74,12 @@ New files:
 | `frontend/server/runner/video/core/{time,join,look,fft,stabilize,flow,draw,waveform,noiseClip,glyphs,textDraw,sound,denoise}.ts` | R6.1–R6.10: self-contained worker cores — the effects, pocketfft's FFT, OpenCV's Farneback flow, Pillow's integer drawing and ink blend, a coverage rasteriser for letters, the sound effects and noisereduce's spectral gating. |
 | `frontend/server/runner/video/fonts/DejaVuSans-Bold.ttf`, `LICENSE_DEJAVU` | R6.8: the bundled font for captions and text clips where none of Python's fonts exists (copied from the Python install). |
 | `frontend/server/runner/media/soundEffects.ts` | R6.9–R6.10: the sound effects' and Silence cut's plans. |
+| `frontend/shared/runner/localModels.ts` | R7.1: the local-model classes' families, the service each runs on (for the price tooltip), and their rule rows. |
+| `frontend/server/runner/generators/localModels.ts` | R7.1–R7.8: each moved class's call and the cheap steps around it (alpha, grow, composite, masks, captions, stems, frame count). |
+| `frontend/shared/runner/samInput.ts` | R7.4: SAM 3's payload, shared by `/api/inpaint/segment` and the runner (moved from `server/utils/samInput.ts`). |
+| `frontend/server/utils/depthModel.ts`, `frontend/server/runner/effects/core/lens.ts`, `frontend/server/runner/cards/lensBlur.ts` | R7.9: the in-process depth model (shared with `/api/depth/estimate`), the lens blur core, and Lens · Depth of field's plan. |
 
-Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`. R6 also modifies `server/media/run.ts` (the lease), `server/media/values.ts`, `server/runner/keptBytes.ts`, `compositor/worker.ts`, `effects/core/kernels.ts` (`gridSample3d`), `shared/runner/media.ts` and `scripts/runner_effect_rows.py`.
+Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`. R6 also modifies `server/media/run.ts` (the lease), `server/media/values.ts`, `server/runner/keptBytes.ts`, `compositor/worker.ts`, `effects/core/kernels.ts` (`gridSample3d`), `shared/runner/media.ts` and `scripts/runner_effect_rows.py`. R7 also modifies `shared/pricing/paidRates.ts` and `paidSettings.ts`, `shared/runner/retired.ts`, `server/api/depth/estimate.post.ts`, `server/api/inpaint/segment.post.ts`, `app/lib/nodeCreditEstimate.ts`, `scripts/runner_paid_fixtures.py` (groups `local-*`) and `scripts/runner_effects_fixtures.py` (group `lens`).
 
 ---
 
@@ -4886,9 +4890,419 @@ There are no paid calls and no live checks: R6 costs nothing to run, and nothing
 
 ---
 
-# R7–R11 — outline tasks (to be expanded before they are built)
+# R7 — Paid and model nodes
 
-(R4.1 stays below for the record: it was built on 2026-09-28. R5 and R6 are expanded above.)
+R7 moves the nodes that run an AI model on this computer (spec decision 1) into the runner. Nine become one provider call each. Lens · Depth of field stays free: its depth model already runs inside Sailor's server, and only its blur is ported. Two class names that were already deleted get a retirement message. The outline's four tasks are replaced by the eleven below (expanded 2026-09-30). `.superpowers/sdd/2026-09-26-engine-free-step3/r7-expansion-report.md` lists the corrections to the outline and why. In short:
+
+- **Face restoration and Wav2Lip are already gone.** Commit `6b682b578` (2026-09-27) deleted `nodes_face_restore.py` and `nodes_lip_sync.py` (non-commercial licences). Fix faces now runs on fal's Topaz (family `fix-faces`), and lip-sync on sync-3. No saved project uses either class. R7.10 only gives the two old class names a retirement message.
+- **Today's models are not the ones the outline names.** Mask by text runs CLIPSeg, not SAM. Mask extractor runs SAM ViT-base and picks the best of three masks. Subject mask runs MobileSAM on every frame. Slow motion (AI) runs RIFE 4.6. Whisper is faster-whisper `base`. The vocal separator is Demucs `htdemucs`. Upscale is Real-ESRGAN x2plus. Object removal is LaMa at 512 × 512, composited back over the original. All are free and local today.
+- **Object removal can stay LaMa.** Replicate's `zylim0702/remove-object` is LaMa. It is already carded, and Separate background and foreground calls it (R3.7). See ruling (c).
+- **Transcription is mostly built.** R3.10 built the Wizper call for Transcribe audio, its card and its WAV hand-off. Whisper transcribe adds the captions and the SRT text, made from Wizper's timed chunks.
+- **Python works on every frame of a batch** for Background remove, Upscale and Object removal. Per-frame calls on a clip multiply the price. See ruling (f).
+- **No saved project uses an R7 class except Background remove** (27 of the 1,059 projects in `user/sailor/projects/`, checked 2026-09-30, mostly through the Product shot app). The families-off check also runs on synthetic graphs.
+- R6's references to "R7.3" for Slow motion (AI) now mean R7.6. The R8 outlines now name R7.1, R7.7 and R7.8.
+
+**Order.** R7.1 (the shared pieces, with Background remove) comes first. After it, R7.2–R7.5 and R7.9 are independent. R7.6 needs R5's video tools; R7.7 and R7.8 need R5's sound values. They all edit `families.ts`, `eligibility.ts` and the price module, so the controller runs at most two at once. R7.10 can go any time. R7.11 is the controller's check.
+
+**Families** (each off by default; kept apart from `RUNNER_FAMILIES`, as R6's are, so every pinned "every family on" set stays as it was):
+
+| Family | Task | Classes | Service | Needs |
+|---|---|---|---|---|
+| `bg-remove` | R7.1 | Background remove | Replicate `851-labs/background-remover` | `cards` |
+| `upscale-2x` | R7.2 | Upscale (2×) | Replicate `nightmareai/real-esrgan` | `cards` |
+| `object-remove` | R7.3 | Object removal | Replicate `zylim0702/remove-object` (ruling (c)) | `cards` |
+| `sam-3-masks` | R7.4 | Mask by text, Mask extractor | fal `sam-3/image` | `cards` |
+| `subject-mask` | R7.5 | Subject mask (still pictures, ruling (e)) | fal `sam-3/image` | `cards` |
+| `slow-motion-ai` | R7.6 | Slow motion (AI) | fal `rife/video` | `media-video` |
+| `whisper-captions` | R7.7 | Whisper transcribe | fal `wizper` | `media-sound` |
+| `vocal-split` | R7.8 | Vocal separator | Replicate `ryan5453/demucs` | `media-sound` |
+| `lens-blur` | R7.9 | Lens · Depth of field | none (free, in the server) | `cards` |
+
+## Rules every R7 task follows (binding for R7.1–R7.9)
+
+1. **The node moves whole.** Each class keeps its name, inputs and outputs. While its family is on, the runner takes it; while off, ComfyUI runs the local model, free, as today. The families that need the video tools are dropped while the tools are missing, as R6's are.
+2. **What must match** (the user's matching rule).
+   - The provider runs a different model, so its answer can't match Python's. The look is judged by eye on the live check.
+   - Everything Sailor does around the call is cheap, and stays exact against Python *given the same answer*: reading the settings, the steps before the call (points, mask grow) and after it (alpha, premultiply, composite, threshold, captions, the preview).
+   - The fixture script proves it. It runs the real `execute` with the model swapped for a stand-in that returns a recorded answer (rule 9).
+   - Python's bugs are fixed where a task says so.
+3. **Requests against the saved schema.** Before a task is dispatched, the controller saves each endpoint's schema into `frontend/tests/unit/fixtures/provider-schemas/` (`snapshot_provider_schemas.mjs`, free GETs). Python sends no request here, so the task's port table is the contract, and every payload must pass `checkPayload`. A setting the schema can't take leaves the whole workflow to the engine before the run. It is never silently changed, and never fails the run.
+4. **Money** (R3 rules 7–9 and 12–14 bind).
+   - Each endpoint has a rate card in `frontend/shared/pricing/` (`paidRates.ts`, or an existing card).
+   - These classes have no flat price row (they were free). `priceNode` prices a class only while its family is on.
+   - The hold is the ceiling, from media measured before the hold (picture size, sound length, frame count). The charge comes from the same calculation and is never above the hold. A call is charged only when it finished and delivered.
+   - A card whose confidence is `estimate` blocks switch-on until the live check measures it.
+   - No backups: no task found the same model on a second service with the same settings.
+   - A branch where Python does nothing (an empty mask, one frame, a silent sound) is a `pass`: no call, nothing held, free (`paidNoCall`).
+5. **Pictures, not clips** (ruling (f)). The picture classes take one picture. A frame batch, or a picture list of more than one, leaves the workflow to the engine (R6 ruling (k)).
+6. **Pre-run checks are true upper bounds.** Sizes come from file headers, sound lengths from the probe, frame counts from R6's `frameShapes`. A case over a cap, or a setting the provider can't take, leaves the workflow to the engine. Only money and ownership are refused (R3 rule 9).
+7. **Hosted safety.** No R7 widget names a file. Every picture and sound handed off must be the person's own (R3 rule 11). Hand-offs go through the run's hand-off (`createHandoff`, fal storage). Saved files go under the person's subfolder.
+8. **Stop leaves nothing running.**
+   - A call in flight follows the runner's cancel policy: the hold is released at once, and a cancel counts only when the provider confirms it.
+   - Encodes and decodes run under R6's `mediaLease`, and are killed within one second.
+   - No partial file is kept.
+9. **Fixtures and tests.**
+   - `scripts/runner_paid_fixtures.py --group local-<g>` (R3.2's script) imports each class with the network blocked. It patches the model loader (and `os.path.isfile` for the model file) with a stand-in, runs `execute`, and records the outputs.
+   - Tests go in `frontend/tests/unit/runner-local-<g>.unit.spec.ts`. Each test checks:
+     - the payload passes the saved schema;
+     - through `planNode` and the kit (`cards`, the media family and the family on), the fake provider gets that payload;
+     - the outputs equal Python's given the same answer;
+     - the hold is the ceiling and the charge is the same calculation;
+     - a refusal comes before `ledger.hold`;
+     - with the family off, the class is left to the engine;
+     - the families-off invariant (R3 rule 15) holds over the saved projects and one synthetic graph per class.
+10. **Run line.**
+    - `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_paid_fixtures.py --group local-<g>`, run twice; the second time the file is unchanged.
+    - `cd frontend && env -u FAL_KEY -u FAL_API_KEY -u NUXT_REPLICATE_TOKEN -u REPLICATE_API_TOKEN npx vitest run tests/unit/runner-local-<g>.unit.spec.ts tests/unit/runner- tests/unit/price-graph.unit.spec.ts`.
+    - The typecheck from the Global Constraints.
+    - Report (no commit).
+
+---
+
+### Task R7.1: The shared pieces, and Background remove (family `bg-remove`)
+
+**Shared pieces:**
+- `LOCAL_MODEL_FAMILIES` in `shared/runner/families.ts`: the nine families, with their `FAMILY_REQUIRES` (table above). `parseFamilies` knows them; the "every family on" sets don't change.
+- `frontend/shared/runner/localModels.ts`:
+  - `LOCAL_MODEL_FAMILY_OF` (class → family);
+  - `SERVICE_OF` (class → `'replicate' | 'fal' | null`);
+  - the rule rows: picture-only `linkSources` (rule 5) and `OUTPUT_KINDS`, applied only while the family is on.
+- The price tooltip names the service while the family is on: "Runs on Replicate" or "Runs on fal" (ruling (b)). There is no new copy on the node.
+- `frontend/server/runner/generators/localModels.ts`: the plans, one function per class, dispatched from `planNode`.
+
+**Port:**
+
+| Piece | Python | The runner |
+|---|---|---|
+| Call | `nodes_bg_remove.py:84-149`: rembg ISNet on each frame, `post_process_mask=True` | One call to `851-labs/background-remover` with `{ image, background_type: 'rgba', format: 'png' }` (R3.7's call); `take: 'first'` |
+| Alpha | `cut.split()[3]`; `edge_softness > 0`: PIL `GaussianBlur(radius)` | The answer's alpha. The blur is R2's torchvision `gaussianBlur` with `σ = radius`, judged by eye (Pillow's box-blur version isn't ported) |
+| `transparent` | RGBA, straight colour | The answer's RGB with the alpha: exact |
+| `premultiplied` | `rgb·a`, 3 channels | Exact (float32, hand-off rounding) |
+| `matte_only` | the alpha as grey RGB | Exact |
+| Mask output | `alpha / 255` | A `mask` value (R0.7): exact |
+| Preview | `save_live_preview(…, unique=True)`: RGBA (matte: grey plus opaque alpha) | A new name per run, Python's unique mode; the pixels are exact |
+
+**Price:** `851-labs/background-remover` is carded as an estimate ($0.0004, `paidRates.ts`). It is the same call as R3.5's Remove background, so one measurement serves both.
+
+**Files:** `families.ts`, `eligibility.ts`, `validate.ts` (`RUNNER_OUTPUT_CLASSES`), `executors.ts`, the new `shared/runner/localModels.ts` and `server/runner/generators/localModels.ts`, `app/lib/nodeCreditEstimate.ts` (the tooltip), and `scripts/runner_paid_fixtures.py` (group `local-cutout`: stand-in `rembg.remove` answers with soft, hard and empty alpha, each `output`, `edge_softness` 0 / 2 / 10). Test: `runner-local-cutout.unit.spec.ts`.
+
+**Acceptance:**
+- Every fixture case passes: exact, except the blur, which is judged by eye.
+- Product shot's chain (Load image → Background remove → Image to mask → Save image) runs with ComfyUI off, and the cut-out keeps its alpha.
+- A video batch wired in leaves the workflow to the engine.
+- With every R7 family off, nothing changes.
+
+**Live check:** one picture, about $0.0004.
+
+---
+
+### Task R7.2: Upscale (2×) (family `upscale-2x`)
+
+| Piece | Python | The runner |
+|---|---|---|
+| Call | `nodes_upscale.py:113-136`: Real-ESRGAN x2plus, tiled by `tile_size` | `nightmareai/real-esrgan` with `{ image, scale: 2, face_enhance: false }`: Upscale's Real-ESRGAN builder (`upscaleInput`, R3.5) at scale 2. `tile_size` is not sent: it only splits Python's own work |
+| Output | 2W × 2H, the preview (`unique=True`) | Kept as downloaded. An answer that isn't 2W × 2H is resized to it with R0's bilinear, so later nodes see Python's size |
+
+**Price:** the existing card, `editRates.ts` (`per_image`, $0.002, verified). The task checks the page for a largest input size. A larger picture leaves the workflow to the engine (rule 6).
+
+**Files:** `localModels.ts` (both), `eligibility.ts`, `executors.ts`. Test: `runner-local-upscale.unit.spec.ts`. No Python fixture: nothing around the call computes anything.
+
+**Acceptance:**
+- The payload passes the schema.
+- A 1000 × 750 fake answer to a 500 × 375 picture is kept as it is; a 900 × 700 one is resized.
+- The preview's ui equals Python's shape.
+
+**Live check:** one 1-megapixel picture, about $0.002.
+
+---
+
+### Task R7.3: Object removal (family `object-remove`)
+
+| Piece | Python | The runner |
+|---|---|---|
+| Mask | `nodes_object_remove.py:54-65` → `_inpaint.py:67-133`: one mask for every frame (or `mask[0]`), `uint8(trunc(255·m))`, `cv2.dilate(3 × 3, iterations = mask_grow)` | Exact. The dilate is R3.7's `maxFilterCore` at size `2·grow + 1`, since a repeated 3 × 3 dilate is one square, clipped at the edges |
+| Nothing to remove | the grown mask is all zero: the frame unchanged | A `pass`: no call, free |
+| Call | LaMa at 512 × 512, back to full size (`INTER_CUBIC`) | `zylim0702/remove-object` with `{ image: RGB picture, mask: grown mask PNG }` (R3.7's builder), full size (ruling (c)) |
+| Composite | `fill·m + original·(1 − m)`, with `m` the grown mask `/ 255` | Exact, given the fill |
+| Preview | `unique=True` | As R7.1 |
+
+- A mask whose size differs from the picture's is refused before the hold: "The mask must be the same size as the picture." (Python fails inside OpenCV.)
+
+**Price:** `zylim0702/remove-object`, an estimate ($0.0007, `paidRates.ts`), shared with R3.7's measurement.
+
+**Files:** `localModels.ts` (both), `eligibility.ts` (the mask input reads R0.7 masks), `executors.ts`, the fixture script (group `local-erase`: masks touching each edge, `mask_grow` 0 / 4 / 64, an all-black mask, a recorded full-size fill; the fixture records `cv2.dilate` and the composite directly, since Python's 512 × 512 resize isn't the provider's). Test: `runner-local-erase.unit.spec.ts`.
+
+**Acceptance:**
+- The grow and the composite are exact.
+- An empty mask makes no call and charges nothing.
+- Subject mask → Object removal runs with ComfyUI off.
+
+**Live check:** one picture, about $0.001.
+
+---
+
+### Task R7.4: Mask by text and Mask extractor (family `sam-3-masks`)
+
+| Piece | Python | The runner |
+|---|---|---|
+| Picture | the first frame only (`_image_to_pil`) | The same |
+| Mask by text | `nodes_matte_ml.py:105-132`: CLIPSeg on `prompt or "object"`, soft | `fal-ai/sam-3/image` with `{ image_url, prompt, apply_mask: false, output_format: 'png', return_multiple_masks: true }`. The union of every mask returned, since CLIPSeg covers every match (ruling (k)) |
+| Mask extractor | `:167-217`: `points` read by `json.loads` (bad text, a non-list or an empty list: one point at the centre); `[clamp(int(float(x)·w)), clamp(int(float(y)·h))]`; `int(label)`; SAM's best of three | The same parsing, exact. `{ image_url, prompt: '', point_prompts, apply_mask: false, output_format: 'png', return_multiple_masks: false, max_masks: 1 }` (`samInput.ts`'s call, moved to a shared builder used by `/api/inpaint/segment` and the runner); `masks[0]` |
+| After | `threshold > 0`: `(m > t)` (text only); `feather > 0`: torchvision `gaussian_blur(2⌈3σ⌉ + 1, σ)`; `invert`; clamp; `[1, H, W]` | Exact, given the mask: R2's `gaussianBlur`. The mask is resized to the picture with R0's bilinear if the answer's size differs |
+| Preview | `_mask_preview` `:54-61`: `image·(1 − m·0.5) + red·m·0.5`, fixed name | Exact |
+
+- Mask by text's `prompt` is moderated (R3 rule 10: added to `PAID_TEXT_INPUTS`).
+- An answer with no mask is an all-black mask, charged (ruling (k)).
+- A wired `points` text is read at the node's turn (R0); the hold doesn't depend on it.
+
+**Price:** a new card, `fal-ai/sam-3/image`, per call. The task reads the figure from fal's page; `priceBook.ts`'s route row says $0.005, verified.
+
+**Files:** `localModels.ts` (both), `server/utils/samInput.ts` (to `shared/runner/samInput.ts`, with the segment route updated), `paidRates.ts`, `paidSettings.ts`, `eligibility.ts`, `executors.ts`, the fixture script (group `local-masks`: the stand-in models return a recorded mask; for CLIPSeg the logits are given at the picture's own size, so Python's resize is the identity; every `threshold`, `feather` and `invert` edge, and bad `points` texts). Test: `runner-local-masks.unit.spec.ts`.
+
+**Acceptance:**
+- Every fixture case is exact given the mask.
+- `/api/inpaint/segment` sends the same payload as before (its test stays green).
+- Mask extractor → Object removal runs with ComfyUI off.
+
+**Live check:** one text call and one click call, about $0.01.
+
+---
+
+### Task R7.5: Subject mask on a still picture (family `subject-mask`)
+
+| Piece | Python | The runner |
+|---|---|---|
+| Point | `nodes_subject_track.py:160-248`: `(point_x·W, point_y·H)`, one positive point | One point prompt, rounded to whole pixels as `samInput.ts` does, `return_multiple_masks: true` |
+| Pick | `best`: SAM's score; `largest` / `smallest`: by pixel count | `best`: the first mask; `largest` / `smallest`: by count over the masks returned. A single mask is taken for every mode |
+| Mask | `(m > 0)`; `mask_grow > 0`: `cv2.dilate(3 × 3, round(grow))`; `< 0`: `cv2.erode` | Exact, given the mask: `maxFilterCore`, and the same over the inverted mask for the erode |
+| Cutout | `rgb / 255 · mask` (3 channels) | Exact |
+| Outputs | a mask batch and a cutout batch, no ui | A `mask` value and a picture |
+
+- A frame batch leaves the workflow to the engine (ruling (e)).
+
+**Price:** R7.4's card.
+
+**Files:** `localModels.ts` (both), `eligibility.ts`, `executors.ts`, the fixture script (group `local-masks` grows: the stand-in decoder returns three recorded masks with scores, `mask_grow` −32 / −1 / 0 / 3 / 32). Test: `runner-local-masks.unit.spec.ts`.
+
+**Acceptance:** exact given the masks; a clip leaves the workflow to the engine.
+
+**Live check:** one picture, about $0.005.
+
+---
+
+### Task R7.6: Slow motion (AI) (family `slow-motion-ai`)
+
+**Consumes:** R5.1b (encode, decode), R5.2 and R6.1 (`frames` values, `frameShapes`, `mediaLease`).
+
+| Piece | Python | The runner |
+|---|---|---|
+| No work | `nodes_frame_interp.py:219-228`: `T < 2` or `multiplier < 2`: the input handed on | A `pass`, free |
+| Call | RIFE 4.6 between each pair at `k / m` | The batch encoded once as H.264 at high quality (ruling (g)), handed off, and one call to `fal-ai/rife/video` asking for `m − 1` frames between each pair (the field names come from the saved schema) |
+| Output | `(T − 1)·m + 1` frames, the originals at `i·m` | The answer decoded to a batch. Its count is forced to `(T − 1)·m + 1` by nearest frame, and the original 8-bit frames are put back at `i·m` (exact). Kept as a `frames` value, with no ui |
+
+- A multiplier the schema can't express, or a batch over the hosted cap (ruling (g)), leaves the workflow to the engine.
+- Stop kills the encode and the decode under the lease (rule 8).
+
+**Price:** a new card, `fal-ai/rife/video`, billed by compute time ($0.0013 a compute-second on the page, read by the task). It is an estimate, a ceiling per output frame and megapixel (ruling (j)). It blocks switch-on until the live check measures it.
+
+**Files:** `localModels.ts` (both), `paidRates.ts`, `paidSettings.ts`, `eligibility.ts` (`FRAMES_OUTPUTS` gains slot 0 while on), `executors.ts`. Test: `runner-local-slowmo.unit.spec.ts`, with the fake fal answering a recorded clip, and one with too few frames.
+
+**Acceptance:**
+- The output count and the original frames are exact.
+- Load video → Get video components → Slow motion (AI) → Create video → Save video runs with ComfyUI off.
+- Stop leaves no `ffmpeg` running.
+
+**Live check:** a 2-second 480p clip at ×2, about $0.05 (up to $0.10: compute time is unknown until measured).
+
+---
+
+### Task R7.7: Whisper transcribe (family `whisper-captions`)
+
+**Consumes:** R3.10 (the Wizper call and card), R5.3 (`resampleLikeTorchaudio`, WAV writing).
+
+| Piece | Python | The runner |
+|---|---|---|
+| Sound | `nodes_audio_ml.py:104-117`: batch 0, mean of the channels, resampled to 16 kHz, the whole sound | The same, as a 16-bit WAV, the whole sound up to the cap (ruling (h)); R3.10's hand-off |
+| Call | faster-whisper `model_size`, `vad_filter=True` | `fal-ai/wizper` with `{ audio_url, task: 'transcribe', chunk_level: 'segment', version: '3' }`, plus `language` unless it is `auto` or blank after `strip()`. `model_size` is not sent: Wizper runs large-v3 only (ruling (h)) |
+| Language | any code faster-whisper knows | A code outside Wizper's saved list leaves the workflow to the engine |
+| Captions | `:178-207`: each segment's `text.strip()`, empty ones skipped; `s = int(round(start·fps))`, `e = max(int(round(end·fps)), s + 1)` (half to even); `"{s} {e} {text}"` joined by `\n` | Exact, given the chunks (`timestamp: [start, end]`). A chunk with no end ends at the sound's length (fix) |
+| SRT | `_format_srt_time` `:120-125`; blocks numbered by `enumerate`, so a skipped segment leaves a gap | Exact, except the numbers run 1, 2, 3 with no gaps (fix; no saved project uses the class) |
+| Text | the texts joined by one space | Exact |
+| Outputs | three strings, no ui | Three `text` values |
+
+**Price:** R3.10's `fal-ai/wizper` card (an estimate, $0.0001 a second sent), charged by the seconds sent. One live measurement serves both families.
+
+**Files:** `localModels.ts` (both; the request reuses `soundIn.ts`'s `wizperInput`), `eligibility.ts` (`valueInputs` for the sound; `OUTPUT_KINDS` text), `executors.ts`, the fixture script (group `local-whisper`: the stand-in `WhisperModel.transcribe` returns recorded segments, including empty and whitespace texts, `.5` frame edges, and fps 1 / 23.976 / 120). Test: `runner-local-whisper.unit.spec.ts`.
+
+**Acceptance:**
+- The three texts equal Python's, apart from the SRT numbering fix.
+- Auto subtitle's chain up to Caption track runs with ComfyUI off.
+
+**Live check:** a 60-second clip, about $0.006.
+
+---
+
+### Task R7.8: Vocal separator (family `vocal-split`)
+
+| Piece | Python | The runner |
+|---|---|---|
+| Sound | `nodes_audio_ml.py:249-295`: batch 0; mono repeated to stereo; more than two channels cut to two; resampled to the model's rate | The same channel steps, at the sound's own rate, sent as 16-bit FLAC (R5.3) through the hand-off. The provider resamples |
+| Call | Demucs `model`, `shifts`, `split=True` | `ryan5453/demucs` with `{ audio, model, shifts, stem: 'vocals', output_format: 'wav' }` (names from the saved schema; ruling (i)) |
+| Outputs | `vocals`; `instrumental = sum of stems − vocals` | The answer's vocals and no-vocals, each read as a sound value (R5.2). Two stems sum to the same instrumental |
+
+- A `model` or `shifts` value the schema refuses (for example `shifts` 0) leaves the workflow to the engine.
+- A sound over the hosted cap does the same (ruling (i)).
+
+**Price:** a new card, `ryan5453/demucs`. It is billed by GPU time; the page says about $0.026 a run. It is an estimate per second of sound sent, with the page's figure as the floor. It blocks switch-on until the live check measures it (spec Open question 6).
+
+**Files:** `localModels.ts` (both), `paidRates.ts`, `paidSettings.ts`, `eligibility.ts` (`SOUND_OUTPUTS` gains slots 0 and 1 while on), `executors.ts`. Test: `runner-local-vocals.unit.spec.ts`: mono, stereo and 6-channel sounds, and a fake answer of two WAVs.
+
+**Acceptance:** Karaoke's chain (Load audio → Vocal separator → Save audio (MP3)) runs with ComfyUI off.
+
+**Live check:** a 30-second song, about $0.03.
+
+---
+
+### Task R7.9: Lens · Depth of field in the server (family `lens-blur`, free)
+
+**Consumes:** R2.2's kernels (`gridSample`, `resizeBilinear`, `gaussianBlur`), R2.1's worker and derive plan, R2.11's preview route.
+
+| Piece | Python | The runner |
+|---|---|---|
+| No picture | `nodes_lens.py:64-70`: a 16 × 16 black picture and its preview | Exact |
+| Wired depth | `:75-85`: the first picture, channels averaged, bilinear to the picture (`align_corners=False`), clamped | Exact |
+| Depth model | `_depth.py:79-123`: Depth Anything V2 Small, bicubic to the picture, min–max normalised, cached | The same model through transformers.js, in-process. The loader is moved out of `server/api/depth/estimate.post.ts` into `server/utils/depthModel.ts` and shared with the route. The raw depth is resized to the picture and normalised, and cached by the picture's sha256. It looks the same, not exact (ruling (l)) |
+| Focus | `:88-97`: `json.loads(focus_point)`, else the centre; `clamp(int(fx·w))`; `depth[py, px] + offset`, clamped | Exact |
+| Lens | `_lens.py`: `resolve_params`; `focal_compression` (`grid_sample`, border, `align_corners=True`); `circle_of_confusion`; `render_dof` (five levels, disk / hexagon / anamorphic kernels, reflect padding, the highlight boost, tent weights); `chromatic_aberration`; `vignette` | Ported, library parity (R2 rule 10) given the same depth. Each kernel is a set of row spans, summed from float64 prefix sums: one pass costs `(2r + 1)` per pixel, not `(2r + 1)²` |
+| Preview | fixed name | As R2's effects |
+
+- **Live preview.** While `lens-blur` and `live-previews` are both on, the class joins R2.11's preview route, so slider drags don't wait for a full run. The depth is cached, so a drag only redoes the blur.
+- **Work cap.** Hosted, a picture whose `W·H·(2r + 1)·5` is over R2's per-node work cap leaves the workflow to the engine.
+- **The model.** In hosted, the model files ship in the image and are never downloaded at run time (ruling (l)).
+
+**Files:**
+- Create `server/utils/depthModel.ts`, `server/runner/effects/core/lens.ts` and `server/runner/cards/lensBlur.ts`.
+- Modify `server/api/depth/estimate.post.ts` (it uses the shared loader; same answers), `effects/table.ts`, `cores.ts`, `preview.ts`, `eligibility.ts`, `executors.ts`.
+- Modify `scripts/runner_effects_fixtures.py` (group `lens`: Python's depth fed through the `depth` input; every preset and shape; `aperture` 0 / 0.4 / 1; `focus_offset` ±1; CA, vignette and focal length at 0 and their ends; bad `focus_point` text).
+- Test: `runner-effects-lens.unit.spec.ts`.
+
+**Acceptance:**
+- Every fixture case passes, library-equal given the depth.
+- An unwired depth runs the model once per picture (a spy).
+- The depth route's own test stays green.
+- Charges nothing.
+
+**Live check:** none (free).
+
+---
+
+### Task R7.10: The two deleted local nodes say they were retired (no family)
+
+`FaceRestore` and `LipSync` (Wav2Lip) were deleted on 2026-09-27. A saved workflow that still holds one would show an unknown node.
+
+- Add both to `RETIRED_CLASSES` (`shared/runner/retired.ts`) with their own advice:
+  - "This node was retired. Use Fix faces instead."
+  - "This node was retired. Use Lip-sync a character instead."
+- Each class gets its own advice line (`RETIRED_ADVICE_OF`); R4.1's message stays the default.
+- R4.1's guard test counts "182 partner classes plus these two".
+
+**Files:** `retired.ts`, `ComfyNode.vue`'s retired line (it reads the advice per class), `runner-retired-nodes.unit.spec.ts`, `comfy-node-retired.unit.spec.ts`.
+
+**Acceptance:**
+- A synthetic saved graph with each class opens, and shows its line.
+- The graph is refused before the hold on both paths.
+- The R4.1 guard is green.
+
+**Live check:** none.
+
+---
+
+### Task R7.11: Controller check, fixture-level and in the browser (not delegated)
+
+- [ ] Every `local-*` fixture group and the `lens` group, run twice, unchanged; every `runner-*.unit.spec.ts` green.
+- [ ] Each endpoint's schema saved before its task, and every payload passing it.
+- [ ] Hosted mode, ComfyUI stopped, each family on in turn, with the fake providers:
+  - Product shot's chain;
+  - Mask extractor → Object removal → Save image;
+  - Slow motion (AI) on a short clip;
+  - Auto subtitle up to Caption track;
+  - Karaoke;
+  - Lens with a slider drag.
+
+  For each: the price shown before the run equals the hold; the charge equals the same calculation; Stop mid-call releases the hold and leaves no `ffmpeg` in `ps`.
+- [ ] With every R7 family off, the needs-engine list over every saved project and the synthetic graphs is identical to before R7.1.
+- [ ] **Live checks, only with the user's go**, one per family, backups off: Background remove ($0.0004), Upscale ($0.002), Object removal ($0.001), the two mask calls ($0.01), Subject mask ($0.005), Slow motion (AI) (about $0.05, up to $0.10), Whisper (about $0.006), Vocal separator (about $0.03). About $0.10 in all, $0.16 at most. Record each measured price with its source and date. Lay the looks side by side against the local models, and record the verdicts.
+- [ ] R8.1 (Product shot), R8.2 (Karaoke) and R8.3 (Auto subtitle) are unblocked.
+
+Record the results in `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md` and `docs/STATE.md`.
+
+### Controller rulings needed before R7 is built
+
+- **(a) Free here, paid once moved.** Today these nodes run free on this Mac. Once a family is on, each run is charged, locally too. *Recommend:* families are switched per place: keep them off on this Mac, so the local models stay free here, and switch them on in hosted after each live check. *Cost:* the same node is free locally and paid in hosted. Someone running locally without ComfyUI pays.
+- **(b) Saying which service runs it** (decision 1: "the label says which service runs it"). *Recommend:* the price's tooltip says "Runs on Replicate" or "Runs on fal". No new text on the node (the user's rule: hints are tooltips). *Cost:* less visible than a label.
+- **(c) Object removal's service.** Decision 1 named fal's `object-removal`. That is a different model, not yet carded, at $0.006–0.024 a call. *Recommend:* Replicate's `zylim0702/remove-object`. It is LaMa, the model this node runs today, and is already carded ($0.0007, estimate) and called by Separate background and foreground. *Cost:* it changes the service the user picked; LaMa's price is an estimate until measured.
+- **(d) Face restoration.** It is already replaced: Fix faces on fal's Topaz (`fix-faces`, 2026-09-27). *Recommend:* nothing to move; only R7.10's retirement message. *Cost:* none.
+- **(e) Subject mask** (spec Open question 2). *Recommend:* still pictures only, one SAM 3 call ($0.005). Clips stay with the engine until fal publishes a price for `sam2/video`. *Cost:* tracked masks on video keep needing ComfyUI.
+- **(f) Clips into picture models.** Python runs Background remove, Upscale and Object removal on every frame. *Recommend:* one picture only; a clip leaves the workflow to the engine. *Cost:* cutting out a whole clip needs ComfyUI. The alternative is one call per frame, with a frame cap and the hold at frames × price.
+- **(g) Slow motion (AI)'s hand-off and caps.** *Recommend:*
+  - send the clip as high-quality H.264;
+  - put the original frames back exactly;
+  - force the frame count to Python's `(T − 1)·m + 1`;
+  - leave a multiplier the provider can't make to the engine;
+  - in hosted, at most 10 seconds (240 frames) in.
+
+  *Cost:* the in-between frames go through one lossy encode, and longer clips need ComfyUI in hosted.
+- **(h) Whisper's settings and length.** Wizper runs only large-v3. *Recommend:*
+  - keep the model size setting, unused while on;
+  - leave languages Wizper doesn't list to the engine;
+  - send the whole sound, up to 30 minutes in hosted;
+  - number the SRT blocks without gaps (a Python bug).
+
+  *Cost:* the model size does nothing while on.
+- **(i) Vocal separator's model and price.** *Recommend:*
+  - Replicate's `ryan5453/demucs` (the inventory's choice) in two-stem mode;
+  - lossless WAV back;
+  - at most 10 minutes in hosted;
+  - priced from the live check's measurement (Open question 6).
+
+  *Cost:* it can't be switched on before the measurement.
+- **(j) Holds for time-billed calls.** RIFE, Demucs, Wizper and LaMa bill by compute time, so no hold is a proven ceiling. *Recommend:*
+  - each card is a generous ceiling from its page, marked as an estimate;
+  - each blocks switch-on until measured;
+  - the charge is never above the hold, so Sailor absorbs any overrun, logged as `runner.charge.above-hold`.
+
+  *Cost:* Sailor may absorb overruns.
+- **(k) SAM 3's answers.** *Recommend:*
+  - text prompts take the union of every mask, as CLIPSeg covers every match; clicks take one mask;
+  - an answer with no mask gives an all-black mask and is charged, since the call ran and answered;
+  - Mask by text's threshold stays: it changes nothing on SAM 3's hard masks, but still applies to a feathered one.
+
+  *Cost:* a "nothing found" answer costs $0.005.
+- **(l) The depth model in hosted.** *Recommend:*
+  - ship Depth Anything V2 Small's files in the Fly image, never downloaded at run time;
+  - one depth per picture, cached by its sha256;
+  - the blur by row spans (fast, library parity), not a full 2-D kernel.
+
+  *Cost:* the image grows by the model's size (the task records it). The depth differs a little from Python's torch run, so focus can land slightly differently on the same tap.
+
+### R7 size
+
+Eleven tasks:
+- one task for the shared pieces, with Background remove (R7.1);
+- seven tasks, one per paid family (R7.2–R7.8);
+- one free port (R7.9);
+- one retirement (R7.10);
+- the controller's check (R7.11).
+
+They cover ten classes moved and two retired names. All are small except R7.6 (encode, call, decode, frame count) and R7.9 (the lens port and its live preview).
+
+The live checks cost about $0.10 in all ($0.16 at most), each needing the user's go. Five families can't be switched on until a check measures them, because their cards are estimates: Background remove, Object removal, Slow motion (AI), Whisper transcribe and Vocal separator.
+
+---
+
+# R8–R11 — outline tasks (to be expanded before they are built)
+
+(R4.1 stays below for the record: it was built on 2026-09-28. R5, R6 and R7 are expanded above.)
 
 Each outline task becomes a full task (tests and code) when its slice starts. Every paid family: its own switch, off by default; priced in `frontend/shared/pricing/` before switch-on; the backup rule; a live paid check with the user's go.
 
@@ -4896,25 +5310,9 @@ Each outline task becomes a full task (tests and code) when its slice starts. Ev
 
 Add every class billed through api.comfy.org (the inventory's list; mechanically, every `comfy_api_nodes/nodes_*.py` class except `nodes_replicate.py`) to a shared `RETIRED_CLASSES` (`frontend/shared/runner/retired.ts`). They leave the Actions panel and the Legacy toggle (`app/data/action-catalog.ts`, `GeneratorsPanel.vue:41-46`), node search (`useNodeSearch.ts:87-140`), the agent and start-modal catalogues, and are refused on both paths before any charge (`blockedModels.ts`' shape: a 400 like ComfyUI's `node_errors`, "This node was retired. Pick another way to make this."). The Python files stay (not edited by this programme). Acceptance: a guard test that every `api.comfy.org`-billed class in `objectInfo.baseline.json.gz` is retired; a saved workflow with one opens, shows the node as retired, and is refused before the hold.
 
-### Task R7.1: Background, upscale, object removal, face restoration (decision 1)
-
-BackgroundRemove → Replicate `851-labs/background-remover` (images; video frames per frame after R5); UpscaleImage (2×) → Replicate `nightmareai/real-esrgan` at scale 2; ObjectRemove → fal `object-removal` (quality tiers priced from its page); FaceRestore → the FixFacesNode call (R3.3). Each class keeps its node and moves whole (the model line-up's Ruling 10 pattern: `upgrade` in its rule row), with a label saying which service runs it. Family per model. Acceptance: request built against the saved provider schema; priced before switch-on; a live paid check per family.
-
-### Task R7.2: Masks from text and clicks
-
-MaskExtractor (clicks) and MaskByText (a phrase) → fal `sam-3/image` (`priceBook.ts:580`, already used by `/api/inpaint/segment`); the answer decoded into a `mask` value (R0.7). SubjectMask waits for Open question 2. Family `sam-3-masks`. Acceptance: the click and text payloads equal the saved schema; the mask value equals the provider's mask decoded; live check.
-
-### Task R7.3: Slow motion (AI), transcription, vocal separation
-
-FrameInterpolateAI → fal `rife/video` (per compute-second: priced at the ceiling for the clip's measured length, R5); WhisperTranscribe → fal `wizper` (its `caption_track` output built as Python builds it from segments); VocalSeparator → Replicate `demucs` (price measured by the live check, Open question 6). Families per model. Acceptance: schema-checked requests; outputs shaped like the Python node's outputs (two stems; text + caption track).
-
-### Task R7.4: Lens · depth of field in the server
-
-LensBlur on the in-process depth model (`server/api/depth/estimate.post.ts`, transformers.js Depth Anything V2 Small) plus a port of the depth-of-field blur (`comfy_extras/nodes_lens.py`, `_depth.py`) with R2.1's kernels. The depth model's output differs from Python's torch run; parity is on the blur given the same depth map (fixtures feed Python's depth). Free, family `lens-blur`. Wav2Lip's LipSync class retires (hidden, refused with a pointer to Lip-sync a character on sync-3). Acceptance: blur parity given the depth; a saved LipSync node says it was retired.
-
 ### Task R8.1–R8.4: The mini apps (decision 10)
 
-Each app (`app/components/apps/*`, prompts built in `layouts/default.vue:4004-4007`) sends its workflow to `/api/runs` instead of `/prompt`: R8.1 Product shot (LoadImage → Background remove → Image to mask → Blend scene / Generate image → Save image; after R1, R7.1); R8.2 Karaoke (LoadAudio → Vocal separator → Save audio MP3; after R5, R7.3); R8.3 Auto subtitle (LoadVideo → Get video components → Whisper → Caption track → Create video → Save video; after R5, R6.1, R6.8, R7.3); R8.4 Face swap (after Open question 1 — or its retirement). Acceptance per app: the app's workflow is runner-eligible with its families on; the result lands where the app shows it; its price shows before the run.
+Each app (`app/components/apps/*`, prompts built in `layouts/default.vue:4004-4007`) sends its workflow to `/api/runs` instead of `/prompt`: R8.1 Product shot (LoadImage → Background remove → Image to mask → Blend scene / Generate image → Save image; after R1, R7.1); R8.2 Karaoke (LoadAudio → Vocal separator → Save audio MP3; after R5, R7.8); R8.3 Auto subtitle (LoadVideo → Get video components → Whisper → Caption track → Create video → Save video; after R5, R6.1, R6.8, R7.7); R8.4 Face swap (after Open question 1 — or its retirement). Acceptance per app: the app's workflow is runner-eligible with its families on; the result lands where the app shows it; its price shows before the run.
 
 ### Task R9.1: Timeline, browser export only (decision 5)
 
@@ -4944,10 +5342,11 @@ Lip-sync a character's Fabric and auto engines, and `sync` below sync-3 (measure
 
 ## Self-review (done while writing)
 
-- **Spec coverage.** Decisions 1 → R7.1–R7.4; 2 → Open question 1, R8.4; 3 → R4.1; 4 → R10.2; 5 → R9.1; 6 → R10.3; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.1–R8.4. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
+- **Spec coverage.** Decision 1 → R7.1–R7.10; 2 → Open question 1, R8.4; 3 → R4.1; 4 → R10.2; 5 → R9.1; 6 → R10.3; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.1–R8.4. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
 - **Types used across tasks.** `RunnerValue` (R0.1) with `mask.files` everywhere; `slotValue`, `filesOf`, `filesOfValues`, `literalOf`, `checkValue`, `withWiredValues` (values.ts); `KeptBytes.put(runId, bytes, ext)`; `DeriveIO` / `Derived` / `staticDerive` (R0.4) — `saveAsset` gains `subfolder?`/`folder?` in R1.5 by name; `ResultEntry` (R0.6); `outputKind`, `valueInputsOf`, `valueWiresAllowed`, `STATIC_VALUES`, `staticValueOf`, `staticWiredTexts` (R0.3).
 - **R2 (expanded 2026-09-26).** Decision 8 → R2 rule 10 (exact / library classes) and R2.9 (Add noise); decision 9 → R2.10; the ledger's rulings → R2 rules 7–9 (worker, one file at a time, per-node cap, start-of-take refusals), 11 (fixtures from real Python, byte-identical, multi-threaded torch) and 12 (families-off invariant); the 78 inventory classes → R2.1 (3) + R2.4 (26) + R2.5 (13) + R2.6 (4) + R2.7 (15) + R2.8 (6) + R2.9 (11); Painter (spec ruling 4) → R2.8; the ~45 live-preview classes' engine runs → R2.11. Rulings the controller still owes: R2 (a)–(f).
 - **R3 (expanded 2026-09-27).** Spec money rules 1–5 → R3 rules 7, 9, 13, 14; parity ("paid nodes: the request is identical") → rules 4–5; spec ruling 1 (3D address) → R3.9; the 38 classes → R3.3 (7) + R3.4 (4) + R3.5 (5) + R3.6 (3) + R3.7 (1) + R3.8 (2) + R3.9 (2) + R3.10 (4) + R3.11 (1, the preset path) + R3.12 (3) + R3.13 (2) + R3.14 (1) + R3.15 (2) + R3.16/R3.17 (1), with nine hidden twins. Rulings the controller still owes: R3 (a)–(t).
 - **R5 (expanded 2026-09-28).** Decision 7 and the ledger's LGPL ruling → R5.1a (build, licence, finder) and R5.1b (the module); the lossy-tolerance ruling → R5 rule 3, with the H.264 exception put to the controller (ruling (c)); the 11 codec classes → R5.3 (5) + R5.4 (4) + R5.5 (2), plus the Audio and Video cards; AudioWaveform → R6.7 (the old outline's R6.1); Timeline → R9.1; thumbnails, waveforms and the asset probe → R5.6; R3.10 / R3.17's needs → the table at the top of R5. Rulings the controller still owes: R5 (a)–(q).
 - **R6 (expanded 2026-09-30).** The outline's 20 + 12 classes → 34: R6.1 (3) + R6.2 (4) + R6.3 (2) + R6.4 (5) + R6.5 (1) + R6.6 (1) + R6.7 (2) + R6.8 (2) + R6.9 (12, with Save audio (Opus), which R5 missed) + R6.10 (1); Text clip (from `nodes_text.py`) and Audio waveform (from R5) counted in; Slow motion (AI) → R7.3. The parity rules → R6 rule 5 (exact, library, band, visual) and rule 4 (8-bit batches, ruling (a)); "switching on never breaks a working graph" → rule 3 (the start pass sends anything the runner can't do to the engine); hosted file names judged by name → rule 8; kept values read back under their caps → rule 10; per-person media slots → rule 7 (one lease per node); kept bytes never read whole → rule 6; Stop leaves no ffmpeg → rule 7 and R6.11. The hard ports named → R6.6 (Farneback), R6.8 (text), R6.3 (glitch), R6.10 (noisereduce), R6.7 (Pillow's drawing). Rulings the controller still owes: R6 (a)–(q).
+- **R7 (expanded 2026-09-30).** Decision 1 → R7.1 (Background remove), R7.2 (Upscale), R7.3 (Object removal), R7.4 (Mask by text, Mask extractor), R7.6 (Slow motion (AI)), R7.7 (Whisper), R7.8 (Vocal separator), R7.9 (Lens, free); Face restoration and Wav2Lip, already deleted on 2026-09-27 → R7.10 (retirement message only); Open question 2 (Subject mask) → R7.5, still pictures; Open question 6 (Demucs price) → R7.8's live check. The user's matching rule → R7 rule 2 (the provider's look judged by eye; the steps around each call exact against Python, given the same answer). Money rules → R7 rule 4; "never fails a working graph" → rules 3, 5 and 6; hosted safety → rule 7; Stop → rule 8. Rulings the controller still owes: R7 (a)–(l).
 - **Known gaps, deliberate:** JPEG/WebP EXIF metadata not written (R1.5); Get image size's progress text not shown (R1.4); Gate choices on a text value (spec ruling 2).
