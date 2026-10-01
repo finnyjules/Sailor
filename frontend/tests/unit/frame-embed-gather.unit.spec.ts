@@ -496,4 +496,11 @@ describe('frameNeedsFullBundle', () => {
     ;(img as any).effects = [{ ...createEffect('relight'), visible: false }]
     expect(frameNeedsFullBundle([img])).toBe('Relight')
   })
+  it('a Shape morph between two shapes (no text partner) is not an outline need, but still takes the full bundle', () => {
+    const a = createRectLayer({}), b = createRectLayer({})
+    const behaviours = [{ id: 'm', kind: 'morph', layerId: a.id, params: { style: 'shape', target: `l:${b.id}` } }]
+    expect(computeNeedsOutlines(plan([a, b]), { layers: [a, b], motion: { behaviours } } as any)).toBe(false)
+    expect(frameNeedsFullBundle([a, b], behaviours)).toBe('Morph')
+    expect(frameNeedsFullBundle([a, b], [{ ...behaviours[0], params: { style: 'letters', target: `l:${b.id}` } }])).toBe('Morph')
+  })
 })

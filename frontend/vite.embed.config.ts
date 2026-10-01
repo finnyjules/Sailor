@@ -176,7 +176,7 @@ function stripVariableFontCssUrlsPlugin(): Plugin {
   }
 }
 
-// Light layers final review: `frame-lean` also leaves out brush tips, Pixel reveal and Relight
+// Light layers final review: `frame-lean` also leaves out brush tips, Pixel reveal, Relight and Morph
 // (with lighting kept in), to stay under its size ceiling. A Frame using any of them is routed to
 // the full `frame.js` (`frameNeedsFullBundle`, app/lib/embed/frame/needs.ts, folded into
 // FrameSnapshot.needsOutlines), and `mount()` refuses one that reaches the lean bundle anyway.
@@ -188,6 +188,9 @@ const FRAME_LEAN_STUBS: [RegExp, string][] = [
   [/\/app\/lib\/relight\/relightPass\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
   [/\/app\/lib\/embed\/frame\/depthField\.embed\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
   [/\/app\/lib\/embed\/frame\/bundleKind\.ts$/, './app/lib/embed/frame/bundleKind.lean.embed.ts'],
+  // Frame Morph (medial/morph/morphPieces, ~22k): morph Frames take the full bundle.
+  [/\/app\/lib\/vector\/morphPieces\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
+  [/\/app\/lib\/vector\/morph\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
 ]
 
 function frameLeanStubsPlugin(): Plugin {

@@ -48,7 +48,8 @@ export function layersNeedPaper(layers: readonly unknown[]): boolean {
 /**
  * Light layers final review: the features `frame-lean.js` does not carry (vite.embed.config.ts
  * stubs them in that one build, to keep it under its size ceiling) — brush tips (a paint layer
- * with a tip stroke), Pixel reveal (a `pixelreveal` motion bar, muted or not) and Relight (a
+ * with a tip stroke), Pixel reveal (a `pixelreveal` motion bar, muted or not), Morph (a `morph`
+ * motion bar — the `morph` geometry effect already goes full through `layersNeedPaper`) and Relight (a
  * `relight` effect, any visibility, same R14f posture as `layersNeedPaper`). Returns the first
  * one found, or null. `gather.ts` folds a non-null answer into `needsOutlines` so the export
  * fetches the full `frame.js`; `surfaces/frame.ts`'s `mount()` re-asks on the live layers and
@@ -57,12 +58,14 @@ export function layersNeedPaper(layers: readonly unknown[]): boolean {
 export function frameNeedsFullBundle(
   layers: readonly unknown[],
   behaviours?: ReadonlyArray<{ kind?: unknown }> | null,
-): 'brush tips' | 'Pixel reveal' | 'Relight' | null {
+): 'brush tips' | 'Pixel reveal' | 'Relight' | 'Morph' | null {
   for (const l of layers) {
     const strokes = (l as { strokes?: unknown } | null)?.strokes
     if (Array.isArray(strokes) && strokes.some(s => isTipStroke(s as Parameters<typeof isTipStroke>[0]))) return 'brush tips'
   }
   if ((behaviours ?? []).some(b => b?.kind === 'pixelreveal')) return 'Pixel reveal'
+  // Frame Morph ("Morph into" / "Shape morph into"): any `morph` bar, muted or not, any partners.
+  if ((behaviours ?? []).some(b => b?.kind === 'morph')) return 'Morph'
   for (const l of layers) {
     for (const e of effectStackOf(l as Parameters<typeof effectStackOf>[0])) {
       if (e.type === 'relight') return 'Relight'
