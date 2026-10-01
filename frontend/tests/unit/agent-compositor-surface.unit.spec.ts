@@ -23,6 +23,15 @@ describe('describeCompositor', () => {
     const doc = snap.objects.find(o => o.type === 'document')!
     expect((doc.current as { background: string }).background).toBe('#000000')
   })
+  it('a lit Frame reports its light count and Darkness as read-only document facts; an unlit one does not', () => {
+    const doc = (st: CompositorState) => describeCompositor(st).objects.find(o => o.type === 'document')!.current as Record<string, unknown>
+    expect(doc(state())).not.toHaveProperty('lights')
+    const lit = state()
+    lit.layers = [...lit.layers, { id: 'L1', kind: 'light', x: 0.3, y: 0.3, rotation: 0, opacity: 1, light: { type: 'lamp' } } as unknown as LocalLayer]
+    lit.lighting = { darkness: 0.6, backgroundLit: true }
+    expect(doc(lit)).toMatchObject({ lights: 1, darkness: 0.6 })
+    expect(describeCompositor(lit).objects.some(o => o.id === 'L1')).toBe(false)
+  })
   it('every command carries a hint', () => {
     const snap = describeCompositor(state())
     expect(snap.commands.length).toBeGreaterThan(8)

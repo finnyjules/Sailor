@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   stampLightingMaps, cachedLightingMaps, LIFT_SCALE, MAP_MAX_EDGE, lightingMapSize, __lightingMapStamps, bumpLightingMapEpoch,
+  layerSig, releaseLightingMaps,
   type LightingStamp,
 } from '~/lib/frame/lighting/maps'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
@@ -210,6 +211,25 @@ describe('map size and cache', () => {
     cachedLightingMaps([wired], W, H, W, H, opts)
     cachedLightingMaps([wired], W, H, W, H, opts)
     expect(drawn).toBe(0)
+    expect(__lightingMapStamps() - n0).toBe(1)
+  })
+
+  it('layerSig is a short memoised hash, not the layer\'s JSON; a changed layer hashes differently', () => {
+    const a = { ...rectLayer('a'), text: 'x'.repeat(5000) } as unknown as LocalLayer
+    const s1 = layerSig(a)
+    expect(s1.length).toBeLessThan(40)
+    expect(layerSig(a)).toBe(s1)
+    expect(layerSig({ ...a } as LocalLayer)).toBe(s1)               // same content, same hash
+    expect(layerSig({ ...a, x: 0.41 } as LocalLayer)).not.toBe(s1)
+  })
+
+  it('releaseLightingMaps drops every cached map: the next paint re-stamps', () => {
+    const a = rectLayer('a')
+    const m1 = cachedLightingMaps([stamp(a, 0, 2)], W, H, W, H, opts)
+    releaseLightingMaps()
+    const n0 = __lightingMapStamps()
+    const m2 = cachedLightingMaps([stamp(a, 0, 2)], W, H, W, H, opts)
+    expect(m2).not.toBe(m1)
     expect(__lightingMapStamps() - n0).toBe(1)
   })
 })

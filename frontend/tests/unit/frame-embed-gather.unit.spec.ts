@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { buildFrameSnapshot, computeNeedsOutlines, formatBytes, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
 import { outlinePartnerIds, planFrameExport } from '~/lib/embed/frame/plan'
 import { assetKey, type FrameVariant } from '~/lib/embed/frame/types'
+import { frameNeedsFullBundle } from '~/lib/embed/frame/needs'
 import { createAppFrameExportIO, makeFontSource } from '~/lib/embed/frame/appIO'
 import { createTextLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import { clipFrameKey } from '~/lib/compositor/clip'
@@ -477,5 +478,22 @@ describe('createAppFrameExportIO — the live route', () => {
       expect(await io.bundleBytes!('spacetype-field')).toBe(30)
       expect(fetch).toHaveBeenCalledTimes(1)
     } finally { vi.unstubAllGlobals() }
+  })
+})
+
+// Light layers final review: frame-lean.js also stubs brush tips, Pixel reveal and Relight, so a
+// Frame using any of them takes the full bundle (folded into needsOutlines by buildFrameSnapshot).
+describe('frameNeedsFullBundle', () => {
+  it('is null for a plain Frame (and for a brush with only legacy stamps)', () => {
+    const r = createRectLayer({})
+    const legacyBrush = { id: 'b', kind: 'brush', strokes: [{ pts: [0, 0], size: 0.01 }] }
+    expect(frameNeedsFullBundle([r, legacyBrush])).toBeNull()
+  })
+  it('names brush tips, Pixel reveal and Relight (Relight even hidden)', () => {
+    expect(frameNeedsFullBundle([{ id: 'b', kind: 'brush', strokes: [{ tip: 'spray', pts: [] }] }])).toBe('brush tips')
+    expect(frameNeedsFullBundle([createRectLayer({})], [{ kind: 'pixelreveal' }])).toBe('Pixel reveal')
+    const img = createImageLayer('a.png')
+    ;(img as any).effects = [{ ...createEffect('relight'), visible: false }]
+    expect(frameNeedsFullBundle([img])).toBe('Relight')
   })
 })

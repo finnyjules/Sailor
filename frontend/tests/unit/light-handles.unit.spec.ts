@@ -126,6 +126,7 @@ describe('LightHandles', () => {
     await dot.trigger('keydown', { key: 'ArrowRight', repeat: true })
     expect(w.emitted('record')).toHaveLength(1)
     expect(w.emitted('change')).toHaveLength(3)
+    expect(lightingDragging.value).toBe(true)   // arrow nudges preview through the fast capped paint
   })
   it('counter-scales dots and aim rings by the zoom; marks the selected dot pressed; names the aim ring', () => {
     const w = make({ zoom: 2 })

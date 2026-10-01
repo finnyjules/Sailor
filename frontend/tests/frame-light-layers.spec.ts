@@ -46,6 +46,15 @@ async function openEditor(page: Page) {
   await page.evaluate((id) => window.dispatchEvent(new CustomEvent('sailor:openCompositor', { detail: { nodeId: id } })), nodeId)
   await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
   await expect.poll(() => page.evaluate(() => typeof (window as any).__compositorSetLayers === 'function'), { timeout: 10_000 }).toBe(true)
+  await gridOff(page)
+}
+/** Hide the Frame's layout grid (⇧G) so its guide lines stay out of the screenshots. */
+async function gridOff(page: Page) {
+  const overlay = page.getByTestId('compositor-grid-overlay')
+  if (!(await overlay.count())) return
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+  await page.keyboard.press('Shift+G')
+  await expect(overlay).toHaveCount(0)
 }
 async function setLayers(page: Page, layers: unknown[]) {
   await page.evaluate((ls) => (window as any).__compositorSetLayers(JSON.parse(JSON.stringify(ls))), layers)
@@ -194,6 +203,9 @@ test.describe('Frame light layers (stage 1) — real editor', () => {
     expect(await lightRuns(page)).toBeGreaterThan(0)
     expect(lit).not.toBe(unlit)
     await page.screenshot({ path: `${SHOTS}/1-lamp-added.png` })
+    // The selected light's inspector header has no stack-order or grid buttons (only Delete).
+    await expect(page.getByTestId('frame-layer-head')).toBeVisible()
+    for (const title of ['Bring forward', 'Send backward', 'Re-snap to grid']) await expect(page.getByTitle(title, { exact: true })).toHaveCount(0)
 
     // 1. Byte-identity: a Darkness edit writes the Frame record, then the light goes. The Frame
     //    must paint exactly as it did before any light code ran, with no further lighting runs.
@@ -511,6 +523,8 @@ test.describe('Frame light layers (stage 1) — real editor', () => {
     const errors: string[] = []
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
     await openFrame(page)
+    await setLayers(page, BASE)
+    await snap(page, 'unlitEditor')
     await setLayers(page, [...BASE, light('lamp', 'lamp', 0.1, 0.3, { height: 0.35 })])
     await snap(page, 'editor')
     await page.getByTestId('compositor-right-panel').getByRole('button', { name: /^Download/ }).click()
@@ -519,12 +533,7 @@ test.describe('Frame light layers (stage 1) — real editor', () => {
     const ready = sheet.getByText('One file · plays anywhere'), failed = sheet.getByText("The export couldn't be built", { exact: false })
     await expect(ready.or(failed)).toBeVisible({ timeout: 90_000 })
     if (await failed.isVisible()) {
-      // Known, NOT a light-layer bug: since the Relight depth-field worker (85551b53f, 2026-09-30)
-      // the frame bundles carry a `new URL("/assets/depthFieldWorker-….js")`, so exportEmbedHtml's
-      // network gate refuses EVERY Frame (frame-embed-parity fails the same way, with no light).
       const why = errors.find(e => e.includes('[Frame] web export failed')) ?? errors.join(' | ')
-      console.log('[web export file] the export was refused:', why)
-      test.skip(/depthFieldWorker/.test(why), `web export refused for every Frame (depth-field worker URL in the embed bundle): ${why.slice(0, 160)}`)
       throw new Error(`web export failed: ${why}`)
     }
     const sizeText = await page.getByTestId('frame-web-export-size').textContent()
@@ -534,10 +543,25 @@ test.describe('Frame light layers (stage 1) — real editor', () => {
     const r = await canvasRect(page)
     const exp = await renderExported(context, html, 0, { width: Math.round(r.width), height: Math.round(r.height) })
     await snapUrl(page, 'web', exp.png, 'editor')
-    const cells = maxCellDiff(await gridMeans(page, 'web'), await gridMeans(page, 'editor'))
-    console.log('[web export file] size', sizeText, '| requests', exp.requests.length, '| max 6×6 cell diff vs editor:', cells)
+    const gw = await gridMeans(page, 'web'), ge = await gridMeans(page, 'editor')
+    console.log('[web export file] cell diffs (web − editor):', gw.map((v, i) => Math.round((v - ge[i]!) * 10) / 10).join(' '))
+    // The region compared is the Frame outside the "LIGHT" word (rows 1–2, columns 1–4 of the
+    // 6×6 grid): the file draws the word with its embedded font cut, whose glyph widths differ a
+    // little from the editor's — a font-fidelity difference, not a lighting one. Everything the
+    // light shapes outside it (the lamp's falloff, the shape and its shadow, the background) must
+    // match; an unlit export misses by far more than 3 levels in these cells.
+    const inWord = (i: number) => { const r = Math.floor(i / 6), c = i % 6; return r >= 1 && r <= 2 && c >= 1 && c <= 4 }
+    const cells = maxCellDiff(gw.filter((_, i) => !inWord(i)), ge.filter((_, i) => !inWord(i)))
+    const word = maxCellDiff(gw.filter((_, i) => inWord(i)), ge.filter((_, i) => inWord(i)))
+    console.log('[web export file] size', sizeText, '| requests', exp.requests.length, '| max cell diff outside the word:', cells, '| inside it:', word)
     expect(exp.requests).toEqual([])
     expect(cells).toBeLessThan(3)
+    expect(word).toBeLessThan(6)
+    // Teeth: the same cells against the UNLIT editor are far apart (the export really is lit).
+    const gu = await gridMeans(page, 'unlitEditor')
+    const teeth = maxCellDiff(gw.filter((_, i) => !inWord(i)), gu.filter((_, i) => !inWord(i)))
+    console.log('[web export file] teeth — max cell diff vs the unlit editor:', teeth)
+    expect(teeth).toBeGreaterThan(10)
   })
 })
 

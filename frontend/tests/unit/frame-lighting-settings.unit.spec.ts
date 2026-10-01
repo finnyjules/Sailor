@@ -66,6 +66,12 @@ describe('visibleLights', () => {
     expect(visibleLights(many as any).map(l => l.id)).toEqual(['l0', 'l1', 'l2', 'l3', 'l4', 'l5'])
     expect(MAX_LIGHTS).toBe(6)
   })
+  it('with groups, drops a light inside a hidden group (any ancestor)', () => {
+    const groups: any[] = [{ id: 'outer', hidden: true }, { id: 'inner', parentId: 'outer' }, { id: 'shown' }]
+    const layers: any[] = [L('a', { groupId: 'inner' }), L('b', { groupId: 'shown' }), L('c')]
+    expect(visibleLights(layers, groups).map(l => l.id)).toEqual(['b', 'c'])
+    expect(visibleLights(layers).map(l => l.id)).toEqual(['a', 'b', 'c'])
+  })
 })
 
 describe('frame lighting record', () => {

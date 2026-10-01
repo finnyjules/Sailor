@@ -130,3 +130,20 @@ describe('placeTemplate', () => {
     expect(after).toEqual([])
   })
 })
+
+describe('placeTemplate — light cap', () => {
+  const light = (key: string) => ({ key, layer: { id: key, kind: 'light', x: 0.5, y: 0.5, rotation: 0, opacity: 1, light: { type: 'lamp' } } as any })
+  it('drops template lights beyond the Frame\'s 6 and says how many', () => {
+    const lit: Template = { ...tpl, layers: [...tpl.layers, light('l1'), light('l2'), light('l3')] }
+    const existing = Array.from({ length: 4 }, (_, i) => ({ id: 'e' + i, kind: 'light' } as any))
+    const r = placeTemplate({ layers: existing, groups: [] }, lit, {}, mkCtx())
+    expect(r.layers.filter(l => l.kind === 'light')).toHaveLength(6)
+    expect(r.droppedLights).toBe(1)
+    expect(Object.keys(r.instance.placedKeys)).toEqual(['bg', 'head', 'l1', 'l2'])
+  })
+  it('drops nothing when there is room', () => {
+    const r = placeTemplate({ layers: [], groups: [] }, { ...tpl, layers: [...tpl.layers, light('l1')] }, {}, mkCtx())
+    expect(r.droppedLights).toBe(0)
+    expect(r.layers).toHaveLength(3)
+  })
+})
