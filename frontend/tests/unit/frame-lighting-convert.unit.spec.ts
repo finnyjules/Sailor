@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   relightLightsToLayers, hasLegacyRelightLights, setupToLightLayers, relightBoxToFrame, frameToRelightBox,
-  activeRelightSetup, relightConvertedMessage,
+  activeRelightSetup, relightConvertedMessage, relightConversionToast,
 } from '~/lib/frame/lighting/convertRelight'
 import { relightSetup, RELIGHT_SETUP_NAMES } from '~/lib/relight/presets'
 import { MAX_LIGHTS, DEFAULT_LIGHTING } from '~/lib/frame/lighting/settings'
@@ -240,5 +240,13 @@ describe('relightConvertedMessage', () => {
   it('says the lights are Frame lights, and how many were left out', () => {
     expect(relightConvertedMessage(0)).toBe('Relight\'s lights are now Frame lights')
     expect(relightConvertedMessage(2)).toBe('Relight\'s lights are now Frame lights — 2 left out')
+  })
+})
+
+describe('relightConversionToast', () => {
+  it('toasts once per Frame per session (an undone conversion re-converts silently)', () => {
+    expect(relightConversionToast('frame-a', 1)).toBe('Relight\'s lights are now Frame lights — 1 left out')
+    expect(relightConversionToast('frame-a', 0)).toBeNull()
+    expect(relightConversionToast('frame-b', 0)).toBe('Relight\'s lights are now Frame lights')
   })
 })

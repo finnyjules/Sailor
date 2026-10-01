@@ -189,3 +189,14 @@ export function activeRelightSetup(layers: readonly LocalLayer[], photo: LocalLa
 export function relightConvertedMessage(dropped: number): string {
   return dropped > 0 ? `Relight's lights are now Frame lights — ${dropped} left out` : 'Relight\'s lights are now Frame lights'
 }
+
+/** Frames whose conversion toast has shown this session (module-level: it outlives the editor,
+ *  which is mounted fresh per open). An undo of the conversion re-converts on the next open,
+ *  silently. */
+const _toastedFrames = new Set<string>()
+/** The toast for a conversion on open — once per Frame per session, null after that. */
+export function relightConversionToast(frameId: string, dropped: number): string | null {
+  if (_toastedFrames.has(frameId)) return null
+  _toastedFrames.add(frameId)
+  return relightConvertedMessage(dropped)
+}

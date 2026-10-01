@@ -187,6 +187,15 @@ describe('editor: Relight and the Frame\'s lights (stage 2)', () => {
     expect('sailor_localLighting' in node.data.properties).toBe(false)
     expect(ed.canUndo.value).toBe(false)
   })
+  it('convertLegacyRelight maps through the Frame size it is given (its aspect), not the editor dims', () => {
+    const top = [photo([oldFx([oldLight({ x: 0.5, y: 0 })])])]
+    const a = makeEditor({ sailor_localLayers: top })
+    a.ed.convertLegacyRelight({ w: 1000, h: 500 })
+    expect(lightsIn(a.node)[0].y).toBeCloseTo(0.25, 9)            // 0.125 Frame widths up = 0.25 of a 2:1 Frame's height
+    const b = makeEditor({ sailor_localLayers: top })
+    b.ed.convertLegacyRelight()                                    // the editor's 680 × 680
+    expect(lightsIn(b.node)[0].y).toBeCloseTo(0.375, 9)
+  })
   it('convertLegacyRelight does nothing (no history) when there is nothing to convert', () => {
     const { ed } = makeEditor({ sailor_localLayers: [photo([oldFx([])])] })
     expect(ed.convertLegacyRelight()).toBeNull()

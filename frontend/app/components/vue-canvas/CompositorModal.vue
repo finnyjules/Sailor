@@ -143,7 +143,7 @@ import {
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight } from '~/lib/relight/settings'
 import type { RelightSetupName } from '~/lib/relight/presets'
-import { activeRelightSetup, hasLegacyRelightLights, relightConvertedMessage } from '~/lib/frame/lighting/convertRelight'
+import { activeRelightSetup, hasLegacyRelightLights, relightConversionToast } from '~/lib/frame/lighting/convertRelight'
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
@@ -2396,18 +2396,6 @@ function onDistortPointerDown(cornerKey: 'tl' | 'tr' | 'br' | 'bl', e: PointerEv
 
 // ── Relight (light layers stage 2): the photo's panel; its lights are the Frame's light layers ──
 const relightSelected = computed(() => activeEffect.value?.type === 'relight' && !!activeEffectLayer.value)
-// Same geometry as distortHandlePositions / onDistortPointerDown (proven under rotation):
-// boxPx is in canvas-display px, the layer centre is (l.x·W, l.y·H), rotation about it.
-/** Layer fraction (0,0 = the layer box's top left, before rotation) → canvas display px. */
-function relightToCanvas(fx: number, fy: number): { x: number; y: number } {
-  const l = activeEffectLayer.value
-  const W = canvasDisplay.w, H = canvasDisplay.h
-  const box = boxPx(l)
-  const cx = l.x * W, cy = l.y * H
-  const rad = ((l.rotation || 0) * Math.PI) / 180, cosA = Math.cos(rad), sinA = Math.sin(rad)
-  const dx = (fx - 0.5) * box.w, dy = (fy - 0.5) * box.h
-  return { x: cx + dx * cosA - dy * sinA, y: cy + dx * sinA + dy * cosA }
-}
 /** The panel's light chips: the Frame's light layers, named as in the layer list. */
 const relightLightChips = computed(() => frameLightLayers.value.map(l => ({
   id: l.id, name: rowLabel({ layer: l }), color: l.light.color, visible: l.visible !== false,
@@ -2432,17 +2420,26 @@ function onRelightSelectLight(id: string) {
 }
 // An old Relight Frame (lights stored on the effect, no light layer) is converted once per open,
 // as one undo step, at the design size — at a viewing size the painter's read-only view shows it
-// and nothing is written. Waits for the artboard's real size (the conversion maps through W×H).
+// and nothing is written. It maps through the Frame's own size (its width/height widgets; only the
+// aspect matters), so it waits for that rather than the artboard (a 1:1 placeholder until the
+// first fit). The toast shows once per Frame per session (an undone conversion re-converts quietly).
+const relightFrameSize = computed<{ w: number; h: number } | null>(() => {
+  const w = readNodeIntWidget('width'), h = readNodeIntWidget('height')
+  return w > 0 && h > 0 ? { w, h } : null
+})
 let relightConvertTried = false
+// …and for the mount too: the conversion commits, and a commit re-syncs wired layers from the
+// artboard's dims, which are a 1:1 placeholder until the first fit (onMounted).
 const relightMounted = ref(false)
-onMounted(() => { relightMounted.value = true })            // after the artboard's first fit
-watch(() => [relightMounted.value, atDesign.value, canvasDisplay.w, canvasDisplay.h] as const, ([mounted, design, w, h]) => {
-  if (relightConvertTried || !mounted || !design || !compositor.value || !(w > 0 && h > 0)) return
+onMounted(() => { relightMounted.value = true })
+watch(() => [relightMounted.value, atDesign.value, relightFrameSize.value] as const, ([mounted, design, size]) => {
+  if (relightConvertTried || !mounted || !design || !size || !compositor.value) return
   relightConvertTried = true
   const ls = localLayers.value as LocalLayer[]
   if (ls.some(l => l.kind === 'light') || !hasLegacyRelightLights(ls)) return
-  const dropped = editor.convertLegacyRelight()
-  if (dropped !== null) toast(relightConvertedMessage(dropped))
+  const dropped = editor.convertLegacyRelight(size)
+  const msg = dropped !== null ? relightConversionToast(String(compositor.value.id), dropped) : null
+  if (msg) toast(msg)
 }, { immediate: true })
 
 /** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
@@ -10186,17 +10183,6 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           :style="{ left: lightHandlePos.x + 'px', top: lightHandlePos.y + 'px', transform: 'translate(-50%, -50%)' }"
           @pointerdown="onLightPointerDown"
         />
-
-        <!-- Relight: the rest of the Frame dimmed (its lights are the Frame's light dots below). -->
-        <template v-if="relightSelected && !editingId && !genActive && !relightFinishing">
-          <svg data-testid="relight-dim" class="absolute inset-0 pointer-events-none z-10" :width="canvasDisplay.w" :height="canvasDisplay.h">
-            <defs><mask id="relight-hole">
-              <rect :width="canvasDisplay.w" :height="canvasDisplay.h" fill="white" />
-              <polygon :points="[relightToCanvas(0,0), relightToCanvas(1,0), relightToCanvas(1,1), relightToCanvas(0,1)].map(p => `${p.x},${p.y}`).join(' ')" fill="black" />
-            </mask></defs>
-            <rect :width="canvasDisplay.w" :height="canvasDisplay.h" fill="rgba(0,0,0,0.35)" mask="url(#relight-hole)" />
-          </svg>
-        </template>
 
         <!-- Light layers: each light as a glowing dot (a spot's aim ring, a sun's line). Design tab only. -->
         <LightHandles

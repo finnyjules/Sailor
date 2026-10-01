@@ -49,11 +49,17 @@ withDefaults(defineProps<{
 const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; setup: [name: RelightSetupName]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': []; finish: [] }>()
 
 // Compare is a hold. Every way the hold can end releases it — including the pointer being taken
-// away (pointercancel / lostpointercapture) and the panel going away mid-hold.
+// away (pointercancel / lostpointercapture), the panel going away mid-hold, and — the fallback
+// when the button never hears the release — any pointerup in the window or the window losing focus.
 const comparing = ref(false)
+const release = () => compare(false)
 function compare(on: boolean) {
   if (comparing.value === on) return
   comparing.value = on
+  if (typeof window !== 'undefined') {
+    if (on) { window.addEventListener('pointerup', release, true); window.addEventListener('blur', release) }
+    else { window.removeEventListener('pointerup', release, true); window.removeEventListener('blur', release) }
+  }
   emit('compare', on)
 }
 function compareDown(e: PointerEvent) {

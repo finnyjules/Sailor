@@ -76,6 +76,17 @@ describe('RelightControls', () => {
     w.unmount()                                   // the panel goes away mid-hold
     expect(got).toEqual([true, false])
   })
+  it('a pointerup anywhere in the window, or the window losing focus, lets go of Compare', async () => {
+    for (const ev of [new Event('pointerup'), new Event('blur')]) {
+      const w = mk()
+      await w.get('[data-testid="relight-compare"]').trigger('pointerdown')
+      window.dispatchEvent(ev)
+      expect(w.emitted('compare')).toEqual([[true], [false]])
+      window.dispatchEvent(new Event('pointerup'))              // released once: the listener is gone
+      expect(w.emitted('compare')).toEqual([[true], [false]])
+      w.unmount()
+    }
+  })
 
   describe('surfaces price line', () => {
     const mkSurfaces = (surfacesStatus: 'idle' | 'loading' | 'ready' | 'error' | 'off', surfacesPrice: string | null = null) =>

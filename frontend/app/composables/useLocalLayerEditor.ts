@@ -472,13 +472,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   /** Persist the conversion of old Relight lights (an effect's own `lights`) into Frame light
    *  layers — once, as ONE undo step. Returns how many old lights were left out by the
    *  MAX_LIGHTS cap, or `null` when there was nothing to convert (no history written): no old
-   *  lights, or the Frame already has a light layer (lib/frame/lighting/convertRelight). */
-  function convertLegacyRelight(): number | null {
+   *  lights, or the Frame already has a light layer (lib/frame/lighting/convertRelight).
+   *  `size`: the Frame's own W×H to map through (only its aspect matters); `dims()` otherwise. */
+  function convertLegacyRelight(size?: { w: number; h: number }): number | null {
     const n = node(); if (!n) return null
     const layers = localLayers.value
     if (!hasLegacyRelightLights(layers)) return null
     const props = n.data.properties as Record<string, unknown> | undefined
-    const { w, h } = dims()
+    const { w, h } = size ?? dims()
     const r = relightLightsToLayers(layers, props?.sailor_localLighting ? lighting.value : null, w, h)
     if (!r.changed) return null
     recordHistory()
