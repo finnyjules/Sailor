@@ -104,6 +104,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   SubjectMask: { frames: LINK, point_x: 0.5, point_y: 0.5, output_mode: 'best', mask_grow: 0 },
   // Slow motion (AI) (R7.6): one clip; its call is RIFE video's.
   FrameInterpolateAI: { frames: LINK, multiplier: 2 },
+  // Whisper transcribe (R7.7): the sound; its call is Wizper's.
+  WhisperTranscribe: { audio: LINK, model_size: 'base', language: 'auto', fps: 30 },
   // Music and speech (R3.8): the text; the rest at the node's defaults.
   GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },
@@ -150,8 +152,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   EnhanceVideoNode: { model: 'Topaz Video Upscale', video_url: '/view?filename=clip.mp4&type=input', target_resolution: '1080p', fps: 'original' },
 }
 
-/** A sound-in node's WAV (R3.10): one sample of silence. */
-const SOUND_WAV = { wav: new Uint8Array(46), seconds: 1 / 8000, frames: 1, rate: 8000, channels: 1 }
+/** A sound-in node's WAV (R3.10): one sample (not silence: Whisper transcribe, R7.7, makes no call for silence). */
+const SOUND_WAV = { wav: Uint8Array.of(...new Uint8Array(44), 1, 0), seconds: 1 / 8000, frames: 1, rate: 8000, channels: 1 }
 
 /** Object removal's mask (R7.3), kept as the runner keeps masks. */
 const MASK_FILE: OutputFile = { filename: 'mask.png', subfolder: '', type: 'temp' }

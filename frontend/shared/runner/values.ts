@@ -66,6 +66,9 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   TranscribeAudioNode: { 0: 'text' },
   WhisperRemoteNode: { 0: 'text' },
   IdentifySpeakersNode: { 0: 'json' },
+  // R7.7: Whisper transcribe's caption track, SRT and text (values only while `whisper-captions` is
+  // on: eligibility.ts outputKindsFor drops this row with it off).
+  WhisperTranscribe: { 0: 'text', 1: 'text', 2: 'text' },
   // R5.4: Get video components' frame batch and rate (its sound, slot 1, is a
   // file), and Create video's made video (values only while `media-video` is
   // on: eligibility.ts outputKindsFor drops these rows with it off).

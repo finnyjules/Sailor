@@ -27,7 +27,8 @@ import { probeVideoFile, type SoundReadIO } from '../media/values'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { sha256Hex } from './handoff'
 import { parseInputFileRef } from './inputs'
-import { silenceWav, silentCardAt, soundFileBeforeRun, type PythonWav } from './soundWav'
+import { silenceWav, silentCardAt, soundFileBeforeRun, whisperSilenceWav, type PythonWav } from './soundWav'
+import { WHISPER_CLASS } from '#shared/runner/localModels'
 import type { MeasuredMedia, OutputFile } from './types'
 
 export interface SoundInReads {
@@ -88,8 +89,9 @@ export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads
   if (!isLink(link)) return { problem: SOUND_IN_NEEDS_SOUND }
   try {
     if (reads.soundWav) return { problem: null, measured: measuredWav(await reads.soundWav(link)) }
-    // An Audio card's 1 s of silence (fix round 1, Important): known before the run, priced at 1 s.
-    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(silenceWav()) }
+    // An Audio card's 1 s of silence (fix round 1, Important): known before the run, priced at 1 s
+    // (R7.7: Whisper transcribe's own 16 kHz WAV of it).
+    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(node.class_type === WHISPER_CLASS ? whisperSilenceWav() : silenceWav()) }
     const file = soundFileBeforeRun(prompt, link, parseInputFileRef)
     if (!file || !reads.soundFileWav) return null
     return { problem: null, measured: measuredWav(await reads.soundFileWav(file)) }

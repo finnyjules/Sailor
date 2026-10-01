@@ -208,6 +208,20 @@ Groups:
              stand-in was asked for and the output frames (8-bit, exact), for
              frontend/server/runner/generators/localModels.ts
              (tests/unit/runner-local-slowmo.unit.spec.ts)
+  local-whisper (R7.7) Whisper transcribe (comfy_extras/nodes_audio_ml.py)
+             with faster-whisper's WhisperModel a stand-in (a module put in
+             sys.modules) whose transcribe answers recorded segments. The real
+             execute then makes the caption track, the SRT and the text:
+             empty and whitespace texts skipped (a gap in Python's SRT
+             numbers), .5 frame edges (half to even), fps 1, 2, 23.976, 30
+             and 120, ends before starts, SRT times past an hour and at a
+             half millisecond, non-ASCII; every kind of language (auto,
+             blank, spaced, upper case, a code); and `sounds`: what
+             `_audio_to_mono16k` hands Whisper for the standard clips (mono
+             and stereo at 16, 44.1 and 48 kHz, a float clip beyond ±1), its
+             length, sha256 and spot samples, for
+             frontend/server/runner/generators/localModels.ts and soundWav.ts
+             (tests/unit/runner-local-whisper.unit.spec.ts)
   e2e    (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
@@ -4079,6 +4093,109 @@ def local_slowmo_group() -> dict:
     return {"cases": cases}
 
 
+def local_whisper_group() -> dict:
+    """Whisper transcribe's real execute with faster-whisper a stand-in (R7.7): the three texts Python
+    makes of recorded segments, the language and VAD it asks for, and the 16 kHz mono samples it hands
+    Whisper for the standard clips."""
+    import hashlib
+    import tempfile
+    import types
+    import numpy as np
+    import comfy_extras.nodes_audio as na
+    from comfy_extras import nodes_audio_ml as ml
+
+    seen: list = []
+    answer: list = []
+
+    class Seg:
+        def __init__(self, start, end, text):
+            self.start, self.end, self.text = start, end, text
+
+    class StandInModel:
+        def __init__(self, size, device=None, compute_type=None, download_root=None):
+            self.size = size
+
+        def transcribe(self, samples, language=None, vad_filter=False):
+            seen.append({"samples": samples, "language": language, "vad_filter": vad_filter, "model_size": self.size})
+            return (Seg(*a) for a in answer), None
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = StandInModel
+
+    def clip_audio(clip: dict) -> dict:
+        tmp = tempfile.mkdtemp(prefix="local-whisper-")
+        try:
+            path = os.path.join(tmp, "clip.wav")
+            with open(path, "wb") as f:
+                f.write(clip_bytes(clip["kind"], clip["rate"], clip["channels"], clip["rate"] * clip["seconds"], clip["seed"]))
+            waveform, rate = na.load(path)
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+        return {"waveform": waveform.unsqueeze(0), "sample_rate": rate}
+
+    def run(audio: dict, segments: list, fps, language: str, model_size: str = "base"):
+        seen.clear()
+        answer[:] = segments
+        ml._WHISPER_CACHE.clear()
+        with mock.patch.dict(sys.modules, {"faster_whisper": fake}):
+            res = ml.WhisperTranscribeNode.execute(audio=audio, model_size=model_size, language=language, fps=fps)
+        assert len(seen) == 1
+        return res.args, seen[0]
+
+    def srt_gapless(segments: list) -> str:
+        """The runner's SRT (the fix): Python's own blocks and times, numbered 1, 2, 3 with no gaps."""
+        kept = [(a, b, t.strip()) for a, b, t in segments if t.strip()]
+        return "\n".join(f"{i}\n{ml._format_srt_time(a)} --> {ml._format_srt_time(b)}\n{t}\n" for i, (a, b, t) in enumerate(kept, start=1))
+
+    short = clip_audio({"kind": "pcm16", "rate": 16000, "channels": 1, "seconds": 1, "seed": 7001})
+    cases: list = []
+
+    def case(name: str, segments: list, fps=30.0, language: str = "auto", model_size: str = "base"):
+        (captions, srt, text), got = run(short, segments, fps, language, model_size)
+        cases.append({
+            "name": name, "fps": _float_hex(float(fps)), "fps_value": fps, "language": language, "model_size": model_size,
+            "segments": [{"start": _float_hex(a), "end": _float_hex(b), "text": t} for a, b, t in segments],
+            "captions": captions, "srt": srt, "text": text, "srt_gapless": srt_gapless(segments),
+            "language_sent": got["language"], "vad_filter": got["vad_filter"], "model_size_used": got["model_size"],
+        })
+
+    case("basic · 30 fps", [(0.0, 2.5, " Hello there."), (2.5, 4.0, "  "), (4.0, 5.25, " How are you? ")])
+    case("half frame edges · 2 fps", [(0.25, 0.75, " a"), (1.25, 1.75, " b"), (2.25, 2.25, " c"), (3.75, 4.25, " d")], fps=2.0)
+    case("fps 1 · .5 seconds", [(0.5, 1.5, "one"), (1.5, 2.5, "two"), (2.5, 3.5, "three"), (4.5, 4.5, "same")], fps=1.0)
+    case("fps 23.976", [(0.0, 1.2345, " The quick"), (1.2345, 3.0031, ""), (3.0031, 7.77, " brown fox"), (7.77, 12.5021, " jumps.")], fps=23.976)
+    case("fps 120", [(0.004166, 0.0125, " tiny"), (10.0, 10.00001, " flash"), (59.99, 61.0045, " long")], fps=120.0)
+    case("no segments", [])
+    case("every text blank", [(0.0, 1.0, ""), (1.0, 2.0, "   "), (2.0, 3.0, "\n\t ")])
+    case("non-ASCII", [(0.0, 1.5, " café 猫 😀 "), (1.5, 3.0, " 日本語 ")])
+    case("end before start", [(5.0, 4.0, " backwards"), (6.0, 6.0, " zero length")])
+    case("srt times past an hour and at half milliseconds", [(3599.9995, 3600.0005, " edge"), (3725.0625, 7322.5, " two hours"), (0.0005, 0.0015, " ms")], fps=30.0)
+    case("inner spaces kept", [(0.0, 2.0, "  two  words  ")], fps=24.0)
+    for lang in ["auto", "AUTO", " Auto ", "", "   ", "en", " fr ", "EN", "xx", "zh-CN"]:
+        case(f"language {lang!r}", [(0.0, 1.0, " hi")], language=lang)
+    for size in ["tiny", "large-v3"]:
+        case(f"model size {size}", [(0.0, 1.0, " hi")], model_size=size)
+
+    clips = [
+        {"name": "mono 16 kHz 3 s", "kind": "pcm16", "rate": 16000, "channels": 1, "seconds": 3, "seed": 7101},
+        {"name": "stereo 16 kHz 3 s", "kind": "pcm16", "rate": 16000, "channels": 2, "seconds": 3, "seed": 7102},
+        {"name": "mono 44.1 kHz 2 s", "kind": "pcm16", "rate": 44100, "channels": 1, "seconds": 2, "seed": 7103},
+        {"name": "stereo 48 kHz 2 s", "kind": "pcm16", "rate": 48000, "channels": 2, "seconds": 2, "seed": 7104},
+        {"name": "stereo 44.1 kHz float, beyond ±1", "kind": "float32", "rate": 44100, "channels": 2, "seconds": 1, "seed": 7105},
+    ]
+    sounds: list = []
+    for clip in clips:
+        _out, got = run(clip_audio(clip), [], 30.0, "auto")
+        x = np.ascontiguousarray(got["samples"], dtype="<f4")
+        step = max(1, len(x) // 64)
+        sounds.append({
+            **clip, "samples": int(len(x)), "sha256": hashlib.sha256(x.tobytes()).hexdigest(),
+            "head": [_float_hex(float(v)) for v in x[:16]],
+            "spots": [[int(i), _float_hex(float(x[i]))] for i in range(0, len(x), step)],
+        })
+    return {"cases": cases, "sounds": sounds}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "handoff2": handoff2_group,
@@ -4103,6 +4220,7 @@ GROUPS = {
     "local-erase": local_erase_group,
     "local-masks": local_masks_group,
     "local-slowmo": local_slowmo_group,
+    "local-whisper": local_whisper_group,
 }
 
 

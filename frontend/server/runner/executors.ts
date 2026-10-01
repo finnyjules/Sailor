@@ -425,7 +425,9 @@ export interface PlanContext {
   /**
    * A sound-in node's WAV (R3.10, ./soundWav.ts): Python's 16-bit WAV of the
    * sound a link brings, its first 60 s, made once for the node's turn (the
-   * one its media check measured). Absent: such a node fails plainly.
+   * one its media check measured); for Whisper transcribe (R7.7) the whole
+   * sound as 16 kHz mono (./soundWav.ts whisperWavOf). Absent: such a node
+   * fails plainly.
    */
   soundWav?(link: ApiLink): Promise<PythonWav>
   /**

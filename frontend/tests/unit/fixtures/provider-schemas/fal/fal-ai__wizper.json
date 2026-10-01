@@ -1,0 +1,386 @@
+{
+  "endpoint": "fal-ai/wizper",
+  "fetchedAt": "2026-10-01",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/wizper",
+    "pricing": "https://fal.ai/models/fal-ai/wizper/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/WizperInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/WizperOutput"
+  },
+  "components": {
+    "schemas": {
+      "WizperInput": {
+        "title": "WhisperInput",
+        "type": "object",
+        "x-fal-order-properties": [
+          "audio_url",
+          "task",
+          "language",
+          "chunk_level",
+          "max_segment_len",
+          "merge_chunks",
+          "version"
+        ],
+        "properties": {
+          "language": {
+            "anyOf": [
+              {
+                "enum": [
+                  "af",
+                  "am",
+                  "ar",
+                  "as",
+                  "az",
+                  "ba",
+                  "be",
+                  "bg",
+                  "bn",
+                  "bo",
+                  "br",
+                  "bs",
+                  "ca",
+                  "cs",
+                  "cy",
+                  "da",
+                  "de",
+                  "el",
+                  "en",
+                  "es",
+                  "et",
+                  "eu",
+                  "fa",
+                  "fi",
+                  "fo",
+                  "fr",
+                  "gl",
+                  "gu",
+                  "ha",
+                  "haw",
+                  "he",
+                  "hi",
+                  "hr",
+                  "ht",
+                  "hu",
+                  "hy",
+                  "id",
+                  "is",
+                  "it",
+                  "ja",
+                  "jw",
+                  "ka",
+                  "kk",
+                  "km",
+                  "kn",
+                  "ko",
+                  "la",
+                  "lb",
+                  "ln",
+                  "lo",
+                  "lt",
+                  "lv",
+                  "mg",
+                  "mi",
+                  "mk",
+                  "ml",
+                  "mn",
+                  "mr",
+                  "ms",
+                  "mt",
+                  "my",
+                  "ne",
+                  "nl",
+                  "nn",
+                  "no",
+                  "oc",
+                  "pa",
+                  "pl",
+                  "ps",
+                  "pt",
+                  "ro",
+                  "ru",
+                  "sa",
+                  "sd",
+                  "si",
+                  "sk",
+                  "sl",
+                  "sn",
+                  "so",
+                  "sq",
+                  "sr",
+                  "su",
+                  "sv",
+                  "sw",
+                  "ta",
+                  "te",
+                  "tg",
+                  "th",
+                  "tk",
+                  "tl",
+                  "tr",
+                  "tt",
+                  "uk",
+                  "ur",
+                  "uz",
+                  "vi",
+                  "yi",
+                  "yo",
+                  "zh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              null
+            ],
+            "description": "\n        Language of the audio file.\n        If translate is selected as the task, the audio will be translated to\n        English, regardless of the language selected. If `None` is passed,\n        the language will be automatically detected. This will also increase\n        the inference time.\n        ",
+            "title": "Language",
+            "default": "en"
+          },
+          "chunk_level": {
+            "title": "Chunk Level",
+            "description": "Level of the chunks to return.",
+            "type": "string",
+            "default": "segment",
+            "const": "segment"
+          },
+          "audio_url": {
+            "title": "Audio Url",
+            "examples": [
+              "https://ihlhivqvotguuqycfcvj.supabase.co/storage/v1/object/public/public-text-to-speech/scratch-testing/earth-history-19mins.mp3"
+            ],
+            "type": "string",
+            "description": "URL of the audio file to transcribe. Supported formats: mp3, mp4, mpeg, mpga, m4a, wav or webm."
+          },
+          "merge_chunks": {
+            "title": "Merge Chunks",
+            "description": "Whether to merge consecutive chunks. When enabled, chunks are merged if their combined duration does not exceed max_segment_len.",
+            "type": "boolean",
+            "default": true
+          },
+          "max_segment_len": {
+            "type": "integer",
+            "maximum": 29,
+            "minimum": 10,
+            "title": "Max Segment Len",
+            "default": 29,
+            "description": "Maximum speech segment duration in seconds before splitting."
+          },
+          "version": {
+            "title": "Version",
+            "description": "Version of the model to use. All of the models are the Whisper large variant.",
+            "type": "string",
+            "default": "3",
+            "const": "3"
+          },
+          "task": {
+            "title": "Task",
+            "enum": [
+              "transcribe",
+              "translate"
+            ],
+            "description": "Task to perform on the audio file. Either transcribe or translate.",
+            "type": "string",
+            "default": "transcribe"
+          }
+        },
+        "required": [
+          "audio_url"
+        ]
+      },
+      "WizperOutput": {
+        "title": "WhisperOutput",
+        "type": "object",
+        "x-fal-order-properties": [
+          "text",
+          "chunks",
+          "languages"
+        ],
+        "properties": {
+          "languages": {
+            "title": "Languages",
+            "description": "List of languages that the audio file is inferred to be. Defaults to null.",
+            "type": "array",
+            "items": {
+              "enum": [
+                "af",
+                "am",
+                "ar",
+                "as",
+                "az",
+                "ba",
+                "be",
+                "bg",
+                "bn",
+                "bo",
+                "br",
+                "bs",
+                "ca",
+                "cs",
+                "cy",
+                "da",
+                "de",
+                "el",
+                "en",
+                "es",
+                "et",
+                "eu",
+                "fa",
+                "fi",
+                "fo",
+                "fr",
+                "gl",
+                "gu",
+                "ha",
+                "haw",
+                "he",
+                "hi",
+                "hr",
+                "ht",
+                "hu",
+                "hy",
+                "id",
+                "is",
+                "it",
+                "ja",
+                "jw",
+                "ka",
+                "kk",
+                "km",
+                "kn",
+                "ko",
+                "la",
+                "lb",
+                "ln",
+                "lo",
+                "lt",
+                "lv",
+                "mg",
+                "mi",
+                "mk",
+                "ml",
+                "mn",
+                "mr",
+                "ms",
+                "mt",
+                "my",
+                "ne",
+                "nl",
+                "nn",
+                "no",
+                "oc",
+                "pa",
+                "pl",
+                "ps",
+                "pt",
+                "ro",
+                "ru",
+                "sa",
+                "sd",
+                "si",
+                "sk",
+                "sl",
+                "sn",
+                "so",
+                "sq",
+                "sr",
+                "su",
+                "sv",
+                "sw",
+                "ta",
+                "te",
+                "tg",
+                "th",
+                "tk",
+                "tl",
+                "tr",
+                "tt",
+                "uk",
+                "ur",
+                "uz",
+                "vi",
+                "yi",
+                "yo",
+                "zh"
+              ],
+              "type": "string"
+            }
+          },
+          "text": {
+            "title": "Text",
+            "description": "Transcription of the audio file",
+            "type": "string"
+          },
+          "chunks": {
+            "title": "Chunks",
+            "description": "Timestamp chunks of the audio file",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WhisperChunk"
+            }
+          }
+        },
+        "required": [
+          "text",
+          "chunks",
+          "languages"
+        ]
+      },
+      "WhisperChunk": {
+        "title": "WhisperChunk",
+        "type": "object",
+        "x-fal-order-properties": [
+          "timestamp",
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "title": "Text",
+            "description": "Transcription of the chunk",
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "array",
+            "minItems": 2,
+            "title": "Timestamp",
+            "prefixItems": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            ],
+            "description": "Start and end timestamp of the chunk",
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "timestamp",
+          "text"
+        ]
+      }
+    }
+  },
+  "pricingText": "- **Price**: $0 per compute seconds\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

@@ -61,18 +61,18 @@ import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { hasLocalModelPicture, localModelStartProblems } from './localModelStart'
-import { LOCAL_MODEL_WORDS, isLocalModelClass } from '#shared/runner/localModels'
+import { LOCAL_MODEL_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, whisperMaxSeconds } from '#shared/runner/localModels'
 import { perFrameCredits } from '#shared/pricing/nodePrice'
 import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
-import { pythonWavOf, silenceWav, silentCardAt, soundMakerOf, type PythonWav } from './soundWav'
+import { pythonWavOf, silenceWav, silentCardAt, soundMakerOf, whisperSilenceWav, whisperWavOf, type PythonWav } from './soundWav'
 import { lipsyncUploadProblem } from './soundInMedia'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { switchedSinceHold } from './switches'
-import { measuredMediaChanged } from './mediaInputs'
+import { measuredMediaChanged, mediaWasMeasured } from './mediaInputs'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
 import type { ResultStore } from './results'
@@ -1196,15 +1196,18 @@ export function createEngine(deps: EngineDeps) {
       // A sound-in node's WAV (R3.10, ./soundWav.ts): made once for this turn from what the wire
       // brought, so the WAV measured and charged (nodeMediaCheck) is the very one the plan sends.
       const wavs = new Map<string, Promise<PythonWav>>()
+      // R7.7: Whisper transcribe sends the whole sound as 16 kHz mono (soundWav.ts whisperWavOf), not R3.10's first 60 s.
+      const whisper = take.prompt[id]!.class_type === WHISPER_CLASS
       const soundWavOnce = (link: ApiLink): Promise<PythonWav> => {
         const key = `${link[0]}:${link[1]}`
         let p = wavs.get(key)
         if (!p) {
           // An Audio card's 1 s of silence (fix round 1, Important), as Python's card hands it on.
-          if (silentCardAt(take.prompt, link)) p = Promise.resolve(silenceWav())
+          if (silentCardAt(take.prompt, link)) p = Promise.resolve(whisper ? whisperSilenceWav() : silenceWav())
           else {
             const value = valueAt(take)(link) ?? { kind: 'files' as const, files: filesAt(take)(link) }
-            p = pythonWavOf(value, soundMakerOf(take.prompt, link), { access: files, userId: run.userId, hosted: deps.hosted(), signal })
+            const io = { access: files, userId: run.userId, hosted: deps.hosted(), signal }
+            p = (whisper ? whisperWavOf : pythonWavOf)(value, soundMakerOf(take.prompt, link), io)
           }
           wavs.set(key, p)
         }
@@ -1311,7 +1314,9 @@ export function createEngine(deps: EngineDeps) {
         // The tight hold (F22 fix round 1): the files must be the ones the start
         // of the run measured and held for, and cost no more.
         const recorded = take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id] : undefined
-        if (recorded && (measuredMediaChanged(recorded, media.measured)
+        // R7.7: a record with nothing measured (Whisper's sound made in the run: only its place) is held at its
+        // ceiling; only its price is compared.
+        if (recorded && ((mediaWasMeasured(recorded) && measuredMediaChanged(recorded, media.measured))
           || nodeCredits(take.prompt[id]!, undefined, families, media.measured.seconds) > nodeCredits(take.prompt[id]!, undefined, families, recorded.seconds))) {
           throw new Error(nodeMediaChangedWords(take.prompt[id]))
         }
@@ -2213,10 +2218,23 @@ export function createEngine(deps: EngineDeps) {
           // A sound-in node's sound named by the prompt (R3.10): Python's WAV of it, as `load` reads the file.
           soundFileWav: async (f) => {
             if (!(await files.exists(f))) throw new Error(SOUND_FILE_MISSING)
-            return pythonWavOf({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted() })
+            // R7.7: Whisper transcribe's whole sound, 16 kHz mono.
+            const read = n.class_type === WHISPER_CLASS ? whisperWavOf : pythonWavOf
+            return read({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted() })
           },
           videoUploadProblem: f => lipsyncUploadProblem(f, { access: files, userId: i.userId, hosted: deps.hosted() }),
         })
+        if (n.class_type === WHISPER_CLASS) {
+          const place = deps.hosted() ? 'hosted' as const : 'local' as const
+          if (media && media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
+          // R7.7: a sound longer than Whisper sends here leaves the workflow to the engine (a stop-gap, R7.7's report).
+          const a = media?.measured.seconds.audio
+          if (typeof a === 'number' && a > whisperMaxSeconds(place)) throw refuse(WHISPER_WORDS.tooLong, 400, { nodeId, classType: n.class_type, reason: RUNNER_NOT_ELIGIBLE })
+          // Not known yet (a sound made in the run): only where it runs is recorded, so the hold is that
+          // place's longest sound (shared/runner/localModels.ts whisperCalls), never below the charge.
+          measured[index]![nodeId] = media ? media.measured : { seconds: { place }, sha: {} }
+          continue
+        }
         if (!media) continue
         if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
         measured[index]![nodeId] = media.measured

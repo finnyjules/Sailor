@@ -469,7 +469,9 @@ describe('server health: caps, sources, Stop', () => {
       // Sound in (R3.10): text and JSON, and a sound.
       'TranscribeAudioNode', 'WhisperRemoteNode', 'IdentifySpeakersNode', 'CloneSingingVoiceNode',
       // Mask by text and Mask extractor (R7.4) hand on a mask.
-      'MaskByText', 'MaskExtractor'])
+      'MaskByText', 'MaskExtractor',
+      // Whisper transcribe (R7.7) hands on three texts.
+      'WhisperTranscribe'])
     // A paid family's picture classes (R3.5's image-repair) are pictures only while their family is on (PAID_PICTURE_FAMILY).
     for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c) || Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, c), c).toBe(!videos.has(c) && !texts.has(c))
     for (const c of Object.keys(PAID_PICTURE_FAMILY)) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(false)

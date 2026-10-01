@@ -95,13 +95,30 @@
  * runs before the call and holds no media slot while the service works; the
  * decodes and the writer run under one media lease: Stop kills them all
  * within a second and removes the partial batch.
+ *
+ * Whisper transcribe (R7.7, family `whisper-captions`; comfy_extras/nodes_audio_ml.py
+ * :104-207): ONE call to fal's Wizper (R3.10's call and card) with the whole
+ * sound as Python's `_audio_to_mono16k` makes it (the channels' mean,
+ * resampled to 16 kHz as torchaudio does), sent as a 16-bit WAV
+ * (../soundWav.ts whisperWavOf, measured before the hold: the seconds it is
+ * charged on). The request is R3.10's `wizperInput` with segment chunks, not
+ * merged (Python's captions are Whisper's own segments), and the language only
+ * where Wizper lists it (else Wizper detects it); `model_size` is not sent
+ * (Wizper runs large-v3 only, ruling (h)). Exact against Python given the
+ * segments (each chunk's `timestamp: [start, end]`): the caption track
+ * (`round(t·fps)`, half to even, the end at least a frame after the start),
+ * the SRT (`_format_srt_time`) and the text; a chunk with no end ends at the
+ * sound's end (a fix), and the SRT blocks are numbered 1, 2, 3 with no gaps
+ * (Python's skipped segments left gaps: a fix). A sound Whisper would hear
+ * nothing in (no samples, or every one 0) makes no call: three empty texts,
+ * free. No ui (Python returns none).
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { isLink, type ApiLink } from '#shared/runner/graph'
 import { NO_FAMILIES } from '#shared/runner/families'
-import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
+import { pyFloatOf, pyIntOf, pyStrip, pyTruthy } from '#shared/runner/pyText'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
   BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
@@ -109,9 +126,13 @@ import {
   MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
   FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
+  WHISPER_CLASS, WHISPER_FPS, WHISPER_SLUG, WHISPER_WORDS, WIZPER_LANGUAGES, whisperMaxSeconds,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
+import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
+import { wavIsSilent } from '../soundWav'
+import { wizperInput } from './soundIn'
 import { effectPreviewName } from '#shared/runner/effects'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
@@ -153,7 +174,7 @@ export function isLocalModelPlan(classType: string): boolean {
 }
 
 /** The node's plan, by its class. */
-export function planLocalModel(ctx: PlanContext): NodePlan {
+export function planLocalModel(ctx: PlanContext): NodePlan | Promise<NodePlan> {
   const cls = ctx.prompt[ctx.nodeId]!.class_type
   if (cls === BG_REMOVE_CLASS) return planBackgroundRemove(ctx)
   if (cls === UPSCALE_2X_CLASS) return planUpscale2x(ctx)
@@ -161,6 +182,7 @@ export function planLocalModel(ctx: PlanContext): NodePlan {
   if (SAM_MASK_CLASSES.has(cls)) return planSamMask(ctx)
   if (cls === SUBJECT_MASK_CLASS) return planSubjectMask(ctx)
   if (cls === FRAME_INTERP_AI_CLASS) return planSlowMotionAi(ctx)
+  if (cls === WHISPER_CLASS) return planWhisper(ctx)
   throw new Error(`The runner cannot run a ${cls} node`)
 }
 
@@ -1334,5 +1356,152 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
         await removeMediaTempDir(work)
       }
     },
+  }
+}
+
+// ── Whisper transcribe (R7.7, family `whisper-captions`) ──
+
+/** Python's `round(x)` of a float: to the nearest whole number, half to even (exact on the double). */
+export function pyRoundHalfEven(x: number): number {
+  const r = Math.round(x)
+  return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r
+}
+
+/** `_format_srt_time` (:120-125): `int(round(seconds · 1000))` ms as HH:MM:SS,mmm. */
+export function srtTime(seconds: number): string {
+  let ms = pyRoundHalfEven(seconds * 1000)
+  const h = Math.floor(ms / 3_600_000)
+  ms -= h * 3_600_000
+  const m = Math.floor(ms / 60_000)
+  ms -= m * 60_000
+  const s = Math.floor(ms / 1000)
+  ms -= s * 1000
+  const pad = (n: number, w: number) => String(n).padStart(w, '0')
+  return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`
+}
+
+/**
+ * The language sent (or null: none, Wizper detects it). Python: `None` for
+ * blank or `auto` (`strip().lower()`), else `strip()`; a code Wizper doesn't
+ * list (its saved schema), in any case, is sent as none — Wizper detects the
+ * language rather than the run failing (the controller's note; Python's
+ * faster-whisper raises on a code it doesn't know).
+ */
+export function whisperLanguage(v: unknown): string | null {
+  const t = pyStrip(typeof v === 'string' ? v : v === undefined || v === null ? 'auto' : String(v))
+  const lower = t.toLowerCase()
+  if (lower === '' || lower === 'auto') return null
+  return WIZPER_LANGUAGES.includes(lower) ? lower : null
+}
+
+/** The node's frame rate as execute gets it (`float`): typed or wired; missing, the default. */
+export function whisperFps(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'boolean') return Number(v)
+  if (typeof v === 'string') {
+    const f = pyFloatOf(v)
+    if (f !== null && Number.isFinite(f)) return f
+  }
+  return WHISPER_FPS.default
+}
+
+/** Whisper's request: R3.10's Wizper request (transcribe, version 3, the language where sent), Whisper's own segments, unmerged. */
+export function whisperInput(inputs: Record<string, unknown>, audioUrl: string): Record<string, unknown> {
+  const language = whisperLanguage(inputs.language)
+  return { ...wizperInput({ language: language ?? 'auto' }, audioUrl), chunk_level: 'segment', merge_chunks: false }
+}
+
+/** One segment of Wizper's answer: `timestamp: [start, end]` (either may be null) and its text. */
+export interface WhisperChunk { start: number | null; end: number | null; text: string }
+
+const timeOf = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/**
+ * Wizper's segments (`chunks`), in order. An answer that isn't an object, or
+ * whose `chunks` isn't a list, is no transcript — except one with only its
+ * `text`: one segment over the whole sound.
+ */
+export function wizperChunks(result: unknown): WhisperChunk[] {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error(WHISPER_WORDS.noAnswer)
+  const r = result as Record<string, unknown>
+  if (!Array.isArray(r.chunks)) {
+    if (typeof r.text === 'string') return [{ start: 0, end: null, text: r.text }]
+    throw new Error(WHISPER_WORDS.noAnswer)
+  }
+  return r.chunks.map((c) => {
+    const o = c && typeof c === 'object' && !Array.isArray(c) ? c as Record<string, unknown> : {}
+    const ts = Array.isArray(o.timestamp) ? o.timestamp : []
+    return { start: timeOf(ts[0]), end: timeOf(ts[1]), text: typeof o.text === 'string' ? o.text : '' }
+  })
+}
+
+/**
+ * Whisper transcribe's three texts from the segments (:178-207), exact given
+ * them: each text `strip()`ed, empty ones skipped; the caption line
+ * `"{s} {e} {text}"` with s = round(start·fps), e = max(round(end·fps), s + 1);
+ * the SRT block `"{n}\n{start} --> {end}\n{text}\n"`; the texts joined by a
+ * space. Fixes: the blocks are numbered 1, 2, 3 with no gaps; a segment with
+ * no end ends at the sound's end (`soundSeconds`; unknown: its start), one
+ * with no start starts where the one before ended (the first at 0).
+ */
+export function whisperOutputs(chunks: readonly WhisperChunk[], fps: number, soundSeconds: number | null): { captions: string; srt: string; text: string } {
+  const lines: string[] = []
+  const blocks: string[] = []
+  const texts: string[] = []
+  let before = 0
+  for (const c of chunks) {
+    const start = c.start ?? before
+    const end = c.end ?? soundSeconds ?? start
+    before = end
+    const text = pyStrip(c.text)
+    if (!text) continue
+    const s = pyRoundHalfEven(start * fps)
+    const e = Math.max(pyRoundHalfEven(end * fps), s + 1)
+    lines.push(`${s} ${e} ${text}`)
+    blocks.push(`${blocks.length + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}\n`)
+    texts.push(text)
+  }
+  return { captions: lines.join('\n'), srt: blocks.join('\n'), text: texts.join(' ') }
+}
+
+function whisperValues(o: { captions: string; srt: string; text: string }): Record<number, RunnerValue> {
+  return { 0: { kind: 'text', text: o.captions }, 1: { kind: 'text', text: o.srt }, 2: { kind: 'text', text: o.text } }
+}
+
+/**
+ * Whisper transcribe's plan: one Wizper call with the WAV the engine made and
+ * measured for this turn (`ctx.soundWav`, ../soundWav.ts whisperWavOf),
+ * handed off under Python's own upload name; its answer's segments made into
+ * the three texts. A resumed node sends nothing again: its request is the one
+ * written down.
+ */
+export async function planWhisper(ctx: PlanContext): Promise<NodePlan> {
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const fps = whisperFps(inputs.fps)
+  let payload: Record<string, unknown>
+  let seconds: number | null
+  const recorded = ctx.recordedPayload
+  if (recorded && typeof recorded.audio_url === 'string') {
+    payload = recorded
+    const a = ctx.measured?.audio
+    seconds = typeof a === 'number' && Number.isFinite(a) ? a : null
+  }
+  else {
+    const link = inputs.audio
+    if (!isLink(link) || !ctx.soundWav || !ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
+    const w = await ctx.soundWav(link as ApiLink)
+    // Nothing to hear (Python's VAD finds no speech in silence): three empty texts, no call, free.
+    if (wavIsSilent(w)) return { kind: 'derive', derive: async () => ({ values: whisperValues({ captions: '', srt: '', text: '' }), ui: null }) }
+    // Held for at most this place's longest sound: a longer one is never sent (the start of the run
+    // leaves a known one to the engine; one made in the run stops here, before the call).
+    if (w.seconds > whisperMaxSeconds(ctx.hosted ? 'hosted' : 'local')) throw new Error(WHISPER_WORDS.tooLong)
+    payload = whisperInput(inputs, await ctx.bytesToUrl({ filename: 'whisper.wav', subfolder: '', type: 'kept' }, w.wav))
+    seconds = w.seconds
+  }
+  return {
+    kind: 'provider', provider: 'fal', endpoint: WHISPER_SLUG, payload,
+    media: 'value', prefix: 'whisper',
+    valuesOf: (result): Record<number, RunnerValue> => whisperValues(whisperOutputs(wizperChunks(result), fps, seconds)),
+    uiFor: () => null,
   }
 }

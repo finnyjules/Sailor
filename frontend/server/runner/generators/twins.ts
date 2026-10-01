@@ -360,6 +360,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'SubjectMask': r('fal', null, 'no SAM 3 on Replicate is carded'),
   // R7.6, Slow motion (AI) (family slow-motion-ai): one call to fal's RIFE video for the whole clip.
   'FrameInterpolateAI': r('fal', null, 'no RIFE video on Replicate is carded'),
+  // R7.7, Whisper transcribe (family whisper-captions): one call to fal's Wizper (R3.10's) with the whole sound.
+  'WhisperTranscribe': r('fal', null, 'Replicate\'s Whisper models aren\'t carded, and none is fal\'s Wizper'),
   // R3.8, music and speech (family audio-gen): Replicate, as Python.
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',

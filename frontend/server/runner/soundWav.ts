@@ -25,7 +25,11 @@ import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { isLink } from '#shared/runner/graph'
 import { SOUND_IN_CHANNELS, SOUND_IN_EMPTY, SOUND_IN_MAX_SECONDS, SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
 import type { DecodedSound } from '../media/decode'
+import { MediaError } from '../media/run'
+import { RESAMPLE_MAX_TAPS, resampleTaps } from '../media/resample'
 import { readSound, soundNoteOf, type SoundReadIO } from '../media/values'
+import { resampleInWorker } from './compositor/worker'
+import { WHISPER_RATE } from '#shared/runner/localModels'
 import type { OutputFile, RunnerValue } from './types'
 
 /** What a sound-in node sends: the WAV, and the seconds of sound in it (what the price reads). */
@@ -172,4 +176,84 @@ export function silentCardAt(prompt: ApiPrompt, link: ApiLink): boolean {
     return a === undefined || a === null || a === ''
   }
   return false
+}
+
+// ── Whisper transcribe (R7.7, family `whisper-captions`) ──
+
+/**
+ * Python's `_audio_to_mono16k` (comfy_extras/nodes_audio_ml.py:104-117) on a
+ * decoded sound, up to the resample: batch 0 (the decoded sound), every
+ * channel's mean (`wav.mean(dim=0, keepdim=True)`, float32: summed in
+ * doubles, divided, rounded once to float32 — for one or two channels
+ * exactly torch's), mono as it is.
+ */
+export function whisperMono(s: DecodedSound): Float32Array {
+  const C = s.channels.length
+  if (C < 1) return new Float32Array(0)
+  if (C === 1) return s.channels[0]!
+  const n = s.channels[0]!.length
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    let sum = 0
+    for (let c = 0; c < C; c++) sum += s.channels[c]![i]!
+    out[i] = sum / C
+  }
+  return out
+}
+
+/** The 16-bit mono WAV Whisper's sound is sent as: each 16 kHz float32 sample as `pyInt16` (Python hands Whisper the floats). */
+export function whisperWavOfSamples(mono16k: Float32Array): PythonWav {
+  const frames = mono16k.length
+  const dataBytes = frames * 2
+  const out = new Uint8Array(44 + dataBytes)
+  out.set(wavHeader(WHISPER_RATE, 1, dataBytes), 0)
+  const v = new DataView(out.buffer)
+  for (let i = 0; i < frames; i++) v.setInt16(44 + 2 * i, pyInt16(mono16k[i]!), true)
+  return { wav: out, seconds: frames / WHISPER_RATE, frames, rate: WHISPER_RATE, channels: 1 }
+}
+
+/**
+ * Python's 16 kHz mono of a decoded sound (`_audio_to_mono16k`): the mean of
+ * its channels, resampled to 16 kHz as torchaudio does (R5.3's port, on the
+ * Frame's worker under Stop and its watchdog; a rate pair whose kernel is past
+ * the cap is refused before any work, as R5's resample is).
+ */
+export async function whisperMono16k(s: DecodedSound, signal?: AbortSignal): Promise<Float32Array> {
+  const mono = whisperMono(s)
+  if (s.rate === WHISPER_RATE || mono.length === 0) return mono
+  if (resampleTaps(s.rate, WHISPER_RATE) > RESAMPLE_MAX_TAPS) throw new MediaError('oddRate')
+  try {
+    const [out] = await resampleInWorker([mono], s.rate, WHISPER_RATE, signal)
+    return out!
+  }
+  catch {
+    throw new MediaError(signal?.aborted ? 'stopped' : 'failed')
+  }
+}
+
+/** Whisper's WAV of a decoded sound: the whole sound, mono, 16 kHz, 16-bit. */
+export async function whisperWav(s: DecodedSound, signal?: AbortSignal): Promise<PythonWav> {
+  return whisperWavOfSamples(await whisperMono16k(s, signal))
+}
+
+/**
+ * Whisper's WAV of the sound a value holds, read as Python's AUDIO holds it
+ * (its note, or its maker's), the WHOLE sound (R5's sound caps apply as it
+ * streams: nothing past them is ever decoded).
+ */
+export async function whisperWavOf(value: RunnerValue | undefined, makerClass: string, io: SoundReadIO): Promise<PythonWav> {
+  if (!value || value.kind !== 'files' || !value.files.length) throw new Error(SOUND_IN_NEEDS_SOUND)
+  const sound = await readSound({ ...value, sound: soundNoteOf(value, makerClass) }, makerClass, io)
+  return whisperWav(sound, io.signal)
+}
+
+/** Whisper's WAV of the Audio card's 1 s of silence: 16,000 zero samples. */
+export function whisperSilenceWav(): PythonWav {
+  return whisperWavOfSamples(new Float32Array(WHISPER_RATE))
+}
+
+/** Whether a 16-bit WAV this module made holds no sound (no samples, or every one 0): Whisper hears nothing. */
+export function wavIsSilent(w: PythonWav): boolean {
+  for (let i = 44; i < w.wav.length; i++) if (w.wav[i] !== 0) return false
+  return true
 }

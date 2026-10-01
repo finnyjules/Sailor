@@ -194,6 +194,16 @@ export async function measureMediaFile(file: OutputFile, rule: MediaRule, reads:
 const tidy = (n: number) => Math.round(n * 1e6) / 1e6
 
 /**
+ * Whether a record holds a measurement at all (R7.7): Whisper transcribe's
+ * record for a sound made in the run carries only where it runs (its hold is
+ * that place's ceiling), so there is nothing to compare its sound with.
+ */
+export function mediaWasMeasured(recorded: MeasuredMedia): boolean {
+  const figures = ['audio', 'video', 'videoWidth', 'videoHeight', 'videoFps'] as const
+  return figures.some(k => recorded.seconds[k] != null) || recorded.sha.audio !== undefined || recorded.sha.video !== undefined
+}
+
+/**
  * Whether a node's files at its turn are not the ones recorded at the start
  * of the run (the tight hold, F22 fix round 1): a length, size or frame rate
  * that differs (to the millionth; one that appeared or went missing counts),

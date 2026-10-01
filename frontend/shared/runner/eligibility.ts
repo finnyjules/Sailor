@@ -1600,8 +1600,9 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // each needs its family, its media family and `cards`.
   ...mediaEffectRows(SOUND_OUTPUTS),
   // ── R7: the local-model nodes moved onto paid services (./localModels.ts) ──
-  // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f)).
-  ...localModelRows(FRAMES_LINK_SOURCES),
+  // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f));
+  // R7.7's Whisper transcribe a sound from SOUND_OUTPUTS.
+  ...localModelRows(FRAMES_LINK_SOURCES, SOUND_OUTPUTS),
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -2226,6 +2227,8 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   TranscribeAudioNode: 'sound-in',
   WhisperRemoteNode: 'sound-in',
   IdentifySpeakersNode: 'sound-in',
+  // R7.7: Whisper transcribe's three texts (its chain: media-sound, cards).
+  WhisperTranscribe: 'whisper-captions',
   // R5.4: Get video components' frame batch and rate, and Create video's made video.
   GetVideoComponents: 'media-video',
   CreateVideo: 'media-video',

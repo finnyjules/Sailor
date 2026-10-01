@@ -285,6 +285,8 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // Transcribe audio (and its twin) on fal's Wizper: the page and its llms.txt give "$0 per compute second"
   // and no other figure, so the card is Sailor's own ceiling, $0.0001 a second of sound sent ($0.006 for
   // the 60 s cap): an estimate that blocks switch-on until the live check reads the real charge.
+  // R7.7: Whisper transcribe (family whisper-captions) calls it too, with the whole sound (at most 30 minutes
+  // hosted, an hour on this computer): one live measurement serves both.
   'fal-ai/wizper': {
     unit: 'per_input_second', perSecond: 0.0001,
     note: 'page and llms.txt: "$0 per compute second", no figure; Sailor\'s ceiling $0.0001/s of sound sent until a live call is billed',
