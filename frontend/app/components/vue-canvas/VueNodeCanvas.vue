@@ -37,6 +37,7 @@ import { useCanvasAnnotations, STICKY_COLORS, type Annotation, type ArrowEndpoin
 import { applyArtifactLocks, applyVariantFanOut, backfillStandaloneArtifactImages, buildFilteredWorkflow, collectKeepSet, realignWidgetValues, setNamedWidget } from '~/composables/useFilteredPrompt'
 import { type LocalLayer, ensureLayerFonts, ensureLayerImages, bakeOverlay, createImageLayer, parseIdeogramLayers, parseSeedreamLayers, drawWiredImageLayer, drawLayerSilhouette } from '~/composables/useCompositorLayers'
 import { readFrameLight } from '~/lib/compositor/frameLight'
+import { readFrameLighting, visibleLights } from '~/lib/frame/lighting/settings'
 import { framePresentKeys, legacyWiredFlagsActive } from '~/lib/compositor/frameStack'
 import { wiredClonerWidgetEntries } from '~/composables/useCloner'
 import { readWiredTreatments } from '~/composables/useWiredTreatments'
@@ -6086,7 +6087,12 @@ async function injectCompositorOverlays(workflow: any): Promise<void> {
     // runs so the backend can apply the mode per layer.
     const injectRun = async (run: LocalLayer[], z: number, blend = 'normal') => {
       if (!run.length || !(W > 0 && H > 0)) return
-      const blob = await bakeOverlay(run, W, H, readFrameLight(comp.properties)) // finishes lit as in the editor
+      // Finishes lit as in the editor, and the Frame's light layers light every run: a run is
+      // only part of the stack, so the Frame's visible lights ride along with each one (a light
+      // draws nothing itself). Stage 1: a run's layers shadow only layers of the same run.
+      const lights = visibleLights(locals)
+      const lit = lights.length ? [...run.filter(l => l.kind !== 'light'), ...lights] : run
+      const blob = await bakeOverlay(lit, W, H, readFrameLight(comp.properties), readFrameLighting(comp.properties))
       if (!blob) return
       let slot = -1
       for (let s = 0; s < 16; s++) { if (!usedSlots.has(s)) { slot = s; break } }

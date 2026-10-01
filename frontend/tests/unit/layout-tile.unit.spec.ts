@@ -75,6 +75,13 @@ describe('LayoutTile — the Frame light', () => {
     const light = { x: 0.8, y: 0.2, height: 0.4 }
     mount(LayoutTile, { props: { plan: basePlan, frameW: 100, frameH: 100, label: 'Test', light } })
     await flushPromises()
-    expect((paintMock.mock.calls[0] as unknown[]).at(-1)).toEqual(light)
+    expect((paintMock.mock.calls[0] as unknown[])[13]).toEqual(light)
+  })
+
+  it('paints with the Frame\'s lighting record, so its light layers light a tile as on the canvas', async () => {
+    const lighting = { darkness: 0.7, backgroundLit: false }
+    mount(LayoutTile, { props: { plan: basePlan, frameW: 100, frameH: 100, label: 'Test', lighting } })
+    await flushPromises()
+    expect((paintMock.mock.calls[0] as unknown[])[14]).toEqual(lighting)
   })
 })

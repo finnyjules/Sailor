@@ -23,6 +23,9 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // Type-only imports are erased at runtime, so they don't create a cycle
 // (evaluate.ts/types.ts don't import this file).
 import { DEFAULT_FRAME_LIGHT, type FrameLight } from '~/lib/compositor/frameLight'
+import { DEFAULT_LIGHTING, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
+import { lightFrame, lightingAvailable } from '~/lib/frame/lighting/lightingPass'
+import { bumpLightingMapEpoch, layerSig, type LightingStamp } from '~/lib/frame/lighting/maps'
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
@@ -72,7 +75,7 @@ import {
 // Text-outline bridge (Frame slice F1): the CSS family → fontkit bytes, and one
 // drawn run → positioned glyph outlines. Used by `drawText`'s collect sink and
 // `textLayerOutline` below.
-import { getCompositorFont, runToCommands } from '~/lib/compositor/textOutline'
+import { getCompositorFont, runToCommands, onCompositorFontReady } from '~/lib/compositor/textOutline'
 import type { VtFont } from '~/lib/compositor/textOutline'
 import { commandsToPathData, type VectorCommand } from '~/lib/vector/svg'
 // Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
@@ -1341,6 +1344,9 @@ export function createBrushLayer(partial: Partial<BrushLayer> = {}): BrushLayer 
 // images up by data URL (a miss: blank, then WebP copies that stay cached). The resolver is asked
 // only when a load assigns `im.src`, exactly as imageFillCache does for image fills.
 const _imageCache = new Map<string, HTMLImageElement>()
+// Outline fonts land after a first paint without changing any layer: the lighting maps' cache
+// must not keep a silhouette drawn in the fallback face.
+onCompositorFontReady(bumpLightingMapEpoch)
 
 /** The cache key for an image layer's bitmap: its ComfyUI /view URL, whatever is registered. */
 function imageLayerCacheKey(filename: string): string {
@@ -1413,6 +1419,7 @@ const _clipLive = new Set<string>()
  */
 function putClipFrames(key: string, frames: HTMLImageElement[]): void {
   _clipCache.set(key, frames)
+  bumpLightingMapEpoch() // a clip's frames change silhouettes without changing the layer
   if (_clipCache.size <= CLIP_CACHE_MAX) return
   for (const k of [..._clipCache.keys()]) {
     if (_clipCache.size <= CLIP_CACHE_MAX) break
@@ -1556,7 +1563,7 @@ export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: bo
     if (key && !_imageCache.get(key)?.complete) {
       jobs.push(new Promise((res) => {
         const im = new Image()
-        im.onload = () => { _imageCache.set(key, im); res(null) }
+        im.onload = () => { _imageCache.set(key, im); bumpLightingMapEpoch(); res(null) }
         im.onerror = () => res(null)
         im.src = imageLayerUrl(layer.filename)
       }))
@@ -6776,6 +6783,9 @@ export function paintLayerStack(
   bake = false,
   /** The Frame's light (Gold foil / Spot UV). Absent ⇒ DEFAULT_FRAME_LIGHT; no finish ⇒ unread. */
   light?: FrameLight,
+  /** The Frame's lighting record (Darkness, background lit). Read only when the stack holds a
+   *  visible light layer; absent ⇒ DEFAULT_LIGHTING. No light layer ⇒ nothing extra is drawn. */
+  lighting?: FrameLighting,
 ): { frozenCount: number } {
   _frameLight = light ?? DEFAULT_FRAME_LIGHT
   _paintClockT = t ?? 0
@@ -6989,6 +6999,42 @@ export function paintLayerStack(
       }
     }
 
+    // Frame light layers: with a visible light (and WebGL2), every item the loop below actually
+    // draws leaves a silhouette stamp — the SAME folded layer, mask and draw-time scale — for the
+    // lit / lift maps; one lighting pass then runs after the loop, before the post chain. No
+    // light ⇒ `stamps` stays null and nothing below records or draws anything extra.
+    // Stage-1 limits: per-letter behaviours are not followed (a letter-motion text stamps its
+    // folded whole-layer shape), silhouettes are drawn without effects or group opacity, and a
+    // wired item's mask is not applied to its stamp.
+    const frameLights = visibleLights(localLayers)
+    const stamps: LightingStamp[] | null = frameLights.length > 0 && lightingAvailable() ? [] : null
+    const pushStamp = (
+      layer: LocalLayer,
+      maskItem: StackItem | null,
+      ms: number | undefined,
+      motionDraw?: (target: CanvasRenderingContext2D, ghost: LocalLayer) => void,
+      extraSig = '',
+    ) => {
+      if (layer.kind === 'light') return // a light draws nothing and shapes no map
+      const ghost = paintShown({ ...layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
+      const scaled = typeof ms === 'number' && Math.abs(ms - 1) > 1e-4 ? Math.max(0.001, ms) : 0
+      const maskSig = !maskItem ? '' : maskItem.type === 'local' ? layerSig(maskItem.layer) : null
+      stamps!.push({
+        layer,
+        sig: maskSig == null ? null : `${layerSig(layer)}|${maskSig}|${scaled}|${extraSig}`,
+        draw: (target) => {
+          if (scaled) {
+            target.translate(layer.x * W, layer.y * H)
+            target.scale(scaled, scaled)
+            target.translate(-layer.x * W, -layer.y * H)
+          }
+          if (motionDraw) motionDraw(target, ghost)
+          else if (maskItem && maskItem.type !== 'local') drawItemMasked(target, { type: 'local', key: `l:${layer.id}`, layer: ghost }, maskItem, W, H, 'source-over', 1)
+          else drawLocalLayer(target, ghost, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
+        },
+      })
+    }
+
     let motionScaleOpen = false
     // A reveal wraps ONE layer's whole draw (every `continue` below included), so — like the
     // draw-time scale — it is closed at the top of the next turn and once more after the loop.
@@ -6999,6 +7045,7 @@ export function paintLayerStack(
       if (maskSourceKeys.has(item.key) && !keepVisibleKeys.has(item.key)) continue
 
       if (item.type === 'wired') {
+        if (stamps) stamps.push({ layer: null, sig: null, draw: target => drawLayerSilhouette(target, item, W, H) })
         const ref = maskRefOf(item)
         const maskItem = ref ? byKey.get(ref) ?? null : null
         if (maskItem) { drawItemMasked(ctx, item, maskItem, W, H, 'source-over'); continue }
@@ -7064,7 +7111,10 @@ export function paintLayerStack(
           else drawLocalLayer(target, solo, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
         }
         const pieces = rv.style === 'pixelreveal' ? pixelRevealPiecesFor(layer, rv, W, H) : undefined
-        if (drawRevealShaderStyle(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) }, pieces)) continue
+        if (drawRevealShaderStyle(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) }, pieces)) {
+          if (stamps) pushStamp(layer, maskItem, ms)
+          continue
+        }
         if (rv.style !== 'settle') revealOpen = beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H, pixelsBase)
       }
       const motionActive = t !== undefined && motion && _motionPainterImpl
@@ -7105,6 +7155,11 @@ export function paintLayerStack(
           if (!brushPaintVisible(layer)) continue
           if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
           else drawOwn(ctx)
+          if (stamps) {
+            pushStamp(layer, null, ms,
+              (target, ghost) => drawLayerWithMotion(target, ghost, W, H, maskLocal, st, maskState),
+              `${JSON.stringify(st)}|${maskLocal ? layerSig(maskLocal) : ''}|${JSON.stringify(maskState)}`)
+          }
           continue
         }
       }
@@ -7137,6 +7192,8 @@ export function paintLayerStack(
           // opacity and blend as usual.
           const strokeGhost = { ...layer, fill: 'none' } as LocalLayer
           drawLocalLayer(ctx, strokeGhost, W, H, maskItem?.type === 'local' ? maskItem.layer : null, opacityMul)
+          // The pane's shape stamps as a plain white fill (its own fill reads the backdrop).
+          if (stamps) pushStamp({ ...layer, fill: '#ffffff' } as LocalLayer, maskItem, ms)
           continue
         }
         // else: refraction unavailable → fall through and paint the layer normally.
@@ -7161,9 +7218,13 @@ export function paintLayerStack(
       if (!brushPaintVisible(layer)) continue // hidden brush paint: backdrop effects only
       if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
       else drawOwn(ctx)
+      if (stamps) pushStamp(layer, maskItem, ms)
     }
     if (motionScaleOpen) ctx.restore()
     if (revealOpen) finishReveal(ctx, revealOpen)
+
+    // The one lighting pass — after every layer, before the post chain.
+    if (stamps) lightFrame(ctx, W, H, stamps, frameLights, lighting ?? DEFAULT_LIGHTING)
 
     if (post && chainActive(post)) applyStackPost(ctx, post, W)
     return { frozenCount }
@@ -7242,9 +7303,11 @@ export function drawLocalLayers(
   bake = false,
   /** The Frame's light, for Gold foil / Spot UV layers. Absent ⇒ DEFAULT_FRAME_LIGHT. */
   light?: FrameLight,
+  /** The Frame's lighting record, for its light layers. Absent ⇒ DEFAULT_LIGHTING. */
+  lighting?: FrameLighting,
 ) {
   paintLayerStack(ctx, W, H, layers.map(l => ({ type: 'local' as const, key: `l:${l.id}`, layer: l })), layers,
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, bake, light)
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, bake, light, lighting)
 }
 
 /** Blend-mode name → canvas composite op (shared by node + modal wired draws). */
@@ -7562,14 +7625,15 @@ export function drawWiredImageLayer(
  * Bake local layers into a transparent RGBA PNG blob at W×H. Returns null if
  * there are no layers. Fonts must already be loaded (call `ensureLayerFonts`).
  */
-export function bakeOverlay(layers: LocalLayer[], W: number, H: number, light?: FrameLight): Promise<Blob | null> {
+export function bakeOverlay(layers: LocalLayer[], W: number, H: number, light?: FrameLight, lighting?: FrameLighting): Promise<Blob | null> {
   if (!layers.length) return Promise.resolve(null)
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(W))
   canvas.height = Math.max(1, Math.round(H))
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, canvas.width, canvas.height) // stay transparent
-  drawLocalLayers(ctx, layers, canvas.width, canvas.height, true, light) // export/bake: unclamped shader fields; the Frame's light for finishes
+  // export/bake: unclamped shader fields; the Frame's light for finishes; its light layers lit
+  drawLocalLayers(ctx, layers, canvas.width, canvas.height, true, light, lighting)
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
 }
 

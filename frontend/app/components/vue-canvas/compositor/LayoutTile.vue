@@ -8,6 +8,7 @@ import { paintLayerStack, ensureLayerFonts, ensureLayerImages, withWiredContent 
 import type { LocalLayer, StackItem, WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
 import type { FrameLight } from '~/lib/compositor/frameLight'
+import type { FrameLighting } from '~/lib/frame/lighting/settings'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { tileSize } from '~/lib/frame/patterns/tileSize'
 import { localStackKey } from '~/lib/compositor/frameStack'
@@ -30,6 +31,8 @@ const props = withDefaults(defineProps<{
   wiredContent?: WiredContentProvider | null
   /** The Frame's light, so foil / Spot UV in a tile are lit as on the canvas (absent: default). */
   light?: FrameLight
+  /** The Frame's lighting record, so its light layers light a tile as on the canvas. */
+  lighting?: FrameLighting
   /** The word shown before the label when `selected` ("Last applied" by default). Empty: the
    *  ring alone marks it (small tiles), and the tooltip says "Current". */
   selectedLabel?: string
@@ -71,13 +74,13 @@ async function paint() {
   ctx.clearRect(0, 0, W, H)
   try {
     withWiredContent(props.wiredContent ?? null, () => {
-      paintLayerStack(ctx, W, H, items, layers as LocalLayer[], undefined, undefined, undefined, undefined, props.background, props.groups, undefined, false, props.light)
+      paintLayerStack(ctx, W, H, items, layers as LocalLayer[], undefined, undefined, undefined, undefined, props.background, props.groups, undefined, false, props.light, props.lighting)
     })
   } catch (e) { console.warn('[LayoutTile] paint failed', e) }
 }
 
 onMounted(paint)
-watch(() => [props.plan, props.frameW, props.frameH, props.background, props.light], paint)
+watch(() => [props.plan, props.frameW, props.frameH, props.background, props.light, props.lighting], paint)
 
 // The ring only means "the tile last applied" — it stays lit after an undo of
 // that apply (`remember()` is UI memory outside the undo step, on purpose), so

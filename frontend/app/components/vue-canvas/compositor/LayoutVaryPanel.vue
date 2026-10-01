@@ -21,6 +21,7 @@ import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
 import type { FrameLight } from '~/lib/compositor/frameLight'
+import type { FrameLighting } from '~/lib/frame/lighting/settings'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 
 const props = defineProps<{
@@ -40,6 +41,8 @@ const props = defineProps<{
   wiredContent?: WiredContentProvider | null
   /** The Frame's light, so foil / Spot UV in a tile are lit as on the canvas (absent: default). */
   light?: FrameLight
+  /** The Frame's lighting record, for its light layers (absent: defaults). */
+  lighting?: FrameLighting
   /** The format the Frame is sized for, its rules and the lines it leaves out (null: none). */
   format?: LayoutFormatInfo | null
   /** The style on show (absent: Swiss). */
@@ -207,7 +210,7 @@ function pick(row: ChoiceRow, k: string) {
         <LayoutTile
           v-for="k in strip" :key="candidates[k]!.sig"
           :plan="candidates[k]!.plan" :frame-w="frameW" :frame-h="frameH"
-          :background="background" :groups="groups" :wired-content="wiredContent" :light="light"
+          :background="background" :groups="groups" :wired-content="wiredContent" :light="light" :lighting="lighting"
           :label="`Variation ${k + 1}`" :selected="applied && k === index" selected-label="" :max-px="60"
           @pick="emit('jump', k)"
         />
@@ -222,7 +225,7 @@ function pick(row: ChoiceRow, k: string) {
         <LayoutTile
           v-for="it in offered" :key="it.id"
           :plan="it.plan!" :frame-w="frameW" :frame-h="frameH"
-          :background="background" :groups="groups" :wired-content="wiredContent" :light="light"
+          :background="background" :groups="groups" :wired-content="wiredContent" :light="light" :lighting="lighting"
           :label="it.name" :selected="applied && it.id === layoutId"
           @pick="emit('select', it.id)"
         />

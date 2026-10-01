@@ -216,3 +216,13 @@ describe('placeRightOf — right of the source, never overlapping', () => {
     expect(frameCardSize(undefined, 1920, 1080).w).toBe(320)
   })
 })
+
+describe('sentFrameData — Frame light layers', () => {
+  it('carries the Frame\'s lighting record (Darkness, background lit) to the new Frame', () => {
+    const src = source() as Record<string, any>
+    src.properties.sailor_localLighting = { darkness: 0.8, backgroundLit: false }
+    const data = sentFrameData(src, entry('meta-story'))!
+    expect(data.properties.sailor_localLighting).toEqual({ darkness: 0.8, backgroundLit: false })
+    expect(data.properties.sailor_localLighting).not.toBe(src.properties.sailor_localLighting)
+  })
+})

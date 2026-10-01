@@ -100,6 +100,14 @@ describe('prepareMotionFramePainter', () => {
     await p.paint(0, fakeCtx(10, 10).ctx)
     expect(paint.mock.calls[0]![13]).toBeUndefined()
   })
+
+  it('hands the Frame\'s lighting record to the painter, so a recording lights its light layers like the editor', async () => {
+    const lighting = { darkness: 0.8, backgroundLit: false }
+    const paint = vi.fn()
+    const p = await prepareMotionFramePainter(() => [], [], 10, 10, motion, undefined, { paint, ensure: async () => {} }, { lighting })
+    await p.paint(0, fakeCtx(10, 10).ctx)
+    expect(paint.mock.calls[0]![14]).toEqual(lighting)
+  })
 })
 
 // A Pixel reveal bar that splits text takes its pieces from the text's outline font; a bake must

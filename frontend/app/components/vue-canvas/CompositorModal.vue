@@ -143,6 +143,8 @@ import {
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
+import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
+import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
@@ -957,6 +959,7 @@ const {
   background, setBackground,
   postEffects, setPostEffects,
   frameLight, setFrameLight,
+  lighting: frameLighting,
   layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging: editorDragging,
   undo, redo, canUndo, canRedo,
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, recordHistory, commit, handleEditorKey, pasteClipboard,
@@ -1664,6 +1667,7 @@ const compositorAgent = useCompositorAgent({
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: editorDims,
   getLight: () => frameLight.value,
+  getLighting: () => frameLighting.value,
 })
 const { ask: caAsk } = compositorAgent
 // The agent writes layer geometry, so an ask snaps back to the design size first. It then goes on
@@ -2773,6 +2777,11 @@ onMounted(() => {
     // plain fallback, the way __dofRuns would if it were exposed (mirrors this file's own
     // __compositor* hooks above).
     ;(window as any).__relightRuns = __relightRuns
+    // Frame light layers: did the lighting pass run, how long the last lighting step took (ms),
+    // and how many times the lit/lift maps were (re)stamped — a light drag must not re-stamp.
+    ;(window as any).__lightingRuns = __lightingRuns
+    ;(window as any).__lightingLastMs = __lightingLastMs
+    ;(window as any).__lightingMapStamps = __lightingMapStamps
   }
 })
 onBeforeUnmount(() => {
@@ -5469,6 +5478,7 @@ function frameDocPaint(): FrameDocPaint {
     groups: localGroups.value,
     post: postEffects.value,
     light: frameLight.value,
+    lighting: frameLighting.value,
   }
 }
 
@@ -5486,7 +5496,7 @@ function renderSceneForHarmonize(): { canvas: HTMLCanvasElement; W: number; H: n
   // live preview — shader-fill fields must render unclamped, same as Render/Export below.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, buildStackItems(), localLayers.value as LocalLayer[],
-      undefined, undefined, undefined, wiredTreatments.value, background.value, localGroups.value, postEffects.value, true, frameLight.value))
+      undefined, undefined, undefined, wiredTreatments.value, background.value, localGroups.value, postEffects.value, true, frameLight.value, frameLighting.value))
   return { canvas, W, H }
 }
 
@@ -5622,7 +5632,7 @@ async function renderStaticComposite(W: number, H: number, frame?: { layers: Loc
   // bake=true (Task 10): the static Render/Export path — final output, not preview.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, frame ? stackItemsFor(frame.layers, frame.order) : paintItemsFor(r), lays,
-      undefined, undefined, undefined, wiredTreatments.value, background.value, frame ? frame.groups : localGroups.value, postEffects.value, true, frameLight.value))
+      undefined, undefined, undefined, wiredTreatments.value, background.value, frame ? frame.groups : localGroups.value, postEffects.value, true, frameLight.value, frameLighting.value))
   return await new Promise<Blob | null>(resolve => off.toBlob(b => resolve(b), 'image/png'))
 }
 // Make a set (Stage 5): the stack items for GIVEN layers in a given stored order — what
@@ -5744,7 +5754,7 @@ function webExportVariant(): FrameVariant {
   return JSON.parse(JSON.stringify({
     width: W, height: H, layers: localLayers.value, stackOrder: stackKeys.value, groups: localGroups.value,
     background: background.value ?? null, post: postEffects.value ?? [], motion, wiredTreatments: wiredTreatments.value ?? {},
-    light: frameLight.value,
+    light: frameLight.value, lighting: frameLighting.value,
   }))
 }
 
@@ -6241,7 +6251,7 @@ function renderStack(wallT?: number, live = false) {
       paintLayerStack(ctx, W, H, items, paintLayers(), l =>
         l.id === editingId.value || (nodeEdit.active.value && l.id === nodeEdit.layerId.value),
         clockT, paintMotion,
-        wiredTreatments.value, shownBackground.value, localGroups.value, postEffects.value, false, frameLight.value)))
+        wiredTreatments.value, shownBackground.value, localGroups.value, postEffects.value, false, frameLight.value, frameLighting.value)))
   } finally { setLiveEffectClock(prevEffectClock) }
   shaderFieldsFrozen.value = frozenCount
 }
@@ -6346,6 +6356,7 @@ watch(
     JSON.stringify(postEffects.value),
     JSON.stringify(localGroups.value),
     JSON.stringify(frameLight.value),
+    JSON.stringify(frameLighting.value),
   ] as const,
   async () => {
     // TEMP open-cost probe: split the wall time between font/image prep and the
@@ -10681,7 +10692,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
     <LayoutSetSheet
       v-if="layoutSet.open.value && panelsVisible"
       :entries="layoutSet.entries.value" :layout-name="layoutName" :has-motion="hasMotion"
-      :background="background" :wired-content="wiredContentForSlot" :light="frameLight"
+      :background="background" :wired-content="wiredContentForSlot" :light="frameLight" :lighting="frameLighting"
       :progress="layoutSet.progress.value" :failures="layoutSet.failures.value" :notice="layoutSet.notice.value" :effects-in-download="layoutSetEffects"
       @send="onLayoutSetSend" @download="onLayoutSetDownload" @cancel="layoutSet.cancelDownload" @close="layoutSet.close" />
 
@@ -10817,7 +10828,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :candidates="layoutVary.candidates.value" :index="layoutVary.index.value"
               :choices="layoutVary.choices.value" :library="layoutVary.library.value"
               :frame-w="editorDims().w" :frame-h="editorDims().h"
-              :background="background" :groups="localGroups" :wired-content="wiredContentForSlot" :light="frameLight"
+              :background="background" :groups="localGroups" :wired-content="wiredContentForSlot" :light="frameLight" :lighting="frameLighting"
               :format="layoutVary.format.value"
               :style-id="layoutVary.style.value" :suggested-face="layoutVary.suggestedFace.value" :library-done="layoutVary.libraryDone.value"
               @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"

@@ -18,6 +18,7 @@ import type { LayoutIssue } from '~/lib/agent/verify'
 import { ensureLayerImages, paintLayerStack, type LocalLayer } from '~/composables/useCompositorLayers'
 import { mergeCompositorState } from '~/lib/agent/mergeCompositorState'
 import type { FrameLight } from '~/lib/compositor/frameLight'
+import type { FrameLighting } from '~/lib/frame/lighting/settings'
 
 const REROLLABLE = new Set(['setText', 'setTextStyle', 'setFill', 'setStroke', 'setBackground'])
 const clone = (s: CompositorState): CompositorState => JSON.parse(JSON.stringify(s)) as CompositorState
@@ -53,6 +54,8 @@ export function useCompositorAgent(opts: {
   /** The Frame's light, so the review render lights foil / Spot UV as the canvas does (and does
    *  not reset the painter's module light to the default behind the canvas's back). */
   getLight?: () => FrameLight
+  /** The Frame's lighting record, so the agent's snapshot shows its light layers lit. */
+  getLighting?: () => FrameLighting
 }) {
   const busy = ref(false)
   const error = ref('')
@@ -173,7 +176,7 @@ export function useCompositorAgent(opts: {
       const ctx = canvas.getContext('2d')
       if (!ctx) return null
       const items = (state.layers as LocalLayer[]).map(l => ({ type: 'local' as const, key: `l:${l.id}`, layer: l }))
-      paintLayerStack(ctx, W, H, items, state.layers as LocalLayer[], undefined, undefined, undefined, undefined, state.background, undefined, state.postEffects, false, opts.getLight?.())
+      paintLayerStack(ctx, W, H, items, state.layers as LocalLayer[], undefined, undefined, undefined, undefined, state.background, undefined, state.postEffects, false, opts.getLight?.(), opts.getLighting?.())
       return canvas.toDataURL('image/png')
     } catch { return null }
   }

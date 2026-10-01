@@ -677,7 +677,7 @@ function renderStack(t?: number, live = false) {
   // second live host (the modal, or another Frame) numbers its slots the same way.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, paintCardItems(resolvedCard.value), paintCardLayers(resolvedCard.value), l => l.id === editor.editingId.value,
-      t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, false, editor.frameLight.value))
+      t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, false, editor.frameLight.value, editor.lighting.value))
   // The glass takes its tint from the artwork at rest. Live (hover-play) paints are skipped: a
   // tint that followed every frame would be a copy per frame for a colour nobody sees change.
   if (!live) printRef.value?.capture(cv)
@@ -938,6 +938,7 @@ watch(
     JSON.stringify(editor.postEffects.value ?? []),
     JSON.stringify(editor.localGroups.value),
     JSON.stringify(editor.frameLight.value), // Gold foil / Spot UV relight when the light moves
+    JSON.stringify(editor.lighting.value), // light layers: Darkness / background lit
   ] as const,
   async () => {
     for (const l of editor.localLayers.value) if (l.kind === 'text') {
@@ -1009,7 +1010,7 @@ function exportCompositeCanvas(t?: number): HTMLCanvasElement | null {
   // fields must render unclamped and stay live past LIVE_FIELD_CEILING.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, paintCardItems(resolvedExport.value), paintCardLayers(resolvedExport.value),
-      undefined, t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true, editor.frameLight.value))
+      undefined, t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true, editor.frameLight.value, editor.lighting.value))
   return cv
 }
 

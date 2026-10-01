@@ -17,6 +17,7 @@ import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { FrameAssetKind } from '~/lib/compositor/assetScope'
 import type { FontWeightSpec } from '../fontFace'
 import type { FrameLight } from '~/lib/compositor/frameLight'
+import type { FrameLighting } from '~/lib/frame/lighting/settings'
 
 export type FrameFit = 'fit' | 'fill'
 
@@ -32,6 +33,9 @@ export interface FrameVariant {
   wiredTreatments: Record<string, WiredTreatment>
   /** The Frame's light for Gold foil / Spot UV. Absent in older snapshots ⇒ the default light. */
   light?: FrameLight
+  /** The Frame's lighting record for its light layers. Absent ⇒ the defaults (and a Frame with
+   *  no light layer never reads it). */
+  lighting?: FrameLighting
 }
 
 export type FrameFontOrigin = 'uploaded' | 'google' | 'library' | 'variable'
