@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28); and R6, the video and sound effects (expanded 2026-09-30); and R7, the paid and model nodes that replace the local AI models (expanded 2026-09-30) — and outlines R8–R11 (R4.1 is built).
+**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28); and R6, the video and sound effects (expanded 2026-09-30); and R7, the paid and model nodes that replace the local AI models (expanded 2026-09-30); and R8, the mini apps on the runner (expanded 2026-10-01) — and outlines R9–R11 (R4.1 is built).
 
 **Architecture:** a runner node's results become per-slot *values* (`NodeRecord.values`): files as today, plus masks, text, numbers, true/false, JSON text and 3D model addresses. At a node's turn, every wire that brings a value is replaced by that value before the node's request is built, so every existing builder, check and prompt sees a plain value, as ComfyUI's `execute()` does. Prices keep reading the workflow as sent (a wired input is priced at its most expensive, as today). Bytes the runner makes itself are kept by sha256 in a run-scoped folder beside the run store. Which wires may carry values is one shared table (`shared/runner/`), read by the browser and the server. New cards run as a new `derive` plan kind: computed on the server, no provider, no charge.
 
@@ -78,8 +78,9 @@ New files:
 | `frontend/server/runner/generators/localModels.ts` | R7.1–R7.8: each moved class's call and the cheap steps around it (alpha, grow, composite, masks, captions, stems, frame count). |
 | `frontend/shared/runner/samInput.ts` | R7.4: SAM 3's payload, shared by `/api/inpaint/segment` and the runner (moved from `server/utils/samInput.ts`). |
 | `frontend/server/utils/depthModel.ts`, `frontend/server/runner/effects/core/lens.ts`, `frontend/server/runner/cards/lensBlur.ts` | R7.9: the in-process depth model (shared with `/api/depth/estimate`), the lens blur core, and Lens · Depth of field's plan. |
+| `frontend/server/api/runs/quote.post.ts`, `frontend/app/composables/useAppRun.ts` | R8.0: the free price quote (the start's own checks and hold calculation, nothing held), and the mini apps' one way to quote, run, wait for results and stop. |
 
-Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`. R6 also modifies `server/media/run.ts` (the lease), `server/media/values.ts`, `server/runner/keptBytes.ts`, `compositor/worker.ts`, `effects/core/kernels.ts` (`gridSample3d`), `shared/runner/media.ts` and `scripts/runner_effect_rows.py`. R7 also modifies `shared/pricing/paidRates.ts` and `paidSettings.ts`, `shared/runner/retired.ts`, `server/api/depth/estimate.post.ts`, `server/api/inpaint/segment.post.ts`, `app/lib/nodeCreditEstimate.ts`, `scripts/runner_paid_fixtures.py` (groups `local-*`) and `scripts/runner_effects_fixtures.py` (group `lens`).
+Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`. R6 also modifies `server/media/run.ts` (the lease), `server/media/values.ts`, `server/runner/keptBytes.ts`, `compositor/worker.ts`, `effects/core/kernels.ts` (`gridSample3d`), `shared/runner/media.ts` and `scripts/runner_effect_rows.py`. R7 also modifies `shared/pricing/paidRates.ts` and `paidSettings.ts`, `shared/runner/retired.ts`, `server/api/depth/estimate.post.ts`, `server/api/inpaint/segment.post.ts`, `app/lib/nodeCreditEstimate.ts`, `scripts/runner_paid_fixtures.py` (groups `local-*`) and `scripts/runner_effects_fixtures.py` (group `lens`). R8 also modifies `server/runner/engine.ts` (`quoteRun`), `app/lib/runner/awaitRunnerResult.ts` (`awaitRunnerOutputs`), Blend scene's row and `compositor/keep.ts` (a mask from Image to mask), Caption track's row and `video/table.ts`, `video/text.ts` (wired captions), and the app files under `app/components/apps/` and `LoraTrainerSurface.vue`.
 
 ---
 
@@ -5307,19 +5308,262 @@ The live checks cost about $0.10 in all ($0.16 at most), each needing the user's
 
 ---
 
-# R8–R11 — outline tasks (to be expanded before they are built)
+# R8 — The mini apps
 
-(R4.1 stays below for the record: it was built on 2026-09-28. R5, R6 and R7 are expanded above.)
+R8 moves the mini apps off ComfyUI's `/prompt` and `/history` and onto the runner (`/api/runs`), with the price shown before each run and a Stop button. Almost every class the apps use is already built (R1, R3, R5, R6, R7). What is left is mostly app plumbing, plus two runner gaps. The outline's four tasks are replaced by the seven below (expanded 2026-10-01). `.superpowers/sdd/2026-09-26-engine-free-step3/r8-expansion-report.md` lists the corrections to the outline and why. In short:
+
+- **The prompts are built in each app**, not in `layouts/default.vue` (which only mounts the apps, `:4063-4066`). Face swap's prompt is in `app/lib/runner/awaitRunnerResult.ts`.
+- **Face swap is already on the runner** (commit `f5fb73be0`, 2026-09-27; fal Easel, family `face-swap`). It still lacks a price before the run and a Stop button, and its family's live check ($0.05) is owed.
+- **Product shot is three small runs, not one chain.** It uses Remove background (R3.5, family `image-repair`), not Background remove (R7.1). Its "Keep the product exact" path wires Image to mask into Blend scene's `keep_subject`, which the runner only takes from a Frame. See R8.1 and ruling (a).
+- **Auto subtitle's Caption track takes its captions by wire**, which leaves the whole workflow to the engine today (R7.7's report, case 2). R8.3 closes it.
+- **Karaoke needs no runner work.** R7.8 already ran its chain with ComfyUI off.
+- **Two more surfaces.** The Voice trainer never calls the engine. The LoRA trainer's cloud mode doesn't either; its local mode trains on ComfyUI and is R10.3's to remove. See R8.5.
+- **No app shows a price, none has Stop, and all poll `/history`.** R8.0 builds one helper for all of them.
+
+**Order.** R8.0 first. Then R8.2 (Karaoke, the pilot: app work only). Then R8.1, R8.3 and R8.4. R8.1 and R8.3 both edit `eligibility.ts`, so the controller runs them one after the other. R8.5 can go any time. R8.6 is the controller's check.
+
+**Families each app needs** (all exist; none is new):
+
+| App | Task | Families | Built in |
+|---|---|---|---|
+| Product shot | R8.1 | `cards`, `bg-remove` (ruling (a)), `fal-edit`, `nano-actions` | R1, R7.1, Phase B |
+| Karaoke | R8.2 | `cards`, `media-sound`, `vocal-split` | R5.3, R7.8 |
+| Auto subtitle | R8.3 | `cards`, `media-sound`, `media-video`, `whisper-captions`, `video-text` | R5, R6.8, R7.7 |
+| Face swap | R8.4 | `cards`, `face-swap` | face-model replacement, 2026-09-27 |
+| Voice and LoRA trainers | R8.5 | none (no runner) | — |
+
+## Rules every R8 task follows (binding for R8.0–R8.5)
+
+1. **One path.** An app sends its workflow through R8.0's helper (`useAppRun`) only. No app calls `/prompt` or polls `/history`, except the local stop-gap of ruling (d).
+2. **Price before the run** (ruling (b)).
+   - The price comes from R8.0's quote: the same start-of-run checks, measurement and hold calculation the run then uses, with nothing held.
+   - It shows next to each paid button, in the node badge's format (dollars here, credits in hosted).
+   - A quote that refuses shows its plain words in place of the price, and the button stays off.
+3. **Money, never relaxed.** The hold is the ceiling. Only delivered calls are charged. The price shown covers the hold in each place. A refusal comes before the hold.
+4. **Pre-run checks are true upper bounds.** Sizes come from file headers, lengths from the probe. Where only a bound is known, the bound is used.
+5. **Switching on never makes a working app fail.** With an app's families off, the app behaves as before R8.
+6. **Hosted safety.** Uploaded file names are checked by name before any disk access, and must be the person's own (as `LoadImage`, `LoadAudio` and `LoadVideo` already check). Results are saved under the person's subfolder.
+7. **Stop leaves nothing** (ruling (e)). Stop ends the run through `stopRunnerRuns`. The hold is released, no `ffmpeg` is left running, and no partial file is kept.
+8. **The engine is a stop-gap.** Each task names any case that still needs ComfyUI, with a plan to close it before ComfyUI is removed.
+9. **Copy.** Sentence case, plain words, no identifiers. Hints are tooltips. Messages that name ComfyUI, ports or model files ("Is ComfyUI running on port 8188?", "Try restarting ComfyUI") go.
+10. **Tests.**
+    - The app's exact prompt is runner-eligible with its families on (`runnerTakesWorkflow`), and is left as before with them off.
+    - Through the kit (fake fal, Replicate and ledger), the app's prompt makes its files, and the quote equals the hold.
+    - The app's own spec (`tests/unit/app-<name>-run.unit.spec.ts`) feeds fake runner events and checks: the result lands in a take; the price shows before the run; Stop; a refusal; a decline.
+11. **Run line.** `cd frontend && env -u FAL_KEY -u FAL_API_KEY -u NUXT_REPLICATE_TOKEN -u REPLICATE_API_TOKEN npx vitest run tests/unit/app- tests/unit/runner-`, then the typecheck from the Global Constraints (app files too, baselines not grown). Report (no commit).
+
+---
+
+### Task R8.0: The app run helper and the price quote
+
+**Builds:**
+- `POST /api/runs/quote` (`server/api/runs/quote.post.ts`). It takes `{ takes }` as `/api/runs` does. It runs the start's own steps up to the hold: eligibility, request rules, ownership, the media measurement (`take.measured`), kept room, and `stageEstimate` over every node. It answers `{ usd, credits, upTo }` or the start's refusal words. It never holds, never stores a run, never keeps bytes and never calls a provider. Rate-limited as `/api/runs`.
+  - The engine exposes this as `quoteRun` beside `startRun` (`server/runner/engine.ts`). Both call one shared function, so the two can't drift.
+  - A workflow the runner wouldn't take answers `{ declined: true }`.
+- `awaitRunnerOutputs(promptId, nodeIds)` in `app/lib/runner/awaitRunnerResult.ts`. It generalises `awaitRunnerImage`: the same early-event buffer, and each listed node's ui (`images`, `audio`, and the video keys R5.4's Save video writes). `awaitRunnerImage` becomes a thin wrapper, so Face swap's spec stays green unchanged.
+- `app/composables/useAppRun.ts`:
+  - `quote(prompt)`: the price, refreshed when the prompt changes (debounced);
+  - `run(prompt, nodeIds)`: `ensureRunnerEvents`, `startRunnerRun` with `canvasId: null`, then `awaitRunnerOutputs`;
+  - `stop()`: `stopRunnerRuns` on the run's id;
+  - `declined`: set when the server says no (ruling (d)).
+
+**Files:** create `server/api/runs/quote.post.ts` and `app/composables/useAppRun.ts`; modify `server/runner/engine.ts` and `app/lib/runner/awaitRunnerResult.ts`. Tests: `runner-quote.unit.spec.ts` and `app-run.unit.spec.ts`.
+
+**Tests:**
+- For each R8 workflow, and in both places, the quote equals the hold the same run then takes.
+- The quote calls no ledger and no provider, and leaves no kept bytes and no run record (spies).
+- A hosted name that climbs out of its folder is refused by name, before any disk read.
+- Events that arrive before the id are kept. Each listed node's output is returned. An error and a timeout reject. Stop calls `stopRunnerRuns`.
+
+**Acceptance:** the quote equals the hold for every app's workflow; nothing is held by a quote; `face-swap-app-runner.unit.spec.ts` is green unchanged.
+
+**Live check:** none (free).
+
+---
+
+### Task R8.1: Product shot
+
+| Step | Workflow today | Families | Gap |
+|---|---|---|---|
+| Background | Generate an image (`flux-schnell`) → Save image | none for the model (`RUNNER_IMAGE_MODEL_IDS`); `cards` | none |
+| Cut-out (runs when a product is dropped) | Load image → Remove background (`851-labs/bg-remover`) | `cards`, `image-repair` | `image-repair` has no live check yet. Ruling (a): becomes Load image → Background remove (`output: transparent`, `edge_softness: 0`) → Save image, under `bg-remove` (measured 2026-10-01) |
+| Lighting | Load image → Blend scene (Flux 2 Pro or Nano Banana) → Save image | `cards`, `fal-edit`, `nano-actions` | none |
+| Lighting, keep the product exact | plus Load image → Image to mask (`red`) → `keep_subject`, Flux Kontext Pro | `cards`, `fal-edit` | `keep_subject` is taken only from a Frame's mask (`linkSources: { keep_subject: [['Compositor', 1]] }`), so the workflow goes to the engine |
+
+**Runner change (the keep path):**
+- Blend scene's `keep_subject` also takes Image to mask's slot 0 while `cards` is on.
+- The keep step (`server/runner/compositor/keep.ts`) reads that mask's file. It is R0.7's 16-bit greyscale PNG, the format `readMaskPng` already reads.
+- Python's keep step (`comfy_api_nodes/nodes_replicate.py:2966-2986`) is cheap, so it stays exact: a mask of another size is resized bilinear (R0's `resizeBilinear`), then feathered, then cross-faded by its grey level (the app bakes "how much to keep" into the grey).
+- The start pass bounds the mask's size from its Load image header, before the hold.
+
+**App change:** the three steps go through `useAppRun`. Each takes Save image's picture by node id. The price shows on Generate, on the product drop zone (ruling (f)) and on Create. It follows the model and the keep switch. The old error copy about the ISNet model and the Replicate token goes.
+
+**Engine cases left:** none, once ruling (a) is taken. Keeping Remove background instead leaves the cut-out on the engine until `image-repair`'s live check.
+
+**Files:** `ProductShotApp.vue`, `shared/runner/eligibility.ts` (Blend scene's row), `server/runner/compositor/keep.ts`. Tests: `app-product-shot-run.unit.spec.ts`, and `runner-blend-keep.unit.spec.ts` (Python's keep, given the same answer: equal and other sizes, feather 0 and 4, grey levels 0, 0.7 and 1).
+
+**Acceptance:**
+- All four workflows are runner-eligible with their families on, and each runs through the kit with ComfyUI off.
+- Each result lands in its step: the backdrop, the cut-out (with its alpha) and the take.
+- The keep path matches Python, given the same answer.
+- Each price shows before its run and equals the hold.
+
+**Live check:** one full pass with ComfyUI off: background (about $0.003), cut-out ($0.0008), Flux 2 Pro blend (about $0.045), keep-exact blend on Kontext ($0.04). About $0.09. Add Nano Banana ($0.039) only if the user wants it: $0.13 in all.
+
+---
+
+### Task R8.2: Karaoke (the pilot)
+
+| Class | Family | State |
+|---|---|---|
+| Load audio | `media-sound` | built (R5.3) |
+| Vocal separator (`htdemucs`, shifts 1) | `vocal-split` | built, measured (R7.8, R7.11) |
+| Save audio (MP3) ×2 | `media-sound` | built (R5.3) |
+
+**App change:**
+- The run goes through `useAppRun`. The two stems are taken by node id (3 and 4), not by matching file names.
+- The price shows after the song is uploaded (Demucs is priced per second of sound sent, measured by the quote).
+- The errors that name ComfyUI and the model go.
+
+**Engine cases left:** a song over the cap (hosted 10 minutes: refused before the hold; local 20 minutes: the engine, as R7.8). Plan: ruling (i).
+
+**Files:** `KaraokeMakerApp.vue`. Test: `app-karaoke-run.unit.spec.ts`, plus one kit case running the app's exact prompt (fake Replicate answering two WAVs → two MP3 files).
+
+**Acceptance:** runner-eligible with its families on; both stems land in one take; the price shows before the run and equals the hold; it runs with ComfyUI off; Stop mid-call releases the hold.
+
+**Live check:** one 30-second song through the app, about $0.03 at the card (R7.11 measured the real cost nearer $0.003).
+
+---
+
+### Task R8.3: Auto subtitle
+
+| Class | Family | State |
+|---|---|---|
+| Load video, Get video components, Create video, Save video | `media-video` | built (R5.4) |
+| Whisper transcribe (`fps` wired from Get video components) | `whisper-captions` | built, measured (R7.7, R7.11) |
+| Caption track (`captions` wired from Whisper) | `video-text` | built (R6.8) for typed captions only |
+
+**Runner change (wired captions, ruling (c)):**
+- Caption track's row gains `valueInputs: { captions: ['text'] }`, taking the shared text sources (Whisper slot 0, the Text card, the string Primitives).
+- With wired captions, the start pass can't read the text. It uses true bounds that don't depend on its length:
+  - the drawings are at most the frame count (`captionRenders ≤ T`);
+  - held bytes and work follow from that;
+  - only the font check stays in `limits`.
+- At the node's turn, a caption's letters that can't land in the frame are not laid out. Python draws one centred line with no wrapping, so those letters are off the frame anyway: no pixel changes. The work then has a bound without any character cap.
+- Typed captions behave exactly as before: R6.8's fixtures stay green, unchanged.
+
+**App change:** the run goes through `useAppRun`. Save video's file is taken by node id (6). The price shows after the video is uploaded (Wizper per second of sound; Caption track is free). The errors that name ComfyUI or Whisper go.
+
+**Engine cases left:**
+- A video whose sound passes Whisper's local hour goes to the engine. Hosted, the 10-minute video cap refuses it before the hold. Plan: R7.7's report, case 1 (cut the sound into pieces of at most 30 minutes; one call each).
+- Whisper's texts over the value cap (ruling (c)).
+
+**Files:** `AutoSubtitleApp.vue`, `shared/runner/mediaEffects.ts` (the row), `server/runner/video/table.ts` and `video/text.ts` (the bound and the visible-letter layout). Tests: `app-auto-subtitle-run.unit.spec.ts`; `runner-media-vfx-text.unit.spec.ts` gains wired cases.
+
+**Tests (wired cases):**
+- Whisper's captions by wire give the same batch, byte for byte, as the same text typed in.
+- A caption wider than the frame gives the same pixels with or without the letters that are cut.
+- The start pass's bound holds for 0, 1 and T captions.
+- With `video-text` off, the workflow is left to the engine, as before.
+
+**Acceptance:** the whole app workflow is runner-eligible with its families on; the captioned video with its sound lands in the take; the price shows before the run and equals the hold; it runs with ComfyUI off.
+
+**Live check:** one 60-second clip with speech through the app, about $0.006.
+
+---
+
+### Task R8.4: Face swap
+
+| Class | Family | State |
+|---|---|---|
+| Load image ×2 | `cards` | built (R1.3) |
+| Face swap | `face-swap` | built (fal Easel, $0.05 a picture, card verified from fal's page); live check owed |
+
+**App change:**
+- The run moves onto `useAppRun` (it already runs on the runner).
+- The price shows once both pictures and a gender are chosen.
+- Stop is added.
+- A decline says "Face swap is switched off right now." in both places. There is no engine fallback: the Python node only says it is defined, and fails on ComfyUI.
+
+**Engine cases left:** none.
+
+**Files:** `FaceSwapApp.vue`. Tests: `face-swap-app-runner.unit.spec.ts` (extended: price, Stop, decline).
+
+**Acceptance:** the price shows before the run and equals the hold; the swapped picture lands in the take; it runs with ComfyUI off.
+
+**Live check:** one swap, $0.05. It is also `face-swap`'s own live check (owed since 2026-09-27), so it unblocks switching the family on (ruling (h)).
+
+---
+
+### Task R8.5: The trainers stay off the engine
+
+- **Voice trainer.** It calls only `/api/voice-clone/*` and `/api/training-queue`, which run in Sailor with their own hold. Nothing to move.
+- **LoRA trainer.**
+  - Cloud mode calls only Sailor's routes: the native `/upload/image` and `/sailor/lora/save_captions`, `/api/cloud-train/*` and `/api/training-queue`.
+  - Local mode builds a ComfyUI training workflow (`UNETLoader` … `TrainLoraNode`, `SaveLoRA`) and polls `/history`. That is local diffusion training (decision 4), and R10.3 removes it.
+  - Local is today's default mode. R8.5 makes Cloud the default whenever the engine is down (`useBackendHealth().engineUp`) or in hosted. In those cases Local is turned off, with a tooltip: "Needs the local engine".
+
+**Files:** `LoraTrainerSurface.vue`. Test: `app-trainers-engine.unit.spec.ts`. It is a guard over both files' source: no `/prompt` or `/history` call except inside the LoRA trainer's local branch; Cloud is the default when the engine is down.
+
+**Acceptance:** with ComfyUI off, the LoRA trainer opens on Cloud and a cloud job starts (fake Replicate); the Voice trainer clones (fake provider). Prices: ruling (g).
+
+**Engine cases left:** LoRA local training, until R10.3.
+
+**Live check:** none.
+
+---
+
+### Task R8.6: Controller check, fixture-level and in the browser (not delegated)
+
+- [ ] Every `runner-*` and `app-*` spec green; R6.8's `vfx-text` fixtures regenerate byte-identically.
+- [ ] Hosted mode, ComfyUI stopped, each app's families on, with the fake providers. For each app:
+  - the price shows before the run;
+  - it equals the hold;
+  - the charge equals the same calculation;
+  - the result lands where the app shows it;
+  - Stop mid-call releases the hold and leaves no `ffmpeg` in `ps`.
+- [ ] With every app family off, each app behaves as before R8 (ruling (d)'s local fallback included).
+- [ ] **Live checks, only with the user's go,** locally, ComfyUI stopped, through each app: Product shot (about $0.09, $0.13 with Nano Banana), Karaoke (about $0.03), Auto subtitle (about $0.006), Face swap ($0.05). About $0.18 in all, $0.22 at most. Record each price with its source and date, and lay the looks out for the user.
+- [ ] Record the results in `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md` and `docs/STATE.md`.
+
+### Controller rulings needed before R8 is built
+
+- **(a) Product shot's cut-out node.** *Recommend:* switch to Background remove (R7.1) → Save image. It is the same Replicate model, already measured and on locally, and Save image gives a lasting file. *Cost:* the app's step uses a different node; Remove background's family (`image-repair`) stays unchecked. The alternative is a live check for `image-repair` itself: six classes, cost not yet worked out.
+- **(b) How the price is shown.** *Recommend:* a free quote route that runs the start's own checks and hold calculation without holding (R8.0). *Cost:* one more route (rate-limited, hosted checks), and a short wait after each upload before the price appears. The alternative, a browser estimate, can differ from the server's measurement, so the price shown might not cover the hold.
+- **(c) Caption track's wired captions, and Whisper's long texts.** *Recommend:*
+  - no character cap for wired captions;
+  - lay out only the letters that can land in the frame;
+  - bound the work by the frame count.
+
+  If Whisper's three texts pass the runner's text cap (262,144 characters), the call counts as delivered nothing and is charged 0, and the run fails plainly. Plan: keep long texts as kept bytes (parked). *Cost:* a very long, dense hour of speech could fail without charge, and Sailor pays fal's few cents.
+- **(d) When the runner says no.** *Recommend:* locally, with an app's families off, the app sends to `/prompt` as today (a named stop-gap, removed by R10.1 once every app family is on in both places). In hosted, it shows "This app is switched off right now." Face swap has no fallback (R8.4). *Cost:* two paths in three apps until R10.1.
+- **(e) Stop in the apps.** *Recommend:* a Stop button replaces the run button while a run is going (copy: "Stop"). *Cost:* one new control per app.
+- **(f) The cut-out runs on drop.** *Recommend:* keep it automatic, and show its price on the drop zone, as the canvas badge does. It is far below the cost-confirm threshold ($0.0008). *Cost:* a paid call starts from a drop, with no click.
+- **(g) Trainer prices.** *Recommend:* out of R8. The trainers don't use the runner, already hold credits in hosted, and are only kept off the engine here (R8.5). *Cost:* the LoRA trainer's price stays as prose ("~$3–5"), not a figure that covers the hold.
+- **(h) Face swap switch-on.** *Recommend:* R8.4's live check serves as `face-swap`'s own check. On a pass, switch it on everywhere, as R7 ruling (a). *Cost:* $0.05, and each swap is paid locally too.
+- **(i) Songs over Karaoke's cap.** *Recommend:* refuse plainly before the hold in hosted (over 10 minutes); locally, the engine as a stop-gap (over 20 minutes). Plan to close: cut the song into pieces at quiet points, one Demucs call each, joined back, with the hold at pieces × price (an R11 task). *Cost:* long songs need ComfyUI locally until then.
+
+### R8 size
+
+Seven tasks:
+- one task for the shared pieces (R8.0: the quote route and the app helper);
+- four app tasks (R8.1–R8.4). Two of them each carry one small runner change: Blend scene's keep path (R8.1) and wired captions (R8.3);
+- one guard task for the trainers (R8.5);
+- the controller's check (R8.6).
+
+All are small. R8.0 is the largest, since the quote must share the start's code. No class is ported. The live checks cost about $0.18 in all ($0.22 at most), each needing the user's go.
+
+---
+
+# R9–R11 — outline tasks (to be expanded before they are built)
+
+(R4.1 stays below for the record: it was built on 2026-09-28. R5, R6, R7 and R8 are expanded above.)
 
 Each outline task becomes a full task (tests and code) when its slice starts. Every paid family: its own switch, off by default; priced in `frontend/shared/pricing/` before switch-on; the backup rule; a live paid check with the user's go.
 
 ### Task R4.1: Retire the 182 partner nodes (decision 3)
 
 Add every class billed through api.comfy.org (the inventory's list; mechanically, every `comfy_api_nodes/nodes_*.py` class except `nodes_replicate.py`) to a shared `RETIRED_CLASSES` (`frontend/shared/runner/retired.ts`). They leave the Actions panel and the Legacy toggle (`app/data/action-catalog.ts`, `GeneratorsPanel.vue:41-46`), node search (`useNodeSearch.ts:87-140`), the agent and start-modal catalogues, and are refused on both paths before any charge (`blockedModels.ts`' shape: a 400 like ComfyUI's `node_errors`, "This node was retired. Pick another way to make this."). The Python files stay (not edited by this programme). Acceptance: a guard test that every `api.comfy.org`-billed class in `objectInfo.baseline.json.gz` is retired; a saved workflow with one opens, shows the node as retired, and is refused before the hold.
-
-### Task R8.1–R8.4: The mini apps (decision 10)
-
-Each app (`app/components/apps/*`, prompts built in `layouts/default.vue:4004-4007`) sends its workflow to `/api/runs` instead of `/prompt`: R8.1 Product shot (LoadImage → Background remove → Image to mask → Blend scene / Generate image → Save image; after R1, R7.1); R8.2 Karaoke (LoadAudio → Vocal separator → Save audio MP3; after R5, R7.8); R8.3 Auto subtitle (LoadVideo → Get video components → Whisper → Caption track → Create video → Save video; after R5, R6.1, R6.8, R7.7); R8.4 Face swap (after Open question 1 — or its retirement). Acceptance per app: the app's workflow is runner-eligible with its families on; the result lands where the app shows it; its price shows before the run.
 
 ### Task R9.1: Timeline, browser export only (decision 5)
 
@@ -5349,11 +5593,12 @@ Lip-sync a character's Fabric and auto engines, and `sync` below sync-3 (measure
 
 ## Self-review (done while writing)
 
-- **Spec coverage.** Decision 1 → R7.1–R7.10; 2 → Open question 1, R8.4; 3 → R4.1; 4 → R10.2; 5 → R9.1; 6 → R10.3; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.1–R8.4. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
+- **Spec coverage.** Decision 1 → R7.1–R7.10; 2 → Open question 1, R8.4 (Face swap on fal Easel, already on the runner since 2026-09-27); 3 → R4.1; 4 → R10.2; 5 → R9.1; 6 → R10.3; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.0–R8.5. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
 - **Types used across tasks.** `RunnerValue` (R0.1) with `mask.files` everywhere; `slotValue`, `filesOf`, `filesOfValues`, `literalOf`, `checkValue`, `withWiredValues` (values.ts); `KeptBytes.put(runId, bytes, ext)`; `DeriveIO` / `Derived` / `staticDerive` (R0.4) — `saveAsset` gains `subfolder?`/`folder?` in R1.5 by name; `ResultEntry` (R0.6); `outputKind`, `valueInputsOf`, `valueWiresAllowed`, `STATIC_VALUES`, `staticValueOf`, `staticWiredTexts` (R0.3).
 - **R2 (expanded 2026-09-26).** Decision 8 → R2 rule 10 (exact / library classes) and R2.9 (Add noise); decision 9 → R2.10; the ledger's rulings → R2 rules 7–9 (worker, one file at a time, per-node cap, start-of-take refusals), 11 (fixtures from real Python, byte-identical, multi-threaded torch) and 12 (families-off invariant); the 78 inventory classes → R2.1 (3) + R2.4 (26) + R2.5 (13) + R2.6 (4) + R2.7 (15) + R2.8 (6) + R2.9 (11); Painter (spec ruling 4) → R2.8; the ~45 live-preview classes' engine runs → R2.11. Rulings the controller still owes: R2 (a)–(f).
 - **R3 (expanded 2026-09-27).** Spec money rules 1–5 → R3 rules 7, 9, 13, 14; parity ("paid nodes: the request is identical") → rules 4–5; spec ruling 1 (3D address) → R3.9; the 38 classes → R3.3 (7) + R3.4 (4) + R3.5 (5) + R3.6 (3) + R3.7 (1) + R3.8 (2) + R3.9 (2) + R3.10 (4) + R3.11 (1, the preset path) + R3.12 (3) + R3.13 (2) + R3.14 (1) + R3.15 (2) + R3.16/R3.17 (1), with nine hidden twins. Rulings the controller still owes: R3 (a)–(t).
 - **R5 (expanded 2026-09-28).** Decision 7 and the ledger's LGPL ruling → R5.1a (build, licence, finder) and R5.1b (the module); the lossy-tolerance ruling → R5 rule 3, with the H.264 exception put to the controller (ruling (c)); the 11 codec classes → R5.3 (5) + R5.4 (4) + R5.5 (2), plus the Audio and Video cards; AudioWaveform → R6.7 (the old outline's R6.1); Timeline → R9.1; thumbnails, waveforms and the asset probe → R5.6; R3.10 / R3.17's needs → the table at the top of R5. Rulings the controller still owes: R5 (a)–(q).
 - **R6 (expanded 2026-09-30).** The outline's 20 + 12 classes → 34: R6.1 (3) + R6.2 (4) + R6.3 (2) + R6.4 (5) + R6.5 (1) + R6.6 (1) + R6.7 (2) + R6.8 (2) + R6.9 (12, with Save audio (Opus), which R5 missed) + R6.10 (1); Text clip (from `nodes_text.py`) and Audio waveform (from R5) counted in; Slow motion (AI) → R7.3. The parity rules → R6 rule 5 (exact, library, band, visual) and rule 4 (8-bit batches, ruling (a)); "switching on never breaks a working graph" → rule 3 (the start pass sends anything the runner can't do to the engine); hosted file names judged by name → rule 8; kept values read back under their caps → rule 10; per-person media slots → rule 7 (one lease per node); kept bytes never read whole → rule 6; Stop leaves no ffmpeg → rule 7 and R6.11. The hard ports named → R6.6 (Farneback), R6.8 (text), R6.3 (glitch), R6.10 (noisereduce), R6.7 (Pillow's drawing). Rulings the controller still owes: R6 (a)–(q).
 - **R7 (expanded 2026-09-30).** Decision 1 → R7.1 (Background remove), R7.2 (Upscale), R7.3 (Object removal), R7.4 (Mask by text, Mask extractor), R7.6 (Slow motion (AI)), R7.7 (Whisper), R7.8 (Vocal separator), R7.9 (Lens, free); Face restoration and Wav2Lip, already deleted on 2026-09-27 → R7.10 (retirement message only); Open question 2 (Subject mask) → R7.5, still pictures; Open question 6 (Demucs price) → R7.8's live check. The user's matching rule → R7 rule 2 (the provider's look judged by eye; the steps around each call exact against Python, given the same answer). Money rules → R7 rule 4; "never fails a working graph" → rules 3, 5 and 6; hosted safety → rule 7; Stop → rule 8. Rulings the controller still owes: R7 (a)–(l).
+- **R8 (expanded 2026-10-01).** Decision 10 → R8.0 (one helper and a free quote for every app), R8.1 (Product shot), R8.2 (Karaoke), R8.3 (Auto subtitle, with Caption track's wired captions, R7.7's case 2), R8.4 (Face swap), R8.5 (the trainers kept off the engine; LoRA local mode stays R10.3's). "Its price shows before the run" → R8 rule 2 and ruling (b) (the quote shares the start's code, so the price shown is the hold); money → rule 3; true bounds → rule 4 and R8.3's frame-count bound; hosted safety → rule 6; Stop → rule 7 and ruling (e); the engine as a stop-gap → rule 8 and each task's "Engine cases left". Rulings the controller still owes: R8 (a)–(i).
 - **Known gaps, deliberate:** JPEG/WebP EXIF metadata not written (R1.5); Get image size's progress text not shown (R1.4); Gate choices on a text value (spec ruling 2).
