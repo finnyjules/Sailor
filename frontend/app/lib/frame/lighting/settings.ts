@@ -6,6 +6,7 @@
  * record stores and paints nothing extra.
  */
 import type { LightLayer, LocalLayer, LocalLayerKind } from '~/composables/useCompositorLayers'
+import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
 
 export type { LightLayer }
 export type LightType = 'lamp' | 'spot' | 'sun'
@@ -78,11 +79,14 @@ export const effectiveLit = (l: Switches): boolean => typeof l.lit === 'boolean'
 export const effectiveCasts = (l: Switches): boolean => typeof l.castsShadow === 'boolean' ? l.castsShadow : defaultCastsShadow(l.kind)
 export const effectiveLift = (l: Switches): number => num(l.lift, 0.005, 0.15, defaultLift(l.kind))
 
-/** Visible light layers, in stack order, at most MAX_LIGHTS. */
-export function visibleLights(layers: readonly LocalLayer[]): LightLayer[] {
+/** Visible light layers, in stack order, at most MAX_LIGHTS. With `groups`, a light inside a
+ *  hidden group (any ancestor hidden — `resolveGroupCascade`) is not visible, as in the painter. */
+export function visibleLights(layers: readonly LocalLayer[], groups?: readonly LayerGroup[] | null): LightLayer[] {
   const out: LightLayer[] = []
   for (const l of layers) {
-    if (l.kind === 'light' && l.visible !== false) { out.push(l); if (out.length >= MAX_LIGHTS) break }
+    if (l.kind !== 'light' || l.visible === false) continue
+    if (groups?.length && l.groupId && resolveGroupCascade(l.groupId, groups as LayerGroup[]).hidden) continue
+    out.push(l); if (out.length >= MAX_LIGHTS) break
   }
   return out
 }

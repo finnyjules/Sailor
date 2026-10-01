@@ -36,7 +36,8 @@ export function packLight(layer: LightLayer, aspect: number): PackedLight {
   const l = layer.light
   let pos: Vec3
   if (l.type === 'sun') {
-    // Direction from the sun's dot toward the Frame's centre, tilted up by height.
+    // Direction TOWARD the sun: the vector from the Frame's centre toward the sun's dot (light
+    // arrives from the dot's side), tilted up by height.
     let dx = layer.x - 0.5, dy = (layer.y - 0.5) * aspect
     const m = Math.hypot(dx, dy) || 1
     dx /= m; dy /= m

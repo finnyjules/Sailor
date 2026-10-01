@@ -153,7 +153,7 @@ import LightInspector from '~/components/vue-canvas/compositor/LightInspector.vu
 import LightShadowControls from '~/components/vue-canvas/compositor/LightShadowControls.vue'
 import LightDarknessSlider from '~/components/vue-canvas/compositor/LightDarknessSlider.vue'
 import LayerLightToggles from '~/components/vue-canvas/compositor/LayerLightToggles.vue'
-import { lightingAvailable } from '~/lib/frame/lighting/lightingPass'
+import { lightingAvailable, releaseLighting } from '~/lib/frame/lighting/lightingPass'
 import { effectiveCasts, effectiveLit, defaultCastsShadow, type LightParams } from '~/lib/frame/lighting/settings'
 import { lightLabel } from '~/lib/frame/lighting/labels'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
@@ -1660,6 +1660,7 @@ const compositorAgent = useCompositorAgent({
     aspect: editorDims().h / Math.max(1, editorDims().w),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
     motion: motionDoc.value,
+    lighting: frameLighting.value,
   }),
   setState: (s) => {
     commit(s.layers)
@@ -1765,6 +1766,8 @@ function placeTemplateIntoFrame(t: Template) {
   recordHistory()
   commitBoth(r.layers, r.groups)
   commitTemplateInstances([...frameTemplateInstances.value, r.instance])
+  // A Frame holds at most 6 lights: the template's lights beyond that were left out.
+  if (r.droppedLights) toast(`Only ${MAX_LIGHTS} lights fit — ${r.droppedLights} left out`)
 }
 
 function fillTemplateSlot(inst: TemplateInstance, t: Template, slotId: string, value: string) {
@@ -6362,6 +6365,9 @@ onBeforeUnmount(() => {
 let stopFieldCatalog: (() => void) | null = null
 onMounted(() => { stopFieldCatalog = onFieldCatalogReady(() => renderStack()) })
 onBeforeUnmount(() => { stopFieldCatalog?.(); stopFieldCatalog = null })
+// Light layers: the lighting pass's GL context, textures and cached maps are freed with the
+// editor (a lit Frame card rebuilds them on its next paint).
+onUnmounted(() => { releaseLighting() })
 // A text layer rendered from glyph OUTLINES (renderAsOutline / a geometry effect)
 // falls back to fillText while its font bytes are in flight; this repaints once
 // they land, so the outline replaces the fallback with no user interaction. Same
@@ -12293,9 +12299,13 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
           <span class="text-sm font-medium truncate" data-testid="frame-layer-head">{{ selectedLayerHead }}</span>
           <div class="ml-auto flex items-center gap-1">
-            <button v-if="layoutGrid.show" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="onResnapSelected"><LayoutGrid class="size-3.5" /></button>
-            <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
-            <button class="text-white/40 hover:text-white/80 p-1" title="Send backward" @click="moveStackZ(localKey(selectedLocal.id), -1)"><ArrowDown class="size-3.5" /></button>
+            <!-- A light lights the whole Frame wherever it sits in the stack (stage 1) and is placed
+                 by its dot, not the grid: no Re-snap / Bring forward / Send backward for one. -->
+            <template v-if="!selectedIsLight">
+              <button v-if="layoutGrid.show" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="onResnapSelected"><LayoutGrid class="size-3.5" /></button>
+              <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
+              <button class="text-white/40 hover:text-white/80 p-1" title="Send backward" @click="moveStackZ(localKey(selectedLocal.id), -1)"><ArrowDown class="size-3.5" /></button>
+            </template>
             <button class="text-white/40 hover:text-red-400 p-1" title="Delete" @click="deleteLocal(selectedLocal.id)"><Trash2 class="size-3.5" /></button>
           </div>
         </div>

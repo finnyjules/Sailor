@@ -22,7 +22,7 @@
  */
 import type { FrameLighting, LightLayer } from './settings'
 import { packLightUniforms } from './shade'
-import { cachedLightingMaps, LIFT_SCALE, type LightingMaps, type LightingStamp } from './maps'
+import { cachedLightingMaps, releaseLightingMaps, LIFT_SCALE, type LightingMaps, type LightingStamp } from './maps'
 
 export { LIFT_SCALE }
 
@@ -142,6 +142,18 @@ class LightingGl {
     this.loc = {}; this.litIn = null; this.liftIn = null; this.colorSize = null
   }
 
+  /** Free the GL objects and the context itself (the next `init` builds a fresh one). */
+  release() {
+    const gl = this.gl
+    if (gl && !gl.isContextLost()) {
+      gl.deleteTexture(this.texColor); gl.deleteTexture(this.texLit); gl.deleteTexture(this.texLift)
+      gl.deleteProgram(this.program)
+      gl.getExtension('WEBGL_lose_context')?.loseContext()
+    }
+    if (this.canvas) { this.canvas.width = 1; this.canvas.height = 1 }
+    this.drop()
+  }
+
   private die(reason: string) {
     this.failed = true
     this.reason = reason
@@ -253,6 +265,18 @@ const getPass = () => (pass ??= new LightingGl())
 
 export function lightingAvailable(): boolean { return getPass().available() }
 export function lightingUnavailableReason(): string { return getPass().unavailableReason() }
+
+/**
+ * Free everything the lighting pass keeps between paints: the GL canvas, its context and
+ * textures, the crop canvas, and every cached / uncached map and the stamp scratch (maps.ts).
+ * Called when the Frame editor closes; a Frame card that paints lit afterwards rebuilds lazily.
+ */
+export function releaseLighting(): void {
+  pass?.release()
+  pass = null
+  _crop = null
+  releaseLightingMaps()
+}
 
 let _lastMs = 0
 /** Test hooks (registered on window by the Frame editor in dev, like __relightRuns). */

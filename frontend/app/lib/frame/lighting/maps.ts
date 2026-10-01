@@ -182,11 +182,13 @@ let _uncached: { make: (w: number, h: number) => HTMLCanvasElement; lit: HTMLCan
  *  change a silhouette that way bumps this, so the next paint re-stamps. */
 export function bumpLightingMapEpoch() { _epoch++ }
 
-/** Per-layer JSON, memoised by object identity: a layer that did not change costs a lookup. */
-const _layerJson = new WeakMap<object, string>()
+/** Per-layer signature: a short hash of the layer's JSON, memoised by object identity — a layer
+ *  that did not change costs a lookup, and the cache key joins short hashes rather than every
+ *  layer's full JSON (a long text or a painted stroke list would otherwise be copied per paint). */
+const _layerSig = new WeakMap<object, string>()
 export function layerSig(layer: LocalLayer): string {
-  let s = _layerJson.get(layer)
-  if (s === undefined) { s = JSON.stringify(layer); _layerJson.set(layer, s) }
+  let s = _layerSig.get(layer)
+  if (s === undefined) { s = hash(JSON.stringify(layer)); _layerSig.set(layer, s) }
   return s
 }
 
@@ -260,6 +262,14 @@ export function cachedLightingMaps(
   const out: LightingMaps = { lit: maps.lit, lift: maps.lift, width: w, height: h, version: ++_version, maxLift: plannedMaxLift(planned) }
   if (key != null) _cache.set(k, out)
   return out
+}
+
+/** Free every map this module holds (the cache, the uncacheable pair, the stamp scratch). The
+ *  next paint re-stamps — called by `releaseLighting` when the Frame editor closes. */
+export function releaseLightingMaps(): void {
+  _cache.clear()
+  _uncached = null
+  _scratch = null
 }
 
 /** Test hook: how many times maps were (re)stamped. */

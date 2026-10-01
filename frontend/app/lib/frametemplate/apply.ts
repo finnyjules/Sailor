@@ -1,6 +1,7 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import type { Template, TemplateInstance, SlotKind } from './types'
+import { MAX_LIGHTS } from '~/lib/frame/lighting/settings'
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v))
 
@@ -22,13 +23,23 @@ export function placeTemplate(
   t: Template,
   slotValues: Record<string, string>,
   ctx: PlaceCtx,
-): { layers: LocalLayer[]; groups: LayerGroup[]; instance: TemplateInstance } {
+): { layers: LocalLayer[]; groups: LayerGroup[]; instance: TemplateInstance; droppedLights: number } {
   const slotByLayerKey = new Map(t.slots.map(s => [s.layerKey, s]))
   const groupIdMap = new Map<string, string>() // template groupId → fresh groupId
   for (const g of t.groups) groupIdMap.set(g.id, ctx.mkGroupId())
   const placedKeys: Record<string, string> = {}
 
-  const newLayers = t.layers.map(({ key, layer }) => {
+  // A Frame holds at most MAX_LIGHTS lights: template lights beyond the room left are not placed
+  // (the caller says so, like a duplicate or paste that leaves lights out).
+  let lightRoom = Math.max(0, MAX_LIGHTS - current.layers.filter(l => l.kind === 'light').length)
+  let droppedLights = 0
+  const placeable = t.layers.filter(({ layer }) => {
+    if ((layer as { kind?: unknown }).kind !== 'light') return true
+    if (lightRoom > 0) { lightRoom--; return true }
+    droppedLights++
+    return false
+  })
+  const newLayers = placeable.map(({ key, layer }) => {
     const copy: any = clone(layer)
     copy.id = ctx.mkLayerId()
     if (copy.groupId) copy.groupId = groupIdMap.has(copy.groupId) ? groupIdMap.get(copy.groupId) : undefined
@@ -54,7 +65,7 @@ export function placeTemplate(
     slotKinds: Object.fromEntries(t.slots.map(s => [s.id, s.kind])),
     placedKeys,
   }
-  return { layers: [...current.layers, ...newLayers], groups: [...current.groups, ...newGroups], instance }
+  return { layers: [...current.layers, ...newLayers], groups: [...current.groups, ...newGroups], instance, droppedLights }
 }
 
 export function setInstanceSlot(

@@ -7182,6 +7182,10 @@ export function paintLayerStack(
           if (!brushPaintVisible(layer)) continue
           if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
           else drawOwn(ctx)
+          // Light layers (stage 1): this LEGACY animation-engine branch stamps its silhouette
+          // through drawLayerWithMotion with the per-frame motion state in the signature, so a
+          // playing layer re-stamps the maps every frame, and its effects / group opacity are not
+          // in the silhouette. Revisit when motion and lights meet in stage 4.
           if (pushStamp) {
             pushStamp(layer, null, ms,
               (target, ghost) => drawLayerWithMotion(target, ghost, W, H, maskLocal, st, maskState),

@@ -17,6 +17,7 @@ import type { Cloner } from '~/composables/useCloner'
 import CompositorInlineToolbar from '~/components/vue-canvas/CompositorInlineToolbar.vue'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 import { lightingDragging } from '~/lib/frame/lighting/drag'
+import { visibleLights } from '~/lib/frame/lighting/settings'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { onCanvasOcclusion, createOcclusionRepaintGate } from '~/lib/studio/occlusion'
@@ -641,6 +642,7 @@ const stackCanvas = ref<HTMLCanvasElement | null>(null)
 // live shader fill there is nothing time-dependent to paint, so `paintLayerStack`
 // defaulting to t=0 is byte-identical to "no clock needed" — see `hasAnimatedFill` below
 // for the predicate that decides whether that default is actually being exercised.
+let paintedCappedForLighting = false
 function renderStack(t?: number, live = false) {
   if (!repaintGate.shouldPaint()) return
   const cv = stackCanvas.value
@@ -656,10 +658,15 @@ function renderStack(t?: number, live = false) {
   // never `live`, so they keep full device resolution — exported quality is unchanged.
   // Trade-off: post-effects look slightly softer WHILE the card is playing, sharp at rest.
   const hasPost = !!editor.postEffects.value?.some((e: any) => e?.visible)
-  // A light / Darkness drag is capped the same way (one full repaint follows on release).
-  const dpr = (live && (hasPost || lightingDragging.value))
+  // A light / Darkness drag is capped the same way (one full repaint follows on release) — but
+  // only on a card that is lit: the drag flag is module-global, and an unlit card has nothing
+  // the drag changes. `paintedCappedForLighting` records that THIS card painted capped, so the
+  // release repaints only those cards, not every Frame on the canvas.
+  const lightingCap = live && lightingDragging.value && visibleLights(paintCardLayers(resolvedCard.value), editor.localGroups.value).length > 0
+  const dpr = (live && (hasPost || lightingCap))
     ? Math.max(1, Math.min(deviceDpr, Math.sqrt(LIVE_PREVIEW_MAXPX / Math.max(1, W * H))))
     : deviceDpr
+  if (live && lightingDragging.value && dpr < deviceDpr) paintedCappedForLighting = true
   // Resize ONLY when the size actually changes. Assigning canvas.width/height reallocates
   // and clears the backing store every time — doing it each animation frame (renderStack
   // runs per tick) is a classic source of playback jank. clearRect below handles the
@@ -954,7 +961,11 @@ watch(
   },
   { immediate: true },
 )
-watch(lightingDragging, (on) => { if (!on) renderStack() })
+watch(lightingDragging, (on) => {
+  if (on || !paintedCappedForLighting) return
+  paintedCappedForLighting = false
+  renderStack()
+})
 const hasAnyLayer = computed(() => wiredLayers.value.length > 0 || editor.localLayers.value.length > 0)
 
 // ── Inline add-toolbar (image upload) ───────────────────────────────────────

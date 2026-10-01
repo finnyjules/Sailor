@@ -32,6 +32,7 @@ import {
 } from '~/lib/compositor/strokeStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { patchLayoutGrid, describeLayoutGrid, type LayoutGrid } from '~/lib/frame/layoutGrid'
+import { DEFAULT_LIGHTING, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
 import { defaultGrid, type MosaicGrid } from '~/lib/compositor/mosaicGrid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import {
@@ -83,6 +84,9 @@ export interface CompositorState {
    *  only ever authors timeline bands (`motion.motionx`, via animateDial); fps/duration
    *  are the timeline's own controls and flow through here read-only. Absent = no motion authored. */
   motion?: FrameMotion
+  /** The Frame's lighting record (`sailor_localLighting`) — read-only context: describe reports
+   *  that the Frame is lit (light count, Darkness). No light ops until stage 4; never written back. */
+  lighting?: FrameLighting
 }
 
 function clone<T>(v: T): T {
@@ -885,6 +889,14 @@ function findLayer(s: CompositorState, id?: string): LocalLayer | undefined {
 }
 
 /** Read a Compositor frame as an agent snapshot: each layer + a document object. */
+/** Document facts for a lit Frame: how many lights are on and its Darkness. Nothing for an unlit
+ *  Frame, so its description is unchanged. */
+function describeLighting(state: CompositorState): Record<string, unknown> {
+  const n = visibleLights(state.layers, state.groups).length
+  if (!n) return {}
+  return { lights: n, darkness: Math.round((state.lighting ?? DEFAULT_LIGHTING).darkness * 100) / 100 }
+}
+
 export function describeCompositor(state: CompositorState): SurfaceSnapshot {
   // Lights are not content the agent can address in stage 1 (agent light ops come in stage 4).
   const objects: SurfaceSnapshot['objects'] = state.layers.filter(l => l.kind !== 'light').map((l) => {
@@ -960,6 +972,8 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
       background: paintLabel(state.background),
       postEffects: state.postEffects?.filter(e => e.visible).map(e => e.type).join(', ') || 'none',
       grid: state.grid ? describeLayoutGrid(state.grid) : 'none',
+      // Read-only: the Frame is lit by its light layers (the agent cannot add or move lights yet).
+      ...describeLighting(state),
       // The frame is a unit square in normalized coords: x/y/sizes are 0..1.
       coordinateSpace: 'normalized 0..1 (0,0 = top-left, 0.5,0.5 = centre)',
       // Every id addShape accepts. ~1.5 KB (measured 1,530 chars serialised); listed so the model never guesses a name.

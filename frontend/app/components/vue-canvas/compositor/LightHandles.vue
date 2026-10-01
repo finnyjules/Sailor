@@ -121,6 +121,7 @@ function onKey(e: KeyboardEvent, id: string, part: 'dot' | 'aim') {
   const x0 = part === 'dot' ? l.x : l.light.aimX
   const y0 = part === 'dot' ? l.y : l.light.aimY
   if (!e.repeat) emit('record')   // a held arrow is one undo step: its repeats ride the first press's
+  nudgeLightingDrag()              // a held arrow previews through the fast capped paint; one full repaint after
   emit('change', id, patchFor(l, part, clampLightPos(x0 + d.x), clampLightPos(y0 + d.y)))
 }
 </script>

@@ -6092,7 +6092,7 @@ async function injectCompositorOverlays(workflow: any): Promise<void> {
       // Finishes lit as in the editor, and the Frame's light layers light every run: a run is
       // only part of the stack, so the Frame's visible lights ride along with each one (a light
       // draws nothing itself). Stage 1: a run's layers shadow only layers of the same run.
-      const lights = visibleLights(locals)
+      const lights = visibleLights(locals, (comp.properties as any)?.sailor_localGroups as Parameters<typeof visibleLights>[1])
       const lit = lights.length ? [...run.filter(l => l.kind !== 'light'), ...lights] : run
       const blob = await bakeOverlay(lit, W, H, readFrameLight(comp.properties), readFrameLighting(comp.properties))
       if (!blob) return
