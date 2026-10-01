@@ -224,10 +224,19 @@ describe('the rows (rule 1)', () => {
     const looks = ['AspectConvert', 'ChromaKey', 'KenBurns', 'LUT', 'ThreeWayCC']
     const madeClips = ['AnimatedNoise', 'AudioWaveform']
     const ported = [...looks, ...madeClips, 'TextClip', 'CaptionTrack', 'Stabilize', 'FrameInterpolate', 'FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'Transition', 'VideoCrossfade', 'VideoReverse', 'VideoTrim'].sort()
-    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(ported)
+    // R6.9's sound effects and Silence cut (family sound-effects): their rows are checked in runner-media-sfx.
+    const sounds = ['TrimAudioDuration', 'SplitAudioChannels', 'JoinAudioChannels', 'AudioConcat', 'AudioMerge', 'AudioAdjustVolume', 'EmptyAudio',
+      'AudioEqualizer3Band', 'AudioFade', 'AudioNormalize', 'AudioDuck', 'VideoSilenceCut']
+    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual([...ported, ...sounds].sort())
     const rows = mediaEffectRows()
-    expect(Object.keys(rows).sort()).toEqual(ported)
+    expect(Object.keys(rows).sort()).toEqual([...ported, ...sounds].sort())
     for (const [cls, row] of Object.entries(rows)) {
+      if (sounds.includes(cls)) {
+        expect(row, cls).toMatchObject({ family: 'sound-effects', local: 'render' })
+        expect(SWITCHED_CLASSES[cls], cls).toBe('sound-effects')
+        expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(false)
+        continue
+      }
       // R6.7's made clips read no frames: a local render of the video-draw family, an output node (runner-media-vfx-draw).
       if (madeClips.includes(cls)) {
         expect(row, cls).toMatchObject({ family: 'video-draw', local: 'render' })
@@ -267,7 +276,7 @@ describe('the rows (rule 1)', () => {
       ['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0],
       ['TemporalMotionBlur', 0], ['SlitScan', 0], ['TimeDisplacement', 0], ['SpeedRamp', 0], ['VideoCrossfade', 0], ['Transition', 0],
       ['KenBurns', 0], ['AspectConvert', 0], ['ChromaKey', 0], ['LUT', 0], ['ThreeWayCC', 0], ['Stabilize', 0], ['FrameInterpolate', 0],
-      ['AnimatedNoise', 0], ['AudioWaveform', 0], ['TextClip', 0], ['CaptionTrack', 0],
+      ['AnimatedNoise', 0], ['AudioWaveform', 0], ['TextClip', 0], ['CaptionTrack', 0], ['VideoSilenceCut', 0],
     ])
     expect([...FRAME_ENCODERS]).toEqual(['CreateVideo', 'SaveVideoFrames'])
     expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({
@@ -276,7 +285,7 @@ describe('the rows (rule 1)', () => {
       VideoCrossfade: { 0: 'frames' }, Transition: { 0: 'frames' },
       KenBurns: { 0: 'frames' }, AspectConvert: { 0: 'frames' }, ChromaKey: { 0: 'frames' }, LUT: { 0: 'frames' }, ThreeWayCC: { 0: 'frames' },
       Stabilize: { 0: 'frames' }, FrameInterpolate: { 0: 'frames' }, AnimatedNoise: { 0: 'frames' }, AudioWaveform: { 0: 'frames' },
-      TextClip: { 0: 'frames' }, CaptionTrack: { 0: 'frames' },
+      TextClip: { 0: 'frames' }, CaptionTrack: { 0: 'frames' }, VideoSilenceCut: { 0: 'frames' },
     })
     for (const [cls, input] of [['CreateVideo', 'images'], ['SaveVideoFrames', 'frames']] as const) {
       expect(RUNNER_NODE_RULES[cls]!.linkSources![input], cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))

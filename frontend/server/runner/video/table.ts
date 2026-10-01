@@ -912,6 +912,19 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
       return () => feed
     },
   },
+  /**
+   * R6.9: Silence cut's frames (nodes_audio_effects.py:286-326). Its plan is
+   * the sound effects' (../media/soundEffects.ts): the ranges come from the
+   * sound first, then the batch is read once and the frames outside them
+   * dropped, as they decode (no worker op: a frame kept is its own bytes).
+   * This row gives the start pass its batch: at most its input's frames.
+   */
+  VideoSilenceCut: {
+    family: 'sound-effects', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: false,
+    shape: (_w, ins) => ({ ...sameShape(_w, ins), exact: false }),
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1 }),
+    work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + SELECT_STEPS),
+  },
 }
 
 /** Speed ramp's reads: the nearest frame, or lo and hi with this frame's frac. */

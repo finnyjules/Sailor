@@ -60,6 +60,7 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
+import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
@@ -2279,6 +2280,32 @@ export function createEngine(deps: EngineDeps) {
       for (const [k, p] of prompts.entries()) {
         if (!hasVideoEffect(p, families) && !several) continue
         const bad = await mediaEffectStartProblems(p, families, opts(k))
+        if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+      }
+    }
+    // The sound effects' start pass (R6.9, ./video/soundShapes.ts): every sound's rate, channels and length
+    // through the chain, from the sources' headers and the widgets. Where Python itself raises on what is known
+    // now (a sound's channels, a trim of no samples) it is refused in the node's words; a node past a limit (the
+    // sound held at once, the sound caps, the run's kept total with the video effects' peak) or reading a sound
+    // that can't be known before the run leaves the whole workflow to the engine (RUNNER_NOT_ELIGIBLE).
+    if (prompts.some(p => hasSoundEffect(p, families))) {
+      const all = await Promise.all(prompts.map(p => soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted() }))))
+      for (const [k, p] of prompts.entries()) {
+        const raised = soundEffectRefusals(p, families, all[k]!)
+        if (raised) throw refuse(raised.message, 400, { nodeId: raised.nodeId, classType: raised.classType })
+      }
+      // Kept bytes: every take's sounds, never let go, and every take's video peak (several takes run side by side).
+      let keptAll = 0
+      for (const [k, p] of prompts.entries()) {
+        keptAll += soundKeptBytes(p, families, all[k]!)
+        if (hasVideoEffect(p, families)) {
+          const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count: true }))
+          const peak = keptPeak(p, families, shapes, { release: prompts.length === 1 })
+          keptAll += peak ? peak.bytes : Number.POSITIVE_INFINITY
+        }
+      }
+      for (const [k, p] of prompts.entries()) {
+        const bad = soundEffectStartProblems(p, families, { hosted: deps.hosted(), sounds: all[k]!, keptOther: keptAll - soundKeptBytes(p, families, all[k]!) })
         if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
       }
     }

@@ -29,6 +29,7 @@ import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
 import { pixelsCore, type PixelsPicture } from '../pixels/core'
 import { EFFECT_CORES, type EffectCoreEntry } from '../effects/cores'
 import { VIDEO_CORES } from '../video/cores'
+import type { SoundOpResult } from '../video/core/sound'
 import type { PilRaw } from '../pixels/pilPixels'
 import { resampleCore } from '../../media/resample'
 
@@ -249,6 +250,15 @@ parentPort.on('message', (m) => {
         value.preview = m.quant === 'trunc' ? rgb.slice() : vx.toRgb(r.out, 'trunc', isStopped)
         transfer.push(value.preview.buffer)
       }
+    }
+    // A sound effect's arithmetic (R6.9, ../video/core/sound.ts): one sound per call, its channels handed
+    // over and handed back; Stop is read as it goes.
+    else if (m.op === 'sfx.run') {
+      stopped()
+      const op = effectOp('sfx.' + m.fn)
+      value = op(m.channels, m.params, isStopped)
+      transfer = []
+      for (const c of (value && value.channels) || []) if (!transfer.includes(c.buffer)) transfer.push(c.buffer)
     }
     // One sound channel through torchaudio's resampler (R5.1c): Stop is read between blocks of output.
     else if (m.op === 'audio.resample') {
@@ -648,6 +658,28 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
     }
     try { return await job(w) }
     finally { if (!t.dead) void call(t, { op: 'drop' }, []).catch(() => {}) }
+  })
+}
+
+/** The longest one sound effect may take on the worker (the Frame's limit, per call). */
+export const SOUND_EFFECT_TIMEOUT_MESSAGE = 'This sound effect took longer than 2 minutes, so it was stopped'
+
+/**
+ * A sound effect's op (R6.9, ../video/core/sound.ts `sfx.<fn>`) on the
+ * Frame's worker, in the same queue, under the same watchdog and Stop. The
+ * channels are HANDED OVER (the caller's arrays are let go: copies are sent
+ * only of views and shared memory); the result's channels come back.
+ */
+export function soundInWorker(fn: string, channels: readonly Float32Array[], params: Record<string, unknown>, signal?: AbortSignal): Promise<SoundOpResult> {
+  return onWorker(signal, SOUND_EFFECT_TIMEOUT_MESSAGE, async (t) => {
+    const buffers: ArrayBuffer[] = []
+    const own = channels.map((c) => {
+      const whole = c.byteOffset === 0 && c.byteLength === c.buffer.byteLength && !(c.buffer instanceof SharedArrayBuffer)
+      const x = whole && !buffers.includes(c.buffer as ArrayBuffer) ? c : c.slice()
+      buffers.push(x.buffer as ArrayBuffer)
+      return x
+    })
+    return await call(t, { op: 'sfx.run', fn, channels: own, params }, buffers) as SoundOpResult
   })
 }
 

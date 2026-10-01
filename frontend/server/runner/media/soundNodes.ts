@@ -28,6 +28,8 @@
  *                   320k, into output under get_save_image_path's name,
  *                   `%batch_num%` per item, the counter moved on per item;
  *                   the prompt and workflow as JSON tags.
+ *   SaveAudioOpus — (R6.9, ruling (o)) get_save_audio_ui in Opus at its
+ *                   `quality`, as SaveAudio (switched with `sound-effects`).
  *   PreviewAudio  — UI.PreviewAudio (:238-257): FLAC into temp under
  *                   `ComfyUI_temp_` + five of its 26 letters.
  *
@@ -152,7 +154,7 @@ export async function saveAudioFiles(
 }
 
 /** The sound a link brings, decoded as Python's AUDIO holds it (its note, or its maker's). */
-async function wiredSound(ctx: PlanContext, link: ApiLink, media: MediaValueIO): Promise<{ value: RunnerValue & { kind: 'files' }; sound: DecodedSound }> {
+export async function wiredSound(ctx: PlanContext, link: ApiLink, media: MediaValueIO): Promise<{ value: RunnerValue & { kind: 'files' }; sound: DecodedSound }> {
   const got = ctx.valueFrom?.(link) ?? { kind: 'files' as const, files: ctx.filesFrom(link) }
   if (got.kind !== 'files' || !got.files.length) throw new Error(NO_SOUND_WIRED)
   const maker = ctx.prompt[link[0]]?.class_type ?? ''
@@ -272,21 +274,21 @@ export function planAudioCard(ctx: PlanContext): NodePlan {
   }
 }
 
-/** SaveAudio (FLAC) and SaveAudioMP3. */
+/** SaveAudio (FLAC), SaveAudioMP3 and (R6.9) SaveAudioOpus. */
 export function planSaveAudio(ctx: PlanContext): NodePlan {
   const node = ctx.prompt[ctx.nodeId]!
   const inputs = node.inputs ?? {}
   const link = inputs.audio
   if (!isLink(link)) throw new Error(NO_SOUND_WIRED)
-  const mp3 = node.class_type === 'SaveAudioMP3'
+  const format: AudioFormat = node.class_type === 'SaveAudioMP3' ? 'mp3' : node.class_type === 'SaveAudioOpus' ? 'opus' : 'flac'
   const prefix = pyStr(inputs.filename_prefix ?? 'ComfyUI')
   // SaveAudio.execute hands save_audio its default quality (128k), which FLAC ignores.
-  const quality = mp3 ? pyStr(inputs.quality ?? '128k') : '128k'
+  const quality = format !== 'flac' ? pyStr(inputs.quality ?? '128k') : '128k'
   return {
     kind: 'derive',
     async derive(io) {
       const { sound } = await wiredSound(ctx, link, mediaOf(io))
-      const files = await saveAudioFiles(io, [sound], { prefix, format: mp3 ? 'mp3' : 'flac', quality, folder: 'output' })
+      const files = await saveAudioFiles(io, [sound], { prefix, format, quality, folder: 'output' })
       return { values: {}, ui: { audio: files.map(entry) } }
     },
   }

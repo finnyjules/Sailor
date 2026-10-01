@@ -131,6 +131,20 @@ Groups:
            Python's lines and their (x, y) and boxes, each frame's sha256 and
            ink box (the pixels the text changed), a Text clip's frame and a
            caption's pixels around its text, zlib'd.
+  sfx    — (R6.9) the sound effects (Trim audio duration, Split and Join
+           audio channels, Audio concat, Audio merge, Audio adjust volume,
+           Empty audio, the 3-band equalizer, Audio fade, Audio normalize,
+           Audio duck) over standard sounds of a fixed formula (tones at 8,
+           44.1 and 48 kHz, mono and stereo, silence, a tone past +-1, a
+           noisy tone from default_rng(0), bursts with gaps), recorded whole
+           (float32, zlib'd); every gain Adjust volume can make, as float32;
+           torch's float32 linspace; Silence cut over the bursts at its
+           thresholds, minimum silences and paddings (and on silence): the
+           frames it kept, its sound, its loud mask's runs, the samples whose
+           level sat within a band of the threshold, and the ranges both as
+           the node walks them and as its walk was meant to (short silences
+           absorbed, the run's start kept); Save audio (Opus) at every
+           quality from 44.1 and 48 kHz, read back by nodes_audio.load.
 """
 from __future__ import annotations
 
@@ -3514,10 +3528,298 @@ def group_vfx_text(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── sfx (R6.9) ─────────────────────────────────────────────────────────────────
+
+# The standard sounds (R6 rule 13): name -> (rate, seconds, channels, kind).
+SFX_SOUNDS = {
+    "tone8k-mono": (8000, 0.25, 1, "tone"),
+    "tone44-mono": (44100, 0.06, 1, "tone"),
+    "tone44-stereo": (44100, 0.06, 2, "tone"),
+    "tone48-stereo": (48000, 0.05, 2, "tone"),
+    "tone48-mono": (48000, 0.04, 1, "tone"),
+    "silence44": (44100, 0.05, 1, "silence"),
+    "clip44-stereo": (44100, 0.04, 2, "clip"),
+    "noisy48": (48000, 0.05, 1, "noisy"),
+    "bursts16": (16000, 2.0, 1, "bursts"),
+    "bursts8-stereo": (8000, 2.0, 2, "bursts"),
+    "silence16": (16000, 2.0, 1, "silence"),
+}
+# Bursts with gaps: (start, end, amplitude) in seconds; between them, silence (exact zeros).
+SFX_BURSTS = [(0.10, 0.30, 0.5), (0.33, 0.50, 0.4), (0.65, 0.80, 0.5), (1.30, 1.45, 0.02), (1.53, 1.70, 0.005), (1.71, 1.80, 0.3)]
+# The band (dB) around Silence cut's threshold within which Python's level is listed (rule 5's band).
+SFX_BAND_DB = 1e-3
+SFX_SILENCE_FPS = 30.0
+
+
+def sfx_sound(name: str) -> np.ndarray:
+    """A standard sound as [C][N] float32."""
+    rate, secs, ch, kind = SFX_SOUNDS[name]
+    n = int(round(rate * secs))
+    if kind == "tone":
+        return tone(rate, secs, ch).astype(np.float32)
+    if kind == "silence":
+        return np.zeros((ch, n), np.float32)
+    if kind == "clip":
+        return (tone(rate, secs, ch) * 3.2).astype(np.float32)
+    if kind == "noisy":
+        rng = np.random.default_rng(0)
+        t = np.arange(n, dtype=np.float64) / rate
+        return (0.3 * np.sin(2 * np.pi * 440.0 * t) + 0.1 * rng.standard_normal(n)).astype(np.float32)[None].repeat(ch, 0)
+    t = np.arange(n, dtype=np.float64) / rate
+    x = np.zeros(n)
+    for s, e, a in SFX_BURSTS:
+        i, j = int(round(s * rate)), int(round(e * rate))
+        x[i:j] = a * np.sin(2 * np.pi * 330.0 * t[i:j])
+    rows = [x * (1.0 if c == 0 else 0.6) for c in range(ch)]
+    return np.stack(rows).astype(np.float32)
+
+
+def sfx_audio(name: str) -> dict:
+    return {"waveform": torch.from_numpy(sfx_sound(name).copy())[None], "sample_rate": SFX_SOUNDS[name][0]}
+
+
+def sfx_rec(v: dict) -> dict:
+    """A sound output: its rate, shape and float32 samples (zlib'd), with their sha256."""
+    w = v["waveform"]
+    assert w.dtype == torch.float32 and w.shape[0] == 1, (w.dtype, w.shape)
+    raw = np.ascontiguousarray(w[0].numpy()).tobytes()
+    return {"rate": int(v["sample_rate"]), "channels": int(w.shape[1]), "samples": int(w.shape[2]), "sha256": sha(raw), "f32z": b64(zlib.compress(raw, 9))}
+
+
+def sfx_case(cls, class_type: str, name: str, sounds: dict, widgets: dict) -> dict:
+    """The real node's execute: its sound outputs (and whether it handed its input on as it came), or the error it raises."""
+    rec = {"class_type": class_type, "name": name, "sounds": {k: v for k, v in sounds.items()}, "widgets": widgets}
+    try:
+        args = cls.execute(**{k: sfx_audio(v) for k, v in sounds.items()}, **widgets).args
+    except Exception as e:  # noqa: BLE001
+        rec["error"] = err(e)
+        return rec
+    rec["outputs"] = [sfx_rec(a) for a in args]
+    return rec
+
+
+def sfx_walk(mask: list, min_silent: int, pad: int, fixed: bool) -> list:
+    """Silence cut's walk over the loud mask (nodes_audio_effects.py:255-282), as written (fixed False: a short silence
+    restarts the run at the next loud sample, so the run before it is dropped), or as it was meant to (fixed True: the
+    run's start kept, the short silence absorbed). Returns the merged ranges."""
+    keep = []
+    i = 0
+    n = len(mask)
+    while i < n:
+        if mask[i]:
+            start = i
+            while True:
+                while i < n and mask[i]:
+                    i += 1
+                j = i
+                while j < n and not mask[j] and (j - i) < min_silent:
+                    j += 1
+                if j < n and mask[j]:
+                    i = j
+                    if fixed:
+                        continue
+                    start = i
+                    continue
+                break
+            keep.append((max(0, start - pad), min(n, i + pad)))
+        else:
+            i += 1
+    if not keep:
+        return []
+    merged = [list(keep[0])]
+    for s, e in keep[1:]:
+        if s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    return merged
+
+
+def sfx_silence_case(cls, name: str, sound: str, widgets: dict) -> dict:
+    """Silence cut on frames tagged by their index (frame i's pixels are (i % 256) / 255) and a standard sound."""
+    import torch.nn.functional as F
+    audio = sfx_audio(sound)
+    wave, sr = audio["waveform"], audio["sample_rate"]
+    T = int(round(wave.shape[-1] / sr * widgets["fps"]))
+    frames = (torch.arange(T, dtype=torch.float32) % 256 / 255.0)[:, None, None, None].expand(T, 2, 2, 3).contiguous()
+    rec = {"class_type": "VideoSilenceCut", "name": name, "sounds": {"audio": sound}, "widgets": widgets, "frames": T}
+    out_frames, out_audio = cls.execute(frames=frames, audio=audio, **widgets).args
+    rec["keptFrames"] = [int(round(float(f[0, 0, 0]) * 255)) for f in out_frames]
+    rec["outputs"] = [sfx_rec(out_audio)]
+    # The node's steps again, for the band and the ranges (the same torch calls).
+    mono = wave.abs().mean(dim=tuple(range(wave.dim() - 1)))
+    win = max(int(sr * 0.020), 1)
+    if win > 1:
+        kernel = torch.ones(1, 1, win, dtype=mono.dtype) / win
+        env = F.conv1d(F.pad(mono.view(1, 1, -1), (win // 2, win // 2)), kernel).view(-1)[: mono.shape[0]]
+    else:
+        env = mono
+    env_db = 20.0 * torch.log10(env.clamp(min=1e-9))
+    mask = (env_db > widgets["threshold_db"]).tolist()
+    near = ((env_db - widgets["threshold_db"]).abs() < SFX_BAND_DB).nonzero().view(-1).tolist()
+    runs, i = [], 0
+    while i < len(mask):
+        if mask[i]:
+            j = i
+            while j < len(mask) and mask[j]:
+                j += 1
+            runs.append([i, j])
+            i = j
+        else:
+            i += 1
+    min_silent = int(sr * widgets["min_silence_ms"] / 1000)
+    pad = int(sr * widgets["keep_padding_ms"] / 1000)
+    py = sfx_walk(mask, min_silent, pad, False)
+    fixed = sfx_walk(mask, min_silent, pad, True)
+    # The walk as written is the node's: its sound is the input sliced by those ranges.
+    if py:
+        assert torch.equal(out_audio["waveform"], torch.cat([wave[..., s:e] for s, e in py], dim=-1))
+    rec.update({"loudRuns": runs, "near": near, "pyRanges": py, "fixedRanges": fixed})
+    return rec
+
+
+def sfx_opus_case(tmp: str, rate: int, quality: str) -> dict:
+    from comfy_api.latest import _ui
+    from comfy_extras import nodes_audio as na
+    out, _temp = fresh_dirs(tmp, f"opus_{rate}_{quality}")
+    shim = _AvShim()
+    x = tone_f32(rate, 0.1, 2)
+    with _patched(_ui, shim):
+        res = node_clone(na.SaveAudioOpus).execute(audio={"waveform": torch.from_numpy(x)[None], "sample_rate": rate},
+                                                   filename_prefix="audio/ComfyUI", quality=quality)
+    ui = ui_of(res)
+    return {"rate": rate, "quality": quality, "input": b64(zlib.compress(np.ascontiguousarray(x).tobytes(), 9)),
+            "ui": ui, "saved": saved_sound(out, ui["audio"][0], True), "written": files_written(out)}
+
+
+def group_sfx(names: list[str]) -> dict:
+    import tempfile
+    from comfy_extras import nodes_audio as na
+    from comfy_extras import nodes_audio_effects as nae
+    sounds = {n: {"rate": SFX_SOUNDS[n][0], "channels": SFX_SOUNDS[n][2], "f32z": b64(zlib.compress(np.ascontiguousarray(sfx_sound(n)).tobytes(), 9))}
+              for n in SFX_SOUNDS}
+    runs = []
+
+    def add(cls, ct, grid):
+        for name, snd, w in grid:
+            runs.append(sfx_case(cls, ct, name, snd, w))
+
+    T44, S44, T8, S48, M48, Z44, C44, N48 = (
+        "tone44-mono", "tone44-stereo", "tone8k-mono", "tone48-stereo", "tone48-mono", "silence44", "clip44-stereo", "noisy48")
+    add(na.TrimAudioDuration, "TrimAudioDuration", [
+        ("defaults", {"audio": S44}, {"start_index": 0.0, "duration": 60.0}),
+        ("a slice", {"audio": T44}, {"start_index": 0.01, "duration": 0.02}),
+        ("from the end", {"audio": S44}, {"start_index": -0.02, "duration": 0.01}),
+        ("start past the end", {"audio": T8}, {"start_index": 5.0, "duration": 1.0}),
+        ("start far before", {"audio": T8}, {"start_index": -100.0, "duration": 0.01}),
+        ("half a sample (to even)", {"audio": T8}, {"start_index": 0.5 / 8000, "duration": 2.5 / 8000}),
+        ("one and a half samples", {"audio": T8}, {"start_index": 1.5 / 8000, "duration": 3.5 / 8000}),
+        ("duration 0 (raises)", {"audio": T8}, {"start_index": 0.0, "duration": 0.0}),
+        ("huge start", {"audio": T8}, {"start_index": 1.8e19, "duration": 1.0}),
+    ])
+    add(na.SplitAudioChannels, "SplitAudioChannels", [
+        ("stereo", {"audio": S44}, {}), ("clipping stereo", {"audio": C44}, {}), ("mono (raises)", {"audio": T44}, {}),
+    ])
+    add(na.JoinAudioChannels, "JoinAudioChannels", [
+        ("same rate", {"audio_left": T44, "audio_right": T44}, {}),
+        ("longer left trimmed", {"audio_left": M48, "audio_right": N48}, {}),
+        ("8 kHz against 48 kHz (resampled up)", {"audio_left": T8, "audio_right": M48}, {}),
+        ("stereo (raises)", {"audio_left": S44, "audio_right": T44}, {}),
+    ])
+    add(na.AudioConcat, "AudioConcat", [
+        ("after", {"audio1": S44, "audio2": C44}, {"direction": "after"}),
+        ("before, mono made stereo", {"audio1": T44, "audio2": S44}, {"direction": "before"}),
+        ("8 kHz against 48 kHz", {"audio1": T8, "audio2": S48}, {"direction": "after"}),
+        ("48 kHz against 44.1 kHz", {"audio1": S48, "audio2": T44}, {"direction": "before"}),
+    ])
+    for m in ("add", "mean", "subtract", "multiply"):
+        add(na.AudioMerge, "AudioMerge", [
+            (f"{m}: stereo and mono (broadcast)", {"audio1": S44, "audio2": T44}, {"merge_method": m}),
+            (f"{m}: past 1 (divided by the peak)", {"audio1": C44, "audio2": S44}, {"merge_method": m}),
+            (f"{m}: shorter second padded", {"audio1": T8, "audio2": M48}, {"merge_method": m}),
+            (f"{m}: longer second trimmed, resampled", {"audio1": S48, "audio2": T8}, {"merge_method": m}),
+        ])
+    add(na.AudioAdjustVolume, "AudioAdjustVolume", [
+        (f"volume {v}", {"audio": s}, {"volume": v}) for v, s in ((0, S44), (1, S44), (-1, T44), (6, C44), (-100, N48), (100, T8), (-37, S48))
+    ])
+    add(na.EmptyAudio, "EmptyAudio", [
+        (f"{d} s at {r} Hz, {c} ch", {}, {"duration": d, "sample_rate": r, "channels": c})
+        for d, r, c in ((60.0 / 1000, 44100, 2), (0.0, 44100, 2), (0.01, 1, 1), (0.0000625, 8000, 1), (0.01, 192000, 2), (1.5, 8000, 1))
+    ])
+    eq0 = {"low_gain_dB": 0.0, "low_freq": 100, "mid_gain_dB": 0.0, "mid_freq": 1000, "mid_q": 0.707, "high_gain_dB": 0.0, "high_freq": 5000}
+    eq_grid = [
+        ("defaults (no band)", eq0),
+        ("low +24", {**eq0, "low_gain_dB": 24.0}), ("low -24", {**eq0, "low_gain_dB": -24.0}),
+        ("low +6 at 20 Hz", {**eq0, "low_gain_dB": 6.0, "low_freq": 20}), ("low +6 at 500 Hz", {**eq0, "low_gain_dB": 6.0, "low_freq": 500}),
+        ("mid +24", {**eq0, "mid_gain_dB": 24.0}), ("mid -24", {**eq0, "mid_gain_dB": -24.0}),
+        ("mid +9 at 200 Hz, q 0.1", {**eq0, "mid_gain_dB": 9.0, "mid_freq": 200, "mid_q": 0.1}),
+        ("mid -9 at 4000 Hz, q 10", {**eq0, "mid_gain_dB": -9.0, "mid_freq": 4000, "mid_q": 10.0}),
+        ("high +24", {**eq0, "high_gain_dB": 24.0}), ("high -24", {**eq0, "high_gain_dB": -24.0}),
+        ("high +6 at 1000 Hz", {**eq0, "high_gain_dB": 6.0, "high_freq": 1000}), ("high +6 at 15000 Hz", {**eq0, "high_gain_dB": 6.0, "high_freq": 15000}),
+        ("all three", {**eq0, "low_gain_dB": 4.5, "mid_gain_dB": -3.2, "high_gain_dB": 7.7}),
+    ]
+    for snd in (S44, T8, C44, N48):
+        add(na.AudioEqualizer3Band, "AudioEqualizer3Band", [(f"{n} · {snd}", {"audio": snd}, w) for n, w in eq_grid])
+    fades = []
+    for curve in ("linear", "equal_power", "exponential"):
+        fades += [
+            (f"{curve}: defaults (whole sound)", {"audio": S44}, {"fade_in": 0.5, "fade_out": 0.5, "curve": curve}),
+            (f"{curve}: in and out", {"audio": T44}, {"fade_in": 0.02, "fade_out": 0.03, "curve": curve}),
+            (f"{curve}: in only", {"audio": T8}, {"fade_in": 0.1, "fade_out": 0.0, "curve": curve}),
+            (f"{curve}: out only, one sample", {"audio": T8}, {"fade_in": 0.0, "fade_out": 1.0 / 8000, "curve": curve}),
+            (f"{curve}: noisy, max", {"audio": N48}, {"fade_in": 60.0, "fade_out": 0.01, "curve": curve}),
+        ]
+    fades.append(("none (handed on)", {"audio": S44}, {"fade_in": 0.0, "fade_out": 0.0, "curve": "linear"}))
+    add(nae.AudioFadeNode, "AudioFade", fades)
+    norms = []
+    for mode in ("peak", "rms"):
+        for db in (-60.0, -1.0, 0.0, -18.5):
+            for snd in (S44, N48, C44):
+                norms.append((f"{mode} {db} · {snd}", {"audio": snd}, {"mode": mode, "target_db": db}))
+        norms.append((f"{mode} on silence (handed on)", {"audio": Z44}, {"mode": mode, "target_db": -1.0}))
+    add(nae.AudioNormalizeNode, "AudioNormalize", norms)
+    duck0 = {"threshold_db": -30.0, "depth_db": -12.0, "attack_ms": 20.0, "release_ms": 300.0}
+    add(nae.AudioDuckNode, "AudioDuck", [
+        ("defaults, same rate", {"audio": S44, "sidechain": T44}, duck0),
+        ("sidechain at another rate (nearest)", {"audio": T8, "sidechain": "bursts16"}, duck0),
+        ("stereo sidechain, shorter (padded)", {"audio": "bursts8-stereo", "sidechain": S48}, duck0),
+        ("threshold -60, depth -60", {"audio": S44, "sidechain": T44}, {**duck0, "threshold_db": -60.0, "depth_db": -60.0}),
+        ("threshold 0", {"audio": S44, "sidechain": C44}, {**duck0, "threshold_db": 0.0}),
+        ("depth 0", {"audio": S44, "sidechain": T44}, {**duck0, "depth_db": 0.0}),
+        ("attack 1, release 1", {"audio": T8, "sidechain": "bursts16"}, {**duck0, "attack_ms": 1.0, "release_ms": 1.0}),
+        ("attack 2000, release 5000", {"audio": T8, "sidechain": "bursts16"}, {**duck0, "attack_ms": 2000.0, "release_ms": 5000.0}),
+        ("silent sidechain", {"audio": S44, "sidechain": Z44}, duck0),
+    ])
+    silence = []
+    sw0 = {"fps": SFX_SILENCE_FPS, "threshold_db": -40.0, "min_silence_ms": 300, "keep_padding_ms": 80}
+    grid = [("defaults", "bursts16", sw0)]
+    for t in (-80.0, 0.0):
+        grid.append((f"threshold {t}", "bursts16", {**sw0, "threshold_db": t}))
+    for m in (20, 5000):
+        grid.append((f"min_silence_ms {m}", "bursts16", {**sw0, "min_silence_ms": m}))
+    for p in (0, 2000):
+        grid.append((f"keep_padding_ms {p}", "bursts16", {**sw0, "keep_padding_ms": p}))
+    grid += [("short gaps kept, no padding", "bursts16", {**sw0, "min_silence_ms": 100, "keep_padding_ms": 0}),
+             ("stereo at 8 kHz", "bursts8-stereo", sw0), ("fps 1", "bursts16", {**sw0, "fps": 1.0}),
+             ("fps 120", "bursts8-stereo", {**sw0, "fps": 120.0, "min_silence_ms": 20}), ("on silence", "silence16", sw0)]
+    for name, snd, w in grid:
+        silence.append(sfx_silence_case(nae.VideoSilenceCutNode, name, snd, w))
+    with tempfile.TemporaryDirectory() as tmp:
+        opus = [sfx_opus_case(tmp, r, q) for r in (44100, 48000) for q in ("64k", "96k", "128k", "192k", "320k")]
+    gains = [float(torch.tensor(10 ** (v / 20), dtype=torch.float32)) for v in range(-100, 101)]
+    lin = []
+    for n, a, b in ((1, 0.0, 1.0), (2, 0.0, 1.0), (10, 0.0, 1.0), (441, 0.0, 1.0), (44100, 0.0, 1.0), (1000, 0.0, 95999.0), (100003, 0.0, 39999.0)):
+        raw = torch.linspace(a, b, n).numpy().tobytes()
+        lin.append({"n": n, "a": a, "b": b, "sha256": sha(raw), **({"f32": b64(raw)} if n <= 441 else {})})
+    return {"cases": {"sounds": sounds, "runs": runs, "silence": silence, "bandDb": SFX_BAND_DB, "opus": opus, "gains": gains, "linspace": lin,
+                      "prompt": _Hidden.prompt, "extraPnginfo": _Hidden.extra_pnginfo}}
+
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
           "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
           "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize, "vfx-flow": group_vfx_flow,
-          "vfx-draw": group_vfx_draw, "vfx-text": group_vfx_text}
+          "vfx-draw": group_vfx_draw, "vfx-text": group_vfx_text, "sfx": group_sfx}
 
 
 def main() -> None:

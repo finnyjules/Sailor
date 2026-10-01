@@ -36,6 +36,7 @@ import { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } from 
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { AUDIO_GEN_CLASSES } from '#shared/runner/audioGen'
 import { MEDIA_WORDS } from '#shared/runner/media'
+import { SOUND_EFFECT_OUTPUTS } from '#shared/runner/mediaEffects'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
 import { createEngineResultStore, type ResultStore } from '~~/server/runner/results'
 import { createFileKeptBytes, type KeptBytes } from '~~/server/runner/keptBytes'
@@ -515,6 +516,8 @@ describe('the family', () => {
     expect(SOUND_OUTPUTS).toEqual([
       ['LoadAudio', 0], ['RecordAudio', 0], ['Audio', 0], ['GetVideoComponents', 1],
       ...AUDIO_GEN_CLASSES.map(c => [c, 0]), ['CloneSingingVoiceNode', 0],
+      // R6.9: every sound effect's sound slots (taken only while `sound-effects` is on: runner-media-sfx).
+      ...SOUND_EFFECT_OUTPUTS,
     ])
     for (const cls of ['SaveAudio', 'SaveAudioMP3', 'PreviewAudio']) expect(RUNNER_NODE_RULES[cls]!.linkSources, cls).toEqual({ audio: SOUND_OUTPUTS })
     expect(AUDIO_CARD_MEDIA_RULE.linkSources).toEqual({ source: SOUND_OUTPUTS })

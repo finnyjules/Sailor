@@ -159,7 +159,7 @@ function madeVideoLink(prompt: ApiPrompt, link: ApiLink, depth = 0): boolean {
 }
 
 /** The file a VIDEO wire brings where it is known before the run: a Load video's, or a Video card's (its source's first). */
-function videoFileOf(prompt: ApiPrompt, link: ApiLink, depth = 0): OutputFile | null {
+export function videoFileOf(prompt: ApiPrompt, link: ApiLink, depth = 0): OutputFile | null {
   const from = prompt[link[0]]
   if (!from || depth > 64 || link[1] !== 0) return null
   const inputs = from.inputs ?? {}

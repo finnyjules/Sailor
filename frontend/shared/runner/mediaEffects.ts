@@ -38,11 +38,13 @@ export const MEDIA_EFFECT_FAMILIES: readonly MediaEffectFamily[] = [
   'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
 ]
 
-/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins; R6.4: the five looks; R6.5: Stabilize; R6.6: Slow motion; R6.7: Animated noise and Audio waveform; R6.8: Text clip and Caption track). Each task adds its classes. */
+/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins; R6.4: the five looks; R6.5: Stabilize; R6.6: Slow motion; R6.7: Animated noise and Audio waveform; R6.8: Text clip and Caption track; R6.9: the sound effects and Silence cut). Each task adds its classes. */
 export const MEDIA_EFFECTS_PORTED: readonly string[] = [
   'FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp', 'VideoCrossfade', 'Transition',
   'KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC', 'Stabilize', 'FrameInterpolate', 'AnimatedNoise', 'AudioWaveform',
   'TextClip', 'CaptionTrack',
+  'TrimAudioDuration', 'SplitAudioChannels', 'JoinAudioChannels', 'AudioConcat', 'AudioMerge', 'AudioAdjustVolume', 'EmptyAudio',
+  'AudioEqualizer3Band', 'AudioFade', 'AudioNormalize', 'AudioDuck', 'VideoSilenceCut',
 ]
 
 /** Each R6 class's family (every generated class, ported or not; Save audio (Opus) is not an R6 family's). */
@@ -69,6 +71,24 @@ export function mediaEffectFamilyOn(classType: string, families: ReadonlySet<Run
 /** The ported video effects' frame-batch output slots. */
 function frameSlotsOf(cls: string): number[] {
   return MEDIA_EFFECT_SCHEMAS[cls]!.outputs.flatMap((o, i) => o === 'image' ? [i] : [])
+}
+
+/**
+ * Every ported sound effect's sound slots (R6.9: Split audio channels 0 and 1,
+ * Silence cut 1, …): eligibility.ts adds them to SOUND_OUTPUTS. Each is taken
+ * only while its own family is on (`linkSourceOn`).
+ */
+export const SOUND_EFFECT_OUTPUTS: readonly (readonly [string, number])[] = MEDIA_EFFECTS_PORTED.flatMap(cls =>
+  MEDIA_EFFECT_SCHEMAS[cls]!.outputs.flatMap((o, i) => (o === 'audio' ? [[cls, i] as const] : [])))
+
+/**
+ * Whether a wire from this class may be read with these families on (R6.9):
+ * an R6 class only while its family (and chain) is on; any other class as
+ * its row says. With the R6 families off, a wire from a sound effect is
+ * refused exactly as before it was listed (rule 12).
+ */
+export function linkSourceOn(classType: string, families: ReadonlySet<RunnerFamily>): boolean {
+  return !Object.prototype.hasOwnProperty.call(MEDIA_EFFECT_FAMILY_OF, classType) || mediaEffectFamilyOn(classType, families)
 }
 
 /** A ported class's mask slots (Chroma key's): the runner doesn't make them, so no node may read one (ruling (l)). */
@@ -185,4 +205,11 @@ export const MEDIA_EFFECT_WORDS = {
   waveSoundTooBig: 'This sound file can’t be drawn as a waveform here',
   textFontMissing: 'The font for text on video isn’t there',
   textTooLong: 'This text is too long to draw on video here',
+  soundUnknown: 'The runner can’t tell before the run how long this sound is',
+  soundTooLong: 'This sound effect would hold too much sound at once to work on here',
+  soundKeptTooMuch: 'This workflow makes more sound and video than the server can keep for one run',
+  trimEmpty: 'The trim’s start must be before its end, inside the sound',
+  splitNeedsStereo: 'This needs a stereo sound to split',
+  joinNeedsMono: 'Both sounds must be mono to join them',
+  soundChannelsDiffer: 'These two sounds have different numbers of channels, so they can’t be combined',
 } as const

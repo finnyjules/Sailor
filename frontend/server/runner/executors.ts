@@ -142,6 +142,8 @@ import { planCreateVideo, planGetVideoComponents, planLoadVideo, planSaveVideo, 
 import { planLoadVideoFrames, planSaveVideoFrames } from './media/frameNodes'
 import { planVideoEffect } from './video/plan'
 import { videoEffectSpec } from './video/table'
+import { SOUND_EFFECT_CLASSES } from './video/soundShapes'
+import { planSoundEffect } from './media/soundEffects'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
@@ -1168,6 +1170,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return planLoadAudio(ctx)
     case 'SaveAudio':
     case 'SaveAudioMP3':
+    case 'SaveAudioOpus':
       return planSaveAudio(ctx)
     case 'PreviewAudio':
       return planPreviewAudio(ctx)
@@ -1354,6 +1357,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     default: {
       // ── video-* (step 3, R6): the video effects, computed here (./video/) ──
+      // R6.9: the sound effects and Silence cut (whose frames have a video effect's row too, for the start pass).
+      if (SOUND_EFFECT_CLASSES.includes(node.class_type)) return planSoundEffect(ctx)
       if (videoEffectSpec(node.class_type)) return planVideoEffect(ctx)
       // ── effects-* (step 3, R2): the still-picture effects, computed here ──
       const fx = effectSpec(node.class_type)

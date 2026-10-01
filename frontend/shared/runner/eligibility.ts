@@ -17,7 +17,7 @@ import {
   asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
-import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
+import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
   ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
   TOPAZ_ENHANCE_MODELS, TOPAZ_SUBJECT_DETECTION, TOPAZ_UPSCALE_FACTORS, UPSCALE_ENGINES,
@@ -474,11 +474,14 @@ const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
  * can take (R5.3): each is taken only while its own family is on, so an AUDIO
  * input may list them all. LoadAudio, RecordAudio and the Audio card
  * (`media-sound`); Get video components' sound (`media-video`, R5.4); the
- * music and speech nodes (`audio-gen`); Clone a singing voice (`sound-in`, R3.10).
+ * music and speech nodes (`audio-gen`); Clone a singing voice (`sound-in`, R3.10);
+ * every sound effect's sound slots (`sound-effects`, R6.9: only while that
+ * family is on, graphRuleAllows' linkSourceOn).
  */
 export const SOUND_OUTPUTS: readonly (readonly [string, number])[] = [
   ['LoadAudio', 0], ['RecordAudio', 0], ['Audio', 0], ['GetVideoComponents', 1],
   ...AUDIO_GEN_CLASSES.map(c => [c, 0] as const), ['CloneSingingVoiceNode', 0],
+  ...SOUND_EFFECT_OUTPUTS,
 ]
 
 /** The sound nodes that read a sound (R5.3): what a music or speech node may feed while `media-sound` is on. */
@@ -926,6 +929,17 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   PreviewAudio: {
     family: 'media-sound', local: 'render', mustLink: ['audio'], required: ['audio'],
     linkSources: { audio: SOUND_OUTPUTS },
+  },
+  // R6.9: Save audio (Opus), R5.3's Opus export (ruling (o)). Switched with `sound-effects` (which needs
+  // media-sound), not media-sound alone: with the R6 families off it is left to the engine exactly as before
+  // (rule 12, and R5.3's own spec).
+  SaveAudioOpus: {
+    family: 'sound-effects', local: 'render', mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    widgets: {
+      filename_prefix: { type: 'STRING', required: true },
+      quality: { type: 'COMBO', required: true, options: ['64k', '96k', '128k', '192k', '320k'] },
+    },
   },
   // ── media-video (step 3, R5.4): the video nodes, computed here with the
   // video tools (server/runner/media/videoNodes.ts). Load video hands its
@@ -1634,8 +1648,9 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   // R5.5: frame batches from and to files.
   LoadVideoFrames: 'media-video',
   SaveVideoFrames: 'media-video',
-  // R6: each ported video or sound effect, by its family.
+  // R6: each ported video or sound effect, by its family; R6.9: Save audio (Opus).
   ...mediaEffectSwitchedClasses(),
+  SaveAudioOpus: 'sound-effects',
 }
 
 /**
@@ -2129,6 +2144,8 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
     if (!isLink(v)) continue
     const from = prompt[v[0]]
     if (!from || !sources.some(([cls, slot]) => cls === from.class_type && slot === v[1])) return false
+    // R6.9: an R6 class is a source only while its own family is on.
+    if (!linkSourceOn(from.class_type, families)) return false
   }
   return true
 }

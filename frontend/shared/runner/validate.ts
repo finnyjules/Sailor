@@ -80,6 +80,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R5.3: Save audio (FLAC and MP3) and Preview audio are output nodes (is_output_node=True;
   // Load audio and Record audio are not). The Audio card is listed above.
   'SaveAudio', 'SaveAudioMP3', 'PreviewAudio',
+  // R6.9: Save audio (Opus), switched with `sound-effects`.
+  'SaveAudioOpus',
   // R5.4: Save video is an output node (is_output_node=True; Load video, Get video
   // components and Create video are not). The Video card is listed above.
   'SaveVideo',
