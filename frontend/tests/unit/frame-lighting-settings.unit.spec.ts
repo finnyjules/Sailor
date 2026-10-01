@@ -222,6 +222,24 @@ describe('editor: Relight and the Frame\'s lights (stage 2)', () => {
     expect(lightsIn(node)).toHaveLength(1)
     expect(lightsIn(node)[0].light.type).toBe('sun')
   })
+  it('addRelight on a Frame with old Relight lights converts them first, in the same undo step, with no extra lamp', () => {
+    const other = { ...photo([oldFx([oldLight({ id: 'a' }), oldLight({ id: 'b', x: 0 })])]), id: 'old' }
+    const { node, ed } = makeEditor({ sailor_localLayers: [other, photo(), rect] })
+    const id = ed.addRelight('p')
+    expect(id).toBeTruthy()
+    expect(lightsIn(node)).toHaveLength(2)                      // the two converted lights, no Golden key lamp
+    expect(lightsIn(node).every(l => l.id.startsWith('ll-rl-old-'))).toBe(true)
+    expect('lights' in layersOf(node).find(l => l.id === 'old').effects[0]).toBe(false)
+    expect(relightOf(node)).toMatchObject({ id, type: 'relight' })
+    expect(layersOf(node).find(l => l.id === 'r')).toMatchObject({ lit: false, castsShadow: false })
+    expect((node.data.properties as any).sailor_localLighting).toEqual({ darkness: 0.45, backgroundLit: true })
+    ed.undo()
+    expect(lightsIn(node)).toHaveLength(0)
+    expect(relightOf(node)).toBeUndefined()
+    expect(layersOf(node).find(l => l.id === 'old').effects[0].lights).toHaveLength(2)
+    expect('sailor_localLighting' in node.data.properties).toBe(false)
+    expect(ed.canUndo.value).toBe(false)
+  })
   it('addRelight refuses a second Relight and a layer that cannot take one', () => {
     const { ed } = makeEditor({ sailor_localLayers: [photo(), rect] })
     expect(ed.addRelight('p')).toBeTruthy()

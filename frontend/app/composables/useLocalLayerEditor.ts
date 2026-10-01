@@ -486,21 +486,29 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     writeLighting(r.lighting)
     return r.dropped
   }
-  /** Add Relight to an image/wired layer, plus a Lamp at Golden key's place when the Frame has
-   *  no light yet — ONE undo step. Returns the new effect's id, or `null` when nothing was added
-   *  (no such layer, a layer that cannot take Relight, or one that already has it). */
+  /** Add Relight to an image/wired layer — ONE undo step. A Frame that still has old Relight
+   *  lights and no light layer is converted first (as `convertLegacyRelight`); then, when the
+   *  Frame has no light at all, a Lamp lands at Golden key's place. Returns the new effect's id,
+   *  or `null` when nothing was added (no such layer, a layer that cannot take Relight, or one
+   *  that already has it). */
   function addRelight(layerId: string): string | null {
-    const layer = localLayers.value.find(l => l.id === layerId)
-    if (!layer || (layer.kind !== 'image' && layer.kind !== 'wired')) return null
+    const layer0 = localLayers.value.find(l => l.id === layerId)
+    if (!layer0 || (layer0.kind !== 'image' && layer0.kind !== 'wired')) return null
+    const before0 = effectStackOf(layer0 as { effects?: unknown[] })
+    if (addEffect(before0, 'relight') === before0) return null
+    const { w, h } = dims()
+    const props = node()?.data?.properties as Record<string, unknown> | undefined
+    const conv = relightLightsToLayers(localLayers.value, props?.sailor_localLighting ? lighting.value : null, w, h)
+    const base = conv.layers
+    const layer = base.find(l => l.id === layerId)!
     const before = effectStackOf(layer as { effects?: unknown[] })
     const next = addEffect(before, 'relight')
-    if (next === before) return null
     const fresh = next.find(e => e.type === 'relight')!
     const withFx = { ...layer, ...writeStackToLayer(next) } as LocalLayer
-    const { w, h } = dims()
-    const lamps = lightCount() === 0 ? setupToLightLayers('Golden key', withFx, w, h) : []
+    const lamps = base.some(l => l.kind === 'light') ? [] : setupToLightLayers('Golden key', withFx, w, h)
     recordHistory()
-    commit([...localLayers.value.map(l => (l.id === layerId ? withFx : l)), ...lamps])
+    commit([...base.map(l => (l.id === layerId ? withFx : l)), ...lamps])
+    if (conv.changed) writeLighting(conv.lighting)
     return fresh.id
   }
   /** A Relight Setup: replace ALL the Frame's light layers with the setup's arrangement around

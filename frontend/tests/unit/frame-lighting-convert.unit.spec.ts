@@ -53,7 +53,9 @@ describe('relightLightsToLayers', () => {
     expect(ls).toHaveLength(1)
     // (0.85, 0.3) of a 500×250 box at (500, 250) → (675, 200) px
     expect(ls[0]!.x).toBeCloseTo(0.675, 9); expect(ls[0]!.y).toBeCloseTo(0.4, 9)
-    expect(ls[0]!.light).toMatchObject({ type: 'lamp', height: 0.4, color: '#ffcf94', brightness: 2, reach: 1.4 })
+    expect(ls[0]!.light).toMatchObject({ type: 'lamp', height: 0.4, color: '#ffcf94', brightness: 2 })
+    // reach was in box heights: 1.4 × the box height 0.25 (Frame widths)
+    expect(ls[0]!.light.reach).toBeCloseTo(0.35, 9)
     expect(r.dropped).toBe(0)
     expect(r.changed).toBe(true)
   })
@@ -157,7 +159,8 @@ describe('setupToLightLayers', () => {
         const at = relightBoxToFrame(p, spec.x, spec.y, W, H)
         expect(l.kind).toBe('light')
         expect(l.x).toBeCloseTo(at.x, 9); expect(l.y).toBeCloseTo(at.y, 9)
-        expect(l.light).toMatchObject({ type: 'lamp', height: Math.max(0, spec.height), color: spec.color, reach: spec.reach })
+        expect(l.light).toMatchObject({ type: 'lamp', height: Math.max(0, spec.height), color: spec.color })
+        expect(l.light.reach).toBeCloseTo(Math.min(2, Math.max(0.2, spec.reach * 0.25)), 9)
         expect(l.light.brightness).toBeCloseTo(Math.min(3, spec.brightness), 9)
       })
     }
@@ -165,6 +168,32 @@ describe('setupToLightLayers', () => {
   it('Golden key lands right of centre and a little up on an upright photo', () => {
     const [l] = setupToLightLayers('Golden key', photo({}, null), W, H)
     expect(l!.x).toBeCloseTo(0.675, 9); expect(l!.y).toBeCloseTo(0.4, 9)
+  })
+  it('Golden key on a 0.5 × 0.25 photo: reach 1.4 box heights → 0.35 Frame widths, brightness 3.2 → 3', () => {
+    const [l] = setupToLightLayers('Golden key', photo({}, null), W, H)
+    expect(l!.light.reach).toBeCloseTo(0.35, 9)
+    expect(l!.light.brightness).toBe(3)
+  })
+  it('a small photo\'s reach stops at the 0.2 floor', () => {
+    const small = photo({ w: 0.1, h: 0.1 }, null)
+    expect(setupToLightLayers('Golden key', small, W, H)[0]!.light.reach).toBe(0.2)
+    const r = relightLightsToLayers([photo({ w: 0.1, h: 0.1 }, [old({ reach: 1 })])], undefined, W, H)
+    expect(lightsOf(r.layers)[0]!.light.reach).toBe(0.2)
+  })
+  it('a light outside the photo maps outside it; outside the Frame it is clamped to the light range', () => {
+    // Window x = −0.05 of a 500 × 250 box at (500, 250) → 225 px → 0.225 of the Frame
+    const [win] = setupToLightLayers('Window', photo({}, null), W, H)
+    expect(win!.x).toBeCloseTo(0.225, 9); expect(win!.y).toBeCloseTo(0.375, 9)
+    // a full-Frame photo puts it just outside the Frame's left edge (still in range)
+    const full = photo({ w: 1, h: 0.5 }, null)
+    expect(setupToLightLayers('Window', full, W, H)[0]!.x).toBeCloseTo(-0.05, 9)
+    // far outside (a 2000 px wide photo, x −0.4 of it → −1.7) → clamped to the light layer's −0.5
+    const big = relightLightsToLayers([photo({ x: 0.1, w: 2, h: 1 }, [old({ x: -0.4, y: 0.5 })])], undefined, W, H)
+    expect(lightsOf(big.layers)[0]!.x).toBe(-0.5)
+  })
+  it('converted brightness above 3 is clamped to 3', () => {
+    const r = relightLightsToLayers([photo({}, [old({ brightness: 3.2 })])], undefined, W, H)
+    expect(lightsOf(r.layers)[0]!.light.brightness).toBe(3)
   })
   it('Rim\'s behind light becomes height 0', () => {
     expect(setupToLightLayers('Rim', photo({}, null), W, H)[0]!.light.height).toBe(0)

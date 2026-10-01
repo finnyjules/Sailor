@@ -61,13 +61,15 @@ export function frameToRelightBox(layer: LocalLayer, x: number, y: number, W: nu
 
 interface BoxLightSpec { x: number; y: number; height: number; color: string; brightness: number; reach: number }
 
-/** A box-fraction light → a lamp layer. Height is clamped to 0..1 (a "behind" rim light → 0);
- *  colour, brightness and reach carry over (the light layer's own ranges still clamp them). */
+/** A box-fraction light → a lamp layer. Height is clamped to 0..1 (a "behind" rim light → 0).
+ *  Colour and brightness carry over; reach was in photo-box heights and becomes Frame widths
+ *  (× the box height in Frame widths), so the light falls off over the same part of the photo.
+ *  The light layer's own ranges then clamp them (brightness ≤ 3, reach 0.2..2). */
 function lampFrom(spec: BoxLightSpec, photo: LocalLayer, W: number, H: number, id: string, visible = true): LightLayer {
   const at = relightBoxToFrame(photo, spec.x, spec.y, W, H)
   const layer = sanitizeLightLayer({
     id, kind: 'light', x: at.x, y: at.y,
-    light: { ...LIGHT_DEFAULTS.lamp, height: Math.min(1, Math.max(0, spec.height)), color: spec.color, brightness: spec.brightness, reach: spec.reach },
+    light: { ...LIGHT_DEFAULTS.lamp, height: Math.min(1, Math.max(0, spec.height)), color: spec.color, brightness: spec.brightness, reach: spec.reach * relightPhotoBox(photo).h },
   })
   if (!visible) layer.visible = false
   return layer
