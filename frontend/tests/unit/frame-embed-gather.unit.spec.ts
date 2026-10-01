@@ -139,16 +139,36 @@ describe('buildFrameSnapshot', () => {
     ;(img as any).effects = [{ ...createEffect('relight'), visible: true }]
     const depthImg = { width: 2, height: 2 } as any, normals = { width: 3, height: 3 } as any
     const full = await buildFrameSnapshot(plan([img]), v([img]), fakeIO({ depthImage: vi.fn(() => depthImg), surfacesImage: vi.fn(() => normals) }))
-    expect(full.assets.depth).toEqual([{ ref: 'p.png', dataUrl: 'data:image/png;base64,IMG4096' }])
-    expect(full.assets.surfaces).toEqual([{ ref: 'p.png', dataUrl: 'data:image/png;base64,IMG4096' }])
+    const px = Math.min(1024, plan([img]).images[0]!.maxPx)
+    expect(full.assets.depth).toEqual([{ ref: 'p.png', dataUrl: `data:image/png;base64,IMG${px}` }])
+    expect(full.assets.surfaces).toEqual([{ ref: 'p.png', dataUrl: `data:image/png;base64,IMG${px}` }])
     expect(full.notices.filter(n => n.text.includes('Relight'))).toEqual([])
     const depthOnly = await buildFrameSnapshot(plan([img]), v([img]), fakeIO({ depthImage: vi.fn(() => depthImg) }))
     expect(depthOnly.assets.depth).toHaveLength(1)
     expect(depthOnly.assets.surfaces).toBeUndefined()
-    expect(depthOnly.notices).toContainEqual({ group: 'leftOut', text: 'Relight on Image · surfaces not read — lit from depth only', layerId: img.id })
+    expect(depthOnly.notices).toContainEqual({ group: 'leftOut', text: 'Relight on Image · shape not read — lit from depth only', layerId: img.id })
     const none = await buildFrameSnapshot(plan([img]), v([img]), fakeIO())
     expect(none.assets.depth).toEqual([])
     expect(none.notices).toContainEqual({ group: 'leftOut', text: 'Relight on Image · needs a depth map', layerId: img.id })
+  })
+
+  it('Relight\'s depth and surfaces maps are capped at min(the photo\'s own export size, 1024)', async () => {
+    const io = () => fakeIO({ depthImage: vi.fn(() => ({ width: 2, height: 2 } as any)), surfacesImage: vi.fn(() => ({ width: 2, height: 2 } as any)) })
+    const small = createImageLayer('s.png', 1, { w: 0.2, h: 0.2 })
+    ;(small as any).effects = [{ ...createEffect('relight'), visible: true }]
+    const ps = plan([small])
+    expect(ps.relight[0]!.maxPx).toBe(ps.images[0]!.maxPx)
+    expect(ps.images[0]!.maxPx).toBeLessThan(1024)
+    const a = await buildFrameSnapshot(ps, v([small]), io())
+    expect(a.assets.depth[0]!.dataUrl).toBe(`data:image/png;base64,IMG${ps.images[0]!.maxPx}`)
+    expect(a.assets.surfaces![0]!.dataUrl).toBe(`data:image/png;base64,IMG${ps.images[0]!.maxPx}`)
+    const big = createImageLayer('b.png', 1, { w: 1, h: 1 })
+    ;(big as any).effects = [{ ...createEffect('relight'), visible: true }]
+    const pb = plan([big])
+    expect(pb.images[0]!.maxPx).toBeGreaterThan(1024)
+    const b = await buildFrameSnapshot(pb, v([big]), io())
+    expect(b.assets.depth[0]!.dataUrl).toBe('data:image/png;base64,IMG1024')
+    expect(b.assets.surfaces![0]!.dataUrl).toBe('data:image/png;base64,IMG1024')
   })
 
   it('Depth blur and Relight on the same photo ship its depth map once', async () => {

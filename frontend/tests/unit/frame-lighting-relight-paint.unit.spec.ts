@@ -17,6 +17,13 @@ vi.mock('~/lib/relight/relightPass', () => ({
   originalLightActive: (k: number) => k < 0.999,
   releaseRelight: () => {},
 }))
+// Depth blur: the GPU pass is a stand-in so a photo can carry both effects in node.
+const applyDof = vi.fn((_src: unknown, _d: unknown, _fx: unknown, _W: number, bw: number, bh: number) => fakeCanvas(bw, bh, 'dof'))
+vi.mock('~/lib/compositor/dofPass', async (orig) => ({
+  ...(await orig<typeof import('~/lib/compositor/dofPass')>()),
+  dofAvailable: () => true,
+  applyDof: (...a: unknown[]) => applyDof(...(a as [unknown, unknown, unknown, number, number, number])),
+}))
 const FIELD = { kind: 'float', width: 2, height: 2, data: new Float32Array(4) }
 // What the depth-field and surfaces registries hand back; a test can make them "arrive".
 const reg: { field: unknown; surfaces: unknown } = { field: FIELD, surfaces: null }
@@ -34,7 +41,7 @@ vi.mock('~/lib/relight/depthField', async (orig) => ({
   relightDepthFieldFor: () => reg.field,
 }))
 
-import { paintLayerStack, __setImageForTest, __relightPhotoCacheForTest, setRelightBypass, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
+import { paintLayerStack, __setImageForTest, __relightPhotoCacheForTest, __sizeRelightPhotoCachesForTest, setRelightBypass, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
 import { newLightLayer } from '~/lib/frame/lighting/settings'
 import { releaseLightingMaps, type LightingStamp } from '~/lib/frame/lighting/maps'
 import { defaultRelightSettings } from '~/lib/relight/settings'
@@ -321,5 +328,46 @@ describe('fix round 1', () => {
     expect(a[0]!.id).toBe(`ll-rl-${p.id}-i0`)            // no stored id: derived, never random
     paint([...ls])                                       // a new stack array converts again, same ids
     expect((lightFrame.mock.calls[2]![4] as LocalLayer[])[0]!.id).toBe(a[0]!.id)
+  })
+})
+
+describe('final review', () => {
+  const dofFx = { id: 'fx-dof', type: 'dof', visible: true, focus: 0.5, range: 0.2, aperture: 0.02, bladeCount: 0, bladeRotation: 0, bloomThreshold: 1, bloomStrength: 0 }
+
+  it('with Depth blur on the photo, the facing tile drops Texture relief and keeps Depth', () => {
+    const p = photo({ texture: 3, depth: 5 })
+    ;(p as unknown as { effects: unknown[] }).effects.push(dofFx)
+    paint([p, newLightLayer('lamp') as unknown as LocalLayer])
+    expect(applyDof).toHaveBeenCalled()
+    expect(facingTile).toHaveBeenCalledTimes(1)
+    const fx = facingTile.mock.calls[0]![2] as { texture: number; depth: number }
+    expect(fx.texture).toBe(0)
+    expect(fx.depth).toBe(5)
+  })
+
+  it('without Depth blur (or with it hidden) the tile keeps Texture', () => {
+    const p = photo({ texture: 3 })
+    paint([p, newLightLayer('lamp') as unknown as LocalLayer])
+    expect((facingTile.mock.calls[0]![2] as { texture: number }).texture).toBe(3)
+    facingTile.mockClear()
+    const q = photo({ texture: 3 })
+    ;(q as unknown as { effects: unknown[] }).effects.push({ ...dofFx, visible: false })
+    paint([q, newLightLayer('lamp') as unknown as LocalLayer])
+    expect((facingTile.mock.calls[0]![2] as { texture: number }).texture).toBe(3)
+  })
+
+  it('a card with one photo does not shrink the caches under the editor\'s many for ~2 s', () => {
+    releaseLightingMaps()
+    __sizeRelightPhotoCachesForTest(6, 1000)               // the editor: 6 photos
+    expect(__relightPhotoCacheForTest().max).toBe(14)
+    __sizeRelightPhotoCachesForTest(1, 1500)               // a card: 1 photo
+    expect(__relightPhotoCacheForTest().max).toBe(14)
+    __sizeRelightPhotoCachesForTest(1, 2900)
+    expect(__relightPhotoCacheForTest().max).toBe(14)
+    __sizeRelightPhotoCachesForTest(1, 3100)               // nobody asked for more for 2 s
+    expect(__relightPhotoCacheForTest().max).toBe(4)
+    __sizeRelightPhotoCachesForTest(3, 3200)               // a bigger ask wins at once
+    expect(__relightPhotoCacheForTest().max).toBe(8)
+    releaseLightingMaps()
   })
 })

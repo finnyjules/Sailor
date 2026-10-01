@@ -118,6 +118,26 @@ describe('finishApplyPatch', () => {
   })
 })
 
+describe('Finish and Frame lights (light layers stage 2 final review)', () => {
+  it('the result is unlit — it already carries the Frame\'s light and Darkness', () => {
+    const layer: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [relightFx()] }
+    expect(finishApplyPatch(layer, 'result.png', 'fx:relight:0').lit).toBe(false)
+  })
+
+  it('Revert restores the photo\'s own lit — absent stays absent, false stays false', () => {
+    const absent: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [relightFx()] }
+    const r1 = finishRevertPatch(absent)
+    expect(r1.lit).toBeUndefined()
+    const applied = { ...absent, ...finishApplyPatch(absent, 'result.png', 'fx:relight:0') }
+    const reverted = JSON.parse(JSON.stringify({ ...applied, ...r1 }))
+    expect('lit' in reverted).toBe(false)
+    const off: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [relightFx()], lit: false }
+    expect(finishRevertPatch(off).lit).toBe(false)
+    const on: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [relightFx()], lit: true }
+    expect(finishRevertPatch(on).lit).toBe(true)
+  })
+})
+
 describe('finishRevertPatch', () => {
   it('captures the layer\'s current filename, crop and full stack (Relight included)', () => {
     const crop = { fit: 'cover' as const, fx: 0.3, fy: 0.7 }

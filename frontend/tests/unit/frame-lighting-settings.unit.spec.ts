@@ -269,6 +269,38 @@ describe('editor: Relight and the Frame\'s lights (stage 2)', () => {
     expect(relightOf(node).keep).toBe(0.5)
     expect(ed.canUndo.value).toBe(false)
   })
+  it('a stored record equal to the defaults counts as no record, in the conversion and in addRelight (as in painters)', () => {
+    const asDefaults = { darkness: 0.45, backgroundLit: true }
+    const a = makeEditor({ sailor_localLayers: [photo([oldFx([oldLight()])])], sailor_localLighting: { ...asDefaults } })
+    a.ed.convertLegacyRelight()
+    expect((a.node.data.properties as any).sailor_localLighting).toEqual({ darkness: 0.45, backgroundLit: false })
+    const other = { ...photo([oldFx([oldLight()])]), id: 'old' }
+    const b = makeEditor({ sailor_localLayers: [other, photo()], sailor_localLighting: { ...asDefaults } })
+    b.ed.addRelight('p')
+    expect((b.node.data.properties as any).sailor_localLighting).toEqual({ darkness: 0.45, backgroundLit: false })
+    // A real record wins everywhere.
+    const c = makeEditor({ sailor_localLayers: [photo([oldFx([oldLight()])])], sailor_localLighting: { darkness: 0.7, backgroundLit: true } })
+    c.ed.convertLegacyRelight()
+    expect((c.node.data.properties as any).sailor_localLighting).toEqual({ darkness: 0.7, backgroundLit: true })
+  })
+  it('applyRelightSetup on a Frame with old Relight lights converts them first, in the same undo step', () => {
+    const other = { ...photo([oldFx([oldLight({ id: 'a' }), oldLight({ id: 'b', x: 0 })])]), id: 'old' }
+    const fx = { id: 'fx:relight:1', type: 'relight', visible: true, keep: 0.5, depth: 4, texture: 2, shine: 0, shadows: true }
+    const { node, ed } = makeEditor({ sailor_localLayers: [other, photo([fx]), rect] })
+    expect(ed.applyRelightSetup('p', 'Neon')).toBe(true)
+    expect(lightsIn(node).map(l => l.light.color)).toEqual(['#ff3fb4', '#29d8ff'])   // the Setup's lamps only
+    expect('lights' in layersOf(node).find(l => l.id === 'old').effects[0]).toBe(false)
+    expect(layersOf(node).find(l => l.id === 'r')).toMatchObject({ lit: false, castsShadow: false })
+    expect((node.data.properties as any).sailor_localLighting).toEqual({ darkness: 0.45, backgroundLit: false })
+    expect(relightOf(node).keep).toBe(0.15)
+    ed.undo()
+    expect(lightsIn(node)).toHaveLength(0)
+    expect(layersOf(node).find(l => l.id === 'old').effects[0].lights).toHaveLength(2)
+    expect(layersOf(node).find(l => l.id === 'r').lit).toBeUndefined()
+    expect('sailor_localLighting' in node.data.properties).toBe(false)
+    expect(relightOf(node).keep).toBe(0.5)
+    expect(ed.canUndo.value).toBe(false)
+  })
   it('applyRelightSetup needs a Relight photo', () => {
     const { ed } = makeEditor({ sailor_localLayers: [photo(), rect] })
     expect(ed.applyRelightSetup('p', 'Rim')).toBe(false)

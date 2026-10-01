@@ -193,6 +193,41 @@ test.describe('Relight effect', () => {
     expect(r!.flipped).toBeGreaterThan(20)                         // control: the map is not symmetric (63.5)
   })
 
+  // Final review #2: Original light's 64-px grid is uploaded premultiplied, so lo.rgb / lo.a is the
+  // exact mean colour of a partly transparent cut-out. A flat colour, half opaque and half at
+  // alpha 0.5, inside a transparent border, has no baked light at all: k must be ~1 everywhere
+  // (straight colour in the mips overweights the half-transparent half and shifts it).
+  test('Original light: a half-transparent cut-out of one flat colour is left as it is (k ≈ 1)', async ({ page }) => {
+    await page.goto('/')
+    const r = await page.evaluate(async () => {
+      const fp = await import('/_nuxt/lib/frame/lighting/facingPass.ts' as string)
+      const W = 128, H = 128
+      const src = document.createElement('canvas'); src.width = W; src.height = H
+      const x = src.getContext('2d')!
+      x.fillStyle = 'rgb(150, 110, 80)'; x.fillRect(16, 16, 48, 96)
+      x.fillStyle = 'rgba(150, 110, 80, 0.5)'; x.fillRect(64, 16, 48, 96)
+      const out = fp.renderOriginalLight(src, 0, W, H) as HTMLCanvasElement | null
+      if (!out) return null
+      const c = document.createElement('canvas'); c.width = W; c.height = H
+      const cx = c.getContext('2d')!; cx.drawImage(out, 0, 0)
+      const o = cx.getImageData(0, 0, W, H).data, s = x.getImageData(0, 0, W, H).data
+      let worstOpaque = 0, worstHalf = 0
+      for (let y = 20; y < 108; y++) for (let i = 20; i < 108; i++) {
+        const k = (y * W + i) * 4
+        for (let ch = 0; ch < 3; ch++) {
+          const d = Math.abs(o[k + ch]! - s[k + ch]!)
+          if (i < 60) worstOpaque = Math.max(worstOpaque, d)
+          else if (i >= 68) worstHalf = Math.max(worstHalf, d)
+        }
+      }
+      return { worstOpaque, worstHalf }
+    })
+    console.log('[original light cut-out] worst channel diff, opaque / half-transparent:', r?.worstOpaque, r?.worstHalf)
+    expect(r).not.toBeNull()
+    expect(r!.worstOpaque).toBeLessThanOrEqual(2)
+    expect(r!.worstHalf).toBeLessThanOrEqual(3)                   // alpha 0.5 round-trips through 8 bits
+  })
+
   test('the first Relight add does not stall the main thread on the depth-field build', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
@@ -334,7 +369,7 @@ async function mockUpload(page: Page) {
  *  `{ off: true }` (the kill switch / hosted refusal), matching the real route's shape.
  *  A 1 s delay gives the tests something to observe ("Finishing…", the disabled button) before
  *  the result lands, the same way the real Nano Banana 2 call takes real time. */
-function mockRelightFinish(page: Page, opts: { off?: boolean } = {}) {
+function mockRelightFinish(page: Page, opts: { off?: boolean; image?: string } = {}) {
   const state = { count: 0, bodies: [] as any[] }
   page.route('**/api/inpaint/relight-finish', async (route) => {
     state.count++
@@ -344,7 +379,7 @@ function mockRelightFinish(page: Page, opts: { off?: boolean } = {}) {
       return
     }
     await new Promise((r) => setTimeout(r, 1_000))
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images: [TINY_PNG_DATA_URL], model: 'fal-ai/nano-banana-2/edit' }) })
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images: [opts.image ?? TINY_PNG_DATA_URL], model: 'fal-ai/nano-banana-2/edit' }) })
   })
   return state
 }
@@ -378,6 +413,35 @@ async function measurePair(page: Page, body: { original: string; guide: string }
     }
     return { a: [a.naturalWidth, a.naturalHeight], b: [b.naturalWidth, b.naturalHeight], diff }
   }, body)
+}
+
+/** 16×16 flat colour (150, 110, 80) — the "Finish" result in the double-lighting check. */
+const FLAT_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGOYlhdAEmIY1TCqYfhqAAAHl1QQYgc/BAAAAABJRU5ErkJggg=='
+const FLAT_RGB = [150, 110, 80] as const
+
+/** The photo's pixels on the stack canvas (inset 10%) against FLAT_RGB: the largest per-channel
+ *  difference of the mean colour and the mean itself. */
+async function photoStats(page: Page): Promise<{ maxDiff: number; mean: number[] }> {
+  await stackPixels(page)
+  const L = await layerRect(page)
+  return page.evaluate(({ L, ref }) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const cr = cv.getBoundingClientRect(), k = cv.width / cr.width
+    const x0 = Math.round((L.left - cr.left + L.w * 0.1) * k), y0 = Math.round((L.top - cr.top + L.h * 0.1) * k)
+    const w = Math.round(L.w * 0.8 * k), h = Math.round(L.h * 0.8 * k)
+    const c = document.createElement('canvas'); c.width = w; c.height = h
+    const x = c.getContext('2d')!; x.drawImage(cv, x0, y0, w, h, 0, 0, w, h)
+    const d = x.getImageData(0, 0, w, h).data
+    const sum = [0, 0, 0]
+    let worst = 0
+    for (let i = 0; i < d.length; i += 4) for (let ch = 0; ch < 3; ch++) {
+      sum[ch] += d[i + ch]!
+      worst = Math.max(worst, Math.abs(d[i + ch]! - ref[ch]!))
+    }
+    const n = d.length / 4
+    const mean = sum.map(v => v / n)
+    return { maxDiff: worst, mean }
+  }, { L, ref: FLAT_RGB as unknown as number[] })
 }
 
 /** 64×64: an opaque square inside an 8 px transparent border — a cut-out the right-click can still hit. */
@@ -547,6 +611,36 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await page.waitForTimeout(300)
     await expect(page.locator('[data-edit-result-bar]')).toBeVisible()
     expect(upload.count).toBe(finish.count)
+  })
+
+  // Final review #1: the result already carries the Frame's light and Darkness, so Keep must not
+  // light it again. The mock answers a flat colour; the uploaded file is served back as that
+  // colour, so the photo's pixels on the canvas must BE that colour (the lamp still shines).
+  test('Keep: the finished photo is not lit a second time — its pixels equal the returned image; Undo lights it again', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await mockUpload(page)
+    await page.route(/\/view\?.*relightfinish_/, route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(FLAT_PNG_B64, 'base64') }))
+    mockRelightFinish(page, { image: `data:image/png;base64,${FLAT_PNG_B64}` })
+    expect(await page.evaluate(() => (window as any).__compositorLayers()[0].lit)).toBeUndefined()
+
+    await finishBtn(page).click()
+    await expect(resultBar(page)).toBeVisible({ timeout: 10_000 })
+    await page.getByTestId('edit-result-validate').click()
+    await expect(resultBar(page)).toHaveCount(0)
+    expect(await page.evaluate(() => (window as any).__compositorLayers()[0].lit)).toBe(false)
+    // The Frame is still lit (the lamp is there): only the finished photo is left alone.
+    expect(await page.evaluate(() => (window as any).__compositorLayers().filter((l: any) => l.kind === 'light').length)).toBe(1)
+    await expect.poll(async () => (await photoStats(page)).maxDiff, { timeout: 15_000 }).toBeLessThanOrEqual(1)
+    const kept = await photoStats(page)
+    expect(kept.maxDiff).toBeLessThanOrEqual(1)
+
+    // One undo: the Relight photo is back, lit by the lamp again (no `lit: false` left behind).
+    await page.keyboard.press('Meta+z')
+    await expect(relightRow(page)).toHaveCount(1)
+    expect(await page.evaluate(() => (window as any).__compositorLayers()[0].lit)).toBeUndefined()
+    await expect.poll(async () => (await photoStats(page)).maxDiff, { timeout: 15_000 }).toBeGreaterThan(20)
   })
 
   // Not covered here: "Relight isn't ready yet" (renderRelightPair returning null because the

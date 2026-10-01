@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   surfacesStatusFor, surfacesImageFor, surfacesMessageFor, surfacesWasPaidFor,
   requestSurfaces, retrySurfaces, peekSurfacesFor, onSurfacesChange, __resetSurfacesRegistry, SURFACES_STILL_READING,
+  surfacesInFlight, surfacesSettled,
 } from '~/lib/compositor/surfacesRegistry'
 
 class FakeImage {
@@ -225,5 +226,44 @@ describe('surfacesRegistry — peekSurfacesFor', () => {
     expect(f).toHaveBeenCalledTimes(2)                        // one peek, one read
     requestSurfaces('a.png')
     expect(f).toHaveBeenCalledTimes(2)                        // ready: requestSurfaces is a no-op again
+  })
+})
+
+describe('waiting for surfaces in flight (the web export, light layers stage 2 final review)', () => {
+  it('nothing in flight resolves at once', async () => {
+    expect(surfacesInFlight()).toBe(false)
+    await surfacesSettled(50)
+  })
+
+  it('a read resolves the wait when it lands', async () => {
+    let answer!: (v: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((r) => { answer = r })))
+    requestSurfaces('a.png')
+    expect(surfacesInFlight()).toBe(true)
+    let done = false
+    const wait = surfacesSettled(5_000).then(() => { done = true })
+    await new Promise(r => setTimeout(r, 20))
+    expect(done).toBe(false)
+    answer({ ok: true, json: async () => ({ normalsFilename: 'moge_abc.png', subfolder: 'sailor_depth', cached: false }) })
+    await wait
+    expect(surfacesStatusFor('a.png')).toBe('ready')
+    expect(surfacesInFlight()).toBe(false)
+  })
+
+  it('a free peek still decoding its cached map counts as in flight', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ normalsFilename: 'moge_abc.png', subfolder: 'sailor_depth', cached: true }) })))
+    peekSurfacesFor('a.png')
+    expect(surfacesInFlight()).toBe(true)
+    await surfacesSettled(5_000)
+    expect(surfacesStatusFor('a.png')).toBe('ready')
+  })
+
+  it('is bounded: a read that never answers stops the wait at the timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    requestSurfaces('a.png')
+    const t0 = Date.now()
+    await surfacesSettled(80)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(70)
+    expect(surfacesInFlight()).toBe(true)
   })
 })

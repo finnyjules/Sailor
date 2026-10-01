@@ -173,7 +173,7 @@ describe('planFrameExport', () => {
     const img = createImageLayer('photo.png', 1, {})
     ;(img as any).effects = [{ ...createEffect('relight'), visible: true }]
     const p = planFrameExport(input(variant([img])))
-    expect(p.relight).toEqual([{ ref: 'photo.png', layerId: img.id, label: 'Image' }])
+    expect(p.relight).toEqual([{ ref: 'photo.png', layerId: img.id, label: 'Image', maxPx: p.images[0]!.maxPx }])
     expect(p.notices.filter(n => n.text.includes('Relight'))).toEqual([])
     ;(img as any).effects = [{ ...createEffect('relight'), visible: false }]
     expect(planFrameExport(input(variant([img]))).relight).toEqual([])
