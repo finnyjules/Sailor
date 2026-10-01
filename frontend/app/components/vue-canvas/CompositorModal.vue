@@ -146,6 +146,9 @@ import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
 import { lightingDragging } from '~/lib/frame/lighting/drag'
+import { MAX_LIGHTS, type LightLayer, type LightType } from '~/lib/frame/lighting/settings'
+import { LIGHT_PLACEMENT } from '~/lib/frame/lighting/handles'
+import LightHandles from '~/components/vue-canvas/compositor/LightHandles.vue'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
@@ -275,7 +278,7 @@ import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import type { GoogleFont } from '~/data/google-fonts'
 import { libraryFamily } from '~/data/library-fonts'
 import { defaultExpressiveParams, type ExpressiveParams } from '~~/shared/text-layout/expressive'
-import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat, SquareDashedMousePointer, Sun } from 'lucide-vue-next'
+import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat, SquareDashedMousePointer, Sun, Lightbulb, Spotlight } from 'lucide-vue-next'
 import {
   TOOLBAR_SHAPES, TOOLBAR_INSERT,
   DEFAULT_SHAPE_FACE, DEFAULT_INSERT_FACE,
@@ -919,6 +922,8 @@ const editor = useLocalLayerEditor({
   // Push the same ⌘C payload to the OS clipboard (Sailor layer JSON + a
   // composited PNG) so copy/paste reaches across frames, projects and sessions.
   onOSCopy: (payload) => { void writeLayersToOSClipboard(payload) },
+  // A Frame holds at most 6 lights: say so when a duplicate or paste leaves some out.
+  onLightsDropped: (n, via) => { toast(via === 'paste' ? `Only ${MAX_LIGHTS} lights fit — ${n} left out` : `A Frame holds up to ${MAX_LIGHTS} lights`) },
 })
 const layerEdit = useLayerImageEdit()
 const layerAnimate = useLayerAnimate()
@@ -2462,6 +2467,20 @@ const outlineLight = computed<FrameLight | undefined>(() => {
   return l && (isFoilFill(l.fill as Paint) || isFoilFill(l.color as Paint)) ? undefined : frameLight.value
 })
 const lightHandlePos = computed(() => ({ x: frameLight.value.x * canvasDisplay.w, y: frameLight.value.y * canvasDisplay.h }))
+// ── Light layers (stage 1): the lights as dots on the canvas (LightHandles) ──
+const frameLightLayers = computed(() => (localLayers.value as LocalLayer[]).filter(l => l.kind === 'light') as LightLayer[])
+/** Design tab only, at the design size (light positions are design fractions, like the selection
+ *  handles), and never while text, generate or the pen owns the canvas. Editor chrome: never painted. */
+const showLightDots = computed(() => frameLightLayers.value.length > 0 && inspectorTab.value === 'design'
+  && atDesign.value && !editingId.value && !genActive.value && !penSession.value && !brush.active.value)
+const selectedIdList = computed(() => [...selectedIds.value])
+/** A selected light has no transform box: it is a point, moved by its dot. */
+const selectedIsLight = computed(() => (selectedLocal.value as LocalLayer | null)?.kind === 'light')
+function onLightDotSelect(id: string) { if (selectedLocalId.value !== id || selectedIds.value.size !== 1) selectLocal(id) }
+/** A dot gesture's write: no history entry — LightHandles emitted `record` once at its start. */
+function onLightDotChange(id: string, patch: Partial<LightLayer>) {
+  commit(localLayers.value.map((l: any) => (l.id === id ? { ...l, ...patch } : l)))
+}
 function onLightPointerDown(e: PointerEvent) {
   if (viewOnlyGuard()) return
   e.preventDefault(); e.stopPropagation()
@@ -2606,7 +2625,8 @@ function onKeydown(e: KeyboardEvent) {
   if (shapePickerOpen) return
   // A focused control that owns the arrow keys (the easing-curve handles nudge themselves)
   // must not also nudge the selected layer.
-  const ownsKeys = !!t?.closest?.('[data-owns-keys]')
+  // A focused light dot / aim ring nudges itself with the arrows (LightHandles); ⌘D, Delete etc. still reach the editor.
+  const ownsKeys = !!t?.closest?.('[data-owns-keys]') || (e.key.startsWith('Arrow') && !!t?.closest?.('[data-light-handle]'))
   // The Layout tab owns V and ←/→ (Vary) while it is showing — ahead of the nudge and the V tool.
   if (!ownsKeys && layoutVaryKey(e, typing || t?.tagName === 'SELECT')) return
   // At a viewing size the arrow keys move what is DRAWN by one screen px, settled at the design size.
@@ -8795,6 +8815,9 @@ async function onPickCanvasImage(src: string) {
 // flyouts can never overlap.
 const shapesMenuOpen = ref(false)
 const insertMenuOpen = ref(false)
+/** Light ▾ (light layers stage 1): the face adds the last-used kind, the chevron lists Lamp / Spot / Sun. */
+const lightMenuOpen = ref(false)
+const lightFace = ref<LightType>('lamp')
 /** Last-used shape, worn by the Shapes button. Component state on purpose —
  *  the spec asks for no persistence beyond the open modal. Same for the
  *  Insert face below: a plain ref, so every session starts on the default. */
@@ -8868,6 +8891,7 @@ const INSERT_ICONS: Record<ToolbarInsertId, Component> = {
 function closeToolbarMenus() {
   zoomMenuOpen.value = false
   shapesMenuOpen.value = false
+  lightMenuOpen.value = false
   insertMenuOpen.value = false
   libraryPickerOpen.value = false
   inspectorShapePickerOpen.value = false
@@ -8875,6 +8899,28 @@ function closeToolbarMenus() {
 function toggleInsertMenu() { const next = !insertMenuOpen.value; closeToolbarMenus(); insertMenuOpen.value = next }
 function toggleZoomMenu() { const next = !zoomMenuOpen.value; closeToolbarMenus(); zoomMenuOpen.value = next }
 function toggleShapesMenu() { const next = !shapesMenuOpen.value; closeToolbarMenus(); shapesMenuOpen.value = next }
+function toggleLightMenu() { const next = !lightMenuOpen.value; closeToolbarMenus(); lightMenuOpen.value = next }
+const LIGHT_ROWS: { id: LightType; label: string; icon: Component }[] = [
+  { id: 'lamp', label: 'Lamp', icon: Lightbulb },
+  { id: 'spot', label: 'Spot', icon: Spotlight },
+  { id: 'sun', label: 'Sun', icon: Sun },
+]
+const LIGHT_ICONS: Record<LightType, Component> = { lamp: Lightbulb, spot: Spotlight, sun: Sun }
+const lightsFull = computed(() => (localLayers.value as LocalLayer[]).filter(l => l.kind === 'light').length >= MAX_LIGHTS)
+/** Add a light where it reads at once — a lamp top left, a spot top centre aiming at the middle,
+ *  a sun at the left edge — and select it. One undo step (addLocal's); the spot's aim is written
+ *  into that same step. At 6 lights nothing is added and a toast says why. */
+function addLightOfType(type: LightType) {
+  closeToolbarMenus()
+  if (viewOnlyGuard()) return
+  lightFace.value = type
+  const at = LIGHT_PLACEMENT[type]
+  if (!editor.addLight(type, { x: at.x, y: at.y })) { toast(`A Frame holds up to ${MAX_LIGHTS} lights`); return }
+  const id = selectedLocalId.value
+  if (type === 'spot' && id && at.aimX != null && at.aimY != null) {
+    commit(localLayers.value.map((l: any) => (l.id === id && l.kind === 'light' ? { ...l, light: { ...l.light, aimX: at.aimX, aimY: at.aimY } } : l)))
+  }
+}
 /** Menu row → stamp it now AND wear it, so repeat stamping is one click.
  *  The library row opens the picker instead; the pick both stamps and wears. */
 function pickShape(id: ToolbarShapeId) {
@@ -9002,6 +9048,7 @@ function handleKeydown(e: KeyboardEvent) {
     if (e.defaultPrevented) return
     if (zoomMenuOpen.value) { zoomMenuOpen.value = false; return }
     if (shapesMenuOpen.value) { shapesMenuOpen.value = false; return }
+    if (lightMenuOpen.value) { lightMenuOpen.value = false; return }
     if (insertMenuOpen.value) { insertMenuOpen.value = false; return }
     if (pickerDialogOpen.value) { pickerDialogOpen.value = false; return }
     if (fxMenuLayerId.value) { closeFxMenu(); return }
@@ -9913,7 +9960,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
 
         <!-- Local-layer selection / handles (single selection only — multi-select uses the group box below) -->
         <svg
-          v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && atDesign"
+          v-if="localHandlePositions && !selectedIsLight && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && atDesign"
           class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
         >
@@ -10032,7 +10079,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <line v-if="selectionGuides.centerY" x1="0" :y1="canvasDisplay.h / 2" :x2="canvasDisplay.w" :y2="canvasDisplay.h / 2" />
           </g>
         </svg>
-        <template v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && !penSession && atDesign">
+        <template v-if="localHandlePositions && !selectedIsLight && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && !penSession && atDesign">
           <div
             v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
             :key="'l-' + corner"
@@ -10135,6 +10182,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               boxShadow: (h.l.id === relightLightId ? '0 0 0 2px #fff, 0 0 0 6px rgba(255,255,255,.22), ' : '0 0 0 2px rgba(255,255,255,.95), ') + `0 0 22px 6px ${h.l.color}99` }"
             @pointerdown="onRelightHandleDown($event, h.l.id)" @wheel.stop.prevent="onRelightHandleWheel($event, h.l.id)" />
         </template>
+
+        <!-- Light layers: each light as a glowing dot (a spot's aim ring, a sun's line). Design tab only. -->
+        <LightHandles
+          v-if="showLightDots"
+          :lights="frameLightLayers" :selected-ids="selectedIdList" :w="canvasDisplay.w" :h="canvasDisplay.h"
+          @select="onLightDotSelect" @record="recordHistory()" @change="onLightDotChange" />
       </div>
 
       <!-- Chrome below is positioned against the stage box, which is now full-bleed
@@ -10441,6 +10494,43 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             @update:model-value="onLibraryPick"
             @close="libraryPickerOpen = false"
           />
+        </div>
+        <!-- Lights: the face adds the last-used kind, the chevron lists Lamp / Spot / Sun. -->
+        <div class="relative flex items-center" @click.stop>
+          <button
+            class="flex items-center justify-center h-8 w-7 rounded-l hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent"
+            data-testid="add-light" :disabled="lightsFull"
+            :title="lightsFull ? `A Frame holds up to ${MAX_LIGHTS} lights` : `Add ${lightFace}`"
+            @click="addLightOfType(lightFace)">
+            <component :is="LIGHT_ICONS[lightFace]" class="size-4" />
+          </button>
+          <button
+            class="flex items-center justify-center h-8 w-4 rounded-r cursor-pointer disabled:opacity-30 disabled:cursor-default"
+            :class="lightMenuOpen ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/50'"
+            data-testid="light-menu-toggle" :disabled="lightsFull"
+            :title="lightsFull ? `A Frame holds up to ${MAX_LIGHTS} lights` : 'Lights'"
+            @click="toggleLightMenu()">
+            <ChevronUp class="size-3" />
+          </button>
+          <Transition
+            enter-active-class="transition-all duration-150 ease-out"
+            leave-active-class="transition-all duration-100 ease-in"
+            enter-from-class="opacity-0 translate-y-1"
+            leave-to-class="opacity-0 translate-y-1"
+          >
+            <div v-if="lightMenuOpen"
+              data-testid="light-menu"
+              class="absolute bottom-full left-0 mb-2 w-[140px] rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a]/97 p-1 shadow-xl"
+              @pointerdown.stop>
+              <button v-for="row in LIGHT_ROWS" :key="row.id"
+                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-[12px] cursor-pointer text-white/85"
+                :class="row.id === lightFace ? 'bg-white/10' : 'hover:bg-white/10'"
+                :data-testid="'light-menu-' + row.id" @click="addLightOfType(row.id)">
+                <component :is="row.icon" class="size-3.5 text-white/60" />
+                <span class="flex-1 text-left">{{ row.label }}</span>
+              </button>
+            </div>
+          </Transition>
         </div>
         <!-- Generate: a top-level tool (a mode, not a stamp) — arms the drag-to-
              generate gesture; hold Option/Alt + drag does the same without the click. -->

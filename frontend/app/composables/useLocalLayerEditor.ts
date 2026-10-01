@@ -99,6 +99,9 @@ interface EditorOpts {
    * reach. Best-effort: never throw here, the copy is already "done".
    */
   onOSCopy?: (payload: ClipboardPayload) => void
+  /** A duplicate or paste left lights out because the Frame holds MAX_LIGHTS (6): `dropped` is
+   *  how many. The editor has no toast; the host says so. */
+  onLightsDropped?: (dropped: number, via: 'duplicate' | 'paste') => void
 }
 
 function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)) }
@@ -767,11 +770,13 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     }
     // A Frame holds at most MAX_LIGHTS lights: lights beyond the cap are not copied.
     let room = Math.max(0, MAX_LIGHTS - lightCount())
+    let droppedLights = 0
     for (const id of [...ids]) {
       if (localLayers.value.find(l => l.id === id)?.kind !== 'light') continue
       if (room > 0) room--
-      else { if (ids === selectedIds.value) ids = new Set(ids); ids.delete(id) }
+      else { if (ids === selectedIds.value) ids = new Set(ids); ids.delete(id); droppedLights++ }
     }
+    if (droppedLights) opts.onLightsDropped?.(droppedLights, 'duplicate')
     if (!ids.size) {
       if (wiredMap.size) appendMotion(motionForCopies(readMotionSnap() as MotionDoc, wiredMap, mkBehaviourId))
       return
@@ -847,6 +852,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       dropped++; return false
     })
     const p = dropped ? { ...p0, layers: kept } : p0
+    if (dropped) opts.onLightsDropped?.(dropped, 'paste')
     recordHistory()
     const r = materializePaste(
       p, localLayers.value, localGroups.value, inPlace ? 0 : 0.02,
