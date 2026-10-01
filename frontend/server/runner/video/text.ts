@@ -404,30 +404,129 @@ export async function textClipMask(p: Record<string, unknown>, hosted: boolean):
   return full.buffer
 }
 
-/** A caption laid out (R8.3): the line with only the glyphs that can land in the frame, and the whole line's ink extent. */
-export interface CaptionLaid { line: LaidLine; box: InkBox | null }
+/** A caption laid out (R8.3): its lines with only the glyphs that can land in the frame, and the whole block's ink extent. */
+export interface CaptionLaid { lines: LaidLine[]; box: InkBox | null }
+
+/** The side margin a wrapped caption keeps from each edge of the frame (live-check fix): 5% of its width. */
+export const CAPTION_SIDE_MARGIN = 0.05
+/** A wrapped caption's line step, in the height of "Ag" (its ink, Text clip's sample), plus the outline's width. */
+export const CAPTION_LINE_SPACING = 1.15
+
+/** The widest a caption line may be on a frame W wide (a wrapped caption's lines; one that fits keeps Python's single line). */
+export const captionMaxWidth = (W: number) => Math.max(1, W - 2 * Math.trunc(W * CAPTION_SIDE_MARGIN))
+
+/** A wrapped caption's line step on its face: the "Ag" sample's ink height × the spacing, plus the outline. */
+export function captionLineStep(face: Face, outline: number): number {
+  const sample = textBbox(face, 'Ag')
+  return (sample[3] - sample[1]) * CAPTION_LINE_SPACING + outline
+}
 
 /**
- * A caption laid out to draw (R8.3, ruling (c)): Python's place from the
- * whole line's measure (one line, centred, no wrap: nodes_video_pro.py
- * :440-450), and of its glyphs only those whose ink (with the outline's pad)
- * can reach the frame across. The rest would land off the frame, so leaving
- * them out changes no pixel: the cut is still taken from the whole line's ink
- * extent (`box`). A caption wider than the frame then lays out about a
- * frame's width of letters, however long its text.
+ * A caption's lines, each at most `maxW` wide (textbbox width): words joined
+ * by ' ' while they fit, a new line at a word; a word wider than a line on
+ * its own is broken between letters (each line takes at least one). One pass
+ * over the text's glyphs (each word and letter measured once, added to the
+ * line's running measure).
  */
-export function captionLaid(face: Face, text: string, p: Record<string, unknown>, W: number, H: number, outline: number): CaptionLaid {
-  const at = captionPlace(face, text, p, W, H)
-  const all = layLine(face, text).glyphs
-  const line: LaidLine = { x: at.x, y: at.y, glyphs: all }
-  const box = inkBoxOf(face, [line])
-  const pad = outline + 2
-  const glyphs = all.filter(({ g, x }) => {
-    const bb = inkOf(g)
-    return !!bb && at.x + x + bb.minX * face.s - pad < W && at.x + x + bb.maxX * face.s + pad > 0
-  })
-  return { line: { x: at.x, y: at.y, glyphs }, box }
+export function wrapCaption(face: Face, text: string, maxW: number): string[] {
+  const lines: string[] = []
+  let cur = ''
+  let m = EMPTY
+  const width = (mm: Measure, t: string) => { const bb = bboxOf(face, mm, t === ''); return bb[2] - bb[0] }
+  for (const word of text.split(' ')) {
+    const add = (cur ? ' ' : '') + word
+    const tm = extend(face, m, add, false)
+    if (!cur || width(tm, cur + add) <= maxW) { cur += add; m = tm }
+    else { lines.push(cur); cur = word; m = extend(face, EMPTY, word, false) }
+    if (width(m, cur) <= maxW) continue
+    // Only a word on a line of its own can be too wide here: break it between letters.
+    let piece = ''
+    let pm = EMPTY
+    for (const ch of Array.from(word)) {
+      const next = extend(face, pm, ch, false)
+      if (piece && width(next, piece + ch) > maxW) { lines.push(piece); piece = ch; pm = extend(face, EMPTY, ch, false) }
+      else { piece += ch; pm = next }
+    }
+    cur = piece
+    m = pm
+  }
+  lines.push(cur)
+  return lines
 }
+
+/**
+ * A caption laid out to draw (R8.3, ruling (c); wrapped since the live check).
+ * - A caption that fits within the frame less its side margins is Python's
+ *   one line at Python's place (nodes_video_pro.py:440-450), exactly as before.
+ * - A wider one is wrapped (wrapCaption), each line centred, the block kept
+ *   at its position: its ink's top at H·y_inset (top), centred (middle), or
+ *   its bottom at H − H·y_inset, growing upward (bottom).
+ * Of each line, only the glyphs whose ink (with the outline's pad) can reach
+ * the frame are kept, and only the lines that can reach it down; the cut is
+ * still taken from the whole block's ink extent (`box`), so leaving the rest
+ * out changes no pixel.
+ */
+export function captionLaid(face: Face, text: string, p: Record<string, unknown>, W: number, H: number, outline: number, o: { every?: boolean } = {}): CaptionLaid {
+  const maxW = captionMaxWidth(W)
+  const whole = textBbox(face, text)
+  let placed: Placed[]
+  if (whole[2] - whole[0] <= maxW) placed = [captionPlace(face, text, p, W, H)]
+  else {
+    const rows = wrapCaption(face, text, maxW)
+    const sample = textBbox(face, 'Ag')
+    const step = captionLineStep(face, outline)
+    const blockH = (rows.length - 1) * step + (sample[3] - sample[1])
+    const inset = p.y_inset as number
+    const top = p.position === 'top' ? H * inset : p.position === 'middle' ? (H - blockH) / 2 : H - H * inset - blockH
+    placed = rows.map((row, k) => {
+      const bb = textBbox(face, row)
+      return { x: (W - (bb[2] - bb[0])) / 2 - bb[0], y: top + k * step - sample[1], text: row }
+    })
+  }
+  const all: LaidLine[] = placed.map(at => ({ x: at.x, y: at.y, glyphs: layLine(face, at.text).glyphs }))
+  const box = inkBoxOf(face, all)
+  // Tests only: every glyph of every line (the cut's reference).
+  if (o.every) return { lines: all, box }
+  const pad = outline + 2
+  const lines: LaidLine[] = []
+  for (const line of all) {
+    const glyphs = line.glyphs.filter(({ g, x }) => {
+      const bb = inkOf(g)
+      return !!bb
+        && line.x + x + bb.minX * face.s - pad < W && line.x + x + bb.maxX * face.s + pad > 0
+        && line.y + face.asc - bb.maxY * face.s - pad < H && line.y + face.asc - bb.minY * face.s + pad > 0
+    })
+    if (glyphs.length) lines.push({ x: line.x, y: line.y, glyphs })
+  }
+  return { lines, box }
+}
+
+/**
+ * The most lines a caption is drawn in (the work bound's band): for typed
+ * captions, the most any of them wraps to on a frame W wide, in every font
+ * text may be drawn in here; for wired ones (unknown before the turn), the
+ * lines that can fit in the frame: Infinity, the band then the frame's height.
+ */
+export function captionLinesAtMost(captions: unknown, fontSize: number, W: number, outline: number): number {
+  if (typeof captions !== 'string') return Infinity
+  const key = `${fontSize}|${W}|${outline}`
+  const hit = linesMemo.get(captions)
+  if (hit && hit.key === key) return hit.n
+  let n = 1
+  const maxW = captionMaxWidth(W)
+  for (const got of [textFont(true), textFont(false)]) {
+    if (!got) continue
+    const face = faceAt(got.font, fontSize)
+    for (const c of captionSegments(captions)) {
+      const bb = textBbox(face, c.text)
+      if (bb[2] - bb[0] > maxW) n = Math.max(n, wrapCaption(face, c.text, maxW).length)
+    }
+  }
+  linesMemo.clear()
+  linesMemo.set(captions, { key, n })
+  return n
+}
+const linesMemo = new Map<string, { key: string; n: number }>()
 
 /**
  * The tallest a line's letters can be, in ems, over the fonts text may be
@@ -445,13 +544,17 @@ export function captionFontBoxEm(): number {
   return em > 0 ? em : 2
 }
 
-/** The renders Caption track keeps at once (a caption shown again soon after is not drawn again). */
-export const CAPTION_RENDERS_KEPT = 4
+/**
+ * The renders Caption track keeps at once: the shown caption's band only
+ * (captions are swept in frame order; it is drawn once when it comes up and
+ * composited on every frame that shows it). Memory: one band.
+ */
+export const CAPTION_RENDERS_KEPT = 1
 
 /**
  * Caption track's per-frame feed: for frame i (in order, from 0), the
  * caption it shows drawn at Python's place (`_cap`: its coverage), or null.
- * Each distinct caption is drawn once while it is among the last few shown.
+ * Each caption is drawn once when it comes up and its band reused on every frame that shows it.
  */
 export function captionFeed(p: Record<string, unknown>, hosted: boolean, W: number, H: number): AsyncIterable<Record<string, unknown>> {
   const segs = captionSegments(p.captions)
@@ -473,7 +576,7 @@ export function captionFeed(p: Record<string, unknown>, hosted: boolean, W: numb
         if (m === undefined) {
           let c = laid.get(text)
           if (!c) { c = captionLaid(face, text, p, W, H, ow > 0 ? ow : 0); laid.set(text, c) }
-          m = await svgMasks(laidSvgs(face, [c.line], W, H, ow > 0 ? ow : 0, c.box))
+          m = await svgMasks(laidSvgs(face, c.lines, W, H, ow > 0 ? ow : 0, c.box))
           kept.set(text, m)
           if (kept.size > CAPTION_RENDERS_KEPT) kept.delete(kept.keys().next().value!)
         }

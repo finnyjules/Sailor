@@ -101,7 +101,7 @@ import {
   TEXT_FONT_PATHS, __setTextFontsForTests, bundledFontFile, captionAt, captionPlace, captionSegments, faceAt, textBbox, textClipLayout, textClipMask,
   textFont, textSvgs, wrapText,
 } from '~~/server/runner/video/text'
-import { captionFeed, captionFontBoxEm, captionLaid, captionSweep, laidSvgs, textMasks } from '~~/server/runner/video/text'
+import { captionFeed, captionFontBoxEm, captionLaid, captionLinesAtMost, captionMaxWidth, captionSweep, laidSvgs, textMasks, wrapCaption } from '~~/server/runner/video/text'
 import { withWiredValues } from '~~/server/runner/values'
 import { requireMediaTools } from './__runner__/mediaParity'
 import {
@@ -492,6 +492,7 @@ describe('Caption track through its plan: the frames with a caption are Pythonâ€
       const per = W * H * 3
       const m = marginOf(c.widgets.font_size as number) + (c.widgets.outline_width as number)
       let most = 0
+      let wrapped = 0
       const looks: string[] = []
       for (let j = 0; j < T; j++) {
         const f = bytes.subarray(j * per, (j + 1) * per)
@@ -500,6 +501,18 @@ describe('Caption track through its plan: the frames with a caption are Pythonâ€
         // Timing (EXACT): a caption where Python drew one, none where it didn't (and then Python's very bytes).
         expect(box === null, `frame ${j}: captioned`).toBe(want.ink === null)
         if (!want.ink) { expect(sha256(f), `frame ${j}: unchanged`).toBe(want.sha256); continue }
+        // Live-check fix: a caption wider than the frame less its side margins is wrapped (Python's one line ran
+        // off the frame): its ink inside the frame, not Python's box. Those that fit are Python's, as before.
+        const shown = captionAt(captionSegments(c.widgets.captions), j)!
+        const face = faceAt(textFont(false)!.font, c.widgets.font_size as number)
+        const wide = textBbox(face, shown)[2] - textBbox(face, shown)[0] > captionMaxWidth(W)
+        if (wide) {
+          wrapped++
+          expect(box![0], `frame ${j}: inside the frame`).toBeGreaterThanOrEqual(0)
+          expect(box![2], `frame ${j}: inside the frame`).toBeLessThanOrEqual(W)
+          expect(wrapCaption(face, shown, captionMaxWidth(W)).length, `frame ${j}: wrapped`).toBeGreaterThan(1)
+          continue
+        }
         expectPlaced(box, want.ink, m, `frame ${j}`)
         most = Math.max(most, ...box!.map((b, k) => Math.abs(b - want.ink![k]!)))
         if (want.u8z) {
@@ -516,7 +529,7 @@ describe('Caption track through its plan: the frames with a caption are Pythonâ€
           }
         }
       }
-      figures.push(`  ${c.name}: ${most} | ${looks.join('; ') || '(no caption)'}`)
+      figures.push(`  ${c.name}: ${most} | ${looks.join('; ') || '(no caption)'}${wrapped ? ` | ${wrapped} frame(s) wrapped` : ''}`)
       expect(got.ui).toEqual(localUi(c))
       const pv = await previewPixels(h, (got.ui as { images: OutputFile[] }).images[0]!)
       const mid = Math.floor(T / 2)
@@ -772,7 +785,7 @@ describe('R8.3: Caption track takes its captions by wire', () => {
       .toBe(sha256(await batchBytes(h, runId, typed.values[0] as Extract<RunnerValue, { kind: 'frames' }>)))
   })
 
-  it('a caption wider than the frame: only the letters that can land are laid out, and the pixels are the same as with every letter', LONG, async () => {
+  it('a caption longer than the frame holds: only the lines and letters that can land are laid out, and the pixels are the same as with every letter', LONG, async () => {
     __setTextFontsForTests(null)
     const W = 320
     const H = 180
@@ -781,17 +794,87 @@ describe('R8.3: Caption track takes its captions by wire', () => {
       const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: `0 2 ${long}`, position, outline_width: outline, font_size: 24 })
       const face = faceAt(textFont(false)!.font, 24)
       const laid = captionLaid(face, long, p, W, H, outline)
-      expect(laid.line.glyphs.length, 'about a frame\'s width of letters').toBeLessThan(80)
+      const every = captionLaid(face, long, p, W, H, outline, { every: true })
       expect(long.length).toBeGreaterThan(3000)
-      // Every letter, as before R8.3.
-      const all = await textMasks(face, [captionPlace(face, long, p, W, H)], W, H, outline)
+      expect(every.lines.length, 'wrapped to many lines').toBeGreaterThan(50)
+      expect(laid.lines.length, 'about a frame\'s height of lines').toBeLessThan(15)
+      const ref = laidSvgs(face, every.lines, W, H, outline, every.box)
+      const cutSvg = laidSvgs(face, laid.lines, W, H, outline, laid.box)
+      expect({ x: cutSvg!.x, y: cutSvg!.y, w: cutSvg!.w, h: cutSvg!.h }).toEqual({ x: ref!.x, y: ref!.y, w: ref!.w, h: ref!.h })
       const it = captionFeed(p, false, W, H)[Symbol.asyncIterator]()
-      const cut = (await it.next()).value._cap as typeof all
-      expect(all, position).not.toBeNull()
-      expect({ x: cut!.x, y: cut!.y, w: cut!.w, h: cut!.h }).toEqual({ x: all!.x, y: all!.y, w: all!.w, h: all!.h })
-      expect(sha256(cut!.fill), `${position}: the letters`).toBe(sha256(all!.fill))
-      expect(cut!.line ? sha256(cut!.line) : null, `${position}: the outline`).toBe(all!.line ? sha256(all!.line) : null)
+      const cut = (await it.next()).value._cap as { fill: Uint8Array; line: Uint8Array | null; x: number; y: number; w: number; h: number }
+      const px = async (svg: string) => new Uint8Array((await sharp(Buffer.from(svg), { density: 72 }).ensureAlpha().extractChannel(3).raw().toBuffer()))
+      expect(sha256(cut.fill), `${position}: the letters`).toBe(sha256(await px(ref!.fill)))
+      expect(cut.line ? sha256(cut.line) : null, `${position}: the outline`).toBe(ref!.line ? sha256(await px(ref!.line)) : null)
       await it.return?.()
+    }
+  })
+
+  it('live-check fix: a long caption at 640 px wraps between words, every line\'s ink inside the frame, the block kept at its place', LONG, async () => {
+    for (const fonts of [null, { system: [] as string[] }]) {
+      __setTextFontsForTests(fonts)
+      const W = 640
+      const H = 360
+      const text = 'This is my voice and my lips are moving, and this sentence is far too long for one line.'
+      const face = faceAt(textFont(false)!.font, 40)
+      expect(textBbox(face, text)[2] - textBbox(face, text)[0]).toBeGreaterThan(W)
+      const maxW = W - 2 * Math.trunc(W * 0.05)
+      let lastTop = -1
+      for (const position of ['bottom', 'middle', 'top'] as const) {
+        const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: `0 2 ${text}`, position, outline_width: 3, font_size: 40, y_inset: 0.08 })
+        const laid = captionLaid(face, text, p, W, H, 3)
+        expect(laid.lines.length, position).toBeGreaterThan(1)
+        // Breaks between words only: the words, in order.
+        const rows = wrapCaption(face, text, maxW)
+        expect(rows.join(' ')).toBe(text)
+        for (const r of rows) expect(textBbox(face, r)[2] - textBbox(face, r)[0], r).toBeLessThanOrEqual(maxW)
+        // Every line's ink inside the frame (with the side margins).
+        const box = laid.box!
+        expect(box.l).toBeGreaterThanOrEqual(W * 0.05 - 1)
+        expect(box.r).toBeLessThanOrEqual(W - W * 0.05 + 1)
+        expect(box.t).toBeGreaterThanOrEqual(0)
+        expect(box.b).toBeLessThanOrEqual(H)
+        // Bottom grows upward from H âˆ’ HÂ·inset; top starts at HÂ·inset; middle centred.
+        if (position === 'bottom') expect(box.b).toBeGreaterThan(H - H * 0.08 - 12)
+        if (position === 'bottom') expect(box.b).toBeLessThanOrEqual(H - H * 0.08 + 12)
+        if (position === 'top') expect(box.t).toBeGreaterThan(H * 0.08 - 12)
+        if (position === 'middle') expect(Math.abs((box.t + box.b) / 2 - H / 2)).toBeLessThan(12)
+        // Each line centred.
+        for (const l of laid.lines) {
+          const ink = l.glyphs.map(({ g, x }) => [l.x + x + g.bbox.minX * face.s, l.x + x + g.bbox.maxX * face.s])
+          const left = Math.min(...ink.map(v => v[0]!))
+          const right = Math.max(...ink.map(v => v[1]!))
+          expect(Math.abs(left + right - W), 'centred').toBeLessThan(8)
+        }
+        if (position === 'bottom') lastTop = box.t
+      }
+      expect(lastTop).toBeGreaterThan(0)
+      // A word wider than a line on its own is broken between letters, each piece within the line.
+      const word = 'Supercalifragilisticexpialidocious'.repeat(3)
+      const pieces = wrapCaption(face, `a ${word} b`, maxW)
+      expect(pieces.join('').replace(/ /g, '')).toBe(`a${word}b`)
+      for (const r of pieces) expect(textBbox(face, r)[2] - textBbox(face, r)[0], r).toBeLessThanOrEqual(maxW)
+    }
+    __setTextFontsForTests(null)
+    // The sample frame, as the feed draws it over a grey frame.
+    const W = 640
+    const H = 360
+    const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: '0 2 This is my voice and my lips are moving, and this sentence is far too long for one line.', position: 'bottom', outline_width: 3, font_size: 40, y_inset: 0.08 })
+    const m = (await captionFeed(p, false, W, H)[Symbol.asyncIterator]().next()).value._cap as { x: number; y: number; w: number; h: number; fill: Uint8Array; line: Uint8Array | null }
+    const out = new Uint8Array(W * H * 3).fill(90)
+    for (let y = 0; y < m.h; y++) {
+      for (let x = 0; x < m.w; x++) {
+        const k = y * m.w + x
+        const o = ((m.y + y) * W + m.x + x) * 3
+        const lo = (m.line?.[k] ?? 0) / 255
+        const fi = m.fill[k]! / 255
+        for (let c = 0; c < 3; c++) out[o + c] = Math.round((out[o + c]! * (1 - lo)) * (1 - fi) + 255 * fi)
+      }
+    }
+    const dir = process.env.R8LOOK_DIR
+    if (dir) {
+      mkdirSync(dir, { recursive: true })
+      await sharp(Buffer.from(out), { raw: { width: W, height: H, channels: 3 } }).png().toFile(join(dir, 'caption_wrapped.png'))
     }
   })
 
@@ -800,7 +883,8 @@ describe('R8.3: Caption track takes its captions by wire', () => {
     const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: '0 2 Hello there', outline_width: 3 })
     const face = faceAt(textFont(false)!.font, 44)
     const laid = captionLaid(face, 'Hello there', p, 640, 360, 3)
-    expect(laidSvgs(face, [laid.line], 640, 360, 3, laid.box)).toEqual(textSvgs(face, [captionPlace(face, 'Hello there', p, 640, 360)], 640, 360, 3))
+    expect(laid.lines).toHaveLength(1)
+    expect(laidSvgs(face, laid.lines, 640, 360, 3, laid.box)).toEqual(textSvgs(face, [captionPlace(face, 'Hello there', p, 640, 360)], 640, 360, 3))
   })
 
   it('the start pass\'s bound for wired captions holds for 0, 1 and T captions, and needs no character cap', async () => {
@@ -816,18 +900,41 @@ describe('R8.3: Caption track takes its captions by wire', () => {
     const typedWork = (captions: string) => spec.work(paramsOf('CaptionTrack', { ...widgets, captions }), ins, out)
     const many = Array.from({ length: T }, (_, i) => `${i} ${i + 1} Caption ${i} ${'w'.repeat(i % 50)}`).join('\n')
     for (const captions of ['', '0 600 One caption over every frame', many]) expect(typedWork(captions)).toBeLessThanOrEqual(bound)
-    expect(typedWork(many)).toBe(bound)
+    // Typed ones wrapped to several lines too (a long one each frame).
+    const longMany = Array.from({ length: T }, (_, i) => `${i} ${i + 1} ${'A long caption wrapped to several lines '.repeat(6)}${i}`).join('\n')
+    expect(typedWork(longMany)).toBeGreaterThan(typedWork(many))
+    expect(typedWork(longMany)).toBeLessThanOrEqual(bound)
     // Only the font check in the limits for wired captions; at the node's turn, no character cap either.
     expect(spec.limits!(wired, ins).every(f => f.value <= f.limit)).toBe(true)
     const huge = paramsOf('CaptionTrack', { ...widgets, captions: `0 600 ${'x'.repeat(CAPTIONS_MAX_CHARS + 10)}` })
     expect(spec.limits!(huge, ins).some(f => f.value > f.limit), 'typed, at the start: as before').toBe(true)
     expect(spec.limits!(huge, ins, { turn: true }).every(f => f.value <= f.limit), 'at the turn: no character cap').toBe(true)
-    // A whole hosted batch of 1080p (20 s at 30 fps) with wired captions fits the hosted work cap at the app's
-    // sizes up to 88 px (the bound is one caption drawn every frame; it was one a frame-run of typed captions).
-    const shapes = new Map([['g:0', { count: T, w: 1920, h: 1080, exact: true }]])
-    for (const font_size of [20, 44, 88]) {
-      expect(await mediaEffectStartProblems(wiredGraph({ ...CAPS[0]!.widgets, font_size, outline_width: 3 }), WHISPER_ON, { hosted: true, shapes }), `${font_size}`).toBeNull()
+    // Live-check fix 2: each caption drawn once and its band composited on every frame that shows it, priced as
+    // measured. A whole hosted batch (600 frames) with wired captions at the app's default size fits at 360p, 720p
+    // and 1080p; past the cap it is refused before the hold (never started and then failed).
+    for (const [w, h] of [[640, 360], [1280, 720], [1920, 1080]] as const) {
+      const shapes = new Map([['g:0', { count: T, w, h, exact: true }]])
+      expect(await mediaEffectStartProblems(wiredGraph({ ...CAPS[0]!.widgets, font_size: 44, outline_width: 3 }), WHISPER_ON, { hosted: true, shapes }), `${w}`).toBeNull()
     }
+    const tiny = new Map([['g:0', { count: T, w: 1920, h: 1080, exact: true }]])
+    expect(await mediaEffectStartProblems(wiredGraph({ ...CAPS[0]!.widgets, font_size: 8, outline_width: 12 }), WHISPER_ON, { hosted: true, shapes: tiny }))
+      .toMatchObject({ nodeId: 'e', message: MEDIA_EFFECT_WORDS.tooMuchWork })
+  })
+
+  it('live-check fix 2: one raster per caption shown, the band reused on every frame that shows it', LONG, async () => {
+    __setTextFontsForTests(null)
+    const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: '0 5 First caption\n5 8 Second caption\n8 12 First caption', outline_width: 3 })
+    const svg = vi.spyOn(sharp.prototype, 'toBuffer')
+    try {
+      const it = captionFeed(p, false, 320, 180)[Symbol.asyncIterator]()
+      const caps: unknown[] = []
+      for (let i = 0; i < 12; i++) caps.push((await it.next()).value._cap)
+      await it.return?.()
+      // Three runs, each drawn once (fill and outline: two rasters each), none redrawn a frame.
+      expect(svg.mock.calls.length).toBe(6)
+      expect(caps.every(Boolean)).toBe(true)
+    }
+    finally { svg.mockRestore() }
   })
 
   it('the feed\'s sweep shows the same caption as Python\'s loop on every frame (fix round 1), in one pass over the captions', () => {
@@ -870,7 +977,9 @@ describe('R8.3: Caption track takes its captions by wire', () => {
         const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: `0 1 ${text}`, font_size: fs, outline_width: ow, position: 'middle' })
         const m = (await captionFeed(p, false, W, H)[Symbol.asyncIterator]().next()).value._cap as { w: number; h: number }
         expect(m.w).toBeLessThanOrEqual(W)
-        expect(m.h, `${fs}/${ow}`).toBeLessThanOrEqual(Math.ceil(captionFontBoxEm() * fs) + 2 * (ow + 2) + 2)
+        const em = captionFontBoxEm() * fs
+        const lines = captionLinesAtMost(`0 1 ${text}`, fs, W, ow)
+        expect(m.h, `${fs}/${ow}`).toBeLessThanOrEqual(Math.min(H, Math.ceil(em + (lines - 1) * (em * 1.15 + ow)) + 2 * (ow + 2) + 2))
       }
     }
     __setTextFontsForTests(null)

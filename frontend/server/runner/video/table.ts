@@ -49,7 +49,7 @@ import type { OutputFile } from '../types'
 import type { MediaLease } from '../../media/run'
 import type { SoundReadIO } from '../../media/values'
 import { waveMaxWindow, waveSamplesPerFrame, waveSoundOf, waveWindows } from './waveSound'
-import { CAPTION_RENDERS_KEPT, bundledFontFile, captionFeed, captionFontBoxEm, captionSegments, textClipMask } from './text'
+import { CAPTION_LINE_SPACING, CAPTION_RENDERS_KEPT, bundledFontFile, captionFeed, captionFontBoxEm, captionLinesAtMost, captionSegments, textClipMask } from './text'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -502,13 +502,37 @@ function waveFftWork(w: Record<string, unknown>): number {
 // ── R6.8: text on video ───────────────────────────────────────────────────────
 
 /**
- * The letters drawn a pixel of their frame (sharp's librsvg: the fill, and the
+ * Text clip: the letters drawn a pixel of their frame (sharp's librsvg: the fill, and the
  * outline's stroke), measured on this Mac through the real plan (the spec's
  * work figure).
  */
 const RASTER_STEPS = 8
-/** Pillow's blend a pixel: the outline's and the letters' (Caption track). */
+/** Pillow's blend a pixel: the outline's and the letters' (Text clip's one frame). */
 const TEXT_BLEND_STEPS = 2
+/**
+ * Caption track (live-check fix 2, the controller's option 3): each caption is
+ * drawn ONCE when it comes up (./text.ts captionFeed keeps the shown caption's
+ * band) and that band composited on every frame that shows it. So the work is
+ * one raster per caption shown (at most one per frame) and a blend a frame.
+ *
+ * Measured on this Mac (2026-10-01, load average 6-10, both fonts; units are
+ * the work figure's, seconds × 2.2 × 10⁷, the slowest pilot's rate):
+ *   - the blend of a cached band, a frame, through the real plan (48 frames of
+ *     1080p and 720p, one page of text drawn once): 0.45-0.54 a pixel → 1;
+ *   - one raster (fill and outline, sharp's librsvg), per pixel of the two
+ *     masks: 0.17 (256 px) to 0.94 (44 px) to 3.1 (20 px) to 12.6 (8 px) with a
+ *     3 px outline; a 12 px outline adds about 0.06 a pixel at 44 px. Its cost
+ *     follows the letters in it: 0.5 + 1300 / size² + 4 · outline / size covers
+ *     every case measured by 1.4× or more;
+ *   - a raster's fixed cost (a short line): 3-11 ms → 3 × 10⁵.
+ */
+const CAPTION_BLEND_STEPS = 1
+const captionRasterSteps = (w: Record<string, unknown>) => {
+  const size = Math.max(1, int(w.font_size, 1))
+  const outline = Math.max(0, int(w.outline_width, 0))
+  return 0.5 + 1300 / (size * size) + (4 * outline) / size
+}
+const CAPTION_RASTER_FIXED = 300_000
 /** The most text one Text clip draws, and all of one Caption track's captions: past it, the workflow goes to the engine. */
 export const TEXT_MAX_CHARS = 20_000
 export const CAPTIONS_MAX_CHARS = 200_000
@@ -528,14 +552,21 @@ const textLimits = (text: unknown, max: number) => [
 const captionRenders = (w: Record<string, unknown>, T: number) =>
   typeof w.captions === 'string' ? Math.min(T, 2 * captionSegments(w.captions).length + 1) : T
 /**
- * The height one caption's letters are drawn in (R8.3): one line, no wrap, so
- * the font's box at its size and the outline's pad on each side (./text.ts
- * textSvgs), never more than the frame. The width is at most the frame's: the
- * letters past its sides are not laid out.
+ * The height one caption's letters are drawn in (R8.3; wrapped since the live
+ * check): its lines (./text.ts captionLinesAtMost: the most a typed caption
+ * wraps to; wired captions, unknown before the turn, the lines that can fit
+ * in the frame, so the frame's height), each line's step at most the font's
+ * box × the spacing plus the outline, the last line the font's box, and the
+ * outline's pad on each side (./text.ts textSvgs); never more than the frame.
+ * The width is at most the frame's: the letters past its sides are not laid out.
  */
-const captionBand = (w: Record<string, unknown>, H: number) => {
+const captionBand = (w: Record<string, unknown>, W: number, H: number) => {
   const outline = Math.max(0, int(w.outline_width, 0))
-  return Math.min(H, Math.ceil(captionFontBoxEm() * Math.max(0, int(w.font_size, 0))) + 2 * (outline + 2) + 2)
+  const size = Math.max(0, int(w.font_size, 0))
+  const em = captionFontBoxEm() * size
+  const lines = captionLinesAtMost(w.captions, size, W, outline)
+  if (!Number.isFinite(lines)) return H
+  return Math.min(H, Math.ceil(em + (lines - 1) * (em * CAPTION_LINE_SPACING + outline)) + 2 * (outline + 2) + 2)
 }
 /** The text's length, as a limit only at the start and only for typed captions: wired ones have no character cap (ruling (c)). */
 const captionLimits = (w: Record<string, unknown>, turn: boolean) =>
@@ -910,7 +941,7 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   CaptionTrack: {
     family: 'video-text', op: 'txt.caption', inputs: ['frames'], reads: 'stream', preview: true,
     shape: sameShape,
-    // One frame in hand; the kept renders (two masks each), sharp's RGBA of one, and this frame's copy of its masks.
+    // One frame in hand; the kept render (the shown caption's two masks), sharp's RGBA of one, and this frame's copy of its masks.
     heldBytes: (w, ins) => {
       const x = oneInput(ins)
       return effectHeldBytes(x, { reads: 1, extra: x.w * x.h * (2 * CAPTION_RENDERS_KEPT + 4 + 2) })
@@ -918,7 +949,8 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     work: (w, ins, out) => {
       const x = oneInput(ins)
       return (x.count * x.w * x.h + out.count * out.w * out.h) * VIDEO_IO_WORK_PER_PIXEL
-        + out.count * out.w * out.h * TEXT_BLEND_STEPS + captionRenders(w, x.count) * 2 * x.w * captionBand(w, x.h) * RASTER_STEPS
+        + out.count * out.w * out.h * CAPTION_BLEND_STEPS
+        + captionRenders(w, x.count) * (2 * x.w * captionBand(w, x.w, x.h) * captionRasterSteps(w) + CAPTION_RASTER_FIXED)
     },
     limits: (w, _ins, o) => captionLimits(w, !!o?.turn),
     passThrough: w => captionSegments(w.captions).length === 0,
