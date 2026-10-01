@@ -13,7 +13,7 @@
  * One renderer (`drawLocalLayer`) draws to any 2D context at any resolution.
  */
 
-export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'image' | 'polygon' | 'star' | 'brush' | 'wired' | 'deal' | 'scatter'
+export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'image' | 'polygon' | 'star' | 'brush' | 'wired' | 'deal' | 'scatter' | 'light'
 
 // ── Motion painter indirection ───────────────────────────────────────────────
 // paintLayerStack(t) needs the motion module, but motion/paint.ts imports
@@ -376,6 +376,13 @@ interface LayerCommon {
   cornerPin?: CornerPin // 4-corner projective warp; absent/identity ⇒ no distortion
   opacity: number    // 0..1
   visible?: boolean  // false = hidden everywhere (render, bake, export); undefined = visible
+  /** Frame lights: whether lights light this layer. Absent ⇒ true. See lib/frame/lighting. */
+  lit?: boolean
+  /** Frame lights: whether this layer casts a shadow. Absent ⇒ by kind (not image/wired). */
+  castsShadow?: boolean
+  /** Frame lights: how far the layer floats above what is beneath, in Frame widths
+   *  (0.005..0.15). Absent ⇒ by kind. */
+  lift?: number
   locked?: boolean   // true = not selectable/editable from the canvas (panel still can)
   blend?: string     // blend mode vs layers below ('normal' default; same names as wired)
   groupId?: string   // layers sharing a groupId select/move/transform together
@@ -945,7 +952,27 @@ export interface ScatterLayer extends LayerCommon {
   husk?: HuskParams
 }
 
-export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer | ScatterLayer
+/**
+ * A light (lamp / spot / sun): lights the layers beneath it. Its own `x`/`y` are its
+ * position as fractions of the Frame (−0.5..1.5). It has no pixels, so it paints nothing as
+ * content, has a 0×0 box, and carries no effects, mask or paint. See lib/frame/lighting.
+ */
+export interface LightLayer extends LayerCommon {
+  kind: 'light'
+  light: {
+    type: 'lamp' | 'spot' | 'sun'
+    height: number      // 0..1
+    color: string       // #rrggbb
+    brightness: number  // 0..3
+    reach: number       // 0.2..2, Frame widths
+    aimX: number        // spot only, fraction of the Frame
+    aimY: number
+    cone: number        // spot half-angle, radians 0.1..0.8
+    edge: number        // spot edge softness 0..1
+  }
+}
+
+export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer | ScatterLayer | LightLayer
 
 // Re-export so consumers of local layers can import the stroke type from one place.
 export type { PaintStroke } from '~/lib/compositor/brushStamp'
@@ -1951,6 +1978,7 @@ export function localLayerBox(
   // must NOT trigger a second resolve.
   wiredLive?: WiredLive | null,
 ): { w: number; h: number } {
+  if (layer.kind === 'light') return { w: 0, h: 0 }   // a point, not an area
   if (layer.kind === 'text') {
     // Placed lines take over the layout, so the box is theirs (flow box fields ignored).
     // Checked first: it must also win over a path, exactly as `drawText` does.
@@ -2418,6 +2446,23 @@ export function thumbBox(boxW: number, boxH: number, size: number): { w: number;
   return { w: Math.max(1, Math.round(bw * s)), h: Math.max(1, Math.round(bh * s)) }
 }
 
+/** A light has no box, so its row thumbnail is a glow disc of its own colour. */
+function renderLightThumbnail(layer: LightLayer, size: number, dpr: number): HTMLCanvasElement | null {
+  const px = Math.max(1, Math.round(size * dpr))
+  const canvas = document.createElement('canvas')
+  canvas.width = px; canvas.height = px
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  const c = px / 2
+  const g = ctx.createRadialGradient(c, c, 0, c, c, c)
+  g.addColorStop(0, layer.light.color)
+  g.addColorStop(0.45, layer.light.color)
+  g.addColorStop(1, `${layer.light.color}00`)
+  ctx.fillStyle = g
+  ctx.beginPath(); ctx.arc(c, c, c, 0, Math.PI * 2); ctx.fill()
+  return canvas
+}
+
 /**
  * Render ONE layer's content into a small offscreen canvas fitted to `size` px,
  * transparent background, unrotated and stripped of its frame position — a
@@ -2435,6 +2480,7 @@ export function thumbBox(boxW: number, boxH: number, size: number): { w: number;
  */
 export function renderLayerThumbnail(layer: LocalLayer, size: number, dpr = 1): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null
+  if (layer.kind === 'light') return renderLightThumbnail(layer, size, dpr)
   // A square reference frame: every kind normalizes its box to the WIDTH (text
   // height included, via lineH = fontSize·W·lineHeight), so the box aspect is
   // independent of the real frame's aspect — a square ref keeps the math simple.
@@ -2930,6 +2976,7 @@ function paintLayer(
   H: number,
   opacityMul = 1,
 ) {
+  if (layer.kind === 'light') return   // a light has no pixels: no effect stack, silhouette or stamp
   const baseOpacity = Math.max(0, Math.min(1, layer.opacity * opacityMul))
   const blendOp = localBlendOp(layer)
   // Resolve the wired provider (if any) exactly ONCE for this whole paint call, and
@@ -4729,6 +4776,7 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
   // outside a paint). Threaded into every geometry `applyGeometry`/`computedOutlineD` call below.
   // Inert until a geometry kind carries a `refLayerId` (F3 Task 2) — no current kind does, so the
   // resolver is never invoked and the rendered `d` is byte-identical with or without it.
+  if (layer.kind === 'light') return   // invisible content: lighting reads it, nothing draws it
   const rs = _siblingResolveFor ? _siblingResolveFor(layer) : undefined
   if (layer.kind === 'text') {
     // Frame slice F1: render from glyph outlines when the layer asks (and the font
@@ -6581,6 +6629,7 @@ export function layerPaints(layer: LocalLayer): Paint[] {
     // (It must be listed: the default branch below reads `fill`/`stroke`, which a
     // scatter has not got.)
     case 'scatter': return []
+    case 'light': return []                    // a light has no paint slot
     default: return [layer.fill, layer.stroke] // rect / ellipse / polygon / star / path
   }
 }

@@ -37,6 +37,7 @@ import { textSnapY, baselineRoundDy, resnapReach, type TextMarks } from '~/lib/f
 import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
+import { MAX_LIGHTS, newLightLayer, readFrameLighting, sanitizeLighting, type FrameLighting, type LightType } from '~/lib/frame/lighting/settings'
 
 interface EditorOpts {
   node: () => any                       // the compositor node (reactive)
@@ -279,6 +280,21 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   /** `record: false` while a drag is under way — the caller records once at pointer-down. */
   function setFrameLight(l: FrameLight, record = true) { if (record) recordHistory(); writeLight(l) }
 
+  // Frame lights (light layers, stage 1): Darkness + Background lit. Absent key = defaults
+  // (readFrameLighting); nothing is written until the user edits.
+  const lighting = computed<FrameLighting>(() => readFrameLighting(node()?.data?.properties))
+  function writeLighting(l: FrameLighting | undefined) {
+    const n = node(); if (!n) return
+    if (!n.data.properties) n.data.properties = {}
+    if (!l) delete (n.data.properties as any).sailor_localLighting
+    else (n.data.properties as any).sailor_localLighting = sanitizeLighting(l)
+  }
+  /** `record: false` while a slider drag is under way — the caller records once at pointer-down. */
+  function setLighting(patch: Partial<FrameLighting>, record = true) {
+    if (record) recordHistory()
+    writeLighting({ ...lighting.value, ...patch })
+  }
+
   // The Frame's layout grid (spec 2026-09-26-frame-layout-grid-design): stored on
   // `sailor_layoutGrid`, read through readLayoutGrid (auto grids follow the format;
   // old Frames migrate). Part of the undo Snapshot — a grid change is a real edit.
@@ -364,11 +380,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!n.data.properties) n.data.properties = {}
     ;(n.data.properties as any).sailor_posterState = next
   }
-  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap; light?: FrameLight; grid?: LayoutGrid }
+  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap; light?: FrameLight; lighting?: unknown; grid?: LayoutGrid }
   const HISTORY_CAP = 120
   const _past = ref<Snapshot[]>([])
   const _future = ref<Snapshot[]>([])
-  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap(), light: (node()?.data?.properties as any)?.sailor_localLight, grid: (node()?.data?.properties as any)?.sailor_layoutGrid ? JSON.parse(JSON.stringify((node()!.data.properties as any).sailor_layoutGrid)) : undefined } }
+  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap(), light: (node()?.data?.properties as any)?.sailor_localLight, lighting: (node()?.data?.properties as any)?.sailor_localLighting ? JSON.parse(JSON.stringify((node()!.data.properties as any).sailor_localLighting)) : undefined, grid: (node()?.data?.properties as any)?.sailor_layoutGrid ? JSON.parse(JSON.stringify((node()!.data.properties as any).sailor_layoutGrid)) : undefined } }
   function restore(s: Snapshot) {
     commit(s.layers); writeOrder([...s.order]); writeBg(s.bg); writeFx(s.fx?.length ? s.fx : undefined); writeGroups([...s.groups])
     const n = node()
@@ -381,6 +397,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const nd = node()?.data
     if (s.frameSize && nd) writeFrameSizeState(nd, s.frameSize)
     writeLight(s.light)
+    writeLighting(s.lighting as FrameLighting | undefined)
     if (s.grid) writeLayoutGrid(s.grid)
   }
   function frameSizeSnap(): FrameSizeState | undefined { const nd = node()?.data; return nd ? readFrameSizeState(nd) : undefined }
@@ -432,6 +449,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     }))
   }
   function addLocal(layer: LocalLayer) { recordHistory(); commit([...localLayers.value, layer]); selectLocal(layer.id) }
+  const lightCount = () => localLayers.value.filter(l => l.kind === 'light').length
+  /** Add a light at the Frame centre (or `at`). Returns false — nothing added — when the Frame
+   *  already holds MAX_LIGHTS; the editor has no toast, so the UI shows "A Frame holds up to 6 lights". */
+  function addLight(type: LightType, at?: { x: number; y: number }): boolean {
+    if (lightCount() >= MAX_LIGHTS) return false
+    addLocal(newLightLayer(type, at))
+    return true
+  }
   /** Tell the host about any `wired` layers a delete is about to remove, so it
    *  can take the slot's edge out with them (see `onWiredRemoved`). */
   function notifyWiredRemoval(ids: Set<string>) {
@@ -734,11 +759,18 @@ export function useLocalLayerEditor(opts: EditorOpts) {
    *  Motion tab. A host that returns nothing (old hosts) carries none, as today. */
   async function duplicateSelection() {
     if (!selectedIds.value.size) return
-    const { ids, wired } = clonableSelection()
+    let { ids, wired } = clonableSelection()
     const wiredMap = new Map<string, string>()
     for (const w of wired) {
       const bakedId = await opts.materializeWired?.(w)
       if (bakedId) wiredMap.set(w.id, bakedId)
+    }
+    // A Frame holds at most MAX_LIGHTS lights: lights beyond the cap are not copied.
+    let room = Math.max(0, MAX_LIGHTS - lightCount())
+    for (const id of [...ids]) {
+      if (localLayers.value.find(l => l.id === id)?.kind !== 'light') continue
+      if (room > 0) room--
+      else { if (ids === selectedIds.value) ids = new Set(ids); ids.delete(id) }
     }
     if (!ids.size) {
       if (wiredMap.size) appendMotion(motionForCopies(readMotionSnap() as MotionDoc, wiredMap, mkBehaviourId))
@@ -1393,6 +1425,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
     frameLight, setFrameLight,
+    lighting, setLighting, addLight,
     layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging, gridSnapLines,
     undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,

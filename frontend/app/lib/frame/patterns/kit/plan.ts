@@ -293,7 +293,7 @@ export { isFromLayout }
  *  With no tags the base view is exactly Stage 3's; with none of the new content either, the two
  *  views agree. */
 function readFrame(a: FrameArgs, layers: LocalLayer[]): { base: View; content: View } {
-  const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }) && !isFromLayout(l as { fromLayout?: unknown }))
+  const userLayers = layers.filter(l => l.kind !== 'light' && !isOwned(l as { owner?: { by: string } }) && !isFromLayout(l as { fromLayout?: unknown }))
   const st = a.props?.sailor_posterState as { roles?: StoredRoles; tags?: ContentTags } | undefined
   const tags = st?.tags && Object.keys(st.tags).length ? st.tags : undefined
   // Base-role tags and 'unused' settle a layer in both views; new-content tags only in the content view.

@@ -64,6 +64,8 @@ export function buildUnits(layers: LocalLayer[], groups: LayerGroup[], ctx: Canv
   const byId = new Map(layers.map(l => [l.id, l]))
   const boxOf = new Map<string, Box>()
   for (const l of layers) boxOf.set(l.id, layerDesignBox(l, ctx, W0, H0))
+  // A light is a point in Frame fractions, not content: no unit, so a responsive layout never moves it.
+  const isLight = (id: string) => byId.get(id)?.kind === 'light'
   const claimed = new Set<string>()
   const units: Unit[] = []
   const union = (ids: string[]): Box => ids.map(id => boxOf.get(id)!).reduce(unionBox)
@@ -85,7 +87,7 @@ export function buildUnits(layers: LocalLayer[], groups: LayerGroup[], ctx: Canv
   for (const l of layers) {
     if (!l.groupId || claimed.has(l.id)) continue
     const top = topGroupOf(l.groupId, groups)
-    const memberIds = layersInGroup(top, layers, groups).filter(id => byId.has(id))
+    const memberIds = layersInGroup(top, layers, groups).filter(id => byId.has(id) && !isLight(id))
     if (memberIds.length === 0) continue
     const unit: Unit = { id: top, kind: 'group', memberIds, box: union(memberIds), pins: groupById.get(top)?.pins, canStretch: false }
     for (const id of memberIds) { claimed.add(id); groupUnitOf.set(id, unit) }
@@ -114,7 +116,7 @@ export function buildUnits(layers: LocalLayer[], groups: LayerGroup[], ctx: Canv
   }
   // 3. Cloners, then plain layers.
   for (const l of layers) {
-    if (claimed.has(l.id)) continue
+    if (claimed.has(l.id) || l.kind === 'light') continue
     claimed.add(l.id)
     if (l.cloner?.enabled) units.push({ id: l.id, kind: 'cloner', memberIds: [l.id], box: boxOf.get(l.id)!, pins: l.pins, canStretch: false })
     else units.push({ id: l.id, kind: 'layer', memberIds: [l.id], box: boxOf.get(l.id)!, pins: l.pins, canStretch: layerCanStretch(l) })

@@ -886,7 +886,8 @@ function findLayer(s: CompositorState, id?: string): LocalLayer | undefined {
 
 /** Read a Compositor frame as an agent snapshot: each layer + a document object. */
 export function describeCompositor(state: CompositorState): SurfaceSnapshot {
-  const objects: SurfaceSnapshot['objects'] = state.layers.map((l) => {
+  // Lights are not content the agent can address in stage 1 (agent light ops come in stage 4).
+  const objects: SurfaceSnapshot['objects'] = state.layers.filter(l => l.kind !== 'light').map((l) => {
     // Expose enough CURRENT state for relative edits ("bigger", "a bit darker",
     // "rotate more") and questions ("what font is the title?") to be answerable.
     const cur: Record<string, unknown> = { x: l.x, y: l.y, opacity: l.opacity }

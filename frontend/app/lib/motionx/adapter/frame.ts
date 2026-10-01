@@ -328,6 +328,13 @@ export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
     { path: `layers.${id}.rotation`, type: 'number', label: 'Rotation', group: 'Transform', min: -360, max: 360 },
     { path: `layers.${id}.opacity`, type: 'number', label: 'Opacity', group: 'Transform', min: 0, max: 1 },
   ]
+  // A light is a point: it can move, nothing else (no scale, rotation, opacity, fill or effects).
+  if (layer.kind === 'light') {
+    return [
+      { path: `layers.${id}.x`, type: 'number', label: 'Position X', group: 'Transform', min: -0.5, max: 1.5 },
+      { path: `layers.${id}.y`, type: 'number', label: 'Position Y', group: 'Transform', min: -0.5, max: 1.5 },
+    ]
+  }
   const fill = (layer as unknown as { fill?: Paint }).fill
   if (isGradient(fill)) {
     out.push({ path: `layers.${id}.fill`, type: 'gradient', label: 'Fill · Gradient', group: 'Fill' })

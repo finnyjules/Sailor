@@ -206,6 +206,7 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
         if (arr) inkArraySites(out, l, arr, Math.max(0.001, area(l)))
         break
       }
+      case 'light': continue // a light's colour is not a recolour site (stage 1)
       default: break // wired: no paint of its own
     }
     // Stroke sites: follow `strokeStackOf`'s OWN precedence exactly, never re-derive it from
