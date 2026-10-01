@@ -5941,6 +5941,14 @@ With ComfyUI fully stopped and its routes unreachable (nothing on `:8188`; `SAIL
 
 ---
 
+### USER rulings on R9–R11 (2026-10-01)
+
+- **(a)** Live checks and switch-on: run the owed checks and switch families on per the earlier "everywhere after its check" ruling; each paid check still needs the user's go when it is run.
+- **(b) Face swap:** retry fal Easel; if it is still unavailable, switch to `fal-ai/face-swap`.
+- **(c) Motion blur (time):** build a simple working blur (blend each frame with its neighbours), judged by eye.
+- **(d) Animated Shader effect in a workflow:** the browser draws every frame at Run (as it draws the still today) and hands the runner a frame batch — no ComfyUI. (Controller's call after explaining it; the user's direction is that nothing should need ComfyUI.)
+- **(e) The long tail:** refuse plainly with words saying what to change; nothing silently falls back to ComfyUI. Ports can come later if anyone hits one.
+
 ### Controller rulings needed before R9–R11 are built
 
 Rulings marked **USER** are the user's: they decide what the product does, or spend money.
