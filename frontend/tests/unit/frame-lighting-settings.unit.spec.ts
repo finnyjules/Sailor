@@ -6,6 +6,10 @@ import {
   effectiveLit, effectiveCasts, effectiveLift, visibleLights,
 } from '~/lib/frame/lighting/settings'
 import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
+import { setClipboard, _resetClipboard } from '~/lib/compositor/layerClipboard'
+import { buildUnits } from '~/lib/frame/responsive/units'
+import { animatableProperties } from '~/lib/motionx/adapter/frame'
+import { layerPaints, localLayerBox } from '~/composables/useCompositorLayers'
 
 describe('light layer sanitizer', () => {
   it('clamps every field', () => {
@@ -108,5 +112,46 @@ describe('editor lighting', () => {
     ed.selectLocal((node.data.properties as any).sailor_localLayers[0].id)
     await ed.duplicateSelection()
     expect((node.data.properties as any).sailor_localLayers).toHaveLength(6)
+  })
+})
+
+describe('paste respects the cap', () => {
+  it('trims pasted lights to the room left, across Frames, and reports the drop', () => {
+    const src = makeEditor()
+    for (let i = 0; i < 3; i++) src.ed.addLight('lamp')
+    src.ed.selectedIds.value = new Set(((src.node.data.properties as any).sailor_localLayers as any[]).map(l => l.id))
+    void src.ed.copySelection()
+    const dst = makeEditor()
+    for (let i = 0; i < 4; i++) dst.ed.addLight('sun')
+    expect(dst.ed.pasteClipboard(false)).toBe(1)
+    expect(((dst.node.data.properties as any).sailor_localLayers as any[]).filter(l => l.kind === 'light')).toHaveLength(6)
+    expect(dst.ed.pasteClipboard(false)).toBe(3)
+    expect(((dst.node.data.properties as any).sailor_localLayers as any[])).toHaveLength(6)
+    _resetClipboard()
+  })
+  it('pastes everything when there is room', () => {
+    const { ed } = makeEditor()
+    setClipboard({ layers: [newLightLayer('lamp'), { id: 'r', kind: 'rect', x: 0.2, y: 0.2, rotation: 0, opacity: 1, w: 0.1, h: 0.1 } as any], groups: [] })
+    expect(ed.pasteClipboard(false)).toBe(0)
+    _resetClipboard()
+  })
+})
+
+describe('lights elsewhere', () => {
+  const rect: any = { id: 'r', kind: 'rect', x: 0.5, y: 0.5, rotation: 0, opacity: 1, w: 0.2, h: 0.1, fill: '#fff', stroke: '', strokeWidth: 0 }
+  it('buildUnits skips lights', () => {
+    const units = buildUnits([rect, newLightLayer('lamp')], [], null, 1000, 1000)
+    expect(units.map(u => u.id)).toEqual(['r'])
+  })
+  it('a light animates Position X/Y only', () => {
+    const props = animatableProperties(newLightLayer('spot') as any)
+    expect(props.map(p => p.label)).toEqual(['Position X', 'Position Y'])
+  })
+  it('layerPaints and localLayerBox', () => {
+    const l = newLightLayer('lamp') as any
+    expect(layerPaints(l)).toEqual([])
+    expect(localLayerBox(null, l, 1000, 1000)).toEqual({ w: 0, h: 0 })
+    expect(localLayerBox(null, rect, 1000, 1000)).toEqual({ w: 200, h: 100 })
+    expect(layerPaints(rect)).toEqual(['#fff', ''])
   })
 })

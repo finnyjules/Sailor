@@ -834,9 +834,19 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     try { opts.onOSCopy?.(p) } catch { /* OS write is best-effort; in-session clipboard already set */ }
   }
   /** Paste the clipboard into THIS frame; offset unless inPlace. Copies become the selection. */
-  function pasteClipboard(inPlace: boolean) {
-    const p = getClipboard()
-    if (!p) return
+  function pasteClipboard(inPlace: boolean): number {
+    const p0 = getClipboard()
+    if (!p0) return 0
+    // A Frame holds at most MAX_LIGHTS lights: pasted lights beyond the room are dropped
+    // (also across Frames). Returns how many were dropped so the UI can say so.
+    let room = Math.max(0, MAX_LIGHTS - lightCount())
+    let dropped = 0
+    const kept = p0.layers.filter((l: LocalLayer) => {
+      if (l.kind !== 'light') return true
+      if (room > 0) { room--; return true }
+      dropped++; return false
+    })
+    const p = dropped ? { ...p0, layers: kept } : p0
     recordHistory()
     const r = materializePaste(
       p, localLayers.value, localGroups.value, inPlace ? 0 : 0.02,
@@ -848,6 +858,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     appendMotion(r.motion)
     selectedIds.value = new Set(r.newIds)
     selectedId.value = r.newIds[r.newIds.length - 1] ?? null
+    return dropped
   }
 
   /** Keyboard: arrow-nudge (1px / shift 10px), cmd/ctrl-D duplicate,
