@@ -102,6 +102,16 @@ export function sanitizeLighting(raw: unknown): FrameLighting {
     backgroundLit: typeof r.backgroundLit === 'boolean' ? r.backgroundLit : DEFAULT_LIGHTING.backgroundLit,
   }
 }
+/** The Frame's lighting as a stored record, or undefined for "no record". A record equal to the
+ *  defaults counts as none: painters receive the lighting already read (`readFrameLighting` gives
+ *  the defaults when nothing is stored), so the two can't be told apart — and the old-Relight
+ *  conversion must then apply its own record (Darkness 0.45, background unlit) the same way in
+ *  every painter and in the editor. */
+export function storedLighting(lighting: FrameLighting | null | undefined): FrameLighting | undefined {
+  return !lighting || (lighting.darkness === DEFAULT_LIGHTING.darkness && lighting.backgroundLit === DEFAULT_LIGHTING.backgroundLit)
+    ? undefined : lighting
+}
+
 export function readFrameLighting(props: unknown): FrameLighting {
   return sanitizeLighting((props as Record<string, unknown> | undefined)?.sailor_localLighting)
 }

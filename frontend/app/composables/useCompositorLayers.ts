@@ -23,7 +23,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // Type-only imports are erased at runtime, so they don't create a cycle
 // (evaluate.ts/types.ts don't import this file).
 import { DEFAULT_FRAME_LIGHT, type FrameLight } from '~/lib/compositor/frameLight'
-import { DEFAULT_LIGHTING, MAX_LIGHTS, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
+import { DEFAULT_LIGHTING, MAX_LIGHTS, storedLighting, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
 import { lightFrame, lightingAvailable, lightBoxWithFrameLights } from '~/lib/frame/lighting/lightingPass'
 import { bumpLightingMapEpoch, layerSig, onLightingRelease, type LightingStamp } from '~/lib/frame/lighting/maps'
 import type { LayerMotionState } from '~/lib/motion/evaluate'
@@ -112,7 +112,7 @@ import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
 // Relight (light layers stage 2): the photo's own paint takes Original light only; the Frame's
 // light layers light it, by the facing tile it hands the lighting maps. Old Frames whose Relight
 // still carries its own lights are lit through the read-only conversion (convertRelight.ts).
-import { sanitizeRelight } from '~/lib/relight/settings'
+import { sanitizeRelight, relightTileDials } from '~/lib/relight/settings'
 import { relightAvailable, relightFacingTile, relightOriginalLight, originalLightActive, releaseRelight } from '~/lib/relight/relightPass'
 import { hasLegacyRelightLights, isRelightPhoto, relightLightsToLayers, type RelightConversion } from '~/lib/frame/lighting/convertRelight'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
@@ -3252,7 +3252,8 @@ function paintLayer(
     // thread, and until it lands the photo faces the viewer. Shared with `renderRelightPair`
     // (the Finish pair) below — see `relightPhotoFor`.
     if (wantRelight) {
-      const out = relightPhotoFor(layer, W, wiredLive, dofRef!, depth, relight!, src, bw, bh, isClipLayer, wantTile && !!depth, layer.rotation || 0)
+      // With Depth blur running, the tile is built without Texture relief (relightTileDials).
+      const out = relightPhotoFor(layer, W, wiredLive, dofRef!, depth, relightTileDials(relight!, wantDof), src, bw, bh, isClipLayer, wantTile && !!depth, layer.rotation || 0)
       if (out.paint) cur = out.paint            // cached, shared, never drawn into
       if (out.tile) _facingRecorder!.set(layer.id, { tile: out.tile, sig: out.sig, shine: relight!.shine })
     }
@@ -6785,13 +6786,6 @@ function addShaderFieldRequest(out: FieldRequest[], paint: Paint | undefined, W:
  * to convert (a light layer exists, or no Relight effect carries lights).
  */
 const _legacyUnlit = new WeakMap<LocalLayer, LocalLayer>()
-/** Painters receive the Frame's lighting already read (`readFrameLighting`: the defaults when no
- *  record is stored), so "no record" arrives as exactly the defaults. The conversion's own
- *  record (Darkness 0.45, background unlit) applies then, as the editor's does on open. */
-function storedLighting(lighting: FrameLighting | undefined): FrameLighting | undefined {
-  return !lighting || (lighting.darkness === DEFAULT_LIGHTING.darkness && lighting.backgroundLit === DEFAULT_LIGHTING.backgroundLit)
-    ? undefined : lighting
-}
 const _legacyConv = new WeakMap<LocalLayer[], { W: number; H: number; lk: string; conv: RelightConversion }>()
 function legacyRelightView(
   items: StackItem[], localLayers: LocalLayer[], lighting: FrameLighting | undefined, W: number, H: number,
@@ -7519,12 +7513,24 @@ interface RelightPhotoOut {
 let _relightPhotoCacheMax = 4
 const _relightPaintCache = new Map<string, HTMLCanvasElement | null>()
 const _relightTileCache = new Map<string, HTMLCanvasElement | null>()
-function sizeRelightPhotoCaches(photos: number): void {
-  _relightPhotoCacheMax = Math.max(4, 2 * photos + 2)
+// The caches are shared by every painter (the editor, cards, Render): a card with one photo must
+// not shrink them under the editor's many. The cap never drops below the largest one asked for
+// in the last RELIGHT_CACHE_HOLD_MS; it shrinks only once nobody has asked for more for that long.
+const RELIGHT_CACHE_HOLD_MS = 2000
+let _relightCapPeak = 4
+let _relightCapPeakAt = -Infinity
+function sizeRelightPhotoCaches(photos: number, now = performance.now()): void {
+  const want = Math.max(4, 2 * photos + 2)
+  if (want >= _relightCapPeak || now - _relightCapPeakAt > RELIGHT_CACHE_HOLD_MS) {
+    _relightCapPeak = want
+    _relightCapPeakAt = now
+  }
+  _relightPhotoCacheMax = Math.max(want, _relightCapPeak)
 }
 onLightingRelease(() => {
   _relightPaintCache.clear()
   _relightTileCache.clear()
+  _relightCapPeak = 4; _relightCapPeakAt = -Infinity
   releaseRelight()
 })
 function cacheGet(cache: Map<string, HTMLCanvasElement | null>, key: string | null): HTMLCanvasElement | null | undefined {
@@ -7538,6 +7544,8 @@ function cachePut(cache: Map<string, HTMLCanvasElement | null>, key: string | nu
   while (cache.size >= _relightPhotoCacheMax) cache.delete(cache.keys().next().value as string)
   cache.set(key, v)
 }
+/** Test seam: size the caches as a paint of `photos` Relight photos at time `now` would. */
+export function __sizeRelightPhotoCachesForTest(photos: number, now: number): void { sizeRelightPhotoCaches(photos, now) }
 /** Test seam: the per-photo caches' sizes and cap. */
 export function __relightPhotoCacheForTest(): { paint: number; tile: number; max: number } {
   return { paint: _relightPaintCache.size, tile: _relightTileCache.size, max: _relightPhotoCacheMax }

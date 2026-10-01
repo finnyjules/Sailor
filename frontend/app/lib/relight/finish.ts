@@ -20,6 +20,8 @@ export interface FinishableLayer extends StackHost {
   filename: string
   crop?: ImageCrop
   id: string
+  /** Frame lights: absent ⇒ lit. */
+  lit?: boolean
 }
 
 /**
@@ -34,7 +36,7 @@ export function canFinishRelight(layer: { kind: string; filename?: string; clip?
   return layer.kind === 'image' && !!layer.filename && !layer.clip
 }
 
-export type FinishPatch = { filename: string; crop: ImageCrop | undefined } & ReturnType<typeof writeStackToLayer>
+export type FinishPatch = { filename: string; crop: ImageCrop | undefined; lit: boolean | undefined } & ReturnType<typeof writeStackToLayer>
 
 /**
  * The result becomes the layer's photo. `crop` becomes a centred cover crop (`{ fit: 'cover' }`,
@@ -48,10 +50,14 @@ export type FinishPatch = { filename: string; crop: ImageCrop | undefined } & Re
  * that still paints over the new photo exactly as it did over the old one (`renderRelightPair`
  * renders the sent pair WITHOUT the tint wash — see its own doc comment — so tint is never baked
  * into the model's input or output).
+ *
+ * `lit: false`: the result already carries the Frame's lights and Darkness (the guide was the
+ * photo lit by them), so the Frame pass must not light it a second time. "Try again" swaps only
+ * the filename, so the flag stays; Revert restores the photo's own `lit` (absent stays absent).
  */
 export function finishApplyPatch(layer: FinishableLayer, filename: string, relightId: string): FinishPatch {
   const stack = removeEffect(effectStackOf(layer), relightId)
-  return { filename, crop: { fit: 'cover' }, ...writeStackToLayer(stack) }
+  return { filename, crop: { fit: 'cover' }, lit: false, ...writeStackToLayer(stack) }
 }
 
 /**
@@ -61,7 +67,7 @@ export function finishApplyPatch(layer: FinishableLayer, filename: string, relig
  * what was on the layer before the FIRST send, not before the most recent one.
  */
 export function finishRevertPatch(layer: FinishableLayer): FinishPatch {
-  return { filename: layer.filename, crop: layer.crop, ...writeStackToLayer(effectStackOf(layer)) }
+  return { filename: layer.filename, crop: layer.crop, lit: layer.lit, ...writeStackToLayer(effectStackOf(layer)) }
 }
 
 /**

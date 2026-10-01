@@ -141,7 +141,8 @@ void main() {
   if (uMode < 0.5) {
     // ORIGINAL_LIGHT: the photo's baked light is its low-frequency luminance. Divide it out
     // toward the photo's mean by (1 - keep): detail and colour stay, the baked gradient goes.
-    // Mip lookups average transparent pixels as black, so they are divided by their own alpha.
+    // uLow is uploaded premultiplied, so its mips average colour × alpha: dividing by the
+    // mip's own alpha gives the exact mean colour of the visible pixels.
     vec3 Wl = vec3(0.299, 0.587, 0.114);
     // Read from uLow, the photo on a fixed power-of-two grid (ORIGINAL_LIGHT_GRID), so the
     // estimate is the same whatever size the box is painted at: editor, Render and export agree.
@@ -375,7 +376,12 @@ class FacingGl {
     gl.activeTexture(gl.TEXTURE3)
     gl.bindTexture(gl.TEXTURE_2D, this.texLow)
     if (low) {
+      // Premultiplied (this upload only): the mips then average colour × alpha, so the shader's
+      // lo.rgb / lo.a is the exact mean colour of a partly transparent cut-out. Straight colour
+      // would weigh a half-transparent pixel like an opaque one and skew the baked-light estimate.
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, low as TexImageSource)
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
       gl.generateMipmap(gl.TEXTURE_2D)
     }
     gl.uniform1i(gl.getUniformLocation(program, 'uLow'), 3)

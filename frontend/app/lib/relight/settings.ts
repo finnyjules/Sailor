@@ -92,6 +92,13 @@ export function sanitizeRelight(raw: unknown): RelightEffect {
   }
 }
 
+/** The dials the facing tile is built from. With Depth blur on the same photo the tile keeps its
+ *  depth normals but drops Texture relief: relief read from the crisp photo would shade the
+ *  blurred colour with detail it no longer shows. */
+export function relightTileDials(fx: RelightEffect, depthBlurred: boolean): RelightEffect {
+  return depthBlurred && fx.texture !== 0 ? { ...fx, texture: 0 } : fx
+}
+
 /** An old saved effect's own lights (layer-box fractions), clamped, at most RELIGHT_MAX_LIGHTS.
  *  `[]` when the effect has none — a stage 2 effect never does. Read only by the conversion. */
 export function readLegacyRelightLights(raw: unknown): RelightLight[] {
