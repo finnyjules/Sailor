@@ -455,9 +455,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   const lightCount = () => localLayers.value.filter(l => l.kind === 'light').length
   /** Add a light at the Frame centre (or `at`). Returns false — nothing added — when the Frame
    *  already holds MAX_LIGHTS; the editor has no toast, so the UI shows "A Frame holds up to 6 lights". */
-  function addLight(type: LightType, at?: { x: number; y: number }): boolean {
+  function addLight(type: LightType, at?: { x: number; y: number; aimX?: number; aimY?: number }): boolean {
     if (lightCount() >= MAX_LIGHTS) return false
-    addLocal(newLightLayer(type, at))
+    const layer = newLightLayer(type, at)
+    // A spot's aim lands in the same (one) undo step as the light itself.
+    if (type === 'spot' && at && typeof at.aimX === 'number' && typeof at.aimY === 'number') {
+      layer.light = { ...layer.light, aimX: Math.min(1.5, Math.max(-0.5, at.aimX)), aimY: Math.min(1.5, Math.max(-0.5, at.aimY)) }
+    }
+    addLocal(layer)
     return true
   }
   /** Tell the host about any `wired` layers a delete is about to remove, so it

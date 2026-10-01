@@ -26,6 +26,8 @@ const props = defineProps<{
   selectedIds: readonly string[]
   w: number
   h: number
+  /** The editor's view zoom: dots and aim rings are counter-scaled so they stay ~22px on screen. */
+  zoom?: number
 }>()
 const emit = defineEmits<{
   select: [id: string]
@@ -38,6 +40,7 @@ const emit = defineEmits<{
 const KIND_LABEL = { lamp: 'Lamp', spot: 'Spot', sun: 'Sun' } as const
 const root = ref<HTMLElement | null>(null)
 const size = computed(() => ({ w: props.w, h: props.h }))
+const counter = computed(() => `scale(${1 / (props.zoom && props.zoom > 0 ? props.zoom : 1)})`)
 
 const items = computed(() => props.lights
   .filter(l => l.visible !== false)
@@ -62,16 +65,20 @@ function onDown(e: PointerEvent, id: string, part: 'dot' | 'aim') {
   if (e.button !== 0) return
   const l = find(id); if (!l || l.locked) return
   e.preventDefault()
-  ;(e.currentTarget as HTMLElement | null)?.focus?.({ preventScroll: true })
-  emit('select', id)
-  const rect = root.value?.getBoundingClientRect(); if (!rect) return
+  // Focusing the dot selects it (onFocus); a dot already focused, or one that cannot take focus, selects here.
+  const el = e.currentTarget as HTMLElement | null
+  const wasFocused = !!el && document.activeElement === el
+  el?.focus?.({ preventScroll: true })
+  if (wasFocused || document.activeElement !== el) onFocus(id)
+  if (!root.value) return
   endDrag?.()
   // First move: one undo step and the live-preview flag. A click that never moves does neither
   // (turning the flag on and off would cost a full repaint for nothing).
   const begin = recordOnce(() => { emit('record'); setLightingDrag(true) })
   const move = (ev: PointerEvent) => {
-    const cur = find(id); if (!cur) return
-    const p = pointerToLightPos(ev.clientX, ev.clientY, rect)
+    const cur = find(id); if (!cur || !root.value) return
+    // Re-read the artboard's box every move: a pan or zoom mid-drag must not make the dot drift.
+    const p = pointerToLightPos(ev.clientX, ev.clientY, root.value.getBoundingClientRect())
     begin()
     emit('change', id, patchFor(cur, part, p.x, p.y))
   }
@@ -101,14 +108,19 @@ function onWheel(e: WheelEvent, id: string) {
 }
 
 // ── Keys: nudge ─────────────────────────────────────────────────────────────
+/** Focus (Tab or click) selects the light, so Delete / ⌘D act on the light you are on. */
+function onFocus(id: string) {
+  if (!props.selectedIds.includes(id) || props.selectedIds.length !== 1) emit('select', id)
+}
 function onKey(e: KeyboardEvent, id: string, part: 'dot' | 'aim') {
+  onFocus(id)
   if (e.metaKey || e.ctrlKey || e.altKey) return
   const d = nudgeForKey(e.key, e.shiftKey); if (!d) return
   const l = find(id); if (!l || l.locked) return
   e.preventDefault(); e.stopPropagation()
   const x0 = part === 'dot' ? l.x : l.light.aimX
   const y0 = part === 'dot' ? l.y : l.light.aimY
-  emit('record')
+  if (!e.repeat) emit('record')   // a held arrow is one undo step: its repeats ride the first press's
   emit('change', id, patchFor(l, part, clampLightPos(x0 + d.x), clampLightPos(y0 + d.y)))
 }
 </script>
@@ -118,12 +130,12 @@ function onKey(e: KeyboardEvent, id: string, part: 'dot' | 'aim') {
     <svg class="absolute inset-0 w-full h-full overflow-visible" :viewBox="`0 0 ${w} ${h}`" aria-hidden="true">
       <template v-for="it in items" :key="'ln-' + it.l.id">
         <template v-if="it.aim">
-          <line :x1="it.dot.x" :y1="it.dot.y" :x2="it.aim.x" :y2="it.aim.y" stroke="rgba(0,0,0,0.35)" stroke-width="3" />
-          <line :x1="it.dot.x" :y1="it.dot.y" :x2="it.aim.x" :y2="it.aim.y" stroke="rgba(255,255,255,0.75)" stroke-width="1.5" stroke-dasharray="6 4" />
+          <line :x1="it.dot.x" :y1="it.dot.y" :x2="it.aim.x" :y2="it.aim.y" stroke="rgba(0,0,0,0.35)" stroke-width="3" vector-effect="non-scaling-stroke" />
+          <line :x1="it.dot.x" :y1="it.dot.y" :x2="it.aim.x" :y2="it.aim.y" stroke="rgba(255,255,255,0.75)" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" />
         </template>
         <template v-if="it.sun">
-          <line :x1="it.sun.x1" :y1="it.sun.y1" :x2="it.sun.x2" :y2="it.sun.y2" stroke="rgba(0,0,0,0.35)" stroke-width="3" />
-          <line :x1="it.sun.x1" :y1="it.sun.y1" :x2="it.sun.x2" :y2="it.sun.y2" stroke="rgba(255,255,255,0.75)" stroke-width="1.5" stroke-dasharray="3 4" />
+          <line :x1="it.sun.x1" :y1="it.sun.y1" :x2="it.sun.x2" :y2="it.sun.y2" stroke="rgba(0,0,0,0.35)" stroke-width="3" vector-effect="non-scaling-stroke" />
+          <line :x1="it.sun.x1" :y1="it.sun.y1" :x2="it.sun.x2" :y2="it.sun.y2" stroke="rgba(255,255,255,0.75)" stroke-width="1.5" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" />
         </template>
       </template>
     </svg>
@@ -131,22 +143,24 @@ function onKey(e: KeyboardEvent, id: string, part: 'dot' | 'aim') {
       <div
         v-if="it.aim"
         data-handle data-light-handle data-testid="light-aim" :data-light-id="it.l.id"
-        role="button" tabindex="0" :aria-label="it.l.name ? `Aim ${it.l.name}` : 'Aim the spot'"
+        role="button" tabindex="0" :aria-label="`Aim ${it.label}`"
         title="Drag to aim the spot"
         class="light-aim absolute z-20 rounded-full"
         :class="it.locked ? 'pointer-events-none' : 'pointer-events-auto cursor-grab'"
-        :style="{ left: it.aim.x + 'px', top: it.aim.y + 'px' }"
+        :style="{ left: it.aim.x + 'px', top: it.aim.y + 'px', transform: counter }"
+        @focus="onFocus(it.l.id)"
         @pointerdown.stop="onDown($event, it.l.id, 'aim')"
         @click.stop
         @keydown="onKey($event, it.l.id, 'aim')"
       />
       <div
         data-handle data-light-handle data-testid="light-dot" :data-light-id="it.l.id"
-        role="button" tabindex="0" :aria-label="it.label"
+        role="button" tabindex="0" :aria-label="it.label" :aria-pressed="it.selected"
         title="Drag to move · scroll to raise or lower"
         class="light-dot absolute z-20 rounded-full"
         :class="[it.selected ? 'is-selected' : '', it.locked ? 'pointer-events-none' : 'pointer-events-auto cursor-grab']"
-        :style="{ left: it.dot.x + 'px', top: it.dot.y + 'px', '--glow': it.l.light.color }"
+        :style="{ left: it.dot.x + 'px', top: it.dot.y + 'px', '--glow': it.l.light.color, transform: counter }"
+        @focus="onFocus(it.l.id)"
         @pointerdown.stop="onDown($event, it.l.id, 'dot')"
         @click.stop
         @wheel.stop.prevent="onWheel($event, it.l.id)"

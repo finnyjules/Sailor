@@ -2470,9 +2470,10 @@ const lightHandlePos = computed(() => ({ x: frameLight.value.x * canvasDisplay.w
 // ── Light layers (stage 1): the lights as dots on the canvas (LightHandles) ──
 const frameLightLayers = computed(() => (localLayers.value as LocalLayer[]).filter(l => l.kind === 'light') as LightLayer[])
 /** Design tab only, at the design size (light positions are design fractions, like the selection
- *  handles), and never while text, generate or the pen owns the canvas. Editor chrome: never painted. */
+ *  handles), and never while a tool owns the canvas (text, generate, pen, brush, node edit, region or smart select). Editor chrome: never painted. */
 const showLightDots = computed(() => frameLightLayers.value.length > 0 && inspectorTab.value === 'design'
-  && atDesign.value && !editingId.value && !genActive.value && !penSession.value && !brush.active.value)
+  && atDesign.value && !editingId.value && !genActive.value && !penSession.value && !brush.active.value
+  && !nodeEdit.active.value && !regionSelectActive.value && !smartActive.value)
 const selectedIdList = computed(() => [...selectedIds.value])
 /** A selected light has no transform box: it is a point, moved by its dot. */
 const selectedIsLight = computed(() => (selectedLocal.value as LocalLayer | null)?.kind === 'light')
@@ -8908,18 +8909,13 @@ const LIGHT_ROWS: { id: LightType; label: string; icon: Component }[] = [
 const LIGHT_ICONS: Record<LightType, Component> = { lamp: Lightbulb, spot: Spotlight, sun: Sun }
 const lightsFull = computed(() => (localLayers.value as LocalLayer[]).filter(l => l.kind === 'light').length >= MAX_LIGHTS)
 /** Add a light where it reads at once — a lamp top left, a spot top centre aiming at the middle,
- *  a sun at the left edge — and select it. One undo step (addLocal's); the spot's aim is written
- *  into that same step. At 6 lights nothing is added and a toast says why. */
+ *  a sun at the left edge — and select it. One undo step: the editor writes a spot's aim into the
+ *  same layer it adds. At 6 lights nothing is added and a toast says why. */
 function addLightOfType(type: LightType) {
   closeToolbarMenus()
   if (viewOnlyGuard()) return
   lightFace.value = type
-  const at = LIGHT_PLACEMENT[type]
-  if (!editor.addLight(type, { x: at.x, y: at.y })) { toast(`A Frame holds up to ${MAX_LIGHTS} lights`); return }
-  const id = selectedLocalId.value
-  if (type === 'spot' && id && at.aimX != null && at.aimY != null) {
-    commit(localLayers.value.map((l: any) => (l.id === id && l.kind === 'light' ? { ...l, light: { ...l.light, aimX: at.aimX, aimY: at.aimY } } : l)))
-  }
+  if (!editor.addLight(type, LIGHT_PLACEMENT[type])) toast(`A Frame holds up to ${MAX_LIGHTS} lights`)
 }
 /** Menu row → stamp it now AND wear it, so repeat stamping is one click.
  *  The library row opens the picker instead; the pick both stamps and wears. */
@@ -10186,7 +10182,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         <!-- Light layers: each light as a glowing dot (a spot's aim ring, a sun's line). Design tab only. -->
         <LightHandles
           v-if="showLightDots"
-          :lights="frameLightLayers" :selected-ids="selectedIdList" :w="canvasDisplay.w" :h="canvasDisplay.h"
+          :lights="frameLightLayers" :selected-ids="selectedIdList" :w="canvasDisplay.w" :h="canvasDisplay.h" :zoom="view.scale"
           @select="onLightDotSelect" @record="recordHistory()" @change="onLightDotChange" />
       </div>
 

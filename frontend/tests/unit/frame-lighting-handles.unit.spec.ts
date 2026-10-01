@@ -59,6 +59,20 @@ describe('light dot geometry', () => {
   })
 })
 
+describe('adding a placed spot', () => {
+  it('lands with its aim, as ONE undo step', () => {
+    const node = reactive({ data: { properties: {} as Record<string, any> } })
+    const ed = useLocalLayerEditor({ node: () => node, dims: () => ({ w: 680, h: 680 }), getRect: () => null })
+    expect(ed.addLight('spot', LIGHT_PLACEMENT.spot)).toBe(true)
+    const l = node.data.properties.sailor_localLayers[0]
+    expect([l.x, l.y, l.light.aimX, l.light.aimY]).toEqual([0.5, 0.04, 0.5, 0.55])
+    expect(ed.selectedId.value).toBe(l.id)
+    ed.undo()
+    expect(node.data.properties.sailor_localLayers ?? []).toHaveLength(0)
+    expect(ed.canUndo.value).toBe(false)
+  })
+})
+
 describe('the editor says when the cap leaves lights out', () => {
   afterEach(() => _resetClipboard())
   function makeEditor(onLightsDropped: (n: number, via: 'duplicate' | 'paste') => void) {

@@ -108,6 +108,33 @@ describe('LightHandles', () => {
     expect(changes[0]![1].y).toBeCloseTo(0.5)
     expect(changes[1]![1].y).toBeCloseTo(0.45)
   })
+  it('focusing a dot or aim ring (Tab) selects its light; a key on it does too', async () => {
+    const w = make({ selectedIds: ['spot1'] })
+    await w.find('[data-light-id="sun1"][data-testid="light-dot"]').trigger('focus')
+    expect(w.emitted('select')).toEqual([['sun1']])
+    await w.find('[data-testid="light-aim"]').trigger('focus')
+    expect(w.emitted('select')).toHaveLength(1)   // the spot is already the selection
+    await w.find('[data-light-id="lamp1"][data-testid="light-dot"]').trigger('keydown', { key: 'Delete' })
+    expect(w.emitted('select')![1]).toEqual(['lamp1'])
+    expect(w.emitted('record')).toBeUndefined()
+  })
+  it('a held arrow is one undo step: repeats change but do not record', async () => {
+    const w = make()
+    const dot = w.find('[data-light-id="lamp1"][data-testid="light-dot"]')
+    await dot.trigger('keydown', { key: 'ArrowRight' })
+    await dot.trigger('keydown', { key: 'ArrowRight', repeat: true })
+    await dot.trigger('keydown', { key: 'ArrowRight', repeat: true })
+    expect(w.emitted('record')).toHaveLength(1)
+    expect(w.emitted('change')).toHaveLength(3)
+  })
+  it('counter-scales dots and aim rings by the zoom; marks the selected dot pressed; names the aim ring', () => {
+    const w = make({ zoom: 2 })
+    expect(w.find('[data-light-id="lamp1"][data-testid="light-dot"]').attributes('style')).toContain('scale(0.5)')
+    expect(w.find('[data-testid="light-aim"]').attributes('style')).toContain('scale(0.5)')
+    expect(w.find('[data-light-id="spot1"][data-testid="light-dot"]').attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-light-id="lamp1"][data-testid="light-dot"]').attributes('aria-pressed')).toBe('false')
+    expect(w.find('[data-testid="light-aim"]').attributes('aria-label')).toBe('Aim Spot')
+  })
   it('scroll over a dot changes Height, one record per wheel run', async () => {
     const w = make()
     const dot = w.find('[data-light-id="lamp1"][data-testid="light-dot"]')
