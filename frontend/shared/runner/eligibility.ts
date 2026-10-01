@@ -568,14 +568,18 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // (model line-up F11) is runner-only, its own family: the nano actions'
   // call. A linked keep_subject (Task F11b) is taken for every model when it
   // is a Frame's protect_mask: the runner makes that mask and lays the answer
-  // under it after the call (server/runner/compositor/keep.ts). Any other
-  // mask source stays with ComfyUI. keep_feather is read then, so it must
-  // not be wired, and must pass ComfyUI's own validation.
+  // under it after the call (server/runner/compositor/keep.ts). R8.1: Image to
+  // mask's mask too (Product shot's "keep the product exact"), while `cards`
+  // is on (KEEP_SOURCE_FAMILY). Any other mask source stays with ComfyUI.
+  // keep_feather is read then, so it must not be wired, and must pass
+  // ComfyUI's own validation.
   BlendSceneNode: {
     models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions', 'Nano Banana 2': 'nano-banana-2-blend' },
     mustLink: ['image'],
     mustNotLink: ['prompt', 'keep_feather'],
-    linkSources: { keep_subject: [['Compositor', 1]] },
+    linkSources: { keep_subject: [['Compositor', 1], ['ImageToMask', 0]] },
+    // The Frame's protect_mask is a file; Image to mask's is a mask value (cards on, R8.1).
+    valueInputs: { keep_subject: ['files', 'mask'] },
     // For EVERY Blend, with or without keep_subject: a wired keep_feather, or
     // one outside 0..30, sends the node to ComfyUI (and the ComfyUI-parity
     // pruning drops an out-of-range one), as ComfyUI's own validation refuses
@@ -2173,6 +2177,13 @@ function hasJsonList(v: unknown, key: string): boolean {
   return Array.isArray(list) && list.length > 0
 }
 
+/**
+ * Link sources taken only while a family is on (R8.1): Image to mask's mask
+ * into Blend scene's keep_subject needs `cards`, which makes that mask. With
+ * `cards` off, the wire is refused exactly as before R8.1.
+ */
+const LINK_SOURCE_FAMILY: Readonly<Record<string, RunnerFamily>> = { ImageToMask: 'cards' }
+
 /** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
 function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, families: ReadonlySet<RunnerFamily>): boolean {
   const notLinked = rule.outputsNotLinked ?? []
@@ -2207,6 +2218,9 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
     if (!from || !sources.some(([cls, slot]) => cls === from.class_type && slot === v[1])) return false
     // R6.9: an R6 class is a source only while its own family is on.
     if (!linkSourceOn(from.class_type, families)) return false
+    // R8.1: a source listed for a family's sake only while that family is on.
+    const needs = LINK_SOURCE_FAMILY[from.class_type]
+    if (needs && !families.has(needs)) return false
   }
   return true
 }

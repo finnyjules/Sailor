@@ -216,9 +216,10 @@ describe('eligibility follows the family switch', () => {
     expect(RUNNER_NODE_RULES.BlendSceneNode!.models).toEqual({
       'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions', 'Nano Banana 2': FAMILY,
     })
-    // keep_subject is taken from a Frame's protect_mask only (Task F11b, runner-blend-keep.unit.spec.ts).
+    // keep_subject is taken from a Frame's protect_mask (Task F11b) or, with cards on, Image to mask's mask
+    // (R8.1, Product shot), runner-blend-keep.unit.spec.ts.
     expect(RUNNER_NODE_RULES.BlendSceneNode!.mustNotLink).toEqual(['prompt', 'keep_feather'])
-    expect(RUNNER_NODE_RULES.BlendSceneNode!.linkSources).toEqual({ keep_subject: [['Compositor', 1]] })
+    expect(RUNNER_NODE_RULES.BlendSceneNode!.linkSources).toEqual({ keep_subject: [['Compositor', 1], ['ImageToMask', 0]] })
   })
 
   it('off (no families, or every other family): not taken', () => {

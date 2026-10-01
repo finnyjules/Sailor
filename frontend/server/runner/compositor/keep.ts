@@ -15,10 +15,13 @@
 import { promisify } from 'node:util'
 import { crc32, deflate, inflate } from 'node:zlib'
 import sharp from 'sharp'
-import { isLink, type ApiLink } from '#shared/runner/graph'
+import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { HOSTED_MAX_FRAME_ARTBOARD_PIXELS } from '#shared/runner/eligibility'
 import { pyFloatOf } from '#shared/runner/pyText'
 import type { PlanContext } from '../executors'
+import type { OutputFile } from '../types'
+import { parseInputFileRef } from '../inputs'
+import { linkPictureBound, pictureSize as pictureSizeOf } from '../../utils/graphInputPixels'
 import { decodeRaw, type PictureSource } from './decode'
 import { core, type RawPicture } from './plane'
 import { MAX_CANVAS_PIXELS } from './render'
@@ -149,7 +152,12 @@ async function pictureSize(bytes: Uint8Array, source: PictureSource): Promise<{ 
   return turned ? { w: h, h: w } : { w, h }
 }
 
-function tooLargeWords(max: number): string {
+/** The largest picture, answer or mask the keep step works on: the Frame's artboard cap in hosted, the canvas cap here. */
+export function keepMaxPixels(hosted: boolean): number {
+  return hosted ? HOSTED_MAX_FRAME_ARTBOARD_PIXELS : MAX_CANVAS_PIXELS
+}
+
+export function tooLargeWords(max: number): string {
   const side = Math.round(Math.sqrt(max))
   return `This picture is larger than ${side} × ${side}, too large to keep its subject exact`
 }
@@ -201,11 +209,13 @@ export async function planKeepSubject(
     if (!baseFile && image.source !== 'blank') throw new Error('There is no picture to blend')
     maskBytes = await read(maskFile).catch(() => { throw new Error(KEEP_MASK_MISSING) })
     baseBytes = baseFile ? await read(baseFile) : null
-    await readMaskPng(maskBytes)
+    const m = await readMaskPng(maskBytes)
+    // R8.1: a mask from Image to mask can be any size (it is brought to the picture's): within the same cap, before the call.
+    if (m.w * m.h > keepMaxPixels(!!ctx.hosted)) throw new Error(tooLargeWords(keepMaxPixels(!!ctx.hosted)))
   }
 
   const size = await pictureSize(baseBytes ?? new Uint8Array(0), image.source)
-  const max = ctx.hosted ? HOSTED_MAX_FRAME_ARTBOARD_PIXELS : MAX_CANVAS_PIXELS
+  const max = keepMaxPixels(!!ctx.hosted)
   if (size.w * size.h > max) throw new Error(tooLargeWords(max))
   if (!keepEdgeFits(feather, size.w, size.h)) throw new Error(KEEP_EDGE_TOO_WIDE)
   kept ??= { mask: await hold.put(maskBytes), base: baseBytes ? await hold.put(baseBytes) : null }
@@ -220,6 +230,7 @@ export async function planKeepSubject(
       const baseNow = k.base ? await hold.get(k.base) : null
       if (!maskNow || (k.base && !baseNow)) throw new Error(KEEP_HELD_MISSING)
       const mask = await readMaskPng(maskNow)
+      if (mask.w * mask.h > max) throw new Error(tooLargeWords(max))
       const pic = async (bytes: Uint8Array | null, source: PictureSource): Promise<RawPicture> => {
         try { return await decodeRaw(bytes, source) }
         catch (e) {
@@ -245,4 +256,40 @@ export async function planKeepSubject(
       return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
     },
   }
+}
+
+// ── The start pass (R8.1) ──────────────────────────────────────────────────
+
+/**
+ * Blend scene's kept subject from Image to mask (Product shot's "keep the
+ * product exact"), at the start of the run, before the hold: the mask's
+ * picture and the picture blended, each bounded from its Load image header
+ * (linkPictureBound), must fit the keep step's cap. A size that can't be
+ * known yet is left to the node's own check, which still comes before the
+ * call. The Frame's protect_mask path (F11b) is unchanged: the Frame's own
+ * caps bound it.
+ */
+export async function keepStartRefusal(
+  prompt: ApiPrompt,
+  o: { hosted: boolean; read?: (f: OutputFile) => Promise<Uint8Array> },
+): Promise<{ message: string; nodeId: string; classType: string } | null> {
+  const readFile = async (value: string) => {
+    const f = o.read ? parseInputFileRef(value) : null
+    return f && o.read ? pictureSizeOf(await o.read(f)) : null
+  }
+  const max = keepMaxPixels(o.hosted)
+  for (const [nodeId, n] of Object.entries(prompt)) {
+    if (n.class_type !== 'BlendSceneNode') continue
+    const inputs = n.inputs ?? {}
+    const keep = inputs.keep_subject
+    if (!isLink(keep)) continue
+    const from = prompt[keep[0]]
+    if (from?.class_type !== 'ImageToMask' || !isLink(from.inputs?.image)) continue
+    for (const link of [from.inputs.image, inputs.image]) {
+      if (!isLink(link)) continue
+      const px = await linkPictureBound(prompt, link, readFile)
+      if (px !== null && Number.isFinite(px) && px > max) return { message: tooLargeWords(max), nodeId, classType: 'BlendSceneNode' }
+    }
+  }
+  return null
 }

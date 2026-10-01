@@ -39,14 +39,15 @@ import { nodesNeedingEngine } from '~~/app/lib/runner/needsEngine'
 import { core, plane, type Plane, type RawPicture } from '~~/server/runner/compositor/plane'
 import { decodeRaw } from '~~/server/runner/compositor/decode'
 import {
-  KEEP_EDGE_TOO_WIDE, KEEP_FEATHER_DEFAULT, KEEP_MASK_MISSING, keepEdgeFits, keepFeatherOf, keepKernelSize, maskPngFromScanlines, readMaskPng,
+  KEEP_EDGE_TOO_WIDE, KEEP_FEATHER_DEFAULT, KEEP_MASK_MISSING, keepEdgeFits, keepFeatherOf, keepKernelSize, keepStartRefusal, maskPngFromScanlines, readMaskPng,
 } from '~~/server/runner/compositor/keep'
 import { __frameWorkerForTests, keepSubjectInWorker } from '~~/server/runner/compositor/worker'
 import { nodeCredits } from '~~/server/runner/metering'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeLedger, makeKit, until } from './__runner__/kit'
 import { createFileHeldBytes, sha256Hex, type HeldBytes } from '~~/server/runner/heldBytes'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { buildBlendPrompt } from '~/lib/runner/productShotApp'
 import { tmpdir } from 'node:os'
 
 interface FrameFix { links: Record<string, string>; inputs: Record<string, unknown>; width: number; height: number; image8: string; protect: string }
@@ -341,7 +342,8 @@ describe('eligibility: a Frame’s protect_mask into Blend’s keep_subject', ()
   it('keep_subject is no longer refused; keep_feather is read, so it must not be wired', () => {
     const rule = RUNNER_NODE_RULES.BlendSceneNode!
     expect(rule.mustNotLink).toEqual(['prompt', 'keep_feather'])
-    expect(rule.linkSources).toEqual({ keep_subject: [['Compositor', 1]] })
+    // R8.1 adds Image to mask's mask (Product shot's keep path), while `cards` is on.
+    expect(rule.linkSources).toEqual({ keep_subject: [['Compositor', 1], ['ImageToMask', 0]] })
     expect(RUNNER_NODE_RULES.Compositor!.outputsNotLinked).toEqual([2])
     expect(RUNNER_NODE_RULES.Compositor!.outputReaders).toEqual({ 1: [['BlendSceneNode', 'keep_subject']] })
   })
@@ -706,5 +708,112 @@ describe('the engine: Frame → Blend scene with the kept region (every model)',
     const k = kitFor(OK[0]!, { held: store })
     await k.engine.reattach()
     expect(readdirSync(heldDir)).toEqual([])
+  })
+})
+
+// ── R8.1: Image to mask's mask into keep_subject (Product shot's "keep the product exact") ──
+
+/**
+ * Measured against the REAL Python: fixtures/runner-blend-keep-mask.json,
+ * written by scripts/blend_keep_mask_fixtures.py (LoadImage → ImageToMask
+ * (red) → BlendSceneNode.execute's keep step, the provider replaced by a fixed
+ * picture through the real download decode), with the network blocked. The
+ * mask at the picture's size and at another (resized bilinear), feather 0
+ * and 4, grey 0, 0.7 and 1. Tolerance as above: within 1/255 (torch's blur
+ * sums in its own order); with no feather and a full grey, the kept region
+ * is the composite's pixels exactly.
+ */
+interface MaskCase { name: string; mask: string; feather: number; grey: number; width: number; height: number; out8: string }
+const MASK_FIX = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/runner-blend-keep-mask.json', import.meta.url)), 'utf8')) as {
+  composite: string
+  answer: string
+  assets: Record<string, string>
+  cases: MaskCase[]
+}
+const maskAsset = (name: string) => new Uint8Array(Buffer.from(MASK_FIX.assets[name]!, 'base64'))
+const APP_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'fal-edit', 'nano-actions'])
+
+function maskKit(o: { hosted?: boolean; files?: Record<string, Uint8Array> } = {}) {
+  const k = makeKit({
+    hosted: !!o.hosted,
+    deps: { families: () => APP_ON, download: async () => ({ bytes: maskAsset(MASK_FIX.answer), contentType: 'image/png' }) },
+  })
+  const files = o.files ?? Object.fromEntries(Object.keys(MASK_FIX.assets).map(n => [n, maskAsset(n)]))
+  mkdirSync(join(k.root, 'input', 'user_1'), { recursive: true })
+  for (const [n, b] of Object.entries(files)) {
+    writeFileSync(join(k.root, 'input', n), b)
+    writeFileSync(join(k.root, 'input', 'user_1', n), b)
+  }
+  return k
+}
+
+describe('R8.1: Image to mask\'s mask into Blend\'s keep_subject', () => {
+  const keepPrompt = (c: { mask: string; feather: number }) =>
+    buildBlendPrompt({ composite: MASK_FIX.composite, mask: c.mask, model: 'Flux 2 Pro', prompt: 'relight', feather: c.feather, seed: 7 })
+
+  it('the fixtures cover both mask sizes, feather 0 and 4, grey 0, 0.7 and 1', () => {
+    expect(MASK_FIX.cases).toHaveLength(12)
+    expect(new Set(MASK_FIX.cases.map(c => c.feather))).toEqual(new Set([0, 4]))
+    expect(new Set(MASK_FIX.cases.map(c => c.grey))).toEqual(new Set([0, 0.7, 1]))
+    expect(new Set(MASK_FIX.cases.map(c => c.name.includes('other size')))).toEqual(new Set([true, false]))
+  })
+
+  it('taken with cards on (every model), in both places; with cards off the wire is refused as before', () => {
+    for (const model of MODELS) {
+      const p = keepPrompt({ mask: 'm.png', feather: 4 })
+      p['4']!.inputs.model = model
+      const fams = new Set<RunnerFamily>(['cards', FAMILY_OF[model]!])
+      for (const hosted of [false, true]) expect(isRunnerEligible(p, fams, { hosted })).toBe(true)
+      const off = new Set<RunnerFamily>([...ALL].filter(f => f !== 'cards'))
+      expect(runnerTakesNode(p, '4', off)).toBe(false)
+      expect(isRunnerEligible(p, off)).toBe(false)
+    }
+    // Any other mask source still stays with ComfyUI (a LoadImage's own mask).
+    const loaded = keepPrompt({ mask: 'm.png', feather: 4 })
+    loaded['4']!.inputs.keep_subject = ['2', 1]
+    expect(runnerTakesNode(loaded, '4', ALL)).toBe(false)
+  })
+
+  it.each(MASK_FIX.cases.map(c => [c.name, c] as const))('%s: the kit (ComfyUI off) makes Python\'s picture', async (_n, c) => {
+    const k = maskKit()
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [keepPrompt(c)], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    const nodes = run.takes[0]!.nodes
+    expect(nodes['4']!.error ?? null).toBeNull()
+    expect(run.status).toBe('done')
+    // Kontext was sent the composite only (the keep path's model).
+    expect(k.fal.submitted()).toHaveLength(1)
+    expect(k.fal.submitted()[0]!.endpoint).toMatch(/kontext/)
+    const saved = nodes['5']!.outputs[0]!
+    const meta = await sharp(join(k.root, saved.type, saved.subfolder, saved.filename)).metadata()
+    expect([meta.width, meta.height]).toEqual([c.width, c.height])
+    const ours = await sharp(join(k.root, saved.type, saved.subfolder, saved.filename)).removeAlpha().raw().toBuffer()
+    const d = diff(ours, unpack(c.out8))
+    report.push(`R8.1 keep ${c.name}: max |Δ| ${d.max}/255, ${d.off} values differ`)
+    expect(d.max).toBeLessThanOrEqual(1)
+    if (c.feather === 0 && c.grey === 1 && !c.name.includes('other size')) expect(d.max).toBe(0)
+  }, 60_000)
+
+  it('hosted: a mask picture past the keep step\'s cap is refused at the start, before the hold, with nothing sent', async () => {
+    const big = await sharp({ create: { width: 4100, height: 4100, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer()
+    const k = maskKit({ hosted: true, files: { 'composite.png': maskAsset('composite.png'), 'big.png': new Uint8Array(big) } })
+    const p = keepPrompt({ mask: 'big.png', feather: 4 })
+    await expect(k.engine.quoteRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(/too large to keep its subject exact/)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(/too large to keep its subject exact/)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.submitted()).toHaveLength(0)
+    // The same mask at the picture's size runs.
+    expect(await keepStartRefusal(keepPrompt({ mask: 'mask_48x40_255.png', feather: 4 }), { hosted: true, read: async () => maskAsset('mask_48x40_255.png') })).toBeNull()
+  })
+
+  it('the quote equals the hold for the keep path', async () => {
+    const k = maskKit({ hosted: true })
+    const p = keepPrompt(MASK_FIX.cases[0]!)
+    const q = await k.engine.quoteRun({ userId: k.userId, takes: [p], ...START })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    expect([...k.ledger.holds.values()].reduce((n, h) => n + h.credits, 0)).toBe(q.credits)
+    expect(q.credits).toBeGreaterThan(0)
   })
 })

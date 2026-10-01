@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
-import { BG_REMOVE_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
+import { WHISPER_CLASS } from '#shared/runner/localModels'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { createMemoryKeptBytes } from '~~/server/runner/keptBytes'
 import { NOT_YOURS } from '~~/server/runner/inputs'
@@ -21,10 +21,10 @@ import { _resetRateLimits } from '~~/server/lib/rateLimit'
 import { stageEstimateParts } from '~~/server/runner/metering'
 import { makeKit, rgbPng1x1 } from './__runner__/kit'
 import { buildKaraokePrompt } from '~/lib/runner/karaokeApp'
+import { buildBackgroundPrompt, buildBlendPrompt, buildCutoutPrompt } from '~/lib/runner/productShotApp'
 import { requireMediaTools } from './__runner__/mediaParity'
 
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
-const SAVE_DEFAULTS = { filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true }
 
 /** A 16-bit PCM WAV of `seconds` of a quiet tone. */
 function wav(seconds: number, rate = 16000, channels = 1): Uint8Array {
@@ -64,15 +64,32 @@ const APPS: AppCase[] = [
     files: { 'face.png': rgbPng1x1(200, 150, 120), 'target.png': rgbPng1x1(90, 80, 70) },
   },
   {
-    // Product shot's cut-out (R8 ruling (a)): Load image → Background remove → Save image.
+    // ProductShotApp.vue's cut-out (R8.1, ruling (a)): Load image → Background remove → Save image.
     name: 'Product shot cut-out',
     families: new Set<RunnerFamily>(['cards', 'bg-remove']),
-    prompt: {
-      1: { class_type: 'LoadImage', inputs: { image: 'product.png', upload: 'image' } },
-      2: { class_type: BG_REMOVE_CLASS, inputs: { frames: ['1', 0], ...cut.widgets } },
-      3: { class_type: 'SaveImage', inputs: { images: ['2', 0], ...SAVE_DEFAULTS, filename_prefix: 'product_cutout' } },
-    },
+    prompt: buildCutoutPrompt('product.png'),
     files: { 'product.png': new Uint8Array(Buffer.from(cut.pictures[0]!, 'base64')) },
+  },
+  {
+    // ProductShotApp.vue's background (R8.1): Generate an image (flux-schnell) → Save image.
+    name: 'Product shot background',
+    families: new Set<RunnerFamily>(['cards']),
+    prompt: buildBackgroundPrompt({ prompt: 'clean white marble countertop', aspect: '4:5', seed: 11 }),
+    files: {},
+  },
+  ...(['Flux 2 Pro', 'Nano Banana'] as const).map(model => ({
+    // ProductShotApp.vue's relight (R8.1): Load image → Blend scene → Save image.
+    name: `Product shot relight (${model})`,
+    families: new Set<RunnerFamily>(['cards', 'fal-edit', 'nano-actions']),
+    prompt: buildBlendPrompt({ composite: 'composite.png', mask: null, model, prompt: 'relight', feather: 4, seed: 5 }),
+    files: { 'composite.png': rgbPng1x1(120, 110, 100) },
+  })),
+  {
+    // ProductShotApp.vue's relight with the product kept exact (R8.1): plus Load image → Image to mask → keep_subject, on Kontext.
+    name: 'Product shot relight, product kept exact',
+    families: new Set<RunnerFamily>(['cards', 'fal-edit']),
+    prompt: buildBlendPrompt({ composite: 'composite.png', mask: 'mask.png', model: 'Flux 2 Pro', prompt: 'relight', feather: 0, seed: 5 }),
+    files: { 'composite.png': rgbPng1x1(120, 110, 100), 'mask.png': rgbPng1x1(178, 178, 178) },
   },
   {
     // KaraokeMakerApp.vue's exact prompt (R8.2): Load audio → Vocal separator → two MP3s.

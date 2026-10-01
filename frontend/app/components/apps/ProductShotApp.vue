@@ -3,9 +3,9 @@
  * Product Shot app — a 3-step studio pipeline (no canvas, no nodes):
  *
  *   1. Background  — generate one with Flux, or upload your own.
- *   2. Object      — upload a product; we remove its background (local, free
- *                    BackgroundRemove) and you drag / resize the cutout onto
- *                    the backdrop.
+ *   2. Object      — upload a product; we remove its background (Background
+ *                    remove, then Save image) and you drag / resize the cutout
+ *                    onto the backdrop.
  *   3. Lighting    — describe the light; we flatten the composite + a keep-mask
  *                    client-side and run BlendScene (Flux 2 Pro / Nano Banana)
  *                    to relight and add contact shadows. "Keep the product
@@ -13,124 +13,45 @@
  *                    and keeps the product pixel-exact via ImageToMask →
  *                    keep_subject.
  *
- * Each step submits its own tiny prompt graph to /prompt and polls /history.
+ * Each step runs its own small workflow on the Sailor runner, with its price
+ * shown before the run and a Stop button (step 3, R8.1;
+ * lib/runner/productShotApp.ts). Each step's picture comes from its Save
+ * image, by node id.
  */
-import { ArrowRight, Bookmark, Check, Copy, Download, Image as ImageIcon, Loader2, RefreshCcw, Sparkles, Upload, X } from 'lucide-vue-next'
+import { ArrowRight, Bookmark, Check, Copy, Download, Image as ImageIcon, Loader2, RefreshCcw, Sparkles, Square, Upload, X } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
+import {
+  PRESERVE_MODEL, buildBackgroundPrompt, buildBlendPrompt, buildCutoutPrompt, productShotViewUrl, useProductShotStep,
+  type BlendEngine,
+} from '~/lib/runner/productShotApp'
 
 type Step = 1 | 2 | 3
 const step = ref<Step>(1)
 
 // ---- shared helpers -------------------------------------------------------
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-// A fresh seed per run so ComfyUI never treats an identical re-run as a cache
-// hit (a cached prompt finishes "successfully" but emits no outputs).
+// A fresh seed per run, so each re-run is a new take.
 const randomSeed = () => Math.floor(Math.random() * 2_000_000_000) + 1
 
 async function uploadBlob(blob: Blob, filename: string): Promise<string> {
-  // Unique name per upload so LoadImage inputs differ across runs (avoids the
-  // same cache-hit-with-empty-outputs trap for the removal / blend steps).
+  // Unique name per upload so each run reads its own file.
   const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${filename}`
   const fd = new FormData()
   fd.append('image', blob, unique)
   fd.append('overwrite', 'true')
   const res = await fetch('/upload/image', { method: 'POST', body: fd })
-  if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+  if (!res.ok) throw new Error('The picture didn’t upload. Try again.')
   const data = await res.json()
   return data?.name ?? unique
 }
 
-async function submit(prompt: Record<string, any>): Promise<string> {
-  const res = await fetch('/prompt', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  })
-  if (!res.ok) throw new Error((await res.text()) || `Comfy returned ${res.status}`)
-  const data = await res.json()
-  if (!data?.prompt_id) throw new Error('No prompt_id — is ComfyUI running on port 8188?')
-  return data.prompt_id
-}
-
-async function pollHistory(promptId: string): Promise<Record<string, any>> {
-  const deadline = Date.now() + 5 * 60 * 1000
-  while (Date.now() < deadline) {
-    await sleep(700)
-    try {
-      const r = await fetch(`/history/${promptId}`)
-      if (!r.ok) continue
-      const entry = (await r.json())?.[promptId]
-      if (!entry) continue
-      if (entry?.status?.status_str === 'error') throw new Error(extractComfyError(entry))
-      if (entry?.outputs) return entry.outputs
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('Comfy:')) throw e
-    }
-  }
-  throw new Error('Timed out waiting for the result.')
-}
-
-function pickImage(
-  outputs: Record<string, any>,
-  opts: { nodeId?: string; preferType?: string } = {},
-): { filename: string; subfolder: string; type: string } | null {
-  const nodes = opts.nodeId ? [outputs[opts.nodeId]].filter(Boolean) : Object.values(outputs)
-  let fallback: any = null
-  for (const node of nodes as any[]) {
-    const imgs = node?.images
-    if (!Array.isArray(imgs) || !imgs.length) continue
-    if (opts.preferType) {
-      const m = imgs.find((i: any) => i.type === opts.preferType)
-      if (m) return m
-    }
-    fallback ??= imgs[0]
-  }
-  return fallback
-}
-
-// Sailor's SaveImage requires the full export-param set (not just images +
-// filename_prefix like stock ComfyUI), so supply sane defaults every time.
-function saveImageInputs(images: [string, number], prefix: string) {
-  return {
-    images,
-    filename_prefix: prefix,
-    format: 'png',
-    quality: 90,
-    lossless_webp: false,
-    png_compression: 4,
-    scale: 1.0,
-    max_dimension: 0,
-    embed_metadata: true,
-  }
-}
-
 function viewUrl(img: { filename: string; subfolder: string; type: string }): string {
-  return `/view?${new URLSearchParams({
-    filename: img.filename,
-    type: img.type,
-    ...(img.subfolder ? { subfolder: img.subfolder } : {}),
-    t: String(Date.now()),
-  })}`
+  return productShotViewUrl(img)
 }
 
-function extractComfyError(entry: any): string {
-  const msg = (entry?.status?.messages ?? []).find((m: any) => m[0] === 'execution_error')?.[1]
-  return msg?.exception_message ? `Comfy: ${msg.exception_message}` : 'Comfy: execution failed.'
-}
-
-function humanizeError(msg: string): string {
-  if (msg.includes('ISNet model not found')) {
-    return 'The background-remover model isn’t installed yet. Open a canvas, find “Background Remove” in the toolbox, and click it to download (~179 MB), then try again.'
-  }
-  if (msg.includes('REPLICATE_API_TOKEN') || /token/i.test(msg)) {
-    return 'Replicate API token missing. Paste it in Settings → AI.'
-  }
-  return msg
-}
+const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : String(e))
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -145,6 +66,16 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 const error = ref<string | null>(null)
 const busy = ref(false)
 const progress = ref('')
+
+// Each step's run on the runner: its price, Run and Stop.
+const hosted = useRuntimeConfig().public?.hostedMode === true
+const bgRun = useProductShotStep('background', { hosted })
+const cutRun = useProductShotStep('cutout', { hosted })
+const shotRun = useProductShotStep('shot', { hosted })
+const { priceText: bgPrice, quoting: bgQuoting, blocked: bgBlocked, canStop: bgCanStop, stopError: bgStopError } = bgRun
+const { priceText: cutPrice, canStop: cutCanStop, stopError: cutStopError } = cutRun
+const { priceText: shotPrice, quoting: shotQuoting, blocked: shotBlocked, canStop: shotCanStop, stopError: shotStopError } = shotRun
+const stopError = computed(() => bgStopError.value || cutStopError.value || shotStopError.value)
 
 // =========================================================================
 // Step 1 — Background
@@ -180,20 +111,23 @@ async function setBackgroundFromRef(ref: { filename: string; subfolder: string; 
   bgUrl.value = url
 }
 
+// The seed is part of the priced prompt, so the price shown is for exactly what runs.
+const bgSeed = ref(randomSeed())
+const bgWorkflow = computed(() => buildBackgroundPrompt({
+  prompt: (bgPrompt.value || '').trim() || BG_PRESETS[0]!, aspect: bgAspect.value, seed: bgSeed.value,
+}))
+watch([bgWorkflow, bgMode], () => { void bgRun.quote(bgMode.value === 'generate' ? bgWorkflow.value : null) }, { immediate: true })
+
 async function generateBackground() {
-  if (busy.value) return
+  if (busy.value || !bgRun.canRun.value) return
   error.value = null; busy.value = true; progress.value = 'Generating background…'
   try {
-    const prompt = (bgPrompt.value || '').trim() || BG_PRESETS[0]!
-    const promptId = await submit({
-      '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt, aspect_ratio: bgAspect.value, seed: randomSeed(), model_options: '{}' } },
-      '2': { class_type: 'SaveImage', inputs: saveImageInputs(['1', 0], 'product_bg') },
-    })
-    const out = pickImage(await pollHistory(promptId), { preferType: 'output' })
-    if (!out) throw new Error('Background generation produced no image.')
-    await setBackgroundFromRef(out)
-  } catch (e: any) {
-    error.value = humanizeError(e?.message ?? String(e))
+    const r = await bgRun.run(bgWorkflow.value)
+    if (!r) return
+    await setBackgroundFromRef(r.image)
+    bgSeed.value = randomSeed()
+  } catch (e) {
+    error.value = messageOf(e)
   } finally {
     busy.value = false
   }
@@ -208,8 +142,8 @@ async function uploadBackground(file: File | null | undefined) {
     // and can be re-referenced by a saved look), not an ephemeral blob URL.
     const name = await uploadBlob(file, file.name)
     await setBackgroundFromRef({ filename: name, subfolder: '', type: 'input' })
-  } catch (e: any) {
-    error.value = humanizeError(e?.message ?? String(e))
+  } catch (e) {
+    error.value = messageOf(e)
   } finally {
     busy.value = false
   }
@@ -246,18 +180,16 @@ function applyRelPlacement(rel: { cx: number; cy: number; wFrac: number }) {
   placement.y = rel.cy * bg.h - h / 2
 }
 
+// Ruling (f): the cut-out runs on drop. Its exact prompt is priced before it starts
+// (the price then shows on the drop zone), and the cost gate is asked on that figure.
 async function uploadAndCutout(file: File | null | undefined) {
-  if (!file || !bgDims.value) return
+  if (!file || !bgDims.value || busy.value) return
   error.value = null; busy.value = true; progress.value = 'Removing background…'
   try {
     const productName = await uploadBlob(file, file.name)
-    const promptId = await submit({
-      '1': { class_type: 'LoadImage', inputs: { image: productName } },
-      '2': { class_type: 'BackgroundRemove', inputs: { frames: ['1', 0], output: 'transparent', edge_softness: 1.5 } },
-    })
-    const out = pickImage(await pollHistory(promptId), { nodeId: '2' })
-    if (!out) throw new Error('Background removal produced no image.')
-    const url = viewUrl(out)
+    const r = await cutRun.run(buildCutoutPrompt(productName))
+    if (!r) return
+    const url = viewUrl(r.image)
     const img = await loadImage(url)
     cutoutDims.value = { w: img.naturalWidth, h: img.naturalHeight }
     cutoutUrl.value = url
@@ -273,8 +205,8 @@ async function uploadAndCutout(file: File | null | undefined) {
       placement.x = (bg.w - placement.w) / 2
       placement.y = (bg.h - placement.h) / 2
     }
-  } catch (e: any) {
-    error.value = humanizeError(e?.message ?? String(e))
+  } catch (e) {
+    error.value = messageOf(e)
   } finally {
     busy.value = false
   }
@@ -333,9 +265,7 @@ const lighting = ref('')
 /** The engines offered for a relight. Flux Kontext Pro (hidden in the node's
  *  menu, model line-up H2) is used only while "Keep the product exact" is on:
  *  the keep-mask needs an engine that edits in place (see runBlend). */
-type BlendEngine = 'Flux 2 Pro' | 'Nano Banana'
 const BLEND_ENGINES: readonly BlendEngine[] = ['Flux 2 Pro', 'Nano Banana']
-const PRESERVE_MODEL = 'Flux Kontext Pro'
 const blendModel = ref<BlendEngine>('Flux 2 Pro')
 const keepExact = ref(false)
 // Each re-create stacks as a take; the displayed result is the active take.
@@ -389,58 +319,68 @@ async function buildComposite(): Promise<{ composite: Blob; mask: Blob }> {
   return { composite: await toBlob(comp), mask: await toBlob(mask) }
 }
 
+function blendInstruction(): string {
+  const light = (lighting.value || '').trim() || LIGHT_PRESETS[0]!.prompt
+  return `Blend this composite into one cohesive, photorealistic product photo. ${light}. ` +
+    'Add soft, realistic contact shadows where the product meets the surface, and unify the ' +
+    "color temperature and ambient light across the whole scene. Keep the product's shape, " +
+    'proportions and identity unchanged.'
+}
+
+// The composite (and, to keep the product exact, its keep-mask) is flattened and
+// uploaded once per arrangement, so the price shown is for the very files Create sends.
+// The keep-mask cross-fades the *original* product pixels back over the result,
+// which only lines up when the engine edits in place: Flux Kontext Pro does, and
+// it is the engine only while "Keep the product exact" is on.
+interface Prepared { composite: string; mask: string | null }
+const arrangementKey = computed(() => JSON.stringify([
+  bgUrl.value, cutoutUrl.value, placement.x, placement.y, placement.w, placement.h, keepExact.value ? preserve.value : null,
+]))
+let preparing: { key: string; p: Promise<Prepared> } | null = null
+function prepareComposite(): Promise<Prepared> {
+  const key = arrangementKey.value
+  if (preparing?.key === key) return preparing.p
+  const keep = keepExact.value
+  const p = (async () => {
+    const { composite, mask } = await buildComposite()
+    const compositeName = await uploadBlob(composite, 'product_composite.png')
+    return { composite: compositeName, mask: keep ? await uploadBlob(mask, 'product_mask.png') : null }
+  })()
+  preparing = { key, p }
+  p.catch(() => { if (preparing?.p === p) preparing = null })
+  return p
+}
+
+const blendSeed = ref(randomSeed())
+function blendWorkflow(prep: Prepared) {
+  return buildBlendPrompt({ ...prep, model: blendModel.value, prompt: blendInstruction(), feather: edgeBlend.value, seed: blendSeed.value })
+}
+
+// The price on Create follows the arrangement, the engine, the keep switch and its settings.
+let shotQuoteTimer: ReturnType<typeof setTimeout> | null = null
+watch([step, arrangementKey, lighting, blendModel, edgeBlend, blendSeed], () => {
+  if (shotQuoteTimer) clearTimeout(shotQuoteTimer)
+  if (step.value !== 3 || !bgUrl.value || !cutoutUrl.value) return
+  shotQuoteTimer = setTimeout(() => {
+    shotQuoteTimer = null
+    prepareComposite().then(prep => shotRun.quote(blendWorkflow(prep)), () => { /* Create flattens again and says why */ })
+  }, 600)
+}, { immediate: true })
+onBeforeUnmount(() => { if (shotQuoteTimer) clearTimeout(shotQuoteTimer) })
+
 async function runBlend() {
-  if (busy.value || !bgUrl.value || !cutoutUrl.value) return
+  if (busy.value || !bgUrl.value || !cutoutUrl.value || !shotRun.canRun.value) return
   // Keep the previous result on screen under the loading overlay (don't null it).
   error.value = null; busy.value = true; progress.value = 'Flattening composite…'
   try {
-    // The keep-mask cross-fades the *original* product pixels back over the result,
-    // which only lines up when the engine edits in place. Flux Kontext Pro does;
-    // Nano Banana regenerates the whole scene and relocates the product, and
-    // Flux 2 Pro's edit isn't known to keep registration, so the preserved
-    // pixels could land off-register and ghost. Only wire the mask for Kontext,
-    // which is used only while "Keep the product exact" is on.
-    const usePreserve = keepExact.value
-
-    const { composite, mask } = await buildComposite()
-    progress.value = 'Uploading…'
-    const compositeName = await uploadBlob(composite, 'product_composite.png')
-    const maskName = usePreserve ? await uploadBlob(mask, 'product_mask.png') : null
-
-    const light = (lighting.value || '').trim() || LIGHT_PRESETS[0]!.prompt
-    const blendPrompt =
-      `Blend this composite into one cohesive, photorealistic product photo. ${light}. ` +
-      'Add soft, realistic contact shadows where the product meets the surface, and unify the ' +
-      "color temperature and ambient light across the whole scene. Keep the product's shape, " +
-      'proportions and identity unchanged.'
-
+    const prep = await prepareComposite()
     progress.value = 'Relighting & blending…'
-    const graph: Record<string, any> = {
-      '1': { class_type: 'LoadImage', inputs: { image: compositeName } },
-    }
-    const blendInputs: Record<string, any> = {
-      model: usePreserve ? PRESERVE_MODEL : blendModel.value,
-      image: ['1', 0],
-      prompt: blendPrompt,
-      // keep_feather isn't optional in the node schema, so always send it — the
-      // node only applies it when keep_subject is wired (Flux Kontext Pro).
-      keep_feather: edgeBlend.value,
-      seed: randomSeed(),
-      output_format: 'png',
-    }
-    if (usePreserve) {
-      graph['2'] = { class_type: 'LoadImage', inputs: { image: maskName } }
-      graph['3'] = { class_type: 'ImageToMask', inputs: { image: ['2', 0], channel: 'red' } }
-      blendInputs.keep_subject = ['3', 0]
-    }
-    graph['4'] = { class_type: 'BlendSceneNode', inputs: blendInputs }
-    graph['5'] = { class_type: 'SaveImage', inputs: saveImageInputs(['4', 0], 'product_shot') }
-    const promptId = await submit(graph)
-    const out = pickImage(await pollHistory(promptId), { preferType: 'output' })
-    if (!out) throw new Error('Blend finished but produced no output.')
-    addTake({ images: [viewUrl(out)], promptId, sig: `${out.subfolder}/${out.filename}` })
-  } catch (e: any) {
-    error.value = humanizeError(e?.message ?? String(e))
+    const r = await shotRun.run(blendWorkflow(prep))
+    if (!r) return
+    addTake({ images: [viewUrl(r.image)], promptId: r.promptId, sig: `${r.image.subfolder}/${r.image.filename}` })
+    blendSeed.value = randomSeed()
+  } catch (e) {
+    error.value = messageOf(e)
   } finally {
     busy.value = false
   }
@@ -710,13 +650,23 @@ function deleteLook(id: string) {
               </div>
             </div>
             <button
+              v-if="bgCanStop"
+              class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-[13px] text-white font-medium transition-colors cursor-pointer"
+              @click="bgRun.stop()"
+            >
+              <Square class="size-3.5" /> Stop
+            </button>
+            <button
+              v-else
               class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-[13px] text-white font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              :disabled="busy"
+              :disabled="busy || !!bgBlocked || bgQuoting"
               @click="generateBackground"
             >
               <Sparkles v-if="!busy" class="size-4" /><Loader2 v-else class="size-4 animate-spin" />
               {{ bgUrl ? 'Regenerate' : 'Generate background' }}
+              <span v-if="bgQuoting || bgPrice" class="text-[11px] text-white/50 tabular-nums" title="The most this run can cost">{{ bgQuoting ? '…' : bgPrice }}</span>
             </button>
+            <p v-if="bgBlocked" class="text-[12px] text-rose-400 leading-relaxed">{{ bgBlocked }}</p>
           </div>
 
           <div v-else>
@@ -746,12 +696,21 @@ function deleteLook(id: string) {
           <input ref="productInputRef" type="file" accept="image/*" class="hidden" @change="(e) => uploadAndCutout((e.target as HTMLInputElement).files?.[0])" />
 
           <button
+            v-if="cutCanStop"
+            class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-[13px] text-white font-medium transition-colors cursor-pointer"
+            @click="cutRun.stop()"
+          >
+            <Square class="size-3.5" /> Stop
+          </button>
+          <button
+            v-else
             class="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-[13px] text-white font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             :disabled="busy"
             @click="productInputRef?.click()"
           >
             <ImageIcon v-if="!busy" class="size-4" /><Loader2 v-else class="size-4 animate-spin" />
             {{ cutoutUrl ? 'Use a different product' : 'Upload product photo' }}
+            <span v-if="cutPrice" class="text-[11px] text-white/50 tabular-nums" title="What removing the background costs">{{ cutPrice }}</span>
           </button>
 
           <p v-if="cutoutUrl" class="text-[11.5px] text-white/40 leading-relaxed">
@@ -823,13 +782,23 @@ function deleteLook(id: string) {
 
           <!-- Run -->
           <button
+            v-if="shotCanStop"
+            class="w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-white font-medium text-[13px] transition-colors cursor-pointer"
+            @click="shotRun.stop()"
+          >
+            <Square class="size-3.5" /> Stop
+          </button>
+          <button
+            v-else
             class="w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
-            :disabled="busy"
+            :disabled="busy || !!shotBlocked || shotQuoting"
             @click="runBlend"
           >
             <span>{{ busy ? 'Blending…' : finalUrl ? 'Re-create shot' : 'Create shot' }}</span>
+            <span v-if="!busy && (shotQuoting || shotPrice)" class="text-[11px] opacity-55 tabular-nums" title="The most this run can cost">{{ shotQuoting ? '…' : shotPrice }}</span>
             <ArrowRight v-if="!busy" class="size-4" /><Loader2 v-else class="size-4 animate-spin" />
           </button>
+          <p v-if="shotBlocked" class="text-[12px] text-rose-400 leading-relaxed">{{ shotBlocked }}</p>
 
           <!-- Result actions -->
           <div v-if="finalUrl" class="flex items-center gap-2 pt-1">
@@ -868,7 +837,7 @@ function deleteLook(id: string) {
         </div>
 
         <!-- Error -->
-        <p v-if="error" class="text-[12px] text-rose-400 mt-5 leading-relaxed">{{ error }}</p>
+        <p v-if="stopError || error" class="text-[12px] text-rose-400 mt-5 leading-relaxed">{{ stopError || error }}</p>
       </div>
     </div>
   </div>
