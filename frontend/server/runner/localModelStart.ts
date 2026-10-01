@@ -24,15 +24,24 @@
  * Image card, Empty image, the Frame, a generator's stated largest…). One
  * larger, or one whose size can't be known, leaves the workflow to the engine
  * the same way (a stop-gap named in R7.2's report).
+ *
+ * R7.6: Slow motion (AI) sends its whole clip in one RIFE call (not a call
+ * per frame): its clip's count T and size (R6's frame shapes) are recorded
+ * for the hold (`counts`, `sizes`). A clip over SLOW_MOTION_AI_MAX_FRAMES,
+ * an output past R5's batch caps, or, for a multiplier RIFE doesn't make or
+ * a clip too small to encode (Sailor's own interpolation), a frame past
+ * R6.6's own limits leaves the
+ * workflow to the engine the same way (stop-gaps named in R7.6's report).
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
+import { MEDIA_CAPS } from '#shared/runner/media'
 import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY, PAID_PICTURE_SLOTS, outputKindsFor } from '#shared/runner/eligibility'
 import { EFFECT_PICTURE_OUTPUTS, effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
 import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
 import {
-  BG_REMOVE_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
+  BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS, rifeTakes, slowMotionAiCount, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
   OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
 } from '#shared/runner/localModels'
 import { linkPictureBound, linkPictureShapes, pictureSize, type Shape } from '../utils/graphInputPixels'
@@ -40,6 +49,7 @@ import { pictureMeta } from './pictures/pythonView'
 import { hasAlphaAsPil } from './pictures/mask'
 import type { FrameShape } from './video/table'
 import { keptPeak } from './video/start'
+import { VIDEO_EFFECTS } from './video/table'
 import { parseInputFileRef } from './inputs'
 import type { OutputFile } from './types'
 
@@ -130,6 +140,8 @@ export function pictureBound(prompt: ApiPrompt, link: ApiLink, families: Readonl
 export interface LocalModelStart {
   /** Node id → the pictures it works through (at most), for the hold. */
   counts: Record<string, number>
+  /** R7.6: node id → the clip's frame size, for the hold (Slow motion (AI) is priced by its frames' size). */
+  sizes?: Record<string, { w: number; h: number }>
   /**
    * The most bytes this take keeps for its frame batches while it runs (R6's peak, every batch kept
    * to the end, a clip's cut-out batch among them), plus each clip's masks (16-bit PNGs, at most
@@ -204,7 +216,33 @@ function readerOf(read: ((f: OutputFile) => Promise<Uint8Array>) | undefined) {
 
 /** Whether the prompt has an R7 picture node the runner takes with these families on. */
 export function hasLocalModelPicture(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): boolean {
-  return Object.values(prompt).some(n => localModelOn(n.class_type, families) && Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type))
+  return Object.values(prompt).some(n => localModelOn(n.class_type, families)
+    && (Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type) || n.class_type === FRAME_INTERP_AI_CLASS))
+}
+
+/**
+ * R7.6: Slow motion (AI)'s clip, before the hold: its count and size, or why
+ * the workflow goes to the engine. `shape`: its input's frame shape (null
+ * when it can't be known).
+ */
+export function slowMotionAiStart(inputs: Record<string, unknown>, shape: FrameShape | null | undefined, hosted: boolean): { frames: number; w: number; h: number } | { problem: string } {
+  if (!shape || !(shape.count >= 0)) return { problem: LOCAL_MODEL_WORDS.unknownCount }
+  const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  if (shape.count > (hosted ? SLOW_MOTION_AI_MAX_FRAMES.hosted : SLOW_MOTION_AI_MAX_FRAMES.local)) return { problem: SLOW_MOTION_AI_WORDS.overCap }
+  if (shape.w * shape.h > caps.framePixels) return { problem: SLOW_MOTION_AI_WORDS.tooBig }
+  const m = inputs.multiplier as number
+  const out = slowMotionAiCount(shape.count, m)
+  // The batch it hands on, held to R5's batch caps (values.ts keepFrames).
+  if (out > caps.batchFrames || out * shape.w * shape.h > caps.batchPixels) return { problem: SLOW_MOTION_AI_WORDS.outTooLong }
+  if (shape.count >= 2 && !rifeTakes(m, shape.w, shape.h)) {
+    // Sailor's own interpolation (R6.6's Slow motion): its memory, its largest frame and its work, as R6.6's start pass judges them.
+    const spec = VIDEO_EFFECTS.FrameInterpolate!
+    const w = { multiplier: m }
+    const outShape = { count: out, w: shape.w, h: shape.h, exact: shape.exact }
+    if (spec.heldBytes(w, [shape]) > caps.heldFrameBytes || spec.work(w, [shape], outShape) > caps.effectWork) return { problem: SLOW_MOTION_AI_WORDS.tooBig }
+    for (const f of spec.limits?.(w, [shape]) ?? []) if (f.value > f.limit) return { problem: SLOW_MOTION_AI_WORDS.tooBig }
+  }
+  return { frames: shape.count, w: shape.w, h: shape.h }
 }
 
 /**
@@ -220,11 +258,23 @@ export async function localModelStartProblems(
   },
 ): Promise<LocalModelStart> {
   const counts: Record<string, number> = {}
+  const sizes: Record<string, { w: number; h: number }> = {}
   const cap = o.hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local
   const kinds = outputKindsFor(families)
   let shapes: ReadonlyMap<string, FrameShape> | null = null
   let masks = 0
   for (const [nodeId, n] of Object.entries(prompt)) {
+    // R7.6: Slow motion (AI), its clip's count and size (one call for the whole clip).
+    if (n.class_type === FRAME_INTERP_AI_CLASS && localModelOn(n.class_type, families)) {
+      const link = n.inputs?.frames
+      if (!isLink(link)) continue
+      shapes ??= await o.shapes()
+      const got = slowMotionAiStart(n.inputs ?? {}, shapes.get(`${link[0]}:${link[1]}`), o.hosted)
+      if ('problem' in got) return { counts, keptBytes: 0, problem: { message: got.problem, nodeId, classType: n.class_type } }
+      counts[nodeId] = got.frames
+      sizes[nodeId] = { w: got.w, h: got.h }
+      continue
+    }
     if (!localModelOn(n.class_type, families) || !Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type)) continue
     const link = n.inputs?.[LOCAL_MODEL_PICTURE_INPUT[n.class_type]!]
     if (!isLink(link)) continue
@@ -270,11 +320,11 @@ export async function localModelStartProblems(
       }
     }
   }
-  if (!shapes) return { counts, keptBytes: 0, problem: null }
+  if (!shapes) return { counts, sizes, keptBytes: 0, problem: null }
   const peak = keptPeak(prompt, families, shapes, { release: false })
   if (!peak) {
     const first = Object.keys(counts)[0]!
     return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId: first, classType: prompt[first]!.class_type } }
   }
-  return { counts, keptBytes: peak.bytes + masks, problem: null }
+  return { counts, sizes, keptBytes: peak.bytes + masks, problem: null }
 }

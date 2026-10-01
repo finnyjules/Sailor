@@ -25,7 +25,7 @@ import { loadFramesPick, settingsOf } from '../media/frameNodes'
 import { probeVideoFile } from '../../media/values'
 import { pyFrameBound, type MediaProbe } from '../../media/probe'
 import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape } from './table'
-import { BG_REMOVE_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, localModelOn, localModelPictureSlot } from '#shared/runner/localModels'
+import { BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, localModelOn, localModelPictureSlot, slowMotionAiCount } from '#shared/runner/localModels'
 
 const key = (l: ApiLink) => `${l[0]}:${l[1]}`
 
@@ -99,6 +99,14 @@ export function batchesOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>
       case SUBJECT_MASK_CLASS:
         if (localModelOn(n.class_type, families) && shapes.has(`${id}:${batchSlotOf(n.class_type)}`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         break
+      // R7.6: Slow motion (AI) makes a batch of its own; under two frames it hands its input on.
+      case FRAME_INTERP_AI_CLASS: {
+        if (!localModelOn(n.class_type, families) || !shapes.has(`${id}:0`)) break
+        const i = isLink(inputs.frames) ? shapes.get(key(inputs.frames)) : undefined
+        if (i && i.count < 2) on = from(inputs.frames)
+        else { on = id; batches.set(id, { maker: id, readers: new Set() }) }
+        break
+      }
       default:
         if (takenVideoEffect(n.class_type, families) && shapes.has(`${id}:0`)) {
           const spec = VIDEO_EFFECTS[n.class_type]!
@@ -159,6 +167,13 @@ export async function frameShapes(
       case UPSCALE_2X_CLASS: {
         const i = localModelOn(n.class_type, families) ? at(inputs.frames) : undefined
         if (i) s = { count: i.count, w: 2 * i.w, h: 2 * i.h, exact: i.exact, ...(i.counted ? { counted: true as const } : {}) }
+        break
+      }
+      // R7.6: Slow motion (AI) hands on (T − 1)·m + 1 frames of the clip's size (T, an upper bound, gives one).
+      case FRAME_INTERP_AI_CLASS: {
+        const i = localModelOn(n.class_type, families) ? at(inputs.frames) : undefined
+        const m = inputs.multiplier
+        if (i && typeof m === 'number' && Number.isInteger(m)) s = { count: slowMotionAiCount(i.count, m), w: i.w, h: i.h, exact: i.exact }
         break
       }
       case 'SaveVideo': {

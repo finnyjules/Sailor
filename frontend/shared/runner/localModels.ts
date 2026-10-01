@@ -19,13 +19,14 @@
  * (frames); their picture output carries what came in (KIND_FOLLOWS_INPUT in
  * ./values.ts): a picture for a picture, a frame batch for a clip.
  *
- * Imports nothing at run time but the family chain and the remover's, LaMa's and SAM 3's ids;
+ * Imports nothing at run time but the family chain, the remover's, LaMa's and SAM 3's ids and the media caps;
  * ./eligibility.ts builds its rule table from localModelRows() when it loads.
  */
 import { familyOn, type RunnerFamily } from './families'
 import { BACKGROUND_REMOVER_SLUG } from './repair'
 import { PHOTO_FILL_SLUGS } from './layers'
 import { SAM_3_IMAGE_APP } from './samInput'
+import { MEDIA_CAPS } from './media'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 import type { PaidCalls } from '../pricing/paidSettings'
@@ -106,6 +107,60 @@ export const SUBJECT_MASK_POINT = { default: 0.5, min: 0, max: 1 } as const
 /** `mask_grow`: IO.Float.Input(default=0.0, min=-32.0, max=32.0, step=1.0). */
 export const SUBJECT_MASK_GROW = { default: 0, min: -32, max: 32 } as const
 
+// ── Slow motion (AI) (R7.6, family `slow-motion-ai`) ──
+
+/** comfy_extras/nodes_frame_interp.py FrameInterpolateAINode's node_id (RIFE 4.6, now fal's RIFE video). */
+export const FRAME_INTERP_AI_CLASS = 'FrameInterpolateAI'
+/** fal's RIFE on a video: one call for the whole clip. */
+export const RIFE_VIDEO_SLUG = 'fal-ai/rife/video'
+/** `multiplier`: IO.Int.Input(default=2, min=2, max=8, step=1). */
+export const FRAME_INTERP_AI_MULTIPLIER = { default: 2, min: 2, max: 8 } as const
+/**
+ * The largest multiplier RIFE video makes: its `num_frames` (frames made
+ * between each pair) is 1–4 in the saved schema, so m = num_frames + 1 is
+ * 2–5. A larger one (6–8) runs in Sailor on ffmpeg's own motion
+ * interpolation (R6.6's minterpolate, free), never on the engine.
+ */
+export const RIFE_MAX_MULTIPLIER = 5
+/**
+ * The most frames one Slow motion (AI) node sends (ruling (g)): hosted 240
+ * (10 s at 24 fps), locally the per-frame cap's 900. A clip over it is left
+ * to the engine before the run (a stop-gap named in R7.6's report).
+ */
+export const SLOW_MOTION_AI_MAX_FRAMES = { hosted: 240, local: 900 } as const
+/**
+ * The frame size the canvas prices a clip at when it can't see it (the
+ * badge's "up to"; the runner always holds what it measured): 1080p.
+ */
+const UNMEASURED_FRAME_PIXELS = 1920 * 1080
+
+/** Whether Slow motion (AI) at multiplier `m` calls RIFE (2–5), rather than Sailor's own interpolation or nothing. */
+export function rifeMakes(m: number): boolean {
+  return Number.isInteger(m) && m >= FRAME_INTERP_AI_MULTIPLIER.min && m <= RIFE_MAX_MULTIPLIER
+}
+
+/**
+ * The smallest side the clip handed to RIFE may have: Sailor's H.264 encoder
+ * (OpenH264) refuses a picture under 16 pixels a side. A smaller clip runs on
+ * Sailor's own interpolation (R6.6), as a multiplier RIFE doesn't make does.
+ */
+export const RIFE_MIN_SIDE = 16
+
+/** Whether a clip of w × h at multiplier `m` goes to RIFE (else Sailor's own interpolation, or nothing under two frames). */
+export function rifeTakes(m: number, w: number, h: number): boolean {
+  return rifeMakes(m) && w >= RIFE_MIN_SIDE && h >= RIFE_MIN_SIDE
+}
+
+/** Python's output count: (T − 1)·m + 1, or the input as it is under two frames (nodes_frame_interp.py:219-236). */
+export function slowMotionAiCount(frames: number, m: number): number {
+  return frames < 2 || m < 2 ? frames : (frames - 1) * m + 1
+}
+
+/** The frame size sent (encoded H.264 pads an odd side to even, as Save video frames does). */
+export function rifeSentPixels(w: number, h: number): number {
+  return (w + (w % 2)) * (h + (h % 2))
+}
+
 /** Every moved class's family (each task adds its row once its port exists). */
 export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [BG_REMOVE_CLASS]: 'bg-remove',
@@ -114,6 +169,7 @@ export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [MASK_BY_TEXT_CLASS]: 'sam-3-masks',
   [MASK_EXTRACTOR_CLASS]: 'sam-3-masks',
   [SUBJECT_MASK_CLASS]: 'subject-mask',
+  [FRAME_INTERP_AI_CLASS]: 'slow-motion-ai',
 }
 
 /** The service each moved class calls (ruling (b): the price's tooltip names it). Null: none (Lens, in the server). */
@@ -124,6 +180,7 @@ export const SERVICE_OF: Readonly<Record<string, LocalModelService | null>> = {
   [MASK_BY_TEXT_CLASS]: 'fal',
   [MASK_EXTRACTOR_CLASS]: 'fal',
   [SUBJECT_MASK_CLASS]: 'fal',
+  [FRAME_INTERP_AI_CLASS]: 'fal',
 }
 
 /** The tooltip on the price (ruling (b)): sentence case, plain, no node copy. */
@@ -208,6 +265,8 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
   [MASK_EXTRACTOR_CLASS]: { 0: 'mask' },
   // R7.5: a mask per picture or frame; its cutout (slot 1) follows its input (values.ts KIND_FOLLOWS_INPUT).
   [SUBJECT_MASK_CLASS]: { 0: 'mask' },
+  // R7.6: a frame batch in (a `frames` value only), a frame batch out.
+  [FRAME_INTERP_AI_CLASS]: { 0: 'frames' },
 }
 
 /** The slot a picture class's picture (or a clip's frame batch) comes out of: 0, but Subject mask's cutout 1. */
@@ -280,11 +339,23 @@ export const SUBJECT_MASK_WORDS = {
   noMode: 'Pick which mask to keep: best, largest or smallest.',
 } as const
 
+/** Slow motion (AI)'s own words (R7.6). */
+export const SLOW_MOTION_AI_WORDS = {
+  noFrames: 'There are no video frames to slow down.',
+  overCap: 'This clip is too long to slow down here.',
+  tooBig: 'This clip’s frames are too large to slow down here.',
+  outTooLong: 'Slowed down, this clip would have too many frames to keep here.',
+  moreThanHeld: 'This clip is longer or larger than was measured before the run, so it was stopped before anything was sent.',
+  noAnswer: 'The service sent back no slowed-down clip.',
+  badAnswer: 'The slowed-down clip the service sent back can’t be read.',
+} as const
+
 /** What the start of the run says of a clip over the frame cap, in the class's own words. */
 export function overCapWords(classType: string): string {
   if (classType === UPSCALE_2X_CLASS) return UPSCALE_2X_WORDS.overCap
   if (classType === OBJECT_REMOVE_CLASS) return OBJECT_REMOVE_WORDS.overCap
   if (classType === SUBJECT_MASK_CLASS) return SUBJECT_MASK_WORDS.overCap
+  if (classType === FRAME_INTERP_AI_CLASS) return SLOW_MOTION_AI_WORDS.overCap
   return LOCAL_MODEL_WORDS.overCap
 }
 
@@ -314,6 +385,10 @@ const SUBJECT_MASK_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   mask_grow: { type: 'FLOAT', required: true, min: SUBJECT_MASK_GROW.min, max: SUBJECT_MASK_GROW.max },
 }
 
+const FRAME_INTERP_AI_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  multiplier: { type: 'INT', required: true, min: FRAME_INTERP_AI_MULTIPLIER.min, max: FRAME_INTERP_AI_MULTIPLIER.max },
+}
+
 const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   output: { type: 'COMBO', required: true, options: BG_REMOVE_OUTPUTS },
   edge_softness: { type: 'FLOAT', required: true, min: BG_REMOVE_EDGE_SOFTNESS.min, max: BG_REMOVE_EDGE_SOFTNESS.max },
@@ -323,8 +398,11 @@ const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
  * The rule rows (rule 1, ruling (f)): the picture input wired, from a
  * picture or a frame batch ('local-model-source'), and every widget as
  * ComfyUI validates it. A provider class (no `local`): it is held and charged.
+ * `framesSources`: the frame-batch sources (mediaEffects.ts
+ * FRAMES_LINK_SOURCES, handed in so this file needs no import of it), for
+ * Slow motion (AI)'s clip.
  */
-export function localModelRows(): Record<string, RunnerNodeRule> {
+export function localModelRows(framesSources: readonly (readonly [string, number])[] = []): Record<string, RunnerNodeRule> {
   return {
     [BG_REMOVE_CLASS]: {
       family: 'bg-remove',
@@ -383,6 +461,16 @@ export function localModelRows(): Record<string, RunnerNodeRule> {
       inputCheck: 'local-model-source',
       widgets: SUBJECT_MASK_WIDGETS,
     },
+    // R7.6: a frame batch (a `frames` value from a frame-batch source, as R6.6's Slow motion reads one) and
+    // the multiplier as ComfyUI validates it.
+    [FRAME_INTERP_AI_CLASS]: {
+      family: 'slow-motion-ai',
+      mustLink: ['frames'],
+      required: ['frames'],
+      valueInputs: { frames: ['frames'] },
+      linkSources: { frames: framesSources },
+      widgets: FRAME_INTERP_AI_WIDGETS,
+    },
   }
 }
 
@@ -415,10 +503,37 @@ const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
  * `frames`), else one picture. The remover's card is R3.5's (paidRates.ts):
  * one measurement serves both.
  */
-export function localModelCalls(classType: string, frames: number | null | undefined): PaidCalls {
+export function localModelCalls(classType: string, frames: number | null | undefined, inputs?: Readonly<Record<string, unknown>> | null, seconds?: { videoWidth?: number | null; videoHeight?: number | null } | null): PaidCalls {
+  if (classType === FRAME_INTERP_AI_CLASS) return slowMotionAiCalls(inputs?.multiplier, frames, seconds?.videoWidth, seconds?.videoHeight)
   const endpoint = has(LOCAL_MODEL_SLUG, classType) ? LOCAL_MODEL_SLUG[classType]! : null
   if (!endpoint) return { refused: `${classType} has no price yet` }
   // A SAM 3 mask class reads the first picture only: one call, however many came in.
   const times = perPictureClass(classType) && typeof frames === 'number' && Number.isFinite(frames) ? Math.max(1, Math.trunc(frames)) : 1
   return { steps: [{ call: { endpoint }, times }] }
+}
+
+/**
+ * Slow motion (AI)'s call (R7.6), for its price: one RIFE call making
+ * (T − 1)·m + 1 frames of the clip's size (sent padded to even), `frames`
+ * (T) and the size measured before the hold (TakeRecord.measured: `frames`,
+ * `videoWidth`, `videoHeight`). No call (free) under two frames, or for a
+ * multiplier RIFE doesn't make, or a clip under RIFE_MIN_SIDE (Sailor's own
+ * interpolation, R6.6). Not
+ * measured (the canvas): the hosted frame cap's clip at 1080p, at most the
+ * hosted batch's pixels, a ceiling for the badge's "up to". A wired
+ * multiplier is held at the dearest RIFE makes.
+ */
+export function slowMotionAiCalls(multiplier: unknown, frames: number | null | undefined, w: number | null | undefined, h: number | null | undefined): PaidCalls {
+  const m = typeof multiplier === 'number' && Number.isInteger(multiplier) ? multiplier : Array.isArray(multiplier) ? RIFE_MAX_MULTIPLIER : null
+  if (m === null || m < FRAME_INTERP_AI_MULTIPLIER.min || m > FRAME_INTERP_AI_MULTIPLIER.max) return { refused: 'Slow motion (AI) needs a multiplier from 2 to 8' }
+  if (!rifeMakes(m)) return { steps: [] }
+  const measured = typeof frames === 'number' && Number.isFinite(frames) && frames >= 0
+  const t = measured ? Math.trunc(frames) : SLOW_MOTION_AI_MAX_FRAMES.hosted
+  if (t < 2) return { steps: [] }
+  const out = slowMotionAiCount(t, m)
+  const sized = typeof w === 'number' && typeof h === 'number' && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0
+  // A clip too small for the encoder runs on Sailor's own interpolation: no call.
+  if (sized && !rifeTakes(m, w, h)) return { steps: [] }
+  const outputPixels = sized ? rifeSentPixels(w, h) : Math.min(UNMEASURED_FRAME_PIXELS, Math.floor(MEDIA_CAPS.hosted.batchPixels / out))
+  return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels }, times: 1 }] }
 }

@@ -56,6 +56,7 @@ import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
 import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, RESTYLE_LORA_CLASS, multiLoraCount } from '../runner/lora'
 import { editSteps } from './editSettings'
 import { POSE_MANNEQUIN_CLASS, poseNoCall, type PoseKnown } from '../runner/nanoExtras'
+import { FRAME_INTERP_AI_CLASS, rifeMakes } from '../runner/localModels'
 import {
   TURNTABLE_ASPECT_RATIO, TURNTABLE_CLASS, TURNTABLE_DEFAULT_DIRECTION, TURNTABLE_FRONT_MODEL, TURNTABLE_SECONDS, TURNTABLE_VIEWS_MODEL,
   planSegments, turntableViews,
@@ -526,6 +527,10 @@ const PAID_NO_CALL: Readonly<Record<string, (inputs: NodeInputs, known: PoseKnow
   ...Object.fromEntries(LLM_CLASSES.flatMap(c => { const r = llmNoCall(c); return r ? [[c, r]] : [] })),
   // R3.15: Pose Mannequin with a saved pose, or nothing to pose with (priced by its call, editSettings.ts, otherwise).
   [POSE_MANNEQUIN_CLASS]: poseNoCall,
+  // R7.6: Slow motion (AI) at a multiplier RIFE doesn't make (6–8) runs on Sailor's own interpolation, free
+  // (R6.6's minterpolate). A wired multiplier is priced as if RIFE runs. (Under two frames it makes no call
+  // either: that is known only from the measured clip, and its price is then 0, localModels.ts slowMotionAiCalls.)
+  [FRAME_INTERP_AI_CLASS]: inputs => typeof inputs.multiplier === 'number' && !rifeMakes(inputs.multiplier),
 }
 
 /** The classes priced by their calls (paidCalls). */

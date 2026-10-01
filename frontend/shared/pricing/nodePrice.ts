@@ -361,7 +361,8 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   // Pixverse Swap, while person-swap-video is on: the measured video, else its ceiling.
   if (familyPricedClass(classType, opts.families)) {
     // R7 (ruling (f)): one call per frame, the frames counted before the hold (else one picture).
-    if (isLocalModelClass(classType)) return localModelPrice(localModelCalls(classType, opts.inputSeconds?.frames))
+    // R7.6: Slow motion (AI), one RIFE call priced by the frames it makes and their size (measured, else a ceiling).
+    if (isLocalModelClass(classType)) return localModelPrice(localModelCalls(classType, opts.inputSeconds?.frames, inputs, opts.inputSeconds))
     const usd = classType === 'PersonSwapVideo'
       ? personSwapVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
       : topazVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})

@@ -358,6 +358,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'MaskExtractor': r('fal', null, 'no SAM 3 on Replicate is carded'),
   // R7.5, Subject mask (family subject-mask): one call to fal's SAM 3 per picture or frame.
   'SubjectMask': r('fal', null, 'no SAM 3 on Replicate is carded'),
+  // R7.6, Slow motion (AI) (family slow-motion-ai): one call to fal's RIFE video for the whole clip.
+  'FrameInterpolateAI': r('fal', null, 'no RIFE video on Replicate is carded'),
   // R3.8, music and speech (family audio-gen): Replicate, as Python.
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',

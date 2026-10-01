@@ -169,6 +169,8 @@ describe('paidCallUsd', () => {
       'fal-ai/wizper', 'thomasmol/whisper-diarization', 'zsxkib/realistic-voice-cloning',
       // R7.4: SAM 3 (Mask by text and Mask extractor).
       'fal-ai/sam-3/image',
+      // R7.6: RIFE video (Slow motion (AI)).
+      'fal-ai/rife/video',
     ].sort())
   })
   it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {

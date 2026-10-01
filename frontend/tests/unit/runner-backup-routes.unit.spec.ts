@@ -21,6 +21,7 @@ import {
 } from '~~/server/runner/generators/twins'
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
+import { rifeVideoInput } from '~~/server/runner/generators/localModels'
 import type { OutputFile } from '~~/server/runner/types'
 import { encodeMask } from '~~/server/runner/pictures/mask'
 import type { RunnerFamily } from '#shared/runner/families'
@@ -101,6 +102,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   MaskExtractor: { image: LINK, points: '[{"x":0.5,"y":0.5,"label":1}]', feather: 0, invert: false },
   // Subject mask (R7.5): one picture; its call is SAM 3's, one click.
   SubjectMask: { frames: LINK, point_x: 0.5, point_y: 0.5, output_mode: 'best', mask_grow: 0 },
+  // Slow motion (AI) (R7.6): one clip; its call is RIFE video's.
+  FrameInterpolateAI: { frames: LINK, multiplier: 2 },
   // Music and speech (R3.8): the text; the rest at the node's defaults.
   GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },
@@ -154,7 +157,7 @@ const SOUND_WAV = { wav: new Uint8Array(46), seconds: 1 / 8000, frames: 1, rate:
 const MASK_FILE: OutputFile = { filename: 'mask.png', subfolder: '', type: 'temp' }
 
 /** What the engine measured of a media node's files before planning (Topaz sets its factor from the video's size, F23). */
-const MEASURED = { video: 3, videoWidth: 1280, videoHeight: 720, videoFps: 24 }
+const MEASURED = { video: 3, videoWidth: 1280, videoHeight: 720, videoFps: 24, frames: 3 }
 
 async function plan(classType: string, inputs: Record<string, unknown>, families?: ReadonlySet<RunnerFamily>): Promise<ProviderPlan> {
   const p = await planNode({
@@ -182,7 +185,9 @@ async function firstCall(classType: string, inputs: Record<string, unknown>, fam
     prompt: { n: { class_type: classType, inputs } }, nodeId: 'n', gateOpen: false,
     filesFrom: () => [{ filename: 'a.png', subfolder: '', type: 'output' }],
     // Object removal (R7.3) reads its mask as a mask value: one 2 × 2 white mask.
-    valueFrom: link => (classType === 'ObjectRemove' && link === inputs.mask ? { kind: 'mask', files: [MASK_FILE] } : undefined),
+    valueFrom: link => (classType === 'ObjectRemove' && link === inputs.mask ? { kind: 'mask', files: [MASK_FILE] }
+      // Slow motion (AI) (R7.6) reads a frame batch: three frames of 64 × 36 (RIFE takes 16 pixels a side and up).
+      : classType === 'FrameInterpolateAI' ? { kind: 'frames', file: { filename: 'b.mkv', subfolder: '', type: 'kept' }, count: 3, w: 64, h: 36 } : undefined),
     toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
     ...(families ? { families } : {}),
     measured: MEASURED,
@@ -198,6 +203,8 @@ async function firstCall(classType: string, inputs: Record<string, unknown>, fam
   const picture = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer())
   await p.run({
     signal: new AbortController().signal, call: async (c: PipelineCall) => { first = c; throw sent },
+    // Slow motion (AI) (R7.6) encodes its clip with the video tools: here, its request as a resumed node recorded it.
+    recorded: (key: string) => (classType === 'FrameInterpolateAI' && key === 'rife' ? rifeVideoInput('https://pics.test/clip.mp4', inputs.multiplier as number) : null),
     read: async (f: OutputFile) => (f.filename === MASK_FILE.filename ? await encodeMask({ w: 2, h: 2, data: new Float32Array(4).fill(1) }) : picture), handOff: async (_b: Uint8Array, name: string) => `https://pics.test/${name}`,
   } as unknown as PipelineIO).catch((e) => { if (e !== sent) throw e })
   if (!first) throw new Error(`${classType} made no call`)

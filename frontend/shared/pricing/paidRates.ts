@@ -28,7 +28,14 @@
  *  - `per_output_image`: dollars per picture the call makes (R3.6, fal's
  *    Seedream layerize, `billing_unit: images`), at a dearer rate for
  *    pictures of a larger area where the page has one (`large`: over
- *    `fromPixels`; an area not known is priced at the dearer rate).
+ *    `fromPixels`; an area not known is priced at the dearer rate);
+ *  - `gpu_per_output_megapixel_frame`: a model billed by compute time whose
+ *    run grows with the frames it makes and their size (R7.6, fal's RIFE
+ *    video): `baseUsd` a call (its start, the hand-off and the download) plus
+ *    `perMegapixelFrame` for every megapixel of every frame it makes
+ *    (`outputFrames` × `outputPixels`), each a generous ceiling from the
+ *    page's compute-second price (`note` says how). An `estimate` until a
+ *    live call measures it, as `gpu_ceiling`.
  *
  * An endpoint carded already elsewhere is priced by that card, so each rate
  * lives in one place: the edit cards (editRates.ts), the per-second clip
@@ -68,6 +75,7 @@ export type PaidRate =
   | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string, perSteps?: number })
   | (RateMeta & { unit: 'gpu_per_output_second', perSecond: number, minUsd: number, note: string })
   | (RateMeta & { unit: 'per_output_image', perImage: number, large?: { fromPixels: number, perImage: number } })
+  | (RateMeta & { unit: 'gpu_per_output_megapixel_frame', baseUsd: number, perMegapixelFrame: number, note: string })
 
 /** One priced provider call: the endpoint and what it is billed by. */
 export interface PaidCall {
@@ -85,6 +93,8 @@ export interface PaidCall {
   steps?: number
   /** Pictures the call makes (per_output_image cards): the most it can make for a hold, what came back for a charge. */
   outputImages?: number
+  /** Frames the call makes (gpu_per_output_megapixel_frame cards, R7.6), each of `outputPixels`. */
+  outputFrames?: number
   /** Pixels of the picture sent in and of the picture that comes back (the edit cards). */
   inputPixels?: number | null; outputPixels?: number | null
   /** Whether a clip comes back with sound (clip and video cards); absent, the dearer of the two. */
@@ -306,6 +316,17 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'per_call', usd: 0.005,
     service: 'fal', source: 'https://fal.ai/models/fal-ai/sam-3/image', read: '2026-09-30', confidence: 'verified',
   },
+  // R7.6, Slow motion (AI) on fal's RIFE video (read 2026-10-01, plain GETs of the public pages): llms.txt,
+  // "Your request will cost $0.0013 per compute second" (the saved schema's pricingText), with no figure for how
+  // long a run takes. Carded as a generous ceiling: 15.4 s of compute a call ($0.02: the start, fetching the
+  // clip, encoding the answer) plus 0.385 s for every megapixel of every frame made ($0.0005: 2.6 megapixel-
+  // frames a second, about six frames of 480p a second, far below RIFE's own speed on a GPU). A 2-second
+  // 480p clip at ×2 (119 frames) is then about $0.044. An estimate until the live check measures it.
+  'fal-ai/rife/video': {
+    unit: 'gpu_per_output_megapixel_frame', baseUsd: 0.02, perMegapixelFrame: 0.0005,
+    note: '$0.0013 a compute second; ceiling: 15.4 s a call ($0.02) + 0.385 s a megapixel of every frame made ($0.0005)',
+    service: 'fal', source: 'https://fal.ai/models/fal-ai/rife/video', read: '2026-10-01', confidence: 'estimate',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
@@ -356,6 +377,11 @@ function paidCardUsd(rate: PaidRate, call: PaidCall): number | null {
       const px = call.outputPixels
       const small = !rate.large || (typeof px === 'number' && Number.isFinite(px) && px >= 0 && px < rate.large.fromPixels)
       return tidy(n * (small ? rate.perImage : rate.large!.perImage))
+    }
+    case 'gpu_per_output_megapixel_frame': {
+      const n = count(call.outputFrames)
+      const px = count(call.outputPixels ?? undefined)
+      return n === undefined || px === undefined ? null : tidy(rate.baseUsd + rate.perMegapixelFrame * n * px / 1e6)
     }
   }
 }

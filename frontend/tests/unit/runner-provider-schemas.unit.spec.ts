@@ -350,6 +350,8 @@ function runnerEndpoints(): string[] {
   out.add('replicate zylim0702/remove-object')
   // R7.4: Mask by text and Mask extractor on fal's SAM 3, /api/inpaint/segment's call (generators/localModels.ts; its grid is runner-local-masks.unit.spec.ts).
   out.add('fal fal-ai/sam-3/image')
+  // R7.6: Slow motion (AI) on fal's RIFE video (generators/localModels.ts; its grid is runner-local-slowmo.unit.spec.ts).
+  out.add('fal fal-ai/rife/video')
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

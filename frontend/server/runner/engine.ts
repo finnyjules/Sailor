@@ -2316,7 +2316,10 @@ export function createEngine(deps: EngineDeps) {
       }
       for (const [nodeId, frames] of Object.entries(counted.counts)) {
         const was = measured[index]![nodeId]
-        measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames }, sha: was?.sha ?? {} }
+        // R7.6: Slow motion (AI) is priced by its clip's frame size too.
+        const size = counted.sizes?.[nodeId]
+        const sized = size ? { videoWidth: size.w, videoHeight: size.h } : {}
+        measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized }, sha: was?.sha ?? {} }
       }
     }
     // The sound effects' start pass (R6.9, ./video/soundShapes.ts): every sound's rate, channels and length

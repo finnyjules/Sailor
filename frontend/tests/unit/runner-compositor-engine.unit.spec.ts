@@ -456,8 +456,8 @@ describe('server health: caps, sources, Stop', () => {
   it('every runner image class is a picture source (drift guard); the video ones are not', () => {
     // Lip-sync a character on sync-3 (Task F22), Enhance a video on Topaz (Task F23), Film a shot (Task 4) and
     // Person swap (video) on Pixverse Swap (non-commercial face models replacement) make a video; so does Turntable (R3.16).
-    // Sync lips to audio and its twin (R3.10) make a video too.
-    const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode', 'PersonSwapVideo', 'TurntableNode', 'LipsyncNode', 'LipsyncRemoteNode'])
+    // Sync lips to audio and its twin (R3.10) make a video too; Slow motion (AI) (R7.6) a frame batch.
+    const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode', 'PersonSwapVideo', 'TurntableNode', 'LipsyncNode', 'LipsyncRemoteNode', 'FrameInterpolateAI'])
     // The LLM text nodes (R3.3) hand on text.
     const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
       // Describe, read and find (R3.4) hand on text and JSON.

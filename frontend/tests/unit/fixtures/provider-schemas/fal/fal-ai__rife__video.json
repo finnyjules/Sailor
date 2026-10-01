@@ -1,0 +1,164 @@
+{
+  "endpoint": "fal-ai/rife/video",
+  "fetchedAt": "2026-10-01",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/rife/video",
+    "pricing": "https://fal.ai/models/fal-ai/rife/video/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/RifeVideoInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/RifeVideoOutput"
+  },
+  "components": {
+    "schemas": {
+      "RifeVideoInput": {
+        "required": [
+          "video_url"
+        ],
+        "x-fal-order-properties": [
+          "video_url",
+          "num_frames",
+          "use_scene_detection",
+          "use_calculated_fps",
+          "fps",
+          "loop"
+        ],
+        "type": "object",
+        "properties": {
+          "num_frames": {
+            "default": 1,
+            "maximum": 4,
+            "type": "integer",
+            "minimum": 1,
+            "title": "Number of Frames",
+            "description": "The number of frames to generate between the input video frames."
+          },
+          "fps": {
+            "default": 8,
+            "maximum": 60,
+            "type": "integer",
+            "minimum": 1,
+            "title": "Frames Per Second",
+            "description": "Frames per second for the output video. Only applicable if use_calculated_fps is False."
+          },
+          "use_scene_detection": {
+            "default": false,
+            "type": "boolean",
+            "title": "Use Scene Detection",
+            "description": "If True, the input video will be split into scenes before interpolation. This removes smear frames between scenes, but can result in false positives if the scene detection is not accurate. If False, the entire video will be treated as a single scene."
+          },
+          "use_calculated_fps": {
+            "default": true,
+            "type": "boolean",
+            "title": "Use Calculated FPS",
+            "description": "If True, the function will use the calculated FPS of the input video multiplied by the number of frames to determine the output FPS. If False, the passed FPS will be used."
+          },
+          "video_url": {
+            "type": "string",
+            "title": "Video URL",
+            "examples": [
+              "https://storage.googleapis.com/falserverless/example_inputs/interpolation-video-input.mp4"
+            ],
+            "description": "The URL of the video to use for interpolation."
+          },
+          "loop": {
+            "default": false,
+            "type": "boolean",
+            "title": "Loop",
+            "description": "If True, the final frame will be looped back to the first frame to create a seamless loop. If False, the final frame will not loop back."
+          }
+        },
+        "title": "RIFEVideoInput"
+      },
+      "RifeVideoOutput": {
+        "required": [
+          "video"
+        ],
+        "x-fal-order-properties": [
+          "video"
+        ],
+        "type": "object",
+        "properties": {
+          "video": {
+            "$ref": "#/components/schemas/File",
+            "examples": [
+              {
+                "url": "https://storage.googleapis.com/falserverless/example_outputs/rife-video-output.mp4"
+              }
+            ],
+            "description": "The generated video file with interpolated frames."
+          }
+        },
+        "title": "RIFEVideoOutput"
+      },
+      "File": {
+        "required": [
+          "url"
+        ],
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size"
+        ],
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type",
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file."
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size",
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The URL where the file can be downloaded from."
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name",
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          }
+        },
+        "title": "File"
+      }
+    }
+  },
+  "pricingText": "Your request will cost **$0.0013** per compute second.\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

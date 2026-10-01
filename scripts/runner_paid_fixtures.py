@@ -196,6 +196,18 @@ Groups:
              it (mask_grow −32 / −1 / 0 / 3 / 32 and Python's half-to-even
              rounding) and makes the cutout, on pictures and a clip, for
              frontend/server/runner/pixels/subjectMask.ts
+  local-slowmo (R7.6) Slow motion (AI) (comfy_extras/nodes_frame_interp.py)
+             with RIFE's ONNX session swapped for a stand-in (no model file:
+             os.path.isfile patched) that answers a blend of the pair at the
+             timestep it was given. The real execute then lays out Python's
+             (T − 1)·m + 1 frames: the originals at i·m, the stand-in's frames
+             between. Clips of 3 frames ×2, 4 frames ×5 (odd size), 2 frames
+             ×3, one frame (handed on), 3 frames ×7 (a multiplier RIFE video
+             doesn't make) and 3 frames ×2 under 16 pixels a side (too small
+             for Sailor's H.264 encoder). Each records the clip, the timesteps the
+             stand-in was asked for and the output frames (8-bit, exact), for
+             frontend/server/runner/generators/localModels.ts
+             (tests/unit/runner-local-slowmo.unit.spec.ts)
   e2e    (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
@@ -4003,6 +4015,70 @@ def local_subject_cases() -> dict:
     }
 
 
+def local_slowmo_group() -> dict:
+    """Slow motion (AI)'s real execute with RIFE's session a stand-in (R7.6): Python's count and
+    places given the stand-in's in-between frames, which the runner's fake RIFE answers back."""
+    import numpy as np
+    import torch
+    from comfy_extras import nodes_frame_interp as fi
+
+    asked: list = []
+
+    class _In:
+        def __init__(self, name, shape):
+            self.name = name
+            self.shape = shape
+
+    class StandInSession:
+        """RIFE's two-picture layout with a timestep map: answers (1 − t)·a + t·b, nudged by t so
+        each in-between differs from a plain blend Sailor might make itself."""
+        def get_inputs(self):
+            return [_In("img0", [1, 3, "h", "w"]), _In("img1", [1, 3, "h", "w"]), _In("timestep", [1, 1, "h", "w"])]
+
+        def run(self, _outputs, feed):
+            a, b, t = feed["img0"], feed["img1"], feed["timestep"]
+            assert a.shape == b.shape and t.shape == (1, 1) + a.shape[2:], (a.shape, t.shape)
+            step = float(t.flat[0])
+            asked.append(step)
+            out = (1.0 - step) * a + step * b
+            out = np.clip(out + 0.1 * step * (1.0 - out), 0.0, 1.0).astype(np.float32)
+            return [out]
+
+    real_isfile = os.path.isfile
+
+    def clip(t: int, w: int, h: int, seed: int):
+        rng = np.random.default_rng(seed)
+        return rng.integers(0, 256, size=(t, h, w, 3), dtype=np.uint8)
+
+    cases: list = []
+
+    def run(name: str, frames, m: int):
+        asked.clear()
+        tensor = torch.from_numpy(frames.astype(np.float32) / 255.0)
+        with mock.patch.object(fi.os.path, "isfile", lambda p: True if p == fi._RIFE_PATH else real_isfile(p)), \
+                mock.patch.object(fi, "_get_rife_session", lambda: StandInSession()):
+            res = fi.FrameInterpolateAINode.execute(frames=tensor, multiplier=m)
+        (out,) = res.args
+        out8 = (out.detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+        t, h, w = frames.shape[0], frames.shape[1], frames.shape[2]
+        cases.append({
+            "name": name, "class_type": "FrameInterpolateAI", "multiplier": m, "w": w, "h": h, "count": t,
+            "frames": _b64(np.ascontiguousarray(frames).tobytes()),
+            "asked": [_float_hex(x) for x in asked],
+            "out_count": int(out8.shape[0]),
+            "out": _b64(np.ascontiguousarray(out8).tobytes()),
+            "handed_on": out is tensor,
+        })
+
+    run("slowmo · 3 frames · ×2", clip(3, 24, 16, 9100), 2)
+    run("slowmo · 4 frames · ×5 · odd size", clip(4, 23, 17, 9101), 5)
+    run("slowmo · 2 frames · ×3", clip(2, 24, 16, 9102), 3)
+    run("slowmo · one frame · ×4 (handed on)", clip(1, 24, 16, 9103), 4)
+    run("slowmo · 3 frames · ×7 (not a RIFE video multiplier)", clip(3, 24, 16, 9104), 7)
+    run("slowmo · 3 frames · ×2 · under 16 pixels a side", clip(3, 10, 8, 9105), 2)
+    return {"cases": cases}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "handoff2": handoff2_group,
@@ -4026,6 +4102,7 @@ GROUPS = {
     "local-cutout": local_cutout_group,
     "local-erase": local_erase_group,
     "local-masks": local_masks_group,
+    "local-slowmo": local_slowmo_group,
 }
 
 

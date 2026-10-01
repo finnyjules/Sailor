@@ -1601,7 +1601,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   ...mediaEffectRows(SOUND_OUTPUTS),
   // ── R7: the local-model nodes moved onto paid services (./localModels.ts) ──
   // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f)).
-  ...localModelRows(),
+  ...localModelRows(FRAMES_LINK_SOURCES),
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */

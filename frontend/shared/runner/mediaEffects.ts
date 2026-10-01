@@ -28,7 +28,7 @@
 import { MEDIA_EFFECT_SCHEMAS, type MediaEffectSchema, type MediaEffectSchemaFamily } from './mediaEffectSchemas.generated'
 import { familyOn, type RunnerFamily } from './families'
 import { GATE_CLASS } from './graph'
-import { BG_REMOVE_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, isLocalModelClass, localModelOn } from './localModels'
+import { BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, isLocalModelClass, localModelOn } from './localModels'
 import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 
@@ -130,6 +130,8 @@ export const FRAMES_LINK_SOURCES: readonly (readonly [string, number])[] = [
   [OBJECT_REMOVE_CLASS, 0],
   // R7.5: Subject mask's cutout (slot 1) the same, only while `subject-mask` is on.
   [SUBJECT_MASK_CLASS, 1],
+  // R7.6: Slow motion (AI)'s batch, only while `slow-motion-ai` is on.
+  [FRAME_INTERP_AI_CLASS, 0],
 ]
 
 /** The classes that only encode a batch they read (rule 4: a batch only they read is kept as trunc-8). */
