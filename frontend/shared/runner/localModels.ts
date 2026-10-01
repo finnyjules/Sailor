@@ -677,8 +677,11 @@ export function localModelCalls(classType: string, frames: number | null | undef
   if (!endpoint) return { refused: `${classType} has no price yet` }
   // A SAM 3 mask class reads the first picture only: one call, however many came in.
   const times = perPictureClass(classType) && typeof frames === 'number' && Number.isFinite(frames) ? Math.max(1, Math.trunc(frames)) : 1
-  // R7.5 fix round: Subject mask makes one or two SAM 3 calls a picture, by its mode (samInput.ts subjectCallKinds).
-  if (classType === SUBJECT_MASK_CLASS) return { steps: [{ call: { endpoint }, times: times * subjectCallKinds(inputs?.output_mode).length }] }
+  // R7.5 fix round 2: Subject mask, by its mode, SAM 3's click alone, or the background remover and (held, sent only
+  // when the click is off its foreground) SAM 3's click, a picture each (samInput.ts subjectCallKinds).
+  if (classType === SUBJECT_MASK_CLASS) {
+    return { steps: subjectCallKinds(inputs?.output_mode).map(k => ({ call: { endpoint: k === 'cutout' ? BG_REMOVE_SLUG : SAM_3_SLUG }, times })) }
+  }
   // R7.11: Upscale (2×) is priced by the picture it sends (the largest the start of the run measured; else the service's largest).
   if (classType === UPSCALE_2X_CLASS) return { steps: [{ call: { endpoint, inputPixels: upscale2xPricedPixels(seconds?.picturePixels) }, times }] }
   return { steps: [{ call: { endpoint }, times }] }

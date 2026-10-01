@@ -75,10 +75,12 @@
  * :160-248): fal's SAM 3 on every picture or frame (the user's direction: a
  * clip runs here, as ruling (f)'s picture classes do). SAM 3 answers one mask
  * for a click (the live check, 2026-10-01: a portrait's face alone), so by the
- * USER's ruling `best` and `largest` mean the whole subject: smallest sends the
- * click alone, best the click with a whole-picture box on one object (the whole
- * object), largest both and keeps the larger (#shared/runner/samInput
- * samSubjectInput, subjectCallKinds; priced per call). Then, exact against Python given
+ * USER's ruling `best` and `largest` mean the whole subject: they call R7.1's
+ * background remover and keep its foreground's region under the click (fix
+ * round 2: a whole-picture box took the whole scene), falling back to SAM 3's
+ * click when the click is off the foreground; smallest sends SAM 3's click
+ * alone (#shared/runner/samInput samSubjectInput, subjectCallKinds; both calls
+ * held, each charged only when sent and delivered). Then, exact against Python given
  * the candidates (../pixels/subjectMask.ts): the pick (best / largest /
  * smallest), (m > 0), the grow or shrink (the worker's MaxFilter), and the
  * cutout. Outputs: a mask per picture (slot 0) and the cutout (slot 1: a
@@ -142,7 +144,7 @@ import {
   VOCALS_CLASS, VOCALS_MODEL_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG, VOCALS_WORDS, vocalsMaxSeconds, vocalsWork,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
-import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds } from '#shared/runner/samInput'
+import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds, subjectClick } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
 import { vocalsSilentStems, wavIsSilent, type PythonWav, type VocalsSound } from '../soundWav'
 import { keepSound } from '../../media/values'
@@ -170,7 +172,7 @@ import { mediaTempDir, removeMediaTempDir } from '../../media/run'
 import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 import type { SamAnswerMask } from '../pixels/samMask'
 import type { CutoutMode, CutoutResult } from '../pixels/cutout'
-import { subjectCutout8, subjectGrow, subjectMask8, subjectMaskFloat } from '../pixels/subjectMask'
+import { subjectCutout8, subjectForeground, subjectGrow, subjectMask8, subjectMaskFloat, subjectRegion } from '../pixels/subjectMask'
 import { firstOutputUrl, upscaleInput } from './repair'
 import { fillInput, maskPng, splitPictures } from './splitLayers'
 
@@ -1085,38 +1087,60 @@ export function planSubjectMask(ctx: PlanContext): NodePlan {
   interface Found { mask: Uint8Array; cutout: Uint8Array; w: number; h: number }
 
   /** One picture: the call, the candidates it needs (best: the first only), and Python's work on them. */
-  const kinds = subjectCallKinds(mode)
+  const removerUsd = paidCallUsd({ endpoint: BG_REMOVE_SLUG })
+  if (usd == null || removerUsd == null) throw new Error('Finding the subject has no price yet')
+  const whole = subjectCallKinds(mode).includes('cutout')
+
+  /** A call's answer file: kept for the run for a picture (a resumed node doesn't fetch it again), downloaded again for a clip's frame. */
+  const answerBytes = async (io: PipelineIO, key: string, name: string, url: string): Promise<Uint8Array> => {
+    if (clip) return (await io.download(url)).bytes
+    const fresh: { bytes?: Uint8Array } = {}
+    const kept = await io.savedOnce(key, name, async () => {
+      fresh.bytes = (await io.download(url)).bytes
+      return io.keep(fresh.bytes, 'bin')
+    })
+    return fresh.bytes ?? await io.read(kept)
+  }
+
+  /** SAM 3's click: its candidates, the mask kept by the mode (best: the highest score; SAM 3 answers one). */
+  const clickMask = async (io: PipelineIO, p: SubjectPicture, image: string): Promise<Uint8Array> => {
+    const key = `subject-${p.index}`
+    const got = await io.call({ key, provider: 'fal', endpoint: SAM_3_SLUG, payload: samSubjectInput(image, pointX, pointY, p.w, p.h), media: 'image', usd })
+    // No mask at all: an all-black mask, charged (ruling (k): the call ran and answered).
+    const urls = samMaskUrls(got.result)
+    const scores = samMaskScores(got.result, urls.length)
+    const cands: { m: SamAnswerMask; score: number | null }[] = []
+    for (const [i, url] of urls.entries()) cands.push({ m: await samAnswerMask(await answerBytes(io, key, `mask-${i}`, url)), score: scores[i]! })
+    return subjectMask8((mode === 'best' ? byScore(cands) : cands).map(c => c.m), mode, p.w, p.h)
+  }
+
+  /**
+   * The whole subject (fix round 2, USER ruling): R7.1's background remover's
+   * foreground, only its region under the click; null when the click is off it
+   * (or the service named no cut-out: that call undelivered, not charged).
+   */
+  const subjectOf = async (io: PipelineIO, p: SubjectPicture, image: string): Promise<Uint8Array | null> => {
+    const key = `subject-cut-${p.index}`
+    const got = await io.call({ key, provider: 'replicate', endpoint: BG_REMOVE_SLUG, payload: bgRemoveInput(image), media: 'image', usd: removerUsd })
+    const url = firstOutputUrl(got.result)[0]
+    if (!url) {
+      await io.undelivered?.(key, 'no-file')
+      return null
+    }
+    let { data: rgba, info: { width: w, height: h } } = await pilRgba(await answerBytes(io, key, 'answer', url))
+    // An answer of another size is fitted to the picture, as Background remove fits a frame's.
+    if (w !== p.w || h !== p.h) {
+      const fitted = await sharp(rgba, { raw: { width: w, height: h, channels: 4 } }).resize(p.w, p.h, { fit: 'fill' }).raw().toBuffer()
+      rgba = new Uint8Array(fitted.buffer, fitted.byteOffset, fitted.length)
+    }
+    const { x, y } = subjectClick(pointX, pointY, p.w, p.h)
+    return subjectRegion(subjectForeground(rgba, p.w, p.h), p.w, p.h, x, y)
+  }
+
   const findOne = async (io: PipelineIO, p: SubjectPicture): Promise<Found> => {
     const image = await p.url()
-    // One call a kind (smallest: the click alone; best: the whole object; largest: both), in flight together.
-    const answers = await Promise.all(kinds.map(async (kind) => {
-      const key = kind === 'part' ? `subject-${p.index}` : `subject-whole-${p.index}`
-      const got = await io.call({ key, provider: 'fal', endpoint: SAM_3_SLUG, payload: samSubjectInput(image, pointX, pointY, p.w, p.h, kind), media: 'image', usd })
-      // No mask at all: no candidate from this call; none from any call is an all-black mask, charged (ruling (k)).
-      const urls = samMaskUrls(got.result)
-      const scores = samMaskScores(got.result, urls.length)
-      const masks: { m: SamAnswerMask; score: number | null }[] = []
-      for (const [i, url] of urls.entries()) {
-        // A picture's candidates are kept for the run (a resumed node doesn't fetch them again); a clip's are not.
-        let bytes: Uint8Array
-        if (clip) bytes = (await io.download(url)).bytes
-        else {
-          const fresh: { bytes?: Uint8Array } = {}
-          const kept = await io.savedOnce(key, `mask-${i}`, async () => {
-            fresh.bytes = (await io.download(url)).bytes
-            return io.keep(fresh.bytes, 'bin')
-          })
-          bytes = fresh.bytes ?? await io.read(kept)
-        }
-        masks.push({ m: await samAnswerMask(bytes), score: scores[i]! })
-      }
-      return masks
-    }))
-    // The candidates, the whole object's first (it wins a tie on size); `best` the highest score
-    // (Python's np.argmax; no scores: SAM 3's own order), the sizes compared by the core.
-    const cands = [...(answers[kinds.indexOf('whole')] ?? []), ...(answers[kinds.indexOf('part')] ?? [])]
-    const ordered = mode === 'best' ? byScore(cands) : cands
-    const m8 = subjectMask8(ordered.map(c => c.m), mode, p.w, p.h)
+    // best / largest: the remover's subject; SAM 3's click only when the click is off it. smallest: SAM 3's click.
+    const m8 = (whole ? await subjectOf(io, p, image) : null) ?? await clickMask(io, p, image)
     const mask = await subjectGrow(m8, p.w, p.h, grow, (l, w, h, size) => pixelsInWorker(io.signal, worker => worker.maxFilter(l, w, h, size), SUBJECT_MASK_TIMEOUT))
     return { mask, cutout: subjectCutout8(await p.rgb(), mask), w: p.w, h: p.h }
   }

@@ -22,8 +22,14 @@
  * runner keeps masks: a 16-bit PNG, exact) and a [T, H, W, 3] cutout of exact
  * k / 255s (an 8-bit RGB PNG, exact). The steps here are linear passes; the
  * grow, the one costly step, runs on the Frame's worker.
+ *
+ * Fix round 2 (the live check, USER ruling): `best` and `largest` are the whole
+ * subject, made from R7.1's background remover: its foreground (alpha ≥ 128),
+ * only the connected region under the click (subjectRegion), which then goes
+ * through the same mask, grow and cutout steps.
  */
 import { pixels as pixelOps } from './core'
+import { maxFilterL } from './maxFilter'
 import type { SamAnswerMask } from './samMask'
 
 export type SubjectPick = 'best' | 'largest' | 'smallest'
@@ -110,5 +116,53 @@ export function subjectCutout8(rgb: Uint8Array, m8: Uint8Array): Uint8Array {
     out[i * 3 + 1] = rgb[i * 3 + 1]!
     out[i * 3 + 2] = rgb[i * 3 + 2]!
   }
+  return out
+}
+
+/** The remover's foreground: alpha ≥ 128 (its cut-out's alpha, PIL's RGBA of the answer), as 0 / 255. */
+export function subjectForeground(rgba: Uint8Array, w: number, h: number): Uint8Array {
+  if (rgba.length !== w * h * 4) throw new Error('The cut-out is not the size it says')
+  const out = new Uint8Array(w * h)
+  for (let i = 0; i < out.length; i++) out[i] = rgba[i * 4 + 3]! >= 128 ? 255 : 0
+  return out
+}
+
+/**
+ * The subject under the click (fix round 2): the foreground's connected region
+ * (8 neighbours) that holds the click, the connection tested on the
+ * foreground grown by one pixel (MaxFilter(3)), so a one-pixel gap (a thin
+ * strap, a stray edge) doesn't split the subject; then cut back to the
+ * foreground itself. Null when the click is off the grown foreground (the
+ * plan then falls back to SAM 3's click).
+ */
+export function subjectRegion(fg: Uint8Array, w: number, h: number, x: number, y: number): Uint8Array | null {
+  if (fg.length !== w * h) throw new Error('The foreground is not the size it says')
+  const grown = maxFilterL(fg, w, h, 3)
+  const start = y * w + x
+  if (!grown[start]) return null
+  const seen = new Uint8Array(w * h)
+  const stack = new Int32Array(w * h)
+  let top = 0
+  stack[top++] = start
+  seen[start] = 1
+  while (top > 0) {
+    const i = stack[--top]!
+    const cx = i % w
+    const cy = (i - cx) / w
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = cy + dy
+      if (ny < 0 || ny >= h) continue
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx
+        if (nx < 0 || nx >= w) continue
+        const j = ny * w + nx
+        if (seen[j] || !grown[j]) continue
+        seen[j] = 1
+        stack[top++] = j
+      }
+    }
+  }
+  const out = new Uint8Array(w * h)
+  for (let i = 0; i < out.length; i++) out[i] = seen[i] && fg[i] ? 255 : 0
   return out
 }

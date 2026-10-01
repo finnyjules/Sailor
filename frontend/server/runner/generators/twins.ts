@@ -356,8 +356,9 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   // R7.4, Mask by text and Mask extractor (family sam-3-masks): one call to fal's SAM 3 on the first picture.
   'MaskByText': r('fal', null, 'no SAM 3 on Replicate is carded'),
   'MaskExtractor': r('fal', null, 'no SAM 3 on Replicate is carded'),
-  // R7.5, Subject mask (family subject-mask): one call to fal's SAM 3 per picture or frame.
-  'SubjectMask': r('fal', null, 'no SAM 3 on Replicate is carded'),
+  // R7.5, Subject mask (family subject-mask): per picture or frame, best / largest (the default) Replicate's
+  // background remover first (fix round 2), SAM 3 on fal when the click is off its foreground; smallest SAM 3 alone.
+  'SubjectMask': r('replicate', null, 'no same-model twin of the remover on fal, nor of SAM 3 on Replicate, is carded'),
   // R7.6, Slow motion (AI) (family slow-motion-ai): one call to fal's RIFE video for the whole clip.
   'FrameInterpolateAI': r('fal', null, 'no RIFE video on Replicate is carded'),
   // R7.7, Whisper transcribe (family whisper-captions): one call to fal's Wizper (R3.10's) with the whole sound.

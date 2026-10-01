@@ -100,7 +100,7 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   // Mask by text and Mask extractor (R7.4): one picture; their call is SAM 3's.
   MaskByText: { image: LINK, prompt: 'the dog', threshold: 0, feather: 0, invert: false },
   MaskExtractor: { image: LINK, points: '[{"x":0.5,"y":0.5,"label":1}]', feather: 0, invert: false },
-  // Subject mask (R7.5): one picture; its call is SAM 3's, one click.
+  // Subject mask (R7.5): one picture; best's first call is the background remover (fix round 2).
   SubjectMask: { frames: LINK, point_x: 0.5, point_y: 0.5, output_mode: 'best', mask_grow: 0 },
   // Slow motion (AI) (R7.6): one clip; its call is RIFE video's.
   FrameInterpolateAI: { frames: LINK, multiplier: 2 },

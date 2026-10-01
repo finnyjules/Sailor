@@ -90,34 +90,35 @@ export function samTextInput(imageUrl: string, prompt: string): Record<string, u
 /** The candidates each Subject mask call asks for (SAM 3's default `max_masks`; MobileSAM gave three). */
 export const SAM_3_SUBJECT_MASKS = 3
 
-/**
- * Subject mask's calls (R7.5; fix round after the live check, 2026-10-01).
- * SAM 3 answers ONE mask for a click (no multi-granularity output: the live
- * check's portrait gave the face alone, whatever the mode), so the node's
- * modes are made from two kinds of call:
- *   - `part`: the click alone, one positive point (the tight mask: what the
- *     click lands on);
- *   - `whole`: the same click and a box over the whole picture sharing one
- *     `object_id` (the schema: "prompts sharing an object id refine the same
- *     object"), so SAM 3 segments the whole object the click is on.
- * The click is `(point_x·W, point_y·H)` rounded to whole pixels as the route
- * rounds them and kept on the picture (a click at 1.0 is the last pixel, not
- * one past it). Every candidate and its score come back
- * (`return_multiple_masks`, `include_scores`).
- */
-export function samSubjectInput(imageUrl: string, pointX: number, pointY: number, w: number, h: number, kind: 'part' | 'whole' = 'part'): Record<string, unknown> {
-  const x = Math.max(0, Math.min(w - 1, Math.round(pointX * w)))
-  const y = Math.max(0, Math.min(h - 1, Math.round(pointY * h)))
-  const base = { ...buildSamInput({ image: imageUrl, points: [{ x, y, label: 1 }] }, { syncMode: false }), return_multiple_masks: true, max_masks: SAM_3_SUBJECT_MASKS, include_scores: true }
-  if (kind === 'part') return base
-  return { ...base, point_prompts: [{ x, y, label: 1, object_id: 1 }], box_prompts: [{ x_min: 0, y_min: 0, x_max: w, y_max: h, object_id: 1 }] }
+/** Subject mask's click in whole pixels: `(point_x·W, point_y·H)` rounded as the route rounds, kept on the picture (1.0 is the last pixel). */
+export function subjectClick(pointX: number, pointY: number, w: number, h: number): { x: number; y: number } {
+  return { x: Math.max(0, Math.min(w - 1, Math.round(pointX * w))), y: Math.max(0, Math.min(h - 1, Math.round(pointY * h))) }
 }
 
-/** The calls one picture makes for a Subject mask mode: smallest the click alone, best the whole object, largest both (and a mode not known before the run both). */
-export function subjectCallKinds(mode: unknown): readonly ('part' | 'whole')[] {
-  if (mode === 'smallest') return ['part']
-  if (mode === 'best' || mode === undefined) return ['whole']
-  return ['part', 'whole']
+/**
+ * Subject mask's SAM 3 call (R7.5): the click alone, one positive point, every
+ * candidate and its score back. SAM 3 answers one mask for a click (the live
+ * check, 2026-10-01: a portrait's face alone), so this is the tight mask:
+ * `smallest`, and the fallback of `best` / `largest` when the click is off the
+ * remover's foreground (subjectCallKinds). Fix round 2 dropped the
+ * whole-picture box (the live check: it took the whole scene).
+ */
+export function samSubjectInput(imageUrl: string, pointX: number, pointY: number, w: number, h: number): Record<string, unknown> {
+  const { x, y } = subjectClick(pointX, pointY, w, h)
+  return { ...buildSamInput({ image: imageUrl, points: [{ x, y, label: 1 }] }, { syncMode: false }), return_multiple_masks: true, max_masks: SAM_3_SUBJECT_MASKS, include_scores: true }
+}
+
+/**
+ * The calls one picture may make for a Subject mask mode, the hold's worst
+ * case (USER ruling, fix round 2: `best` and `largest` are the whole subject):
+ *   - smallest: SAM 3's click (`click`);
+ *   - best / largest (and a mode not known before the run): R7.1's background
+ *     remover (`cutout`), whose foreground region under the click is the
+ *     subject; SAM 3's click only when the click is off that foreground, which
+ *     is known only from the remover's answer, so both are held.
+ */
+export function subjectCallKinds(mode: unknown): readonly ('cutout' | 'click')[] {
+  return mode === 'smallest' ? ['click'] : ['cutout', 'click']
 }
 
 /**
