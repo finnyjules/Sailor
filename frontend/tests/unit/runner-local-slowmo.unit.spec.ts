@@ -69,12 +69,14 @@ import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import { MEDIA_CAPS } from '#shared/runner/media'
 import {
   FRAME_INTERP_AI_CLASS, LOCAL_MODEL_FAMILY_OF, RIFE_MAX_MULTIPLIER, RIFE_VIDEO_SLUG, SERVICE_OF, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
-  rifeMakes, rifeSentPixels, serviceTooltip, slowMotionAiCount,
+  rifeMakes, rifePricedPixels, serviceTooltip, slowMotionAiCount,
 } from '#shared/runner/localModels'
 import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
 import { paidNoCall } from '#shared/pricing/paidSettings'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
+import { estimateUsdForNodes, localModelFrames, localModelSeconds, upstreamInputSeconds, vueNodesToEstimateInput } from '~/lib/costEstimate'
+import { modelPricedUsd, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { stageEstimate } from '~~/server/runner/metering'
 import { planNode, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
 import { RIFE_SEND_FPS, fitRifeFrame, rifeAnswerIndex, rifeVideoInput } from '~~/server/runner/generators/localModels'
@@ -260,7 +262,7 @@ describe('every RIFE case through the plan: Python’s output given the same in-
       expect([call.provider, call.endpoint, call.media]).toEqual(['fal', RIFE_VIDEO_SLUG, 'video'])
       expect(checkPayload(SCHEMA, call.payload)).toEqual([])
       expect(call.payload.num_frames).toBe(c.multiplier - 1)
-      expect(call.usd).toBe(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: c.out_count, outputPixels: rifeSentPixels(c.w, c.h) }))
+      expect(call.usd).toBe(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: c.out_count, outputPixels: rifePricedPixels(c.w, c.h) }))
       // The clip handed off: H.264, T frames, padded to even.
       expect(r.handed.length).toBe(1)
       const sent = join(mkdtempSync(join(scratch, 'sent-')), 'clip.mp4')
@@ -511,13 +513,13 @@ describe('prices (R7 rule 4, ruling (j))', () => {
     expect(card).toMatchObject({ unit: 'gpu_per_output_megapixel_frame', service: 'fal', confidence: 'estimate', read: '2026-10-01' })
     expect(SCHEMA.pricingText).toContain('$0.0013')
     // The live check's clip: 2 s of 854 × 480 at 30 fps, ×2: 119 frames, about $0.044.
-    expect(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: 119, outputPixels: rifeSentPixels(854, 480) })).toBeCloseTo(0.0444, 3)
+    expect(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: 119, outputPixels: rifePricedPixels(854, 480) })).toBeCloseTo(0.0444, 3)
     expect(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: 119 })).toBeNull()
   })
 
   it('priced only while its family is on: the measured frames and size; nothing under two frames or for ×6–8; held = charged', () => {
     const at = (m: number, frames: number) => priceNode(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: { frames, videoWidth: 641, videoHeight: 360 } })
-    const usd = paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: 95, outputPixels: 642 * 360 })!
+    const usd = paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: 95, outputPixels: 641 * 360 })!
     expect(at(2, 48)).toEqual({ usd, credits: creditsForUsd(usd) })
     expect(at(2, 1)).toEqual({ usd: 0, credits: 0 })
     for (const m of [6, 7, 8]) {
@@ -536,6 +538,69 @@ describe('prices (R7 rule 4, ruling (j))', () => {
     expect('refused' in priceNode(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: new Set(['cards', 'media-video']) })).toBe(true)
     expect(serviceTooltip(FRAME_INTERP_AI_CLASS, ON)).toBe('Runs on fal')
     expect(serviceTooltip(FRAME_INTERP_AI_CLASS, new Set(['cards']))).toBeNull()
+  })
+})
+
+// ── What the canvas shows covers what is held, where it runs (fix round 1) ──
+
+describe('the canvas’s "up to" for a clip it can’t see covers the most the runner can hold WHERE IT RUNS (fix round 1)', () => {
+  const vn = (id: string, nodeType: string, widgets: [string, unknown][], inputs: string[] = []) => ({
+    id, data: { nodeType, title: nodeType, widgetDefs: widgets.map(([name]) => ({ name })), widgetsValues: widgets.map(([, v]) => v), inputs: inputs.map(name => ({ name })) },
+  })
+  const wire = (source: string, target: string, port: number) => ({ source, target, targetHandle: `input-${port}` })
+  const canvas = (m: number) => ({
+    nodes: [vn('l', 'LoadVideo', [['file', 'a.mp4']]), vn('g', 'GetVideoComponents', [], ['video']), vn('n', FRAME_INTERP_AI_CLASS, [['multiplier', m]], ['frames'])],
+    edges: [wire('l', 'g', 0), wire('g', 'n', 0)],
+  })
+  /** What the runner holds for a clip the start of the run measured (its own price, the stage's render credit aside). */
+  const held = (m: number, frames: number, w: number, h: number) => priceNode(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: { frames, videoWidth: w, videoHeight: h } }) as { usd: number; credits: number }
+  /** Clips the start of the run lets through, at each place's edges: the frame cap, the largest frame, the batch caps. */
+  const edges = (hosted: boolean): [number, number, number, number][] => {
+    const cap = hosted ? SLOW_MOTION_AI_MAX_FRAMES.hosted : SLOW_MOTION_AI_MAX_FRAMES.local
+    return hosted
+      ? [[cap, 2, 2560, 1015], [cap, 2, 1920, 1080], [121, 5, 2560, 1040], [2, 5, 4096, 4096], [cap, 2, 640, 360]]
+      : [[cap, 5, 8192, 8192], [cap, 2, 8192, 8192], [2, 5, 8192, 8192], [cap, 5, 3840, 2160]]
+  }
+
+  it('locally: the badge (this computer’s caps) is at least the hold of the largest clip the start pass lets through, 900 frames included', () => {
+    const f = localModelFrames(null, false)
+    expect(f).toEqual({ frames: 900, upTo: true })
+    let checked = 0
+    for (const [t, m, w, h] of edges(false)) {
+      if ('problem' in slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, false)) continue
+      const badge = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
+      expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, t, w, h).usd)
+      checked++
+    }
+    expect(checked).toBeGreaterThanOrEqual(3)
+    // The 900-frame local clip at ×2 is let through and held; before this fix the badge priced hosted's 240 frames of 1080p, below it.
+    expect('problem' in slowMotionAiStart({ multiplier: 2 }, { count: 900, w: 1920, h: 1080, exact: false }, false)).toBe(false)
+    const local = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
+    expect(local).toBeGreaterThanOrEqual(held(2, 900, 1920, 1080).usd)
+    expect(held(2, 900, 1920, 1080).usd).toBeGreaterThan(held(2, 240, 1920, 1080).usd)
+    // The run-confirm and the cost gate, locally: the same ceiling, "up to".
+    const est = estimateUsdForNodes(vueNodesToEstimateInput(canvas(2).nodes, canvas(2).edges, ON), { families: ON })!
+    expect(est.usd).toBe(local)
+    expect(est.breakdown[0]!.upTo).toBe(true)
+  })
+
+  it('hosted: the badge, the run-confirm and the cost gate (hosted caps) are at least the hold of the largest hosted clip', () => {
+    const secs = upstreamInputSeconds(canvas(2).nodes[2], canvas(2).nodes, canvas(2).edges)!
+    expect(secs).toMatchObject({ upTo: true, seconds: { framesUpTo: 'hosted' } })
+    let checked = 0
+    for (const [t, m, w, h] of edges(true)) {
+      if ('problem' in slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, true)) continue
+      const c = canvas(m)
+      const s = upstreamInputSeconds(c.nodes[2], c.nodes, c.edges)!
+      const badge = nodeCreditEstimate(FRAME_INTERP_AI_CLASS, { multiplier: m, frames: ['g', 0] }, { inputSeconds: s.seconds, families: ON })!
+      const est = estimateUsdForNodes(vueNodesToEstimateInput(c.nodes, c.edges, ON), { hosted: true, families: ON })!
+      expect(est.hostedCredits).toBe(badge)
+      expect(est.breakdown[0]!.upTo).toBe(true)
+      // The stage's hold: the node's credits and the render credit.
+      expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, t, w, h).credits + 1)
+      checked++
+    }
+    expect(checked).toBeGreaterThanOrEqual(3)
   })
 })
 

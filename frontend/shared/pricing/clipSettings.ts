@@ -187,6 +187,12 @@ export interface InputSeconds {
    * (server/runner/localModelStart.ts). Absent or null = one picture.
    */
   frames?: number | null
+  /**
+   * R7.6 fix round 1: `frames` is the canvas's frame cap where it runs ("up
+   * to": the clip can't be seen), not a measured count. A price that grows with
+   * the clip's size (Slow motion (AI)) then takes that place's largest clip.
+   */
+  framesUpTo?: 'hosted' | 'local' | null
 }
 
 /**

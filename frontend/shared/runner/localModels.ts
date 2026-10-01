@@ -128,12 +128,6 @@ export const RIFE_MAX_MULTIPLIER = 5
  * to the engine before the run (a stop-gap named in R7.6's report).
  */
 export const SLOW_MOTION_AI_MAX_FRAMES = { hosted: 240, local: 900 } as const
-/**
- * The frame size the canvas prices a clip at when it can't see it (the
- * badge's "up to"; the runner always holds what it measured): 1080p.
- */
-const UNMEASURED_FRAME_PIXELS = 1920 * 1080
-
 /** Whether Slow motion (AI) at multiplier `m` calls RIFE (2–5), rather than Sailor's own interpolation or nothing. */
 export function rifeMakes(m: number): boolean {
   return Number.isInteger(m) && m >= FRAME_INTERP_AI_MULTIPLIER.min && m <= RIFE_MAX_MULTIPLIER
@@ -156,9 +150,13 @@ export function slowMotionAiCount(frames: number, m: number): number {
   return frames < 2 || m < 2 ? frames : (frames - 1) * m + 1
 }
 
-/** The frame size sent (encoded H.264 pads an odd side to even, as Save video frames does). */
-export function rifeSentPixels(w: number, h: number): number {
-  return (w + (w % 2)) * (h + (h % 2))
+/**
+ * The frame size a RIFE call is priced at: the clip's own pixels (fix round 1;
+ * the H.264 sent pads an odd side by one row or column, which the price
+ * leaves out, so the canvas ceiling is a true bound on R5's batch caps).
+ */
+export function rifePricedPixels(w: number, h: number): number {
+  return w * h
 }
 
 /** Every moved class's family (each task adds its row once its port exists). */
@@ -503,8 +501,8 @@ const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
  * `frames`), else one picture. The remover's card is R3.5's (paidRates.ts):
  * one measurement serves both.
  */
-export function localModelCalls(classType: string, frames: number | null | undefined, inputs?: Readonly<Record<string, unknown>> | null, seconds?: { videoWidth?: number | null; videoHeight?: number | null } | null): PaidCalls {
-  if (classType === FRAME_INTERP_AI_CLASS) return slowMotionAiCalls(inputs?.multiplier, frames, seconds?.videoWidth, seconds?.videoHeight)
+export function localModelCalls(classType: string, frames: number | null | undefined, inputs?: Readonly<Record<string, unknown>> | null, seconds?: SlowMotionAiMeasured | null): PaidCalls {
+  if (classType === FRAME_INTERP_AI_CLASS) return slowMotionAiCalls(inputs?.multiplier, frames, seconds)
   const endpoint = has(LOCAL_MODEL_SLUG, classType) ? LOCAL_MODEL_SLUG[classType]! : null
   if (!endpoint) return { refused: `${classType} has no price yet` }
   // A SAM 3 mask class reads the first picture only: one call, however many came in.
@@ -512,28 +510,51 @@ export function localModelCalls(classType: string, frames: number | null | undef
   return { steps: [{ call: { endpoint }, times }] }
 }
 
+/** What Slow motion (AI)'s price reads of the clip (clipSettings.ts InputSeconds' fields). */
+export interface SlowMotionAiMeasured {
+  videoWidth?: number | null
+  videoHeight?: number | null
+  /** `frames` is the canvas's frame cap where it runs, not a measured clip (fix round 1): price that place's ceiling. */
+  framesUpTo?: 'hosted' | 'local' | null
+}
+
 /**
  * Slow motion (AI)'s call (R7.6), for its price: one RIFE call making
- * (T − 1)·m + 1 frames of the clip's size (sent padded to even), `frames`
- * (T) and the size measured before the hold (TakeRecord.measured: `frames`,
- * `videoWidth`, `videoHeight`). No call (free) under two frames, or for a
- * multiplier RIFE doesn't make, or a clip under RIFE_MIN_SIDE (Sailor's own
- * interpolation, R6.6). Not
- * measured (the canvas): the hosted frame cap's clip at 1080p, at most the
- * hosted batch's pixels, a ceiling for the badge's "up to". A wired
- * multiplier is held at the dearest RIFE makes.
+ * (T − 1)·m + 1 frames of the clip's size, `frames` (T) and the size
+ * measured before the hold (TakeRecord.measured: `frames`, `videoWidth`,
+ * `videoHeight`). No call (free) under two frames, for a multiplier RIFE
+ * doesn't make, or for a clip under RIFE_MIN_SIDE (Sailor's own
+ * interpolation, R6.6). A wired multiplier is held at the dearest RIFE makes.
+ *
+ * Not measured (the canvas's "up to", fix round 1): the most the start of the
+ * run can hold WHERE THE CANVAS RUNS (`framesUpTo`; absent, this computer's,
+ * the larger): T at that place's frame cap, the output at most its batch's
+ * frames, and the frames' megapixels at most its batch's pixels (each frame
+ * at most its largest frame). The start pass refuses anything past those caps
+ * (localModelStart.ts slowMotionAiStart), so what is shown is never below
+ * what is held.
  */
-export function slowMotionAiCalls(multiplier: unknown, frames: number | null | undefined, w: number | null | undefined, h: number | null | undefined): PaidCalls {
+export function slowMotionAiCalls(multiplier: unknown, frames: number | null | undefined, seen?: SlowMotionAiMeasured | null): PaidCalls {
   const m = typeof multiplier === 'number' && Number.isInteger(multiplier) ? multiplier : Array.isArray(multiplier) ? RIFE_MAX_MULTIPLIER : null
   if (m === null || m < FRAME_INTERP_AI_MULTIPLIER.min || m > FRAME_INTERP_AI_MULTIPLIER.max) return { refused: 'Slow motion (AI) needs a multiplier from 2 to 8' }
   if (!rifeMakes(m)) return { steps: [] }
-  const measured = typeof frames === 'number' && Number.isFinite(frames) && frames >= 0
-  const t = measured ? Math.trunc(frames) : SLOW_MOTION_AI_MAX_FRAMES.hosted
-  if (t < 2) return { steps: [] }
-  const out = slowMotionAiCount(t, m)
+  const w = seen?.videoWidth
+  const h = seen?.videoHeight
   const sized = typeof w === 'number' && typeof h === 'number' && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0
-  // A clip too small for the encoder runs on Sailor's own interpolation: no call.
-  if (sized && !rifeTakes(m, w, h)) return { steps: [] }
-  const outputPixels = sized ? rifeSentPixels(w, h) : Math.min(UNMEASURED_FRAME_PIXELS, Math.floor(MEDIA_CAPS.hosted.batchPixels / out))
+  const known = typeof frames === 'number' && Number.isFinite(frames) && frames >= 0
+  if (sized && known && !seen?.framesUpTo) {
+    const t = Math.trunc(frames)
+    // Under two frames, or a clip too small for the encoder (Sailor's own interpolation): no call.
+    if (t < 2 || !rifeTakes(m, w, h)) return { steps: [] }
+    return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: slowMotionAiCount(t, m), outputPixels: rifePricedPixels(w, h) }, times: 1 }] }
+  }
+  // The ceiling where the canvas runs.
+  const place = seen?.framesUpTo === 'hosted' ? 'hosted' : 'local'
+  const caps = MEDIA_CAPS[place]
+  const cap = SLOW_MOTION_AI_MAX_FRAMES[place]
+  const t = known && !seen?.framesUpTo ? Math.min(Math.trunc(frames), cap) : cap
+  if (t < 2) return { steps: [] }
+  const out = Math.min(slowMotionAiCount(t, m), caps.batchFrames)
+  const outputPixels = sized ? rifePricedPixels(w, h) : Math.ceil(Math.min(caps.framePixels, caps.batchPixels / out))
   return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels }, times: 1 }] }
 }

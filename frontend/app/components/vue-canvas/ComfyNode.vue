@@ -32,7 +32,7 @@ import { getGeneratorIcon } from '~/data/generator-icons'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { creditsForUsd } from '~/lib/pricing'
 import { MODEL_PRICED_BADGE_CLASSES, modelPricedUsd, nodeCreditEstimate, nodePriceTooltip } from '~/lib/nodeCreditEstimate'
-import { linkedInputNames, localModelFrames, upstreamInputPixels, upstreamInputSeconds, upstreamPictureCount, widgetValueMap } from '~/lib/costEstimate'
+import { linkedInputNames, localModelFrames, localModelSeconds, upstreamInputPixels, upstreamInputSeconds, upstreamPictureCount, widgetValueMap } from '~/lib/costEstimate'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { upgradeHidesWidget } from '#shared/runner/eligibility'
 import { RETIRED_NODE_MESSAGE, isRetiredClass } from '#shared/runner/retired'
@@ -173,7 +173,8 @@ const priceLabel = computed(() => {
   // A per-frame node is priced on the pictures the canvas sees, else this computer's frame cap, "up to" (fix round 1).
   else if (priceTitle.value) {
     const f = localModelFrames(upstreamPictureCount(props, injectedNodes?.value, injectedEdges?.value), false)
-    const usd = modelPricedUsd(props.data.nodeType as string, pricedInputs.value, { families: badgeFamilies, inputSeconds: { frames: f.frames } })
+    // R7.6 fix round 1: "up to" this computer's own caps (a price that grows with the clip's size takes its largest).
+    const usd = modelPricedUsd(props.data.nodeType as string, pricedInputs.value, { families: badgeFamilies, inputSeconds: localModelSeconds(f, false) })
     if (usd != null && usd > 0) return `${f.upTo ? 'up to ' : '~'}${usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`}`
   }
   const badge = props.data.priceBadge

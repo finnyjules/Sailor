@@ -594,7 +594,7 @@ describe('what the canvas shows covers what is held (fix round 1, Critical)', ()
   it('a 300-frame hosted clip: the canvas can\'t count it, so the badge and the run-confirm show the frame cap, "up to", never below the hold', () => {
     expect(upstreamPictureCount(bg, clipCanvas.nodes, clipCanvas.edges)).toBeNull()
     const secs = upstreamInputSeconds(bg, clipCanvas.nodes, clipCanvas.edges)
-    expect(secs).toEqual({ seconds: { frames: LOCAL_MODEL_MAX_FRAMES.hosted }, upTo: true })
+    expect(secs).toEqual({ seconds: { frames: LOCAL_MODEL_MAX_FRAMES.hosted, framesUpTo: 'hosted' }, upTo: true })
     // The badge: "up to 19 cr" (300 × $0.0004 = $0.12 → 18 credits, + the render credit).
     expect(nodeCreditEstimate(BG_REMOVE_CLASS, values, { inputSeconds: secs!.seconds, families: ON_CLIP })).toBe(19)
     // The run-confirm and the cost gate (hosted): the same ceiling, marked "up to".

@@ -108,7 +108,7 @@ import {
   OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass,
   MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
-  FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifeSentPixels, rifeTakes, slowMotionAiCount,
+  FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
@@ -1211,10 +1211,10 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
   const heldT = held?.frames
   const heldW = held?.videoWidth
   const heldH = held?.videoHeight
-  if (typeof heldT !== 'number' || typeof heldW !== 'number' || typeof heldH !== 'number' || T > heldT || rifeSentPixels(v.w, v.h) > rifeSentPixels(heldW, heldH)) {
+  if (typeof heldT !== 'number' || typeof heldW !== 'number' || typeof heldH !== 'number' || T > heldT || rifePricedPixels(v.w, v.h) > rifePricedPixels(heldW, heldH)) {
     throw new Error(SLOW_MOTION_AI_WORDS.moreThanHeld)
   }
-  const usd = paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: rifeSentPixels(v.w, v.h) })
+  const usd = paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: rifePricedPixels(v.w, v.h) })
   if (usd == null) throw new Error('Slow motion (AI) has no price yet')
   const key = 'rife'
 

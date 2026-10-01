@@ -194,7 +194,7 @@ export function estimateUsdForNodes(
     // Priced from the WHOLE widget map, the same way the server charges it.
     // An estimate-priced R3 class off the runner at its flat price before R3, as priceGraph charges it (R3.9 fix round 2).
     const values = hosted || perFrame ? widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs) : null
-    const inputSeconds = frames ? { ...(n.inputSeconds ?? {}), frames: frames.frames } : n.inputSeconds
+    const inputSeconds = frames ? { ...(n.inputSeconds ?? {}), ...localModelSeconds(frames, hosted) } : n.inputSeconds
     const shared = values ? estimateFloored(n.type, values, priceNode(n.type, values, { inputPixels: n.inputPixels, inputSeconds, families: opts.families }), opts.families) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
@@ -252,6 +252,17 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null, fami
 export function localModelFrames(pictures: number | null, hosted: boolean): { frames: number; upTo: boolean } {
   if (pictures != null && pictures >= 1) return { frames: pictures, upTo: false }
   return { frames: hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local, upTo: true }
+}
+
+/**
+ * A per-frame node's priced media (R7.6 fix round 1): its frames, and, when
+ * they are the frame cap ("up to"), WHERE the canvas runs, so a price that
+ * grows with the clip's size (Slow motion (AI)) takes that place's largest
+ * clip — this computer's caps locally, hosted's in hosted — never less than
+ * the runner can hold there.
+ */
+export function localModelSeconds(f: { frames: number; upTo: boolean }, hosted: boolean): InputSeconds {
+  return { frames: f.frames, ...(f.upTo ? { framesUpTo: hosted ? 'hosted' as const : 'local' as const } : {}) }
 }
 
 /** Sources that hand on one picture (the runner's server/runner/localModelStart.ts pictureBound, as far as the canvas sees). */
@@ -340,7 +351,7 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   // frame cap, "up to" (the badge's hosted credits; localModelFrames picks the cap where it runs).
   if (isLocalModelClass(ct)) {
     const f = localModelFrames(upstreamPictureCount(node, nodes, edges), true)
-    return { seconds: { frames: f.frames }, upTo: f.upTo }
+    return { seconds: localModelSeconds(f, true), upTo: f.upTo }
   }
   // Describe a video (R3.4): the canvas can't see the video's length, so it is
   // priced at its ceiling (45 minutes, the longest answer): "up to". The
