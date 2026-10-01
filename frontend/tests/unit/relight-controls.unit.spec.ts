@@ -2,43 +2,60 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
-import { sanitizeRelightWithLegacyLights as sanitizeRelight } from '~/lib/relight/settings'
-import { applySetup, setupOf } from '~/lib/relight/presets'
+import { sanitizeRelight } from '~/lib/relight/settings'
 
-const mk = (fx = sanitizeRelight(null)) => mount(RelightControls, { props: { fx, selectedLight: fx.lights[0]!.id, depthStatus: 'ready' } })
+const LIGHTS = [
+  { id: 'la', name: 'Lamp', color: '#ffcf94', visible: true },
+  { id: 'lb', name: 'Key', color: '#29d8ff', visible: false },
+]
+const mk = (extra: Record<string, unknown> = {}) =>
+  mount(RelightControls, { props: { fx: sanitizeRelight(null), depthStatus: 'ready', ...extra } })
 
 describe('RelightControls', () => {
-  it('shows the setups, the photo controls and the light controls by name', () => {
-    const t = mk().text()
-    for (const s of ['Window', 'Golden key', 'Rim', 'Neon', 'Under', 'Original light', 'Depth', 'Texture', 'Shine', 'Shadows', 'Brightness', 'Height', 'Reach', 'Light 1'])
+  it('shows the setups and the photo controls by name, and no per-light controls', () => {
+    const t = mk({ lights: LIGHTS }).text()
+    for (const s of ['Window', 'Golden key', 'Rim', 'Neon', 'Under', 'Original light', 'Depth', 'Texture', 'Shine', 'Shadows', 'Compare'])
       expect(t).toContain(s)
+    for (const s of ['Brightness', 'Height', 'Reach']) expect(t).not.toContain(s)
+    const w = mk({ lights: LIGHTS })
+    for (const id of ['relight-light-panel', 'relight-add-light', 'relight-remove-light', 'relight-light-on', 'relight-brightness', 'relight-height', 'relight-reach', 'relight-swatch-Cyan'])
+      expect(w.find(`[data-testid="${id}"]`).exists()).toBe(false)
   })
-  it('marks the active setup', () => {
-    const w = mk()
+  it('marks the active setup the editor reports, and none when there is none', () => {
+    const w = mk({ activeSetup: 'Golden key' })
     expect(w.get('[data-testid="relight-setup-Golden key"]').attributes('aria-pressed')).toBe('true')
     expect(w.get('[data-testid="relight-setup-Neon"]').attributes('aria-pressed')).toBe('false')
+    expect(mk().findAll('[aria-pressed="true"]')).toHaveLength(0)
   })
-  it('emits the setup as a patch', async () => {
+  it('emits the setup by name (the editor replaces the Frame\'s lights), not an effect patch', async () => {
     const w = mk()
     await w.get('[data-testid="relight-setup-Neon"]').trigger('click')
-    const patch = w.emitted('update')![0]![0] as any
-    expect(setupOf({ ...sanitizeRelight(null), ...patch })).toBe('Neon')
+    expect(w.emitted('setup')).toEqual([['Neon']])
+    expect(w.emitted('update')).toBeUndefined()
   })
-  it('adds a light up to three, then disables adding', async () => {
-    const three = applySetup(sanitizeRelight(null), 'Rim')
-    three.lights.push({ ...three.lights[0]!, id: 'x3' })
-    expect(mk(three).get('[data-testid="relight-add-light"]').attributes('disabled')).toBeDefined()
-    const w = mk()
-    await w.get('[data-testid="relight-add-light"]').trigger('click')
-    expect((w.emitted('update')![0]![0] as any).lights).toHaveLength(2)
+  it('lists the Frame\'s lights as chips by name and colour, and selects one on click', async () => {
+    const w = mk({ lights: LIGHTS, selectedLight: 'lb' })
+    const a = w.get('[data-testid="relight-light-1"]'), b = w.get('[data-testid="relight-light-2"]')
+    expect(a.text()).toBe('Lamp')
+    expect(b.text()).toBe('Key')
+    expect(a.attributes('data-light-id')).toBe('la')
+    expect(a.attributes('aria-pressed')).toBe('false')
+    expect(b.attributes('aria-pressed')).toBe('true')
+    expect(a.find('span').attributes('style')).toContain('opacity: 1')
+    expect(b.find('span').attributes('style')).toContain('opacity: 0.35')   // a hidden light
+    await a.trigger('click')
+    expect(w.emitted('select-light')).toEqual([['la']])
   })
-  it('recolours the selected light from a swatch', async () => {
+  it('shows no chips when the Frame has no light', () => {
+    expect(mk().find('[data-testid="relight-light-1"]').exists()).toBe(false)
+  })
+  it('emits photo dial changes as an effect patch', async () => {
     const w = mk()
-    await w.get('[data-testid="relight-swatch-Cyan"]').trigger('click')
-    expect((w.emitted('update')![0]![0] as any).lights[0].color).toBe('#29d8ff')
+    w.getComponent('[data-testid="relight-keep"]').vm.$emit('update:modelValue', 0.5)
+    expect(w.emitted('update')).toEqual([[{ keep: 0.5 }]])
   })
   it('keeps explanations in tooltips, not panel text', () => {
-    expect(mk().text()).not.toMatch(/how much|how strongly|glossy|contact shadows/i)
+    expect(mk({ lights: LIGHTS }).text()).not.toMatch(/how much|how strongly|glossy|contact shadows|hold to/i)
   })
   it('emits compare on press and release', async () => {
     const w = mk()
@@ -54,26 +71,16 @@ describe('RelightControls', () => {
       expect(w.emitted('compare')).toEqual([[true], [false]])
     }
     const got: boolean[] = []
-    const fx = sanitizeRelight(null)
-    const w = mount(RelightControls, { props: { fx, selectedLight: fx.lights[0]!.id, depthStatus: 'ready', onCompare: (on: boolean) => got.push(on) } })
+    const w = mk({ onCompare: (on: boolean) => got.push(on) })
     await w.get('[data-testid="relight-compare"]').trigger('pointerdown')
     w.unmount()                                   // the panel goes away mid-hold
     expect(got).toEqual([true, false])
-  })
-  it('cannot remove the last light', async () => {
-    const one = mk()
-    expect(one.get('[data-testid="relight-remove-light"]').attributes('disabled')).toBeDefined()
-    const fx = applySetup(sanitizeRelight(null), 'Neon')
-    const two = mk(fx)
-    expect(two.get('[data-testid="relight-remove-light"]').attributes('disabled')).toBeUndefined()
-    await two.get('[data-testid="relight-remove-light"]').trigger('click')
-    expect((two.emitted('update')![0]![0] as any).lights).toHaveLength(1)
   })
 
   describe('surfaces price line', () => {
     const mkSurfaces = (surfacesStatus: 'idle' | 'loading' | 'ready' | 'error' | 'off', surfacesPrice: string | null = null) =>
       mount(RelightControls, {
-        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', surfacesStatus, surfacesPrice },
+        props: { fx: sanitizeRelight(null), depthStatus: 'ready', surfacesStatus, surfacesPrice },
       })
 
     it('shows the price while loading', () => {
@@ -91,7 +98,7 @@ describe('RelightControls', () => {
     })
     it('the error line shows the still-reading note in place of the plain words', () => {
       const w = mount(RelightControls, {
-        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', surfacesStatus: 'error', surfacesNote: 'Still reading — try again in a minute' },
+        props: { fx: sanitizeRelight(null), depthStatus: 'ready', surfacesStatus: 'error', surfacesNote: 'Still reading — try again in a minute' },
       })
       const t = w.get('[data-testid="relight-status-error"]').text()
       expect(t).toContain('Still reading — try again in a minute')
@@ -112,7 +119,7 @@ describe('RelightControls', () => {
     const mkAbsent = (surfacesReadPrice: string | null = '~$0.01') =>
       mount(RelightControls, {
         props: {
-          fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready',
+          fx: sanitizeRelight(null), depthStatus: 'ready',
           surfacesStatus: 'absent', surfacesReadPrice,
         },
       })
@@ -131,7 +138,7 @@ describe('RelightControls', () => {
     it('shows no button and no status line for idle, ready or off', () => {
       for (const surfacesStatus of ['idle', 'ready', 'off'] as const) {
         const w = mount(RelightControls, {
-          props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', surfacesStatus },
+          props: { fx: sanitizeRelight(null), depthStatus: 'ready', surfacesStatus },
         })
         expect(w.find('[data-testid="relight-surfaces-read"]').exists()).toBe(false)
         expect(w.find('[data-testid="relight-status-loading"]').exists()).toBe(false)
@@ -142,7 +149,7 @@ describe('RelightControls', () => {
     it('loading still shows the status line, not the button', () => {
       const w = mount(RelightControls, {
         props: {
-          fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready',
+          fx: sanitizeRelight(null), depthStatus: 'ready',
           surfacesStatus: 'loading', surfacesPrice: '~$0.01',
         },
       })
@@ -153,7 +160,7 @@ describe('RelightControls', () => {
   describe('Finish button (stage 3)', () => {
     const mkFinish = (extra: Record<string, unknown> = {}) =>
       mount(RelightControls, {
-        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', finishAvailable: true, finishPrice: '~$0.08', ...extra },
+        props: { fx: sanitizeRelight(null), depthStatus: 'ready', finishAvailable: true, finishPrice: '~$0.08', ...extra },
       })
 
     it('shows the price on the button, with the explanation as a tooltip', () => {

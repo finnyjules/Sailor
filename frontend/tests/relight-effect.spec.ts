@@ -48,7 +48,7 @@ test.describe('Relight effect', () => {
     await seedPhoto(page)
     const before = await stackPixels(page)
     await addRelight(page)                                    // includes: the GPU pass really ran
-    await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
     await expect(page.getByTestId('relight-setup-Golden key')).toHaveAttribute('aria-pressed', 'true')
     expect(await stackPixels(page)).not.toBe(before)
   })
@@ -57,7 +57,7 @@ test.describe('Relight effect', () => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
-    const handle = page.getByTestId('relight-light-handle').first()
+    const handle = page.getByTestId('light-dot').first()
     const b0 = (await handle.boundingBox())!
     const px0 = await stackPixels(page)
     await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2)
@@ -73,14 +73,14 @@ test.describe('Relight effect', () => {
     expect(await stackPixels(page)).toBe(px0)
   })
 
-  test('setups switch the lights; Neon gives two handles and un-highlights after a change', async ({ page }) => {
+  test('setups switch the lights; Neon gives two light dots and un-highlights after a change', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
     await page.getByTestId('relight-setup-Neon').click()
-    await expect(page.getByTestId('relight-light-handle')).toHaveCount(2)
+    await expect(page.getByTestId('light-dot')).toHaveCount(2)
     await expect(page.getByTestId('relight-setup-Neon')).toHaveAttribute('aria-pressed', 'true')
-    const h = page.getByTestId('relight-light-handle').first()
+    const h = page.getByTestId('light-dot').first()
     const b = (await h.boundingBox())!
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down()
     await page.mouse.move(b.x + 60, b.y + 40, { steps: 6 }); await page.mouse.up()
@@ -172,32 +172,6 @@ test.describe('Relight effect', () => {
     expect(r).not.toBeNull()
     expect(r!.same).toBeLessThan(2)                                // measured 0.25
     expect(r!.flipped).toBeGreaterThan(20)                         // control: the map is not symmetric (63.5)
-  })
-
-  test('a wheel run over a light raises it as one undo step and does not pan; a click records nothing', async ({ page }) => {
-    await openCompositor(page)
-    await seedPhoto(page)
-    await addRelight(page)
-    const height = () => page.evaluate(() => {
-      const l = (window as any).__compositorLayers()[0]
-      const fx = (l.effects ?? []).find((e: any) => e.type === 'relight')
-      return fx?.lights?.[0]?.height ?? null
-    })
-    const h0 = await height()
-    expect(h0).not.toBeNull()
-    const h = page.getByTestId('relight-light-handle').first()
-    const hb = (await h.boundingBox())!
-    // A click that never moves: no undo step (undo would otherwise pop the effect's own add).
-    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
-    await page.mouse.down(); await page.mouse.up()
-    for (let i = 0; i < 12; i++) await page.mouse.wheel(0, -40)   // one trackpad-like run
-    await expect.poll(height).toBeGreaterThan(h0 + 0.3)
-    const hb1 = (await h.boundingBox())!
-    // Centres, not corners: a higher light draws a bigger handle.
-    expect(Math.abs(hb1.x + hb1.width / 2 - hb.x - hb.width / 2) + Math.abs(hb1.y + hb1.height / 2 - hb.y - hb.height / 2)).toBeLessThan(1)   // the canvas did not pan
-    await page.keyboard.press('Meta+z')
-    await expect.poll(height).toBeCloseTo(h0, 5)                   // one undo undid the whole run
-    await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)   // …and not the add
   })
 
   test('the first Relight add does not stall the main thread on the depth-field build', async ({ page }) => {
@@ -430,7 +404,7 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     expect(finishedFilename).not.toBe(origFilename)
     expect(finishedFilename).toMatch(/^relightfinish_/)
     // The effect panel closed with it (selectedEffect cleared on success).
-    await expect(page.getByTestId('relight-light-handle')).toHaveCount(0)
+    await expect(page.getByTestId('relight-compare')).toHaveCount(0)
 
     await page.getByTestId('edit-result-revert').click()
     await expect(page.locator('[data-edit-result-bar]')).toHaveCount(0)
@@ -571,9 +545,9 @@ async function measureOrientation(page: Page, ready?: Promise<unknown>): Promise
   await openCompositor(page)
   await seedPhoto(page)
   await addRelight(page)                                         // Golden key: a single light
-  await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)
+  await expect(page.getByTestId('light-dot')).toHaveCount(1)
   if (ready) { await ready; await stackPixels(page) }            // the surfaces swap has painted
-  const h = page.getByTestId('relight-light-handle').first()
+  const h = page.getByTestId('light-dot').first()
   /** Drag the one light to a layer fraction (0.5, fy), and wait for the GPU pass to re-run. */
   const dragTo = async (fy: number) => {
     const runs0 = await runs(page)

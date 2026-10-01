@@ -1,11 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   defaultRelightSettings, sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId, RELIGHT_SWATCHES,
-  readLegacyRelightLights, sanitizeRelightWithLegacyLights,
+  readLegacyRelightLights,
 } from '~/lib/relight/settings'
-import { applySetup, setupOf, RELIGHT_SETUP_NAMES, relightSetup, isRelightSetupName } from '~/lib/relight/presets'
-
-const fx = () => sanitizeRelightWithLegacyLights({ type: 'relight', visible: true, ...defaultRelightSettings() })
+import { RELIGHT_SETUP_NAMES, relightSetup, isRelightSetupName } from '~/lib/relight/presets'
 
 describe('relight settings', () => {
   it('starts with Golden key\'s Original light and the photo defaults, and no lights of its own', () => {
@@ -44,11 +42,6 @@ describe('relight settings', () => {
   it('has the six swatches by name', () => {
     expect(RELIGHT_SWATCHES.map(s => s.label)).toEqual(['Warm', 'Tungsten', 'Daylight', 'Blue hour', 'Magenta', 'Cyan'])
   })
-  it('bridge (until Tasks 2/3): an effect without lights reads as Golden key\'s light, a stored list as itself', () => {
-    expect(setupOf(fx())).toBe('Golden key')
-    expect(sanitizeRelightWithLegacyLights({ lights: [] }).lights).toEqual([])
-    expect(sanitizeRelightWithLegacyLights({ lights: [{ x: 0.1 }] }).lights[0]).toMatchObject({ x: 0.1 })
-  })
 })
 
 describe('relight setups', () => {
@@ -68,17 +61,5 @@ describe('relight setups', () => {
     const s = relightSetup('Window') as { lights: { x: number }[] }
     s.lights[0]!.x = 9
     expect(relightSetup('Window').lights[0]!.x).toBe(-0.05)
-  })
-  it('bridge: applies a setup to the effect\'s lights and recognises it, ignoring light ids', () => {
-    for (const name of RELIGHT_SETUP_NAMES) expect(setupOf(applySetup(fx(), name))).toBe(name)
-  })
-  it('bridge: keeps the photo controls when a setup is applied', () => {
-    const f = { ...fx(), depth: 9, texture: 1, shine: 0.5, shadows: false }
-    expect(applySetup(f, 'Neon')).toMatchObject({ depth: 9, texture: 1, shine: 0.5, shadows: false })
-  })
-  it('bridge: stops recognising a setup once a light moves', () => {
-    const f = applySetup(fx(), 'Rim')
-    f.lights[0]!.x += 0.05
-    expect(setupOf(f)).toBeNull()
   })
 })

@@ -34,7 +34,7 @@ vi.mock('~/lib/relight/depthField', async (orig) => ({
   relightDepthFieldFor: () => reg.field,
 }))
 
-import { paintLayerStack, __setImageForTest, __relightPhotoCacheForTest, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
+import { paintLayerStack, __setImageForTest, __relightPhotoCacheForTest, setRelightBypass, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
 import { newLightLayer } from '~/lib/frame/lighting/settings'
 import { releaseLightingMaps, type LightingStamp } from '~/lib/frame/lighting/maps'
 import { defaultRelightSettings } from '~/lib/relight/settings'
@@ -192,6 +192,26 @@ describe('with a Frame light', () => {
     const stamps = lightFrame.mock.calls[0]![3] as LightingStamp[]
     expect(stamps.every(s => !s.facing)).toBe(true)
     expect(facingTile).not.toHaveBeenCalled()
+  })
+})
+
+describe('Compare (the Relight bypass hold)', () => {
+  it('shows the original photo: no Relight passes, and it stamps unlit — only while held', () => {
+    const p = photo({ keep: 0.3 })
+    const lamp = newLightLayer('lamp') as unknown as LocalLayer
+    setRelightBypass(p.id)
+    try { paint([p, lamp]) } finally { setRelightBypass(null) }
+    expect(originalLight).not.toHaveBeenCalled()
+    expect(facingTile).not.toHaveBeenCalled()
+    const held = (lightFrame.mock.calls[0]![3] as LightingStamp[]).find(s => s.layer?.id === p.id)!
+    expect(held.layer!.lit).toBe(false)
+    expect(held.facing).toBeFalsy()
+    expect(p.lit).toBeUndefined()                  // the layer itself is untouched
+    paint([p, lamp])
+    const after = (lightFrame.mock.calls[1]![3] as LightingStamp[]).find(s => s.layer?.id === p.id)!
+    expect(after.layer!.lit).toBeUndefined()
+    expect(after.facing).toBeTruthy()
+    expect(after.sig).not.toBe(held.sig)
   })
 })
 

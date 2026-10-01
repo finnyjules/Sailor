@@ -141,8 +141,9 @@ import {
   surfacesWasPaidFor, surfacesMessageFor, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
-// Stage 2 bridge (until Task 3): the Relight panel and handles still edit the effect's own lights.
-import { sanitizeRelightWithLegacyLights as sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
+import { sanitizeRelight } from '~/lib/relight/settings'
+import type { RelightSetupName } from '~/lib/relight/presets'
+import { activeRelightSetup, hasLegacyRelightLights, relightConvertedMessage } from '~/lib/frame/lighting/convertRelight'
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
@@ -167,7 +168,6 @@ import { canFinishRelight, finishApplyPatch, finishRevertPatch } from '~/lib/rel
 import { requestRelightFinish } from '~/composables/useRelightFinish'
 import { renderRelightPair } from '~/composables/useCompositorLayers'
 import { requestCostConfirm } from '~/lib/costConfirmRequest'
-import { recordOnce, wheelGestureRecorder } from '~/lib/relight/gestureHistory'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
@@ -2394,9 +2394,8 @@ function onDistortPointerDown(cornerKey: 'tl' | 'tr' | 'br' | 'bl', e: PointerEv
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
 }
 
-// ── Relight: on-canvas light handles ───────────────────────────────────────
+// ── Relight (light layers stage 2): the photo's panel; its lights are the Frame's light layers ──
 const relightSelected = computed(() => activeEffect.value?.type === 'relight' && !!activeEffectLayer.value)
-const relightFx = computed(() => (relightSelected.value ? sanitizeRelight(activeEffect.value) : null))
 // Same geometry as distortHandlePositions / onDistortPointerDown (proven under rotation):
 // boxPx is in canvas-display px, the layer centre is (l.x·W, l.y·H), rotation about it.
 /** Layer fraction (0,0 = the layer box's top left, before rotation) → canvas display px. */
@@ -2409,63 +2408,42 @@ function relightToCanvas(fx: number, fy: number): { x: number; y: number } {
   const dx = (fx - 0.5) * box.w, dy = (fy - 0.5) * box.h
   return { x: cx + dx * cosA - dy * sinA, y: cy + dx * sinA + dy * cosA }
 }
-/** A pointer event → layer fraction (the inverse), mapped through the canvas rect as distort does. */
-function pointerToRelight(ev: { clientX: number; clientY: number }, r: DOMRect): { x: number; y: number } {
-  const l = activeEffectLayer.value
-  const W = canvasDisplay.w, H = canvasDisplay.h
-  const box = boxPx(l)
-  const mx = ((ev.clientX - r.left) / r.width) * W - l.x * W
-  const my = ((ev.clientY - r.top) / r.height) * H - l.y * H
-  const rad = ((l.rotation || 0) * Math.PI) / 180, cosA = Math.cos(rad), sinA = Math.sin(rad)
-  const lx = mx * cosA + my * sinA, ly = -mx * sinA + my * cosA   // un-rotate into the layer box
-  return { x: box.w ? lx / box.w + 0.5 : 0.5, y: box.h ? ly / box.h + 0.5 : 0.5 }
+/** The panel's light chips: the Frame's light layers, named as in the layer list. */
+const relightLightChips = computed(() => frameLightLayers.value.map(l => ({
+  id: l.id, name: rowLabel({ layer: l }), color: l.light.color, visible: l.visible !== false,
+})))
+/** The Setup the Frame still matches around the selected Relight photo, for the panel's highlight. */
+const relightActiveSetup = computed<RelightSetupName | null>(() => {
+  const l = relightSelected.value ? activeEffectLayer.value as LocalLayer : null
+  if (!l) return null
+  const d = editorDims()
+  return activeRelightSetup(localLayers.value as LocalLayer[], l, d.w, d.h)
+})
+/** A Setup replaces ALL the Frame's light layers around this photo (one undo step). */
+function onRelightSetup(name: RelightSetupName) {
+  const l = activeEffectLayer.value; if (!l) return
+  viewOnlyGuard()                                             // lights are placed at the design size
+  editor.applyRelightSetup(l.id, name)
 }
-const relightHandles = computed(() => (relightFx.value?.lights ?? []).map(l => ({ l, ...relightToCanvas(l.x, l.y) })))
-function writeRelight(patch: Record<string, unknown>, record: boolean) {
-  if (record) { updateActiveEffect(patch); return }
-  // Inside a gesture: write without a history entry (the gesture recorded its one step).
-  const sel = selectedEffect.value; const l = sel ? layerById(sel.layerId) : null
-  if (!sel || !l) return
-  const stack = layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e))
-  commit(localLayers.value.map((x: any) => (x.id === l.id ? { ...x, ...writeStackToLayer(stack) } : x)))
+/** A light chip selects that light layer: the light inspector edits it. */
+function onRelightSelectLight(id: string) {
+  selectedEffect.value = null
+  selectLocal(id)
 }
-function onRelightHandleDown(e: PointerEvent, id: string) {
-  if (viewOnlyGuard()) return
-  e.preventDefault(); e.stopPropagation()
-  relightLightId.value = id
-  const r = canvasRect(); if (!r) return
-  const recordDrag = recordOnce(recordHistory)               // one undo step, on the first move only
-  const move = (ev: PointerEvent) => {
-    const f = relightFx.value; if (!f) return
-    const p = pointerToRelight(ev, r)
-    const x = Math.min(1.4, Math.max(-0.4, p.x)), y = Math.min(1.4, Math.max(-0.4, p.y))
-    recordDrag()
-    writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, x, y } : l)) }, false)
-  }
-  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
-}
-// One undo step per wheel run (first event after 300 ms of quiet), not per event.
-const recordRelightWheel = wheelGestureRecorder(recordHistory)
-function onRelightHandleWheel(e: WheelEvent, id: string) {
-  if (viewOnlyGuard()) return
-  const f = relightFx.value; if (!f) return
-  recordRelightWheel()
-  writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, height: Math.min(1, Math.max(-0.3, l.height - e.deltaY * 0.001)) } : l)) }, false)
-}
-/** Double-click on the Relight layer adds a light. true only when it consumed the event (a
- *  light was added, or the click snapped a viewing size back); anything else falls through. */
-function onRelightDoubleClick(e: MouseEvent): boolean {
-  const f = relightFx.value; if (!f || f.lights.length >= RELIGHT_MAX_LIGHTS) return false
-  const r = canvasRect(); if (!r) return false
-  const p = pointerToRelight(e, r)
-  if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return false  // only on the layer itself
-  if (viewOnlyGuard()) return true
-  const l = { id: newLightId(), x: p.x, y: p.y, height: 0.35, color: '#f4f7ff', brightness: 1.4, reach: 1, on: true }
-  updateActiveEffect({ lights: [...f.lights, l] })
-  relightLightId.value = l.id
-  return true
-}
+// An old Relight Frame (lights stored on the effect, no light layer) is converted once per open,
+// as one undo step, at the design size — at a viewing size the painter's read-only view shows it
+// and nothing is written. Waits for the artboard's real size (the conversion maps through W×H).
+let relightConvertTried = false
+const relightMounted = ref(false)
+onMounted(() => { relightMounted.value = true })            // after the artboard's first fit
+watch(() => [relightMounted.value, atDesign.value, canvasDisplay.w, canvasDisplay.h] as const, ([mounted, design, w, h]) => {
+  if (relightConvertTried || !mounted || !design || !compositor.value || !(w > 0 && h > 0)) return
+  relightConvertTried = true
+  const ls = localLayers.value as LocalLayer[]
+  if (ls.some(l => l.kind === 'light') || !hasLegacyRelightLights(ls)) return
+  const dropped = editor.convertLegacyRelight()
+  if (dropped !== null) toast(relightConvertedMessage(dropped))
+}, { immediate: true })
 
 /** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
  *  selected layer carries foil anywhere (a foil fill, text colour or outline paint). */
@@ -3005,19 +2983,8 @@ function updateActiveEffect(patch: Record<string, unknown>) {
   if (!sel || !l) return
   setLayerStack(sel.layerId, layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e)))
 }
-// Relight: which of the effect's lights the panel and the on-canvas handles show as selected.
-// Owned here (not by RelightControls) so it survives the panel re-rendering, and reset to the
-// first light whenever the selection lands on a different Relight instance (or one loses its
-// current light, e.g. after Remove).
-const relightLightId = ref<string | null>(null)
 // Compare is a hold: a selection change mid-hold must not leave that layer painting without Relight.
 watch(selectedEffect, () => { setRelightBypass(null) })
-watch(activeEffect, (v) => {
-  if (v?.type === 'relight') {
-    const f = sanitizeRelight(v)
-    if (!f.lights.some(l => l.id === relightLightId.value)) relightLightId.value = f.lights[0]?.id ?? null
-  }
-})
 const activeEffectDepthStatus = computed<'idle' | 'loading' | 'ready' | 'error'>(() => {
   void depthTick.value
   return activeEffectDepth.value ? depthStatusFor(activeEffectDepth.value) : 'error'
@@ -3302,6 +3269,7 @@ function toggleShaderFxPicker(key: string) {
 }
 
 function addLayerEffect(layerId: string, kind: EffectKind) {
+  if (kind === 'relight') { relightStart(layerId); return }    // Relight comes with the Frame's lights
   const l = layerById(layerId); if (!l) return
   // Read the BEFORE stack once: after setLayerStack the layer is the new stack, so diffing
   // against a re-read would find nothing and fall back to the last entry — wrong for a pinned
@@ -3322,12 +3290,17 @@ function addLayerEffect(layerId: string, kind: EffectKind) {
   const fresh = next.find(e => !beforeIds.has(e.id)) ?? next[next.length - 1]
   if (fresh) selectEffect(layerId, fresh.id)
 }
-/** Right-click "Relight…": select the layer's existing Relight effect, or add one. */
+/** Right-click "Relight…" and the + menu: select the layer's existing Relight effect, or add one
+ *  through the editor — which converts an old Relight Frame first and, when the Frame has no
+ *  light, adds a Lamp at Golden key's place (one undo step). */
 function relightStart(layerId: string) {
   const l = layerById(layerId); if (!l) return
   const existing = layerStack(l).find(e => e.type === 'relight')
   if (existing) { selectEffect(layerId, existing.id); return }
-  addLayerEffect(layerId, 'relight')                         // adds, expands the layer, selects it
+  viewOnlyGuard()                                             // the lamp is placed at the design size
+  const id = editor.addRelight(layerId); if (!id) return
+  expandedLayers.value = new Set(expandedLayers.value).add(layerId)
+  selectEffect(layerId, id)
 }
 function removeLayerEffect(layerId: string, effectId: string) {
   const l = layerById(layerId); if (!l) return
@@ -4551,7 +4524,6 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
   if (penSession.value) return // the pen's own double-clicks
-  if (relightSelected.value && onRelightDoubleClick(e)) { e.preventDefault(); e.stopPropagation(); return } // a double-click on the Relight layer adds a light
   if (viewEditing.value) { void onViewDblClick(e); return }
   // Double-click a path → enter node edit; otherwise fall back to text edit.
   if (!nodeEdit.active.value) {
@@ -10215,7 +10187,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           @pointerdown="onLightPointerDown"
         />
 
-        <!-- Relight: light handles on the layer, and the rest of the Frame dimmed. -->
+        <!-- Relight: the rest of the Frame dimmed (its lights are the Frame's light dots below). -->
         <template v-if="relightSelected && !editingId && !genActive && !relightFinishing">
           <svg data-testid="relight-dim" class="absolute inset-0 pointer-events-none z-10" :width="canvasDisplay.w" :height="canvasDisplay.h">
             <defs><mask id="relight-hole">
@@ -10224,15 +10196,6 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             </mask></defs>
             <rect :width="canvasDisplay.w" :height="canvasDisplay.h" fill="rgba(0,0,0,0.35)" mask="url(#relight-hole)" />
           </svg>
-          <div v-for="h in relightHandles" :key="h.l.id" data-handle data-testid="relight-light-handle" :data-light-id="h.l.id"
-            :aria-label="`Light ${relightFx!.lights.indexOf(h.l) + 1}`" title="Drag to move · scroll to raise or lower"
-            class="absolute z-20 rounded-full cursor-grab"
-            :style="{ left: h.x + 'px', top: h.y + 'px', transform: 'translate(-50%, -50%)',
-              width: 14 + Math.max(0, h.l.height) * 26 + 'px', height: 14 + Math.max(0, h.l.height) * 26 + 'px',
-              background: h.l.color, opacity: h.l.on ? 1 : 0.35,
-              outline: h.l.height < 0 ? '1.5px dashed rgba(255,255,255,.8)' : 'none', outlineOffset: '4px',
-              boxShadow: (h.l.id === relightLightId ? '0 0 0 2px #fff, 0 0 0 6px rgba(255,255,255,.22), ' : '0 0 0 2px rgba(255,255,255,.95), ') + `0 0 22px 6px ${h.l.color}99` }"
-            @pointerdown="onRelightHandleDown($event, h.l.id)" @wheel.stop.prevent="onRelightHandleWheel($event, h.l.id)" />
         </template>
 
         <!-- Light layers: each light as a glowing dot (a spot's aim ring, a sun's line). Design tab only. -->
@@ -11862,7 +11825,9 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <p v-if="!relightAvailable()" class="text-[11px] text-white/50">{{ relightUnavailableReason() }}</p>
             <RelightControls
               :fx="sanitizeRelight(activeEffect)"
-              :selected-light="relightLightId"
+              :lights="relightLightChips"
+              :selected-light="selectedIsLight ? selectedLocalId : null"
+              :active-setup="relightActiveSetup"
               :depth-status="activeEffectDepthStatus"
               :surfaces-status="activeEffectSurfacesStatus"
               :surfaces-price="activeEffectSurfacesPrice"
@@ -11874,7 +11839,8 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :finish-blocked="relightFinishBlocked"
               :locked="!!relightFinishing"
               @update="(p) => { if (!relightFinishing) updateActiveEffect(p) }"
-              @select-light="(id) => (relightLightId = id)"
+              @setup="onRelightSetup"
+              @select-light="onRelightSelectLight"
               @compare="(on) => { relightComparing = on; setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
               @retry-surfaces="retryActiveEffectSurfaces"
               @read-surfaces="readActiveEffectSurfaces"

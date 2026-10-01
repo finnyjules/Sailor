@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   relightLightsToLayers, hasLegacyRelightLights, setupToLightLayers, relightBoxToFrame, frameToRelightBox,
+  activeRelightSetup, relightConvertedMessage,
 } from '~/lib/frame/lighting/convertRelight'
 import { relightSetup, RELIGHT_SETUP_NAMES } from '~/lib/relight/presets'
 import { MAX_LIGHTS, DEFAULT_LIGHTING } from '~/lib/frame/lighting/settings'
@@ -201,5 +202,43 @@ describe('setupToLightLayers', () => {
   it('gives fresh ids each time', () => {
     const a = setupToLightLayers('Neon', photo({}, null), W, H), b = setupToLightLayers('Neon', photo({}, null), W, H)
     expect(new Set([...a, ...b].map(l => l.id)).size).toBe(4)
+  })
+})
+
+describe('activeRelightSetup', () => {
+  const withKeep = (keep: number) => photo({ effects: [relight(undefined, { keep })] }, null)
+  it('recognises every setup the editor applies (lamps + Original light), ids ignored', () => {
+    for (const name of RELIGHT_SETUP_NAMES) {
+      const p = withKeep(relightSetup(name).keep)
+      expect(activeRelightSetup([p, text(), ...setupToLightLayers(name, p, W, H)], p, W, H)).toBe(name)
+    }
+  })
+  it('is null once a light moves, changes, hides, or another light joins', () => {
+    const p = withKeep(relightSetup('Rim').keep)
+    const ls = setupToLightLayers('Rim', p, W, H)
+    expect(activeRelightSetup([p, { ...ls[0]!, x: ls[0]!.x + 0.05 }, ls[1]!], p, W, H)).toBeNull()
+    expect(activeRelightSetup([p, { ...ls[0]!, light: { ...ls[0]!.light, color: '#ffffff' } }, ls[1]!], p, W, H)).toBeNull()
+    expect(activeRelightSetup([p, { ...ls[0]!, visible: false }, ls[1]!], p, W, H)).toBeNull()
+    expect(activeRelightSetup([p, ...ls, ...setupToLightLayers('Under', p, W, H)], p, W, H)).toBeNull()
+  })
+  it('is null when Original light moved, or the Frame has no light, or the layer has no Relight', () => {
+    const p = withKeep(0.5)
+    expect(activeRelightSetup([p, ...setupToLightLayers('Neon', p, W, H)], p, W, H)).toBeNull()
+    expect(activeRelightSetup([withKeep(0.12)], withKeep(0.12), W, H)).toBeNull()
+    const plain = text()
+    expect(activeRelightSetup([plain], plain, W, H)).toBeNull()
+  })
+  it('follows the photo: the same lamps after the photo moved no longer match', () => {
+    const p = withKeep(relightSetup('Window').keep)
+    const ls = setupToLightLayers('Window', p, W, H)
+    const moved = { ...p, x: p.x + 0.1 } as LocalLayer
+    expect(activeRelightSetup([moved, ...ls], moved, W, H)).toBeNull()
+  })
+})
+
+describe('relightConvertedMessage', () => {
+  it('says the lights are Frame lights, and how many were left out', () => {
+    expect(relightConvertedMessage(0)).toBe('Relight\'s lights are now Frame lights')
+    expect(relightConvertedMessage(2)).toBe('Relight\'s lights are now Frame lights — 2 left out')
   })
 })

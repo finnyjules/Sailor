@@ -6,7 +6,7 @@
  * sets. `setupToLightLayers` (lib/frame/lighting/convertRelight) turns a setup into the
  * Frame's light layers through the photo's transform.
  */
-import { newLightId, type LegacyRelightEffect, type RelightLight } from './settings'
+import type { RelightLight } from './settings'
 
 export type RelightSetupName = 'Window' | 'Golden key' | 'Rim' | 'Neon' | 'Under'
 /** One light of a setup: x, y in fractions of the photo's box; height < 0 = behind (becomes 0
@@ -38,33 +38,3 @@ export function relightSetup(name: RelightSetupName): RelightSetup {
 
 export const isRelightSetupName = (v: unknown): v is RelightSetupName =>
   typeof v === 'string' && (RELIGHT_SETUP_NAMES as readonly string[]).includes(v)
-
-// ── Temporary bridge (light layers stage 2, Task 1 → Task 3) ───────────────────────────────
-// The Relight panel still applies setups to the effect's own lights until Task 3 moves it onto
-// the editor's `applyRelightSetup` (which sets the Frame's light layers).
-
-/** @deprecated Stage 2 bridge only — the panel moves to `applyRelightSetup` in Task 3.
- *  Replaces the lights and Original light; the photo controls (Depth, Texture, Shine, Shadows) stay. */
-export function applySetup(fx: LegacyRelightEffect, name: RelightSetupName): LegacyRelightEffect {
-  const s = SETUPS[name]
-  return { ...fx, keep: s.keep, lights: s.lights.map(l => ({ ...l, id: newLightId(), on: true })) }
-}
-
-const close = (a: number, b: number) => Math.abs(a - b) < 1e-3
-
-/** @deprecated Stage 2 bridge only (see `applySetup`).
- *  The setup these settings still match exactly (ids ignored), or null once anything moved.
- *  Photo controls (Depth, Texture, Shine, Shadows) are ignored on purpose: a setup defines only the lights and Original light. */
-export function setupOf(fx: LegacyRelightEffect): RelightSetupName | null {
-  for (const name of RELIGHT_SETUP_NAMES) {
-    const s = SETUPS[name]
-    if (!close(fx.keep, s.keep) || fx.lights.length !== s.lights.length) continue
-    const same = s.lights.every((l, i) => {
-      const f = fx.lights[i]!
-      return f.on && close(f.x, l.x) && close(f.y, l.y) && close(f.height, l.height)
-        && f.color === l.color && close(f.brightness, l.brightness) && close(f.reach, l.reach)
-    })
-    if (same) return name
-  }
-  return null
-}

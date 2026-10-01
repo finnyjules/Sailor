@@ -98,18 +98,3 @@ export function readLegacyRelightLights(raw: unknown): RelightLight[] {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   return Array.isArray(r.lights) ? r.lights.slice(0, RELIGHT_MAX_LIGHTS).map(sanitizeLight) : []
 }
-
-// ── Temporary bridge (light layers stage 2, Task 1 → Tasks 2/3) ────────────────────────────
-// Until the painter lights photos through the Frame's lights (Task 2) and the Relight panel
-// drops its per-light controls (Task 3), those two still read an effect WITH its own lights,
-// exactly as before stage 2: the stored list, or Golden key's one light when there is none.
-/** @deprecated Stage 2 bridge only — removed by Tasks 2/3. */
-export type LegacyRelightEffect = RelightEffect & { lights: RelightLight[] }
-/** @deprecated Stage 2 bridge only — removed by Tasks 2/3. */
-export function sanitizeRelightWithLegacyLights(raw: unknown): LegacyRelightEffect {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  const lights = Array.isArray(r.lights)
-    ? readLegacyRelightLights(r)
-    : [{ id: newLightId(), x: 0.85, y: 0.3, height: 0.4, color: '#ffcf94', brightness: 3.2, reach: 1.4, on: true }]
-  return { ...sanitizeRelight(raw), lights }
-}

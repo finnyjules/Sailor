@@ -7117,6 +7117,9 @@ export function paintLayerStack(
         if (loopLights!.length < MAX_LIGHTS) loopLights!.push(layer as LightLayer)
         return
       }
+      // Relight's Compare hold shows the ORIGINAL photo: no Relight on its paint (above) and,
+      // here, not lit by the Frame's lights either — it stamps as an unlit layer while held.
+      if (relightBypassed(layer.id)) layer = { ...layer, lit: false } as LocalLayer
       const ghost = paintShown({ ...layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
       const scaled = typeof ms === 'number' && Math.abs(ms - 1) > 1e-4 ? Math.max(0.001, ms) : 0
       const maskLocal = maskItem?.type === 'local' ? maskItem.layer : null

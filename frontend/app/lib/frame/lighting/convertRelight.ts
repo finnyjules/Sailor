@@ -12,7 +12,7 @@
 import type { LocalLayer, LightLayer } from '~/composables/useCompositorLayers'
 import { effectStackOf, writeStackToLayer, type EffectInstance } from '~/lib/compositor/effectStack'
 import { readLegacyRelightLights } from '~/lib/relight/settings'
-import { relightSetup, type RelightSetupName } from '~/lib/relight/presets'
+import { RELIGHT_SETUP_NAMES, relightSetup, type RelightSetupName } from '~/lib/relight/presets'
 import { MAX_LIGHTS, DEFAULT_LIGHTING, LIGHT_DEFAULTS, newLightLayer, sanitizeLightLayer, sanitizeLighting, type FrameLighting } from './settings'
 
 // ── The photo's box ──────────────────────────────────────────────────────────
@@ -157,4 +157,35 @@ export function relightLightsToLayers(
  *  setup's order). The setup's Original light (`keep`) is the caller's to apply. */
 export function setupToLightLayers(setup: RelightSetupName, photo: LocalLayer, W: number, H: number): LightLayer[] {
   return relightSetup(setup).lights.map(spec => lampFrom(spec, photo, W, H, newLightLayer('lamp').id))
+}
+
+const close = (a: number, b: number) => Math.abs(a - b) < 1e-3
+
+/** The Setup the Frame still matches around `photo` — its light layers are exactly that setup's
+ *  lamps (stack order, all visible; ids ignored) and the photo's Original light is the setup's —
+ *  or null once anything moved. The Relight panel highlights it. */
+export function activeRelightSetup(layers: readonly LocalLayer[], photo: LocalLayer, W: number, H: number): RelightSetupName | null {
+  const entry = relightEntry(photo)
+  if (!entry) return null
+  const keep = (entry as { keep?: unknown }).keep
+  const lights = layers.filter((l): l is LightLayer => l.kind === 'light')
+  for (const name of RELIGHT_SETUP_NAMES) {
+    const setup = relightSetup(name)
+    if (typeof keep !== 'number' || !close(keep, setup.keep) || lights.length !== setup.lights.length) continue
+    const want = setup.lights.map(spec => lampFrom(spec, photo, W, H, ''))
+    const same = want.every((w, i) => {
+      const l = lights[i]!
+      if (l.visible === false || !close(l.x, w.x) || !close(l.y, w.y)) return false
+      const a = l.light, b = w.light
+      return a.type === b.type && a.color === b.color && close(a.height, b.height) && close(a.brightness, b.brightness)
+        && close(a.reach, b.reach) && close(a.aimX, b.aimX) && close(a.aimY, b.aimY) && close(a.cone, b.cone) && close(a.edge, b.edge)
+    })
+    if (same) return name
+  }
+  return null
+}
+
+/** The one-time toast after the editor converts an old Relight Frame on open. */
+export function relightConvertedMessage(dropped: number): string {
+  return dropped > 0 ? `Relight's lights are now Frame lights — ${dropped} left out` : 'Relight\'s lights are now Frame lights'
 }
