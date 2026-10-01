@@ -186,6 +186,8 @@ const FRAME_LEAN_STUBS: [RegExp, string][] = [
   [/\/app\/lib\/brushTips\/coverage\.ts$/, './app/lib/embed/frame/brushTipsLean.embed.ts'],
   [/\/app\/lib\/motionx\/reveal\/paintPixelReveal\.ts$/, './app/lib/embed/frame/pixelRevealLean.embed.ts'],
   [/\/app\/lib\/relight\/relightPass\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
+  // Relight's light conversion (light layers stage 2) pulls in the effect stack and the Setups.
+  [/\/app\/lib\/frame\/lighting\/convertRelight\.ts$/, './app/lib/embed/frame/convertRelightLean.embed.ts'],
   [/\/app\/lib\/embed\/frame\/depthField\.embed\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
   [/\/app\/lib\/embed\/frame\/bundleKind\.ts$/, './app/lib/embed/frame/bundleKind.lean.embed.ts'],
   // Frame Morph (medial/morph/morphPieces, ~22k): morph Frames take the full bundle.

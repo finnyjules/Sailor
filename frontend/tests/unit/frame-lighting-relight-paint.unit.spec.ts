@@ -15,8 +15,15 @@ vi.mock('~/lib/relight/relightPass', () => ({
   relightOriginalLight: (...a: unknown[]) => originalLight(...(a as [unknown, number, number, number])),
   relightFacingTile: (...a: unknown[]) => facingTile(...a),
   originalLightActive: (k: number) => k < 0.999,
+  releaseRelight: () => {},
 }))
 const FIELD = { kind: 'float', width: 2, height: 2, data: new Float32Array(4) }
+// What the depth-field and surfaces registries hand back; a test can make them "arrive".
+const reg: { field: unknown; surfaces: unknown } = { field: FIELD, surfaces: null }
+vi.mock('~/lib/compositor/surfacesRegistry', async (orig) => ({
+  ...(await orig<typeof import('~/lib/compositor/surfacesRegistry')>()),
+  surfacesImageFor: () => reg.surfaces,
+}))
 vi.mock('~/lib/compositor/depthRegistry', async (orig) => ({
   ...(await orig<typeof import('~/lib/compositor/depthRegistry')>()),
   depthImageFor: () => ({ complete: true, naturalWidth: 2, naturalHeight: 2 }),
@@ -24,12 +31,12 @@ vi.mock('~/lib/compositor/depthRegistry', async (orig) => ({
 }))
 vi.mock('~/lib/relight/depthField', async (orig) => ({
   ...(await orig<typeof import('~/lib/relight/depthField')>()),
-  relightDepthFieldFor: () => FIELD,
+  relightDepthFieldFor: () => reg.field,
 }))
 
-import { paintLayerStack, __setImageForTest, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
+import { paintLayerStack, __setImageForTest, __relightPhotoCacheForTest, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
 import { newLightLayer } from '~/lib/frame/lighting/settings'
-import type { LightingStamp } from '~/lib/frame/lighting/maps'
+import { releaseLightingMaps, type LightingStamp } from '~/lib/frame/lighting/maps'
 import { defaultRelightSettings } from '~/lib/relight/settings'
 
 function stubCtx() {
@@ -51,12 +58,24 @@ function stubCtx() {
 
 const BITMAP = { complete: true, naturalWidth: 40, naturalHeight: 40, width: 40, height: 40, tag: 'bitmap' }
 
+/** Every canvas the painter made this test, with the one 2D context it handed out. */
+let made: { c: any; x: any }[] = []
 beforeEach(() => {
   lightFrame.mockClear(); originalLight.mockClear(); facingTile.mockClear()
+  reg.field = FIELD; reg.surfaces = null
+  made = []
   vi.stubGlobal('document', {
-    createElement: () => { const c: any = { width: 0, height: 0 }; c.getContext = () => { const x = stubCtx(); x.canvas = c; return x }; return c },
+    createElement: () => {
+      const c: any = { width: 0, height: 0 }
+      let x: any = null
+      c.getContext = () => (x ??= Object.assign(stubCtx(), { canvas: c }))
+      made.push({ c, get x() { return x } } as never)
+      return c
+    },
   })
 })
+/** The painter's own copy of the tile the facing pass returned (copyCanvas draws it in). */
+const tileCopy = () => made.find(m => m.x?.drawImage?.mock?.calls.some((a: unknown[]) => (a[0] as { tag?: string })?.tag === 'tile'))?.c
 
 let seq = 0
 /** A Relight photo, its own file each time (so the per-photo cache never crosses tests). */
@@ -73,8 +92,8 @@ const rect = (id: string, patch: Record<string, unknown> = {}): LocalLayer => ({
   id, kind: 'rect', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1, fill: '#ff0000', ...patch,
 } as unknown as LocalLayer)
 const itemsOf = (ls: LocalLayer[]): StackItem[] => ls.map(l => ({ type: 'local' as const, key: `l:${l.id}`, layer: l }))
-const paint = (ls: LocalLayer[], lighting?: unknown) =>
-  paintLayerStack(stubCtx(), 20, 20, itemsOf(ls), ls, undefined, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, lighting as never)
+const paint = (ls: LocalLayer[], lighting?: unknown, ctx = stubCtx()) =>
+  paintLayerStack(ctx, 20, 20, itemsOf(ls), ls, undefined, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, lighting as never)
 
 describe('a Relight photo with no light layer and no legacy lights', () => {
   it('draws plain + Original light: no Frame pass, no facing tile', () => {
@@ -192,5 +211,86 @@ describe('the per-photo cache', () => {
     const fx = (p as unknown as { effects: Record<string, unknown>[] }).effects[0]!
     paint([{ ...p, effects: [{ ...fx, depth: 9 }] } as unknown as LocalLayer, lamp])
     expect(facingTile).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('fix round 1', () => {
+  const lampL = () => newLightLayer('lamp') as unknown as LocalLayer
+  const fxOf = (p: LocalLayer) => (p as unknown as { effects: Record<string, unknown>[] }).effects[0]!
+  const withFx = (p: LocalLayer, patch: Record<string, unknown>) => ({ ...p, effects: [{ ...fxOf(p), ...patch }] } as unknown as LocalLayer)
+
+  it('the tile IS what the facing stamp draws, and the visible canvas never draws it', () => {
+    const p = photo()
+    const ctx = stubCtx()
+    paint([p, lampL()], undefined, ctx)
+    const copy = tileCopy()
+    expect(copy).toBeTruthy()
+    const st = (lightFrame.mock.calls[0]![3] as LightingStamp[]).find(s => s.layer?.id === p.id)!
+    const target = stubCtx()
+    st.facing!.draw(target)
+    expect((target.drawImage as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0])).toContain(copy)
+    expect((ctx.drawImage as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0])).not.toContain(copy)
+  })
+
+  it('Shine reruns neither pass; Original light reruns only the paint; Depth / Texture / Shadows only the tile', () => {
+    const p = photo()
+    const lamp = lampL()
+    paint([p, lamp])
+    paint([withFx(p, { shine: 0.9 }), lamp])
+    expect([originalLight.mock.calls.length, facingTile.mock.calls.length]).toEqual([1, 1])
+    paint([withFx(p, { keep: 0.5 }), lamp])
+    expect([originalLight.mock.calls.length, facingTile.mock.calls.length]).toEqual([2, 1])
+    paint([withFx(p, { depth: 7 }), lamp])
+    expect([originalLight.mock.calls.length, facingTile.mock.calls.length]).toEqual([2, 2])
+    paint([withFx(p, { texture: 5 }), lamp])
+    paint([withFx(p, { shadows: false }), lamp])
+    expect([originalLight.mock.calls.length, facingTile.mock.calls.length]).toEqual([2, 4])
+  })
+
+  it('a new source image reruns both passes', () => {
+    const p = photo()
+    const lamp = lampL()
+    paint([p, lamp])
+    __setImageForTest((p as unknown as { filename: string }).filename, { ...BITMAP } as never)
+    paint([p, lamp])
+    expect([originalLight.mock.calls.length, facingTile.mock.calls.length]).toEqual([2, 2])
+  })
+
+  it('the depth field arriving makes the tile; surfaces arriving remake it', () => {
+    const p = photo()
+    const lamp = lampL()
+    reg.field = null
+    paint([p, lamp])
+    expect(facingTile).not.toHaveBeenCalled()
+    expect((lightFrame.mock.calls[0]![3] as LightingStamp[]).find(s => s.layer?.id === p.id)!.facing).toBeFalsy()
+    reg.field = FIELD
+    paint([p, lamp])
+    expect(facingTile).toHaveBeenCalledTimes(1)
+    reg.surfaces = { tag: 'moge' }
+    paint([p, lamp])
+    expect(facingTile).toHaveBeenCalledTimes(2)
+    expect(facingTile.mock.calls[1]![6]).toBe(reg.surfaces)
+    expect(originalLight).toHaveBeenCalledTimes(1)
+  })
+
+  it('the caches are sized by the visible Relight photos, and emptied when lighting is released', () => {
+    releaseLightingMaps()
+    expect(__relightPhotoCacheForTest()).toMatchObject({ paint: 0, tile: 0 })
+    const ps = Array.from({ length: 5 }, () => photo())
+    paint([...ps, lampL()])
+    expect(__relightPhotoCacheForTest().max).toBe(12)
+    expect(__relightPhotoCacheForTest().tile).toBe(5)
+  })
+
+  it('the legacy view is memoised: one conversion per stack, the same lights every paint', () => {
+    const p = photo({ lights: [{ x: 0.2, y: 0.3, height: 0.4, color: '#ffcf94', brightness: 2, reach: 1, on: true }] })
+    const ls = [rect('r'), p]
+    paint(ls)
+    paint(ls)
+    const a = lightFrame.mock.calls[0]![4] as LocalLayer[], b = lightFrame.mock.calls[1]![4] as LocalLayer[]
+    expect(a[0]).toBe(b[0])                              // same object: converted once
+    expect(a[0]!.id).toBe(`ll-rl-${p.id}-i0`)            // no stored id: derived, never random
+    paint([...ls])                                       // a new stack array converts again, same ids
+    expect((lightFrame.mock.calls[2]![4] as LocalLayer[])[0]!.id).toBe(a[0]!.id)
   })
 })

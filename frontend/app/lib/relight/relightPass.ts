@@ -12,7 +12,7 @@
  * docs/superpowers/specs/2026-10-01-frame-light-layers-design.md
  */
 import {
-  FACING_FRAG, facingAvailable, facingUnavailableReason, __facingPassRuns, renderFacingTile, renderOriginalLight,
+  FACING_FRAG, facingAvailable, facingUnavailableReason, __facingPassRuns, renderFacingTile, renderOriginalLight, releaseFacing,
 } from '~/lib/frame/lighting/facingPass'
 import type { RelightEffect } from './settings'
 
@@ -46,3 +46,6 @@ export const relightFacingTile = renderFacingTile
 /** The photo's paint with Original light applied (see facingPass.ts `renderOriginalLight`); null
  *  when keep is 1 (nothing to do). The pass's own canvas. */
 export const relightOriginalLight = renderOriginalLight
+
+/** Free the per-photo pass's GL context (the next use rebuilds it). */
+export const releaseRelight = releaseFacing

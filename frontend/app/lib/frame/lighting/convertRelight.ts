@@ -129,10 +129,16 @@ export function relightLightsToLayers(
     const entry = stack.find(e => e.type === 'relight')!
     const old = readLegacyRelightLights(entry)
     const shown = l.visible !== false && entry.visible !== false
-    for (const o of old) {
-      if (lights.length >= MAX_LIGHTS) { dropped++; continue }
-      lights.push(lampFrom(o, l, W, H, `ll-rl-${l.id}-${o.id}`, shown && o.on))
-    }
+    // A stored light without an id gets a random one from the sanitizer; the light layer's id is
+    // derived from the photo and the light's place instead, so the painter's read-only view
+    // makes the same lights on every paint.
+    const stored = (entry as { lights?: unknown }).lights as unknown[]
+    old.forEach((o, i) => {
+      if (lights.length >= MAX_LIGHTS) { dropped++; return }
+      const raw = stored[i] as { id?: unknown } | null | undefined
+      const key = typeof raw?.id === 'string' && raw.id ? raw.id : `i${i}`
+      lights.push(lampFrom(o, l, W, H, `ll-rl-${l.id}-${key}`, shown && o.on))
+    })
     if (!('lights' in (entry as object))) return l
     const { lights: _gone, ...kept } = entry as EffectInstance & { lights?: unknown }
     return { ...l, ...writeStackToLayer(stack.map(e => (e === entry ? kept as EffectInstance : e))) } as LocalLayer

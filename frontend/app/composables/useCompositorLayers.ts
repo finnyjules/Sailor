@@ -25,7 +25,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import { DEFAULT_FRAME_LIGHT, type FrameLight } from '~/lib/compositor/frameLight'
 import { DEFAULT_LIGHTING, MAX_LIGHTS, type FrameLighting } from '~/lib/frame/lighting/settings'
 import { lightFrame, lightingAvailable } from '~/lib/frame/lighting/lightingPass'
-import { bumpLightingMapEpoch, layerSig, type LightingStamp } from '~/lib/frame/lighting/maps'
+import { bumpLightingMapEpoch, layerSig, onLightingRelease, type LightingStamp } from '~/lib/frame/lighting/maps'
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
@@ -113,8 +113,8 @@ import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
 // light layers light it, by the facing tile it hands the lighting maps. Old Frames whose Relight
 // still carries its own lights are lit through the read-only conversion (convertRelight.ts).
 import { sanitizeRelight } from '~/lib/relight/settings'
-import { relightAvailable, relightFacingTile, relightOriginalLight, originalLightActive } from '~/lib/relight/relightPass'
-import { hasLegacyRelightLights, isRelightPhoto, relightLightsToLayers } from '~/lib/frame/lighting/convertRelight'
+import { relightAvailable, relightFacingTile, relightOriginalLight, originalLightActive, releaseRelight } from '~/lib/relight/relightPass'
+import { hasLegacyRelightLights, isRelightPhoto, relightLightsToLayers, type RelightConversion } from '~/lib/frame/lighting/convertRelight'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
 import { canFinishRelight, finishBoxSize } from '~/lib/relight/finish'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
@@ -6785,12 +6785,23 @@ function addShaderFieldRequest(out: FieldRequest[], paint: Paint | undefined, W:
  * to convert (a light layer exists, or no Relight effect carries lights).
  */
 const _legacyUnlit = new WeakMap<LocalLayer, LocalLayer>()
+const _legacyConv = new WeakMap<LocalLayer[], { W: number; H: number; lk: string; conv: RelightConversion }>()
 function legacyRelightView(
   items: StackItem[], localLayers: LocalLayer[], lighting: FrameLighting | undefined, W: number, H: number,
 ): { items: StackItem[]; localLayers: LocalLayer[]; lighting: FrameLighting } | null {
   if (!localLayers.some(l => l.kind === 'image' || l.kind === 'wired')) return null
-  if (localLayers.some(l => l.kind === 'light') || !hasLegacyRelightLights(localLayers)) return null
-  const conv = relightLightsToLayers(localLayers, lighting, W, H)
+  // Memoised on the stack's identity + size + lighting: an unchanged old Frame converts once,
+  // not per paint (its lights keep one identity, and their ids are derived, never random).
+  const lk = lighting ? JSON.stringify(lighting) : ''
+  const memo = _legacyConv.get(localLayers)
+  let conv: RelightConversion
+  if (memo && memo.W === W && memo.H === H && memo.lk === lk) conv = memo.conv
+  else {
+    conv = localLayers.some(l => l.kind === 'light') || !hasLegacyRelightLights(localLayers)
+      ? { layers: localLayers, lighting: lighting ?? DEFAULT_LIGHTING, dropped: 0, changed: false }
+      : relightLightsToLayers(localLayers, lighting, W, H)
+    _legacyConv.set(localLayers, { W, H, lk, conv })
+  }
   if (!conv.changed) return null
   const before = new Set(localLayers.map(l => l.id))
   const out: StackItem[] = items.map((it) => {
@@ -6864,6 +6875,10 @@ export function paintLayerStack(
   // converts once on open). No legacy Relight ⇒ the same arrays, untouched.
   const legacy = legacyRelightView(items, localLayers, lighting, W, H)
   if (legacy) ({ items, localLayers, lighting } = legacy)
+  // Relight photo caches hold two entries per visible photo (plus slack for another surface).
+  let relightPhotos = 0
+  for (const l of localLayers) if ((l.kind === 'image' || l.kind === 'wired') && l.visible !== false && isRelightPhoto(l)) relightPhotos++
+  if (relightPhotos) sizeRelightPhotoCaches(relightPhotos)
   // Shader fields, glass, backdrop and pixel effects run on the live effect clock when a live
   // host set one (never for a bake); otherwise on `t`, exactly as before.
   const fieldT = !bake && _liveEffectClock != null ? _liveEffectClock : (t ?? 0), fieldFps = motion?.fps ?? 30
@@ -7460,14 +7475,15 @@ function objId(o: unknown): number {
   return n
 }
 
-/** A layer's signature without its position: moving a photo changes neither of its passes. */
-const _placeFreeSig = new WeakMap<object, string>()
-function placeFreeSig(layer: LocalLayer): string {
-  let sig = _placeFreeSig.get(layer)
+/** What the photo's box-sized render depends on: the layer without its place and its effects
+ *  (no effect is drawn into it) — so moving a photo or turning a dial changes neither key. */
+const _contentSig = new WeakMap<object, string>()
+function relightContentSig(layer: LocalLayer): string {
+  let sig = _contentSig.get(layer)
   if (sig === undefined) {
-    const { x: _x, y: _y, ...rest } = layer as LocalLayer & { x: number; y: number }
+    const { x: _x, y: _y, effects: _e, ...rest } = layer as LocalLayer & { x: number; y: number; effects?: unknown }
     sig = layerSig(rest as LocalLayer)
-    _placeFreeSig.set(layer, sig)
+    _contentSig.set(layer, sig)
   }
   return sig
 }
@@ -7480,14 +7496,43 @@ interface RelightPhotoOut {
   /** The facing tile (facingPass.ts encoding), rotated by `rotation`; null when not asked for or
    *  the depth field has not landed. Shared from the cache. */
   tile: HTMLCanvasElement | null
-  /** The result's content signature (photo, box, dials, field, surfaces); null ⇒ uncacheable. */
+  /** The tile's content signature (photo, box, Depth / Texture / Shadows, field, surfaces,
+   *  rotation); null ⇒ uncacheable or no tile. */
   sig: string | null
 }
 
-// A few photos' results, so a paint that changes nothing about a photo (a light drag, a text
-// edit elsewhere) runs neither pass. Each entry holds at most two box-sized canvases.
-const RELIGHT_PHOTO_CACHE_MAX = 4
-const _relightPhotoCache = new Map<string, { paint: HTMLCanvasElement | null; tile: HTMLCanvasElement | null }>()
+// The two passes are cached apart, each keyed only by what it reads: Original light by the photo
+// and `keep`; the facing tile by the photo, the shape dials, the depth field, the surfaces and the
+// rotation. So dragging Shine reruns neither, Original light only the paint, Depth only the tile;
+// a light drag or a photo move reruns nothing. Sized by the Frame's visible Relight photos
+// (`sizeRelightPhotoCaches`, from paintLayerStack); emptied when the Frame editor closes.
+let _relightPhotoCacheMax = 4
+const _relightPaintCache = new Map<string, HTMLCanvasElement | null>()
+const _relightTileCache = new Map<string, HTMLCanvasElement | null>()
+function sizeRelightPhotoCaches(photos: number): void {
+  _relightPhotoCacheMax = Math.max(4, 2 * photos + 2)
+}
+onLightingRelease(() => {
+  _relightPaintCache.clear()
+  _relightTileCache.clear()
+  releaseRelight()
+})
+function cacheGet(cache: Map<string, HTMLCanvasElement | null>, key: string | null): HTMLCanvasElement | null | undefined {
+  if (key == null || !cache.has(key)) return undefined
+  const v = cache.get(key)!
+  cache.delete(key); cache.set(key, v) // most recent last
+  return v
+}
+function cachePut(cache: Map<string, HTMLCanvasElement | null>, key: string | null, v: HTMLCanvasElement | null): void {
+  if (key == null) return
+  while (cache.size >= _relightPhotoCacheMax) cache.delete(cache.keys().next().value as string)
+  cache.set(key, v)
+}
+/** Test seam: the per-photo caches' sizes and cap. */
+export function __relightPhotoCacheForTest(): { paint: number; tile: number; max: number } {
+  return { paint: _relightPaintCache.size, tile: _relightTileCache.size, max: _relightPhotoCacheMax }
+}
+
 const copyCanvas = (c: HTMLCanvasElement | null): HTMLCanvasElement | null => {
   if (!c) return null
   const o = document.createElement('canvas'); o.width = c.width; o.height = c.height
@@ -7499,8 +7544,8 @@ const copyCanvas = (c: HTMLCanvasElement | null): HTMLCanvasElement | null => {
  *  ONE implementation: the live paint and the Finish pair (`renderRelightPair` below) must see
  *  the identical field, crop rect and surfaces normals. `depth` is the caller's own
  *  `depthImageFor(dofRef)` result (never re-fetched here — this stays synchronous); the depth
- *  field and surfaces are read only when a tile is asked for. A living image (`noCache`) and a
- *  photo whose source is not decoded yet are never cached. */
+ *  field and surfaces are read only when a tile is asked for. A living image (`noCache`), a
+ *  canvas source and a photo whose source is not decoded yet are never cached. */
 function relightPhotoFor(
   layer: LocalLayer,
   W: number,
@@ -7523,20 +7568,24 @@ function relightPhotoFor(
   const normals = field ? surfacesImageFor(dofRef) : null
   // A canvas source (a live studio slot) is redrawn in place: its identity says nothing.
   const live = !!rs && typeof HTMLCanvasElement !== 'undefined' && rs.src instanceof HTMLCanvasElement
-  const key = noCache || !rs || live ? null
-    : `${objId(rs.src)}|${placeFreeSig(layer)}|${bw}x${bh}|${W}|${wantTile ? `t${objId(field)}:${objId(normals)}:${rotation}` : '-'}`
-  const hit = key == null ? undefined : _relightPhotoCache.get(key)
-  if (hit) {
-    _relightPhotoCache.delete(key!); _relightPhotoCache.set(key!, hit)
-    return { ...hit, sig: key }
+  const base = noCache || !rs || live ? null : `${objId(rs.src)}|${relightContentSig(layer)}|${bw}x${bh}|${W}`
+
+  const paintKey = base == null ? null : `${base}|k${relight.keep}`
+  let paint = cacheGet(_relightPaintCache, paintKey)
+  if (paint === undefined) {
+    paint = copyCanvas(relightOriginalLight(src, relight.keep, bw, bh))
+    cachePut(_relightPaintCache, paintKey, paint)
   }
-  const paint = copyCanvas(relightOriginalLight(src, relight.keep, bw, bh))
-  const tile = field && rs ? copyCanvas(relightFacingTile(src, field, relight, bw, bh, rs.rect, normals, rotation)) : null
-  if (key != null) {
-    if (_relightPhotoCache.size >= RELIGHT_PHOTO_CACHE_MAX) _relightPhotoCache.delete(_relightPhotoCache.keys().next().value as string)
-    _relightPhotoCache.set(key, { paint, tile })
+
+  if (!field || !rs) return { paint, tile: null, sig: null }
+  const tileKey = base == null ? null
+    : `${base}|d${relight.depth}|t${relight.texture}|s${relight.shadows ? 1 : 0}|f${objId(field)}|n${objId(normals)}|r${rotation}`
+  let tile = cacheGet(_relightTileCache, tileKey)
+  if (tile === undefined) {
+    tile = copyCanvas(relightFacingTile(src, field, relight, bw, bh, rs.rect, normals, rotation))
+    cachePut(_relightTileCache, tileKey, tile)
   }
-  return { paint, tile, sig: key }
+  return { paint, tile, sig: tile ? tileKey : null }
 }
 
 /**

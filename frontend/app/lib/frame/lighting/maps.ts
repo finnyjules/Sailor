@@ -343,7 +343,16 @@ export function cachedLightingMaps(
 
 /** Free every map this module holds (the cache, the uncacheable pair, the stamp scratch). The
  *  next paint re-stamps — called by `releaseLighting` when the Frame editor closes. */
+const _releaseHooks = new Set<() => void>()
+/** Called with every `releaseLightingMaps` (the Frame editor closing): other per-Frame lighting
+ *  caches (the painter's Relight photo results) free themselves too. Returns an unsubscribe. */
+export function onLightingRelease(cb: () => void): () => void {
+  _releaseHooks.add(cb)
+  return () => { _releaseHooks.delete(cb) }
+}
+
 export function releaseLightingMaps(): void {
+  for (const cb of [..._releaseHooks]) cb()
   _cache.clear()
   _uncached = null
   _scratch = null

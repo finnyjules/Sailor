@@ -23,6 +23,8 @@ export function relightOriginalLight(): HTMLCanvasElement | null {
   return null
 }
 
+export function releaseRelight(): void {}
+
 export function originalLightActive(): boolean {
   return false
 }
