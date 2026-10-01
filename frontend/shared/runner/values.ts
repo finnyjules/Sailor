@@ -75,6 +75,16 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   LoadVideoFrames: { 0: 'frames', 1: 'number' },
 }
 
+/**
+ * R7 ruling (f): a picture node that works on every frame of what comes in
+ * (Background remove) hands on, on this slot, what its input brings: a
+ * picture for a picture, a frame batch for a clip. Applied only where `kinds`
+ * has a row for the class (its family on: eligibility.ts outputKindsFor).
+ */
+export const KIND_FOLLOWS_INPUT: Readonly<Record<string, { slot: number; input: string }>> = {
+  BackgroundRemove: { slot: 0, input: 'frames' },
+}
+
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */
 export function outputKind(
   prompt: ApiPrompt, link: ApiLink,
@@ -88,6 +98,11 @@ export function outputKind(
     return isLink(d) ? outputKind(prompt, d, kinds, depth + 1) : 'files'
   }
   const row = Object.prototype.hasOwnProperty.call(kinds, node.class_type) ? kinds[node.class_type] : undefined
+  const follows = row && Object.prototype.hasOwnProperty.call(KIND_FOLLOWS_INPUT, node.class_type) ? KIND_FOLLOWS_INPUT[node.class_type]! : undefined
+  if (follows && follows.slot === link[1]) {
+    const d = node.inputs?.[follows.input]
+    return isLink(d) && outputKind(prompt, d, kinds, depth + 1) === 'frames' ? 'frames' : 'files'
+  }
   return row && Object.prototype.hasOwnProperty.call(row, link[1]) ? row[link[1]]! : 'files'
 }
 

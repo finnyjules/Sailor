@@ -347,6 +347,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'OutpaintImageNode:Bria Expand': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   // R3.7, Separate background and foreground: its cut-out and fill on Replicate, as Python.
   'SplitPhotoLayersNode': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
+  // R7.1, Background remove (family bg-remove): one call per picture to Replicate's 851-labs remover.
+  'BackgroundRemove': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   // R3.8, music and speech (family audio-gen): Replicate, as Python.
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',

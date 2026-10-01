@@ -181,6 +181,12 @@ export interface InputSeconds {
   videoWidth?: number | null
   videoHeight?: number | null
   videoFps?: number | null
+  /**
+   * The pictures (frames) a local-model node works through, one call each
+   * (R7 ruling (f)), as the start of the run counted them before the hold
+   * (server/runner/localModelStart.ts). Absent or null = one picture.
+   */
+  frames?: number | null
 }
 
 /**

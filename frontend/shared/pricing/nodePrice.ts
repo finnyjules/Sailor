@@ -73,6 +73,7 @@ import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
 import { REMOTE_VIDEO_NODE_CLASSES, personSwapVideoUsd, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 import type { RunnerFamily } from '../runner/families'
+import { isLocalModelClass, localModelCalls, localModelOn } from '../runner/localModels'
 
 export type NodeInputs = Record<string, unknown>
 
@@ -123,10 +124,14 @@ export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PR
 export const FAMILY_PRICED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   EnhanceVideoNode: 'topaz-video',
   PersonSwapVideo: 'person-swap-video',
+  // (R7's local-model nodes are priced here too while their family is on: familyPricedClass reads
+  // shared/runner/localModels.ts. They had no flat price: they were free, on this computer.)
 }
 
 /** Whether `classType` is priced here with these families on (FAMILY_PRICED_CLASSES). */
 export function familyPricedClass(classType: string, families: ReadonlySet<RunnerFamily> | undefined): boolean {
+  // R7: a local-model node, with its whole chain on (its family needs `cards`).
+  if (isLocalModelClass(classType)) return localModelOn(classType, families)
   const family = hasOwn(FAMILY_PRICED_CLASSES, classType) ? FAMILY_PRICED_CLASSES[classType] : undefined
   return !!family && !!families?.has(family)
 }
@@ -329,6 +334,8 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   // Enhance a video on fal's Topaz, while topaz-video is on (F23); Person swap (video) on fal's
   // Pixverse Swap, while person-swap-video is on: the measured video, else its ceiling.
   if (familyPricedClass(classType, opts.families)) {
+    // R7 (ruling (f)): one call per frame, the frames counted before the hold (else one picture).
+    if (isLocalModelClass(classType)) return paidStepsPrice(localModelCalls(classType, opts.inputSeconds?.frames))
     const usd = classType === 'PersonSwapVideo'
       ? personSwapVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
       : topazVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})

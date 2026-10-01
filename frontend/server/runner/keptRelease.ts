@@ -26,11 +26,14 @@ import { linksOf, type ApiPrompt } from '#shared/runner/graph'
 import { MEDIA_EFFECT_FAMILY_OF } from '#shared/runner/mediaEffects'
 import type { NodeRecord, OutputFile, RunRecord, RunnerValue, TakeRecord } from './types'
 import { filesOf, slotValue } from './values'
+import { LOCAL_MODEL_FAMILY_OF } from '#shared/runner/localModels'
 
 /** The classes that keep frame batches or sounds of their own as they run (R5, R6). */
 export const KEPT_MEDIA_MAKERS: ReadonlySet<string> = new Set([
   'GetVideoComponents', 'LoadVideoFrames', 'SaveVideo', 'Video', 'Audio',
   ...Object.keys(MEDIA_EFFECT_FAMILY_OF),
+  // R7 (ruling (f)): the local-model picture nodes keep a clip's batch of their own.
+  ...Object.keys(LOCAL_MODEL_FAMILY_OF),
 ])
 
 const FINISHED_BADLY: ReadonlySet<string> = new Set(['error', 'skipped', 'stopped', 'dropped'])

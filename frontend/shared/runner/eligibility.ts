@@ -19,6 +19,9 @@ import {
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
 import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
+  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_PICTURE_SLOTS, localModelOn, localModelRows, localModelSwitchedClasses,
+} from './localModels'
+import {
   ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
   TOPAZ_ENHANCE_MODELS, TOPAZ_SUBJECT_DETECTION, TOPAZ_UPSCALE_FACTORS, UPSCALE_ENGINES,
 } from './repair'
@@ -175,8 +178,8 @@ function feedsAlsoAllows(rule: RunnerNodeRule, classType: string, families: Read
   return list.some(a => familyOn(a.family, families) && a.classes.includes(classType))
 }
 
-/** What an input check may read beside the node's inputs: its class, its id in the prompt, the host, and (R2.10) the prompt. */
-export interface InputCheckContext { classType: string; nodeId?: string; hosted?: boolean; prompt?: ApiPrompt }
+/** What an input check may read beside the node's inputs: its class, its id in the prompt, the host, (R2.10) the prompt and (R7.1) the families on. */
+export interface InputCheckContext { classType: string; nodeId?: string; hosted?: boolean; prompt?: ApiPrompt; families?: ReadonlySet<RunnerFamily> }
 
 /**
  * Checks of a node's own inputs, named by RunnerNodeRule.inputCheck. A node
@@ -242,6 +245,20 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
     if (!showsMadeVideo(ctx.prompt, inputs.source)) return true
     return Object.values(ctx.prompt).every(n => MADE_VIDEO_READERS.includes(n.class_type) || !linksOf(n).some(l => l.from === ctx.nodeId))
   },
+  // R7 (ruling (f)): a picture class's input brings a picture (any picture source, carriesImage) or a
+  // frame batch (FRAMES_LINK_SOURCES, its maker's family on; through a Gate, a batch indeed). Anything
+  // else (a video file, a sound) is left to the engine. Without the prompt, nothing to check it against.
+  'local-model-source': (inputs, ctx) => {
+    const name = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, ctx.classType) ? LOCAL_MODEL_PICTURE_INPUT[ctx.classType]! : null
+    if (!name || !ctx.prompt) return true
+    const v = inputs[name]
+    if (!isLink(v)) return false
+    const families = ctx.families ?? NO_FAMILIES
+    if (carriesImage(ctx.prompt, v, families)) return true
+    const from = ctx.prompt[v[0]]
+    if (!from || !FRAMES_LINK_SOURCES.some(([cls, slot]) => cls === from.class_type && slot === v[1]) || !linkSourceOn(from.class_type, families)) return false
+    return from.class_type !== 'ComfyGateNode' || outputKind(ctx.prompt, v, outputKindsFor(families)) === 'frames'
+  },
   'audio-card-lip-sync': (inputs, ctx) => {
     if (!ctx.prompt || ctx.nodeId === undefined || !isLink(inputs.source)) return true
     const from = ctx.prompt[inputs.source[0]]?.class_type
@@ -252,7 +269,7 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
 
 /** The name of an input check (INPUT_CHECKS). */
 export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake' | 'audio-card-lip-sync'
-  | 'create-video-fps' | 'video-card-made-video'
+  | 'create-video-fps' | 'video-card-made-video' | 'local-model-source'
 
 /** Whether a wire brings a made video: Create video's, directly or through Gates and Video cards (their `source`). */
 function showsMadeVideo(prompt: ApiPrompt, link: [string, number], depth = 0): boolean {
@@ -420,6 +437,10 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   [RESTYLE_LORA_CLASS]: 'lora',
   // R3.15: Lens · 3D Reframe's and Pose Mannequin's picture.
   ...Object.fromEntries(NANO_EXTRAS_CLASSES.map(c => [c, 'nano-extras' as const])),
+  // R7: the local-model picture classes' picture (Background remove's cut-out), only while their family
+  // is on. A clip they hand on is a frame batch, not a picture: the value kinds refuse it where a
+  // picture is read (./values.ts KIND_FOLLOWS_INPUT).
+  ...Object.fromEntries(Object.keys(LOCAL_MODEL_PICTURE_SLOTS).map(c => [c, LOCAL_MODEL_FAMILY_OF[c]!])),
 }
 
 /**
@@ -1564,6 +1585,9 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // Rows built from the real node schemas (./mediaEffectSchemas.generated.ts), one per ported class;
   // each needs its family, its media family and `cards`.
   ...mediaEffectRows(SOUND_OUTPUTS),
+  // ── R7: the local-model nodes moved onto paid services (./localModels.ts) ──
+  // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f)).
+  ...localModelRows(),
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -1651,6 +1675,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   // R6: each ported video or sound effect, by its family; R6.9: Save audio (Opus).
   ...mediaEffectSwitchedClasses(),
   SaveAudioOpus: 'sound-effects',
+  // R7: each local-model node moved onto a paid service, by its family.
+  ...localModelSwitchedClasses(),
 }
 
 /**
@@ -1940,7 +1966,7 @@ export function nodeRuleAllows(
     if (!widgetValid(inputs, name, spec)) return false
   }
   if (rule.inputCheck) {
-    const ctx: InputCheckContext = { classType, nodeId, hosted: !!opts.hosted, prompt }
+    const ctx: InputCheckContext = { classType, nodeId, hosted: !!opts.hosted, prompt, families }
     const names: readonly InputCheckName[] = typeof rule.inputCheck === 'string' ? [rule.inputCheck] : rule.inputCheck
     if (names.some(name => !INPUT_CHECKS[name]!(inputs, ctx))) return false
   }
@@ -2210,8 +2236,10 @@ export function outputKindsFor(families: ReadonlySet<RunnerFamily>): OutputKinds
   const paid = Object.keys(PAID_OUTPUT_KIND_FAMILY).filter(cls => familyOn(PAID_OUTPUT_KIND_FAMILY[cls]!, families))
   // R6: a video effect's batch, only while its family (and its chain) is on.
   const media = Object.keys(MEDIA_EFFECT_OUTPUT_KINDS).filter(cls => mediaEffectFamilyOn(cls, families))
-  if (!on.length && !paid.length && !media.length) return base
-  const key = `${on.join(',')}|${paid.join(',')}|${media.join(',')}`
+  // R7: a local-model node's mask (and, through KIND_FOLLOWS_INPUT, its picture or batch), only while its family is on.
+  const local = Object.keys(LOCAL_MODEL_OUTPUT_KINDS).filter(cls => localModelOn(cls, families))
+  if (!on.length && !paid.length && !media.length && !local.length) return base
+  const key = `${on.join(',')}|${paid.join(',')}|${media.join(',')}|${local.join(',')}`
   let kinds = effectKindsCache.get(key)
   if (!kinds) {
     kinds = {
@@ -2219,6 +2247,7 @@ export function outputKindsFor(families: ReadonlySet<RunnerFamily>): OutputKinds
       ...Object.fromEntries(paid.map(cls => [cls, OUTPUT_KINDS[cls]!])),
       ...Object.fromEntries(on.map(cls => [cls, EFFECT_OUTPUT_KINDS[cls]!])),
       ...Object.fromEntries(media.map(cls => [cls, MEDIA_EFFECT_OUTPUT_KINDS[cls]!])),
+      ...Object.fromEntries(local.map(cls => [cls, LOCAL_MODEL_OUTPUT_KINDS[cls]!])),
     }
     effectKindsCache.set(key, kinds)
   }

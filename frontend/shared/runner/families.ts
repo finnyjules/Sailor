@@ -278,6 +278,23 @@ export type RunnerFamily =
   | 'video-text'
   | 'sound-effects'
   | 'sound-denoise'
+  /**
+   * The nodes that ran an AI model on this computer, moved onto a paid
+   * service each (step 3, R7; shared/runner/localModels.ts): one family per
+   * node or pair. Each is off by default and needs `cards` (Slow motion (AI)
+   * `media-video`; Whisper transcribe and Vocal separator `media-sound`:
+   * LOCAL_MODEL_REQUIRES). Lens · Depth of field (`lens-blur`) stays free,
+   * in the server. Off: they go to ComfyUI, which runs the local model, free.
+   */
+  | 'bg-remove'
+  | 'upscale-2x'
+  | 'object-remove'
+  | 'sam-3-masks'
+  | 'subject-mask'
+  | 'slow-motion-ai'
+  | 'whisper-captions'
+  | 'vocal-split'
+  | 'lens-blur'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
@@ -307,7 +324,28 @@ export const MEDIA_EFFECT_TOOL_FAMILIES: readonly RunnerFamily[] = [
   'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
 ]
 
-/** Every family parseFamilies knows: RUNNER_FAMILIES, the media families and R6's. */
+/**
+ * R7's nine families (the local-model nodes moved onto paid services, and
+ * Lens · Depth of field in the server): known to parseFamilies, but kept
+ * apart from RUNNER_FAMILIES, as R6's are, so every pinned "every family on"
+ * set stays as it was. Their requirements are LOCAL_MODEL_REQUIRES.
+ */
+export const LOCAL_MODEL_FAMILIES: readonly RunnerFamily[] = [
+  'bg-remove', 'upscale-2x', 'object-remove', 'sam-3-masks', 'subject-mask', 'slow-motion-ai', 'whisper-captions', 'vocal-split', 'lens-blur',
+]
+
+/**
+ * The R7 families whose work needs the server's video tools: dropped with
+ * the media families while the tools are missing or refused
+ * (server/runner/config.ts), as their requirement is.
+ */
+export const LOCAL_MODEL_TOOL_FAMILIES: readonly RunnerFamily[] = ['slow-motion-ai', 'whisper-captions', 'vocal-split']
+
+/**
+ * Every family before R7: RUNNER_FAMILIES, the media families and R6's (the
+ * "every family on" set specs pin). parseFamilies knows R7's too
+ * (LOCAL_MODEL_FAMILIES), kept out of this list so those sets stay as they were.
+ */
 export const ALL_RUNNER_FAMILIES: readonly RunnerFamily[] = [...RUNNER_FAMILIES, ...MEDIA_TOOL_FAMILIES, ...MEDIA_EFFECT_TOOL_FAMILIES]
 
 /**
@@ -359,12 +397,30 @@ export const MEDIA_EFFECT_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> 
   'sound-denoise': 'media-sound',
 }
 
-/** The family a family needs on too (FAMILY_REQUIRES, then MEDIA_EFFECT_REQUIRES), or undefined. */
-export function requirementOf(family: RunnerFamily): RunnerFamily | undefined {
-  return FAMILY_REQUIRES[family] ?? MEDIA_EFFECT_REQUIRES[family]
+/**
+ * R7's requirements (the table in the plan): every local-model family needs
+ * `cards`, but Slow motion (AI) `media-video` and Whisper transcribe and
+ * Vocal separator `media-sound` (which need `cards`). A table of its own,
+ * read with the others (`requirementOf`).
+ */
+export const LOCAL_MODEL_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
+  'bg-remove': 'cards',
+  'upscale-2x': 'cards',
+  'object-remove': 'cards',
+  'sam-3-masks': 'cards',
+  'subject-mask': 'cards',
+  'slow-motion-ai': 'media-video',
+  'whisper-captions': 'media-sound',
+  'vocal-split': 'media-sound',
+  'lens-blur': 'cards',
 }
 
-const KNOWN: ReadonlySet<string> = new Set(ALL_RUNNER_FAMILIES)
+/** The family a family needs on too (FAMILY_REQUIRES, then MEDIA_EFFECT_REQUIRES, then LOCAL_MODEL_REQUIRES), or undefined. */
+export function requirementOf(family: RunnerFamily): RunnerFamily | undefined {
+  return FAMILY_REQUIRES[family] ?? MEDIA_EFFECT_REQUIRES[family] ?? LOCAL_MODEL_REQUIRES[family]
+}
+
+const KNOWN: ReadonlySet<string> = new Set([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES])
 
 /** No family switched on. */
 export const NO_FAMILIES: ReadonlySet<RunnerFamily> = new Set()

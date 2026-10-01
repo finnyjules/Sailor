@@ -342,6 +342,8 @@ function runnerEndpoints(): string[] {
   out.add(`fal ${TOPAZ_IMAGE_APP}`)
   // Face swap on Easel's advanced face swap, no backup (easelFaceSwap.ts; its grid is runner-face-swap.unit.spec.ts).
   out.add(`fal ${EASEL_FACE_SWAP_APP}`)
+  // R7.1: Background remove on Replicate's 851-labs remover (generators/localModels.ts; its grid is runner-local-cutout.unit.spec.ts).
+  out.add('replicate 851-labs/background-remover')
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

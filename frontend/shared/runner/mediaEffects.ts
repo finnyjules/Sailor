@@ -28,6 +28,7 @@
 import { MEDIA_EFFECT_SCHEMAS, type MediaEffectSchema, type MediaEffectSchemaFamily } from './mediaEffectSchemas.generated'
 import { familyOn, type RunnerFamily } from './families'
 import { GATE_CLASS } from './graph'
+import { BG_REMOVE_CLASS, isLocalModelClass, localModelOn } from './localModels'
 import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 
@@ -89,6 +90,8 @@ export const SOUND_EFFECT_OUTPUTS: readonly (readonly [string, number])[] = MEDI
  * refused exactly as before it was listed (rule 12).
  */
 export function linkSourceOn(classType: string, families: ReadonlySet<RunnerFamily>): boolean {
+  // R7: a local-model node (Background remove's clip) only while its own family is on too.
+  if (isLocalModelClass(classType)) return localModelOn(classType, families)
   return !Object.prototype.hasOwnProperty.call(MEDIA_EFFECT_FAMILY_OF, classType) || mediaEffectFamilyOn(classType, families)
 }
 
@@ -116,7 +119,12 @@ export const FRAMES_OUTPUTS: readonly (readonly [string, number])[] = [
  * as before R6.1 (a Gate between Get video components and Create video was
  * taken; R6 rule 12).
  */
-export const FRAMES_LINK_SOURCES: readonly (readonly [string, number])[] = [...FRAMES_OUTPUTS, [GATE_CLASS, 0]]
+export const FRAMES_LINK_SOURCES: readonly (readonly [string, number])[] = [
+  ...FRAMES_OUTPUTS, [GATE_CLASS, 0],
+  // R7 ruling (f): Background remove hands on a frame batch when a clip comes in (its picture
+  // otherwise, which the value kinds keep out of a frame-batch input), only while `bg-remove` is on.
+  [BG_REMOVE_CLASS, 0],
+]
 
 /** The classes that only encode a batch they read (rule 4: a batch only they read is kept as trunc-8). */
 export const FRAME_ENCODERS: readonly string[] = ['CreateVideo', 'SaveVideoFrames']

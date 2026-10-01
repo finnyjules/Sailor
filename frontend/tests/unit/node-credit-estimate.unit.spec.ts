@@ -37,7 +37,8 @@ describe('MODEL_PRICED_BADGE_CLASSES', () => {
 
   it('is the same set the server price book prices from widgets: by model, (Task P4) the edit tools by their settings, (Task P5) the older video and lip-sync nodes per second, and (Task F23) Enhance a video while its switch moves it to fal, and (step 3, R3) the paid classes priced by their calls', () => {
     // + step 3, R3: the paid classes priced by their calls (R3.3 the LLM text nodes, R3.4 describe, read and find).
-    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, 'EnhanceVideoNode', 'PersonSwapVideo', ...PAID_NODE_CLASSES].sort())
+    // + step 3, R7.1: Background remove, priced while its family moves it onto Replicate.
+    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, 'EnhanceVideoNode', 'PersonSwapVideo', ...PAID_NODE_CLASSES, 'BackgroundRemove'].sort())
   })
 })
 

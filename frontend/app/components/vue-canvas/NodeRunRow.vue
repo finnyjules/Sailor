@@ -13,6 +13,8 @@ const props = withDefaults(defineProps<{
   runLabel?: string
   variant?: 'slim' | 'instrument'
   price?: string | null
+  /** The price's tooltip (R7 ruling (b): which service runs the node, "Runs on Replicate"). */
+  priceTitle?: string | null
   buttonText?: string
   /**
    * Why the node can't run at all (a retired node, R4.1 fix round 1): the
@@ -20,7 +22,7 @@ const props = withDefaults(defineProps<{
    * tooltip and its accessible description.
    */
   blockedReason?: string | null
-}>(), { runLabel: 'Run this node', variant: 'slim', price: null, buttonText: 'Run', blockedReason: null })
+}>(), { runLabel: 'Run this node', variant: 'slim', price: null, priceTitle: null, buttonText: 'Run', blockedReason: null })
 
 const reasonId = `run-blocked-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
@@ -86,7 +88,7 @@ function onRun() {
       <Loader2 v-if="running" class="size-3 animate-spin" />
       <Play v-else class="size-2.5" fill="currentColor" />
       <span>{{ buttonText }}</span>
-      <span v-if="price && !running" class="node-btn__price">{{ price }}</span>
+      <span v-if="price && !running" class="node-btn__price" :title="priceTitle ?? undefined">{{ price }}</span>
     </button>
     <span v-if="blockedReason" :id="reasonId" class="sr-only">{{ blockedReason }}</span>
     <slot name="menu" />

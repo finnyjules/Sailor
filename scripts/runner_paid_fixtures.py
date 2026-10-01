@@ -149,6 +149,19 @@ Groups:
              Remove object (Replicate), for
              frontend/server/runner/pictures/handoffView.ts
              (tests/unit/runner-handoff-parity.unit.spec.ts)
+  local-cutout (R7.1) Background remove (comfy_extras/nodes_bg_remove.py) with
+             its model swapped for a stand-in `rembg.remove` (no model file, no
+             network: os.path.isfile and the session patched) that answers a
+             recorded RGBA picture: soft, hard and empty alpha × each `output`
+             × edge_softness 0, 2 and 10 on a 48 × 40 picture; a batch of three
+             frames (one answer each, as a clip); a 7 × 5 picture with the
+             blur wider than it; an answer in grey + alpha. Each records the
+             answer PNG, the node's float32 outputs (sha256; whole when small),
+             their 8-bit forms, the mask, and the live preview Python wrote
+             (save_live_preview(unique=True)), for
+             frontend/server/runner/generators/localModels.ts and
+             frontend/server/runner/pixels/cutout.ts
+             (tests/unit/runner-local-cutout.unit.spec.ts)
   e2e       (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
@@ -3346,6 +3359,157 @@ def e2e_group() -> dict:
     return out
 
 
+# ── R7.1: Background remove with a stand-in model (group local-cutout) ─────────
+
+CUTOUT_W, CUTOUT_H = 48, 40
+CUTOUT_INLINE_VALUES = 256
+
+
+def _cutout_answer(w: int, h: int, seed: int, alpha: str, mode: str = "RGBA") -> bytes:
+    """The stand-in model's answer as a PNG: random RGB and an alpha that is soft
+    (a radial ramp with noise), hard (a disc, 0 or 255) or empty (all 0)."""
+    import io
+    import numpy as np
+    from PIL import Image
+    rng = np.random.default_rng(seed)
+    rgb = rng.integers(0, 256, size=(h, w, 3), dtype=np.uint8)
+    yy, xx = np.mgrid[0:h, 0:w]
+    r = np.sqrt((xx - w / 2.0) ** 2 + (yy - h / 2.0) ** 2) / (min(w, h) / 2.0)
+    if alpha == "soft":
+        a = np.clip((1.2 - r) * 255.0 + rng.integers(-40, 41, size=(h, w)), 0, 255).astype(np.uint8)
+    elif alpha == "hard":
+        a = np.where(r < 0.7, 255, 0).astype(np.uint8)
+    else:
+        a = np.zeros((h, w), dtype=np.uint8)
+    img = Image.fromarray(np.dstack([rgb, a]), "RGBA")
+    if mode != "RGBA":
+        img = img.convert(mode)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _cutout_tensor_record(t) -> dict:
+    """A float32 output as recorded: shape, sha256 of its float32 (whole when small), round-8 and trunc-8."""
+    import hashlib
+    import numpy as np
+    f = np.ascontiguousarray(t.detach().cpu().float().numpy())
+    raw = f.tobytes()
+    rec = {
+        "shape": list(f.shape),
+        "f32_sha256": hashlib.sha256(raw).hexdigest(),
+        "round8_sha256": hashlib.sha256((np.clip(f, 0, 1) * np.float32(255)).round().astype(np.uint8).tobytes()).hexdigest(),
+        "trunc8_sha256": hashlib.sha256(np.clip(np.float32(255) * f, 0, 255).astype(np.uint8).tobytes()).hexdigest(),
+    }
+    if f.size <= CUTOUT_INLINE_VALUES:
+        rec["f32"] = _b64(raw)
+    return rec
+
+
+def local_cutout_group() -> dict:
+    """Background remove's real execute, its model a stand-in that answers recorded pictures (R7.1)."""
+    import hashlib
+    import io
+    import shutil
+    import tempfile
+    import types
+    import numpy as np
+    import torch
+    from PIL import Image, ImageFilter
+    import folder_paths
+    from comfy_api.latest._io import HiddenHolder
+    from comfy_extras import nodes_bg_remove as bg
+
+    answers: list = []
+    seen: list = []
+
+    def stand_in_remove(pil, session=None, post_process_mask=False):
+        assert session == "stand-in session" and post_process_mask is True
+        seen.append(list(pil.size) + [pil.mode])
+        return Image.open(io.BytesIO(answers.pop(0)))
+
+    fake_rembg = types.ModuleType("rembg")
+    fake_rembg.remove = stand_in_remove
+    real_isfile = os.path.isfile
+    temp = tempfile.mkdtemp(prefix="local-cutout-")
+    folder_paths.set_temp_directory(temp)
+    cases: list = []
+
+    def run(name: str, pictures: list, served: list, output: str, edge_softness: float, node_id: str = "7"):
+        answers[:] = list(served)
+        seen.clear()
+        frames = torch.cat([_picture_tensor(p) for p in pictures], dim=0)
+        with mock.patch.dict(sys.modules, {"rembg": fake_rembg}), \
+                mock.patch.object(bg.os.path, "isfile", lambda path: path == bg._MODEL_PATH or real_isfile(path)), \
+                mock.patch.object(bg, "_get_session", lambda: "stand-in session"), \
+                mock.patch.object(bg.BackgroundRemoveNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": node_id})):
+            res = bg.BackgroundRemoveNode.execute(frames=frames, output=output, edge_softness=edge_softness)
+        assert not answers, f"{name}: {len(answers)} answers unused"
+        image, mask = res.args
+        ui = res.ui.as_dict() if hasattr(res.ui, "as_dict") else res.ui
+        entry = dict(ui["images"][0])
+        with Image.open(os.path.join(temp, entry["subfolder"], entry["filename"])) as im:
+            im.load()
+            px = im.tobytes()
+            preview = {"filename": entry["filename"], "subfolder": entry["subfolder"], "type": entry["type"], "mode": im.mode,
+                       "w": im.size[0], "h": im.size[1], "sha256": hashlib.sha256(px).hexdigest()}
+        alpha8 = np.clip(np.rint(mask.numpy() * 255.0), 0, 255).astype(np.uint8)
+        cases.append({
+            "name": name, "class_type": "BackgroundRemove", "node_id": node_id,
+            "widgets": {"output": output, "edge_softness": edge_softness},
+            "pictures": [_b64(p) for p in pictures],
+            "answers": [_b64(a) for a in served],
+            "sent": [list(x) for x in seen],
+            "image": _cutout_tensor_record(image),
+            "mask": _cutout_tensor_record(mask),
+            "alpha8": _b64(alpha8.tobytes()),
+            "preview": preview,
+            "animated": list(ui.get("animated", [])),
+        })
+
+    try:
+        seed = 7100
+        for alpha in ("soft", "hard", "empty"):
+            for output in ("transparent", "premultiplied", "matte_only"):
+                for soft in (0.0, 2.0, 10.0):
+                    seed += 1
+                    run(f"cutout · {alpha} alpha · {output} · edge {soft:g}", [png_bytes(CUTOUT_W, CUTOUT_H, seed)],
+                        [_cutout_answer(CUTOUT_W, CUTOUT_H, seed, alpha)], output, soft)
+        # A clip: three frames, one answer each (ruling (f): one call per frame).
+        for output in ("transparent", "premultiplied", "matte_only"):
+            frames = [png_bytes(24, 16, 7300 + i) for i in range(3)]
+            run(f"cutout · a clip of three frames · {output}", frames,
+                [_cutout_answer(24, 16, 7310 + i, ("soft", "hard", "empty")[i]) for i in range(3)], output, 0.0)
+        run("cutout · a clip of three frames · transparent · edge 2", [png_bytes(24, 16, 7320 + i) for i in range(3)],
+            [_cutout_answer(24, 16, 7330 + i, "soft") for i in range(3)], "transparent", 2.0)
+        # A picture smaller than the blur's kernel (torchvision's would refuse it; the runner narrows it).
+        run("cutout · a 7 × 5 picture · edge 2", [png_bytes(7, 5, 7400)], [_cutout_answer(7, 5, 7401, "soft")], "transparent", 2.0)
+        # The answer PIL reads its own way (grey + alpha): convert("RGBA").
+        run("cutout · an answer in grey and alpha · premultiplied", [png_bytes(CUTOUT_W, CUTOUT_H, 7500)],
+            [_cutout_answer(CUTOUT_W, CUTOUT_H, 7501, "soft", "LA")], "premultiplied", 0.0)
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+    # Pillow's GaussianBlur alone, the one step the runner doesn't port (judged by eye): alphas at a
+    # picture's size (160 × 120: the blur's reach far from every edge), zlib-compressed.
+    import zlib
+    bw, bh = 160, 120
+    rng = np.random.default_rng(7600)
+    yy, xx = np.mgrid[0:bh, 0:bw]
+    r = np.sqrt((xx - bw / 2.0) ** 2 + (yy - bh / 2.0) ** 2) / (min(bw, bh) / 2.0)
+    alphas = {
+        "hard": np.where(r < 0.7, 255, 0).astype(np.uint8),
+        "soft": np.clip((1.2 - r) * 255.0 + rng.integers(-40, 41, size=(bh, bw)), 0, 255).astype(np.uint8),
+        "edge": np.where(yy > bh * 0.6, 255, 0).astype(np.uint8),
+    }
+    blur = []
+    for kind, a in alphas.items():
+        for radius in (0.5, 2.0, 10.0):
+            out = np.asarray(Image.fromarray(a, "L").filter(ImageFilter.GaussianBlur(radius)))
+            blur.append({"alpha": kind, "radius": radius, "w": bw, "h": bh,
+                         "in": _b64(zlib.compress(a.tobytes(), 9)), "out": _b64(zlib.compress(out.tobytes(), 9))})
+    return {"cases": cases, "size": [CUTOUT_W, CUTOUT_H], "blur": blur}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "handoff2": handoff2_group,
@@ -3366,6 +3530,7 @@ GROUPS = {
     "turntable": turntable_group,
     "turntable-views": turntable_views_group,
     "e2e": e2e_group,
+    "local-cutout": local_cutout_group,
 }
 
 

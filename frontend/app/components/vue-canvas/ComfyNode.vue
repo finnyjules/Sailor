@@ -31,7 +31,7 @@ import { TOOLBOX_NODE_ICONS } from '~/data/toolbox-items'
 import { getGeneratorIcon } from '~/data/generator-icons'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { creditsForUsd } from '~/lib/pricing'
-import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
+import { MODEL_PRICED_BADGE_CLASSES, modelPricedUsd, nodeCreditEstimate, nodePriceTooltip } from '~/lib/nodeCreditEstimate'
 import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValueMap } from '~/lib/costEstimate'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { upgradeHidesWidget } from '#shared/runner/eligibility'
@@ -151,6 +151,9 @@ const pricedInputs = computed(() => {
     linkedInputNames(props.id, props.data.inputs, injectedEdges?.value))
 })
 
+// The price's tooltip: which service runs a node moved off this computer (R7 ruling (b)).
+const priceTitle = computed(() => nodePriceTooltip(props.data.nodeType as string, badgeFamilies))
+
 // Extract the minimum USD price from the price badge expression
 const priceLabel = computed(() => {
   // A retired partner node can't run, so it quotes no price (R4.1 fix round 1).
@@ -164,6 +167,12 @@ const priceLabel = computed(() => {
     const est = nodeCreditEstimate(props.data.nodeType as string, pricedInputs.value, { inputPixels: upstreamInputPixels(props, injectedNodes?.value, injectedEdges?.value, badgeFamilies), inputSeconds: secs?.seconds, families: badgeFamilies })
     if (est != null) return `${secs?.upTo ? 'up to ' : '~'}${est} cr`
     // Unknown/missing model → fall through to the static estimate below.
+  }
+  // A node moved off this computer onto a paid service (R7, ruling (a): it costs the same few cents
+  // locally): its service's price for one picture, in dollars, named by the tooltip.
+  else if (priceTitle.value) {
+    const usd = modelPricedUsd(props.data.nodeType as string, pricedInputs.value, { families: badgeFamilies })
+    if (usd != null && usd > 0) return usd < 0.01 ? '<$0.01' : `~$${usd.toFixed(2)}`
   }
   const badge = props.data.priceBadge
   if (!badge?.expr) return null
@@ -2331,6 +2340,7 @@ watch(previewImages, (urls) => {
       v-if="showRunButton || LIVE_PREVIEW_NODES.has(data.nodeType)"
       variant="instrument"
       :price="priceLabel"
+      :price-title="priceTitle"
       :button-text="hasRun ? 'Run again' : 'Run'"
       :status="isRetired ? RETIRED_STATUS : runStatus"
       :can-run="showRunButton && !isMuted && !isBypassed && !isRetired"

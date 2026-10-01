@@ -269,6 +269,8 @@ export interface MeasuredMedia {
     videoWidth?: number | null
     videoHeight?: number | null
     videoFps?: number | null
+    /** R7 (ruling (f)): the pictures a local-model node works through, counted at the start (./localModelStart.ts). */
+    frames?: number | null
   }
   /** The sha256 of each file's bytes, by its part (a sync-3 node has both; a Topaz node only its video). */
   sha: { video?: string; audio?: string }

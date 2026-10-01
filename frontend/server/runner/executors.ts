@@ -134,6 +134,7 @@ import { planDescribe } from './generators/describe'
 import { planRepair } from './generators/repair'
 import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
+import { isLocalModelPlan, planLocalModel } from './generators/localModels'
 import { planAudioGen } from './generators/audioGen'
 import { planSoundIn } from './generators/soundIn'
 import type { PythonWav } from './soundWav'
@@ -1356,6 +1357,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     }
 
     default: {
+      // ── R7: the local-model nodes moved onto paid services (./generators/localModels.ts) ──
+      if (isLocalModelPlan(node.class_type)) return planLocalModel(ctx)
       // ── video-* (step 3, R6): the video effects, computed here (./video/) ──
       // R6.9: the sound effects and Silence cut (whose frames have a video effect's row too, for the start pass).
       if (SOUND_TAKEN_CLASSES.includes(node.class_type)) return planSoundEffect(ctx)

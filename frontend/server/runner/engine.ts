@@ -60,6 +60,8 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
+import { hasLocalModelPicture, localModelStartProblems } from './localModelStart'
+import { LOCAL_MODEL_WORDS, isLocalModelClass } from '#shared/runner/localModels'
 import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
@@ -1312,6 +1314,9 @@ export function createEngine(deps: EngineDeps) {
         }
         inputSeconds = media.measured.seconds
       }
+      // R7 (ruling (f)): a local-model node is priced (and planned) on the pictures the start of the run
+      // counted and held for; its plan refuses more (./generators/localModels.ts).
+      if (!inputSeconds && isLocalModelClass(take.prompt[id]!.class_type)) inputSeconds = take.measured?.[id]?.seconds
       // What planning reads of the media (Topaz sets its factor from the video's
       // size): this turn's measurement, or on resume the one recorded at the
       // start of the run, so the resumed plan (kept only for its backup) can be
@@ -2281,6 +2286,30 @@ export function createEngine(deps: EngineDeps) {
         if (!hasVideoEffect(p, families) && !several) continue
         const bad = await mediaEffectStartProblems(p, families, opts(k))
         if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+      }
+    }
+    // R7 (ruling (f)): each local-model picture node's pictures (a clip's frames, one call each) counted
+    // before the hold, a true upper bound (./localModelStart.ts), and recorded on the take: the hold and
+    // the charge are priced on it, and its turn refuses more. A count that can't be known, or one over the
+    // frame cap, leaves the whole workflow to the engine (RUNNER_NOT_ELIGIBLE), never a refusal.
+    // A clip's batches (its own, its cut-out's, its masks) are kept while the run goes on: in hosted, every
+    // take's together must fit the run's kept room, else the workflow is left to the engine too.
+    let localKept = 0
+    for (const [index, p] of prompts.entries()) {
+      if (!hasLocalModelPicture(p, families)) continue
+      const counted = await localModelStartProblems(p, families, {
+        hosted: deps.hosted(),
+        shapes: () => frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count: true })),
+      })
+      if (counted.problem) throw refuse(counted.problem.message, 400, { nodeId: counted.problem.nodeId, classType: counted.problem.classType, reason: RUNNER_NOT_ELIGIBLE })
+      localKept += counted.keptBytes
+      if (localKept > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {
+        const [nodeId] = Object.keys(counted.counts)
+        throw refuse(LOCAL_MODEL_WORDS.overCap, 400, { nodeId, classType: nodeId ? p[nodeId]?.class_type : undefined, reason: RUNNER_NOT_ELIGIBLE })
+      }
+      for (const [nodeId, frames] of Object.entries(counted.counts)) {
+        const was = measured[index]![nodeId]
+        measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames }, sha: was?.sha ?? {} }
       }
     }
     // The sound effects' start pass (R6.9, ./video/soundShapes.ts): every sound's rate, channels and length

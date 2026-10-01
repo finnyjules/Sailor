@@ -11,7 +11,7 @@
  *   NUXT_RUNNER_BACKUP=on                    let a stalled or refused job move to its backup service (off by default)
  *   NUXT_RUNNER_BACKUP_STALL_MS=120000       how long a job may wait to start before it is switched; 0 = never for a slow start
  */
-import { MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+import { LOCAL_MODEL_TOOL_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
 import { mediaToolsReady } from '../media/tools'
 
 function truthy(v: string | undefined): boolean {
@@ -24,8 +24,8 @@ export function runnerEnabled(): boolean {
   return truthy(process.env.NUXT_RUNNER_ENABLED)
 }
 
-/** Every family that needs the video tools: R5's (MEDIA_TOOL_FAMILIES) and R6's (MEDIA_EFFECT_TOOL_FAMILIES). */
-const TOOL_FAMILIES: readonly RunnerFamily[] = [...MEDIA_TOOL_FAMILIES, ...MEDIA_EFFECT_TOOL_FAMILIES]
+/** Every family that needs the video tools: R5's (MEDIA_TOOL_FAMILIES), R6's (MEDIA_EFFECT_TOOL_FAMILIES) and R7's (LOCAL_MODEL_TOOL_FAMILIES). */
+const TOOL_FAMILIES: readonly RunnerFamily[] = [...MEDIA_TOOL_FAMILIES, ...MEDIA_EFFECT_TOOL_FAMILIES, ...LOCAL_MODEL_TOOL_FAMILIES]
 
 /**
  * The families switched on, server side. None while the runner itself is off.

@@ -90,6 +90,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R6: every ported video effect that is one (all but Slow motion, Silence cut and Text clip, as
   // define_schema's is_output_node says; ./mediaEffects.ts MEDIA_EFFECT_OUTPUT_NODES).
   ...MEDIA_EFFECT_OUTPUT_NODES,
+  // R7.1: Background remove is an output node (is_output_node=True).
+  'BackgroundRemove',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

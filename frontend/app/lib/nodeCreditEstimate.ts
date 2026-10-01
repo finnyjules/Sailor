@@ -28,6 +28,8 @@ import {
   type PriceOptions,
 } from '#shared/pricing/nodePrice'
 import { estimateFloored } from '#shared/pricing/estimateFloor'
+import { LOCAL_MODEL_FAMILY_OF, serviceTooltip } from '#shared/runner/localModels'
+import type { RunnerFamily } from '#shared/runner/families'
 
 /** Flat credits the graph pricer adds once for producing a deliverable. */
 export const BASE_RENDER_CREDITS = 1
@@ -46,15 +48,15 @@ export const BASE_RENDER_CREDITS = 1
  * Enhance a video on fal's Topaz, F23): with the family off they price as
  * nothing here, and the badge keeps Python's static figure, as before.
  */
-export const MODEL_PRICED_BADGE_CLASSES: ReadonlySet<string> = new Set([...SHARED_PRICED_CLASS_SET, ...Object.keys(FAMILY_PRICED_CLASSES)])
+export const MODEL_PRICED_BADGE_CLASSES: ReadonlySet<string> = new Set([...SHARED_PRICED_CLASS_SET, ...Object.keys(FAMILY_PRICED_CLASSES), ...Object.keys(LOCAL_MODEL_FAMILY_OF)])
 
 /**
  * Provider USD for `nodeType` as configured by `inputs` (the whole widget
  * map), or null when the class isn't model-priced / the model is missing or
  * unknown.
  */
-export function modelPricedUsd(nodeType: string, inputs: NodeInputs | null | undefined): number | null {
-  return providerUsd(nodeType, inputs)
+export function modelPricedUsd(nodeType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
+  return providerUsd(nodeType, inputs, opts)
 }
 
 /**
@@ -76,4 +78,14 @@ export function nodeCreditEstimate(nodeType: string, inputs: NodeInputs | null |
   const price = estimateFloored(nodeType, inputs, priceNode(nodeType, inputs, opts), opts.families)
   if ('refused' in price || !(price.usd > 0)) return null
   return price.credits + BASE_RENDER_CREDITS
+}
+
+/**
+ * The price's tooltip (R7 ruling (b)): which service runs a node that ran an
+ * AI model on this computer, while its family moves it there ("Runs on
+ * Replicate", "Runs on fal"); null for every other node, or with its family
+ * off. No new copy on the node itself (hints are tooltips).
+ */
+export function nodePriceTooltip(nodeType: string, families: ReadonlySet<RunnerFamily> | undefined): string | null {
+  return serviceTooltip(nodeType, families)
 }
