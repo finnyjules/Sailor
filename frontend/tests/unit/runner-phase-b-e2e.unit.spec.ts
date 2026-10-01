@@ -866,13 +866,25 @@ describe('B10 · a Replicate image feeds a Gate, which feeds a Replicate video',
       // Four Replicate pictures, each the fixture body at its own seed (take 0 is the fixture exactly); no video yet.
       const pics = k.replicate.submitted()
       expect(pics.map(r => r.endpoint)).toEqual(Array(4).fill(img.endpoint))
-      expect(pics[0]!.payload).toEqual(img.body)
-      expect(pics.map(r => r.payload)).toEqual(seeds.map(seed => ({ ...img.body, seed })))
+      // The four takes send side by side, in any order: each take's picture is the request it wrote down.
+      const pausedRun = (await k.store.get(runId))!
+      const picOf = (t: number) => pics.find(r => r.id === pausedRun.takes[t]!.nodes['1']!.request!.requestId)!
+      expect(picOf(0).payload).toEqual(img.body)
+      for (const [t, seed] of seeds.entries()) expect(picOf(t).payload).toEqual({ ...img.body, seed })
       expect(k.fal.client.submit).not.toHaveBeenCalled()
       const paused = events.msgs.at(-1)!
       expect(paused.type).toBe('gate_paused')
       expect((paused.data.choices as unknown[]).length).toBe(4)
       expect(events.msgs.filter(m => m.type === 'execution_success')).toHaveLength(4)
+
+      // Take 1's picture uploads slowly, so take 3's video is sent first: the order sent never
+      // decides which take's picture a video gets.
+      const slowFrame = pausedRun.takes[1]!.nodes['1']!.outputs[0]!.filename
+      const upload = k.upload.getMockImplementation()!
+      k.upload.mockImplementation(async (b, name) => {
+        if (name === slowFrame) await until(() => k.replicate.submitted().length >= 5)
+        return upload(b, name)
+      })
 
       // Pick takes 1 and 3, Continue.
       const cont = await post(gateRoute, { runId, nodeId: '2', action: 'continue', takes: [1, 3] })
@@ -886,14 +898,19 @@ describe('B10 · a Replicate image feeds a Gate, which feeds a Replicate video',
       expect(run.status).toBe('done')
       expect(run.takes.map(t => t.nodes['2']!.status)).toEqual(['dropped', 'done', 'dropped', 'done'])
       // Two Replicate videos, each the fixture body with its own take's picture as the first frame.
+      // Takes 1 and 3 run side by side, so either may send first: each take's video is the
+      // request that take wrote down, not the j-th one sent.
       const videos = k.replicate.submitted().slice(4)
       expect(videos).toHaveLength(2)
-      for (const [j, t] of [1, 3].entries()) {
+      for (const t of [1, 3]) {
         const frame = run.takes[t]!.nodes['1']!.outputs[0]!.filename
-        expect(videos[j]!.endpoint).toBe(vid.endpoint)
-        expect(videos[j]!.payload).toEqual({ ...vid.body, image: `https://fal.storage/${frame}` })
+        const sent = videos.find(v => v.id === run.takes[t]!.nodes['3']!.request!.requestId)!
+        expect(sent.endpoint).toBe(vid.endpoint)
+        expect(sent.payload).toEqual({ ...vid.body, image: `https://fal.storage/${frame}` })
         expect(run.takes[t]!.nodes['3']!.request!.provider).toBe('replicate')
       }
+      expect(new Set([1, 3].map(t => run.takes[t]!.nodes['3']!.request!.requestId)).size).toBe(2)
+      expect(videos[0]!.id).toBe(run.takes[3]!.nodes['3']!.request!.requestId) // take 3 went first
       for (const t of [0, 2]) expect(run.takes[t]!.nodes['3']!.request ?? null).toBeNull()
       expect(k.fal.client.submit).not.toHaveBeenCalled()
 
