@@ -60,19 +60,32 @@ export const UPSCALE_2X_SLUG = 'nightmareai/real-esrgan'
 /** `tile_size`: IO.Int.Input(default=512, min=0, max=2048, step=64). Not sent: it only splits Python's own work. */
 export const UPSCALE_2X_TILE_SIZE = { default: 512, min: 0, max: 2048 } as const
 /**
- * The largest picture (pixels) handed to Real-ESRGAN in one call — a
- * MEASURED limit. R11.6's live check (2026-10-01) sent a 1302 × 2160 tile
- * and Replicate refused it: "Input image of dimensions (2160, 1302, 3) has a
- * total number of pixels 2812320 greater than the max size that fits in GPU
- * memory on this hardware, 2096704" (2 096 704 = 1448²). The model page's
- * "Max recommended input image resolution is 1440p" (2560 × 1440, R7.2's
- * cap) was too high: a picture between the two failed at the service.
+ * The largest picture (pixels) handed to Real-ESRGAN in one call, by
+ * Upscale (2×) and by R3.5's Upscale on Real-ESRGAN alike (the same model,
+ * the same `{ image, scale, face_enhance }`). R11.6's live check (2026-10-01)
+ * sent a 1302 × 2160 tile and Replicate refused it: "Input image of
+ * dimensions (2160, 1302, 3) has a total number of pixels 2812320 greater
+ * than the max size that fits in GPU memory on this hardware, 2096704"
+ * (2 096 704 = 1448², the service's own check).
+ *
+ * LC4 (live5-esrgan-tiles, 2026-10-02): a 1364 × 1500 tile (2 046 000 px,
+ * UNDER that check) ran out of GPU memory at the service: "CUDA out of
+ * memory. Tried to allocate 3.90 GiB … 14.56 GiB total … 3.74 GiB free …
+ * 4.98 GiB reserved by PyTorch but unallocated". 3.90 GiB is exactly the
+ * 4×-upsampled 64-channel half-precision feature map of that tile
+ * (2 046 000 × 16 × 64 × 2 bytes): the model always upsamples 4× inside and
+ * resizes to `scale` after, so its memory follows the pixels sent, not the
+ * scale. The service's check doesn't allow for memory a warm worker holds
+ * fragmented. Measured to work: 1.33 MP (R7.11) and five 871 × 2160 tiles
+ * in a row (1 881 360 px, R11.6). Taken: 1536 × 1024 = 1 572 864 px, 75% of
+ * the service's check, about 7.4 GiB at its peak, leaving 7 GiB of the card
+ * for memory held fragmented (4.98 GiB seen).
  * R11.6 (ruling (i)): a larger picture is cut into overlapping tiles of at
- * most this many pixels, each tile's 32-pixel overlap inside it, one call
- * each, blended back (./upscaleTiles.ts, server/runner/generators/tiles.ts).
+ * most this many pixels, each tile's overlap inside it, one call each,
+ * blended back (./upscaleTiles.ts, server/runner/generators/tiles.ts).
  * shared/pricing/editRates.ts's Real-ESRGAN card takes the same ceiling.
  */
-export const UPSCALE_2X_MAX_PIXELS = 2_096_704
+export const UPSCALE_2X_MAX_PIXELS = 1_572_864
 /**
  * R11.6: the largest picture (pixels) Upscale (2×) cuts into tiles, in both
  * places. Fix round 1: the largest picture Sailor makes or takes

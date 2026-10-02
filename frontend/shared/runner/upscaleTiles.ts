@@ -5,7 +5,8 @@
  * never disagree.
  *
  * A picture over the service's largest (`cap`, UPSCALE_2X_MAX_PIXELS: the
- * 2 096 704 pixels Replicate's GPU takes, measured 2026-10-01) is cut
+ * 1 572 864 pixels sent in one call, LC4: under the 2 096 704 Replicate
+ * states, after a tile under that ran out of GPU memory) is cut
  * into a grid of `cols` × `rows` overlapping tiles, every tile the same size
  * and at most `cap` pixels, neighbours overlapping by at least `overlap`
  * pixels (UPSCALE_TILE_OVERLAP: 128 since fix round 3; Python's
@@ -99,7 +100,7 @@ function fewest(w: number, h: number, cap: number, overlap: number): { cols: num
     if (!best || n < best.cols * best.rows || (n === best.cols * best.rows && skew(tw, r.th) < skew(best.tw, best.th))) best = { cols: c, rows: r.rows, tw, th: r.th }
   }
   // c = W makes tiles at most overlap + 1 wide, which fit some rows whenever the cap is well above the overlap
-  // (the real one: 2 096 704 pixels, 1448², against 128).
+  // (the real one: 1 572 864 pixels, 1536 × 1024, against 128).
   if (!best) throw new Error('This picture can’t be cut into tiles')
   return best
 }

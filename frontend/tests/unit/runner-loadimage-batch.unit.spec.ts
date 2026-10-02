@@ -247,24 +247,25 @@ describe('I1: a reader that takes the batch is checked against its own limits be
 })
 
 describe('I3, M2: the run\'s kept room counts what the frames keep, and what each local-model call keeps', () => {
-  it('hosted: a 250-frame 1080p animation into Upscale (2×) is refused before the hold, never partway', async () => {
+  it('hosted: a 250-frame 1440 × 1080 animation into Upscale (2×) is refused before the hold, never partway', async () => {
+    // LC4: 1440 × 1080 (1 555 200 px) is under the 1 572 864 px sent in one call, so each frame is one call, not tiles.
     const replicate = createFakeReplicate()
     const k = makeKit({ hosted: true, replicate, deps: { families: () => UPSCALE } })
-    writeFileSync(join(k.root, 'input', 'long.gif'), bigGif(1920, 1080, 250))
+    writeFileSync(join(k.root, 'input', 'long.gif'), bigGif(1440, 1080, 250))
     const p: ApiPrompt = { l: load('long.gif'), u: { class_type: UPSCALE_2X_CLASS, inputs: { frames: ['l', 0], tile_size: 512 } }, s: save(['u', 0]) }
     await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(LOCAL_MODEL_WORDS.overCap) })
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(replicate.submitted()).toEqual([])
     // Its count and what it keeps, a true upper bound: every 2× answer kept for the run.
-    const read = async () => bigGif(1920, 1080, 250)
+    const read = async () => bigGif(1440, 1080, 250)
     const counted = await localModelStartProblems(p, UPSCALE, { hosted: true, shapes: async () => new Map(), read })
     expect(counted.counts).toEqual({ u: 250 })
-    expect(counted.keptBytes).toBeGreaterThanOrEqual(250 * 4 * 1920 * 1080 * 3)
-    expect(counted.keptBytes).toBe(250 * pictureCallKeptBound(UPSCALE_2X_CLASS, 1920 * 1080))
+    expect(counted.keptBytes).toBeGreaterThanOrEqual(250 * 4 * 1440 * 1080 * 3)
+    expect(counted.keptBytes).toBe(250 * pictureCallKeptBound(UPSCALE_2X_CLASS, 1440 * 1080))
     expect(counted.keptByNode?.u).toBe(counted.keptBytes)
     // The loader's own frames, counted with it.
     const frames = await loaderBatchStartProblems(p, UPSCALE, { hosted: true, read, saveSize })
-    expect(frames.keptBytes).toBe(loaderBatchKeptBytes({ count: 250, w: 1920, h: 1080, alpha: false }, false))
+    expect(frames.keptBytes).toBe(loaderBatchKeptBytes({ count: 250, w: 1440, h: 1080, alpha: false }, false))
     expect(frames.keptBytes + counted.keptBytes).toBeGreaterThan(MEDIA_CAPS.hosted.keptBytesPerRun)
   })
 

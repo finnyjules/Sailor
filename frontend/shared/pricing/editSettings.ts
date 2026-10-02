@@ -44,7 +44,7 @@
  *
  * Pure: no server imports. Relative imports only.
  */
-import { pyFloatOf } from '../runner/pyText'
+import { pyFloatOf, pyIntOf } from '../runner/pyText'
 import { NO_FAMILIES, type RunnerFamily } from '../runner/families'
 import { classUpgradeOn } from '../runner/eligibility'
 import { FAL_FACE_SWAP_APP } from '../runner/faceSwap'
@@ -331,6 +331,20 @@ function scaleFactor(v: unknown): number {
   return Math.max(1, Math.min(MAX_SCALE_FACTOR, n))
 }
 
+/**
+ * LC4: the denoising steps a diffusion engine is sent (Clarity's
+ * `num_inference_steps`, the refiner's `refine_steps`), as the builders read
+ * them (int() of the widget; missing, the node's default). Linked or
+ * unreadable: null, priced at the card's most.
+ */
+function stepsSent(v: unknown, def: number): number | null {
+  if (v === undefined) return def
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v)
+    : typeof v === 'boolean' ? Number(v)
+      : typeof v === 'string' ? pyIntOf(v) : null
+  return n != null && n > 0 ? n : null
+}
+
 /** Topaz's topaz_upscale_factor: "None" / "2x" / "4x" / "6x", default "2x". Linked or anything else: 6. */
 const TOPAZ_FACTORS: Record<string, number> = { 'None': 1, '2x': 2, '4x': 4, '6x': 6 }
 function topazFactor(v: unknown): number {
@@ -369,11 +383,12 @@ function upscaleCall(engine: string, inputs: NodeInputs, px: number): EditCall |
     const tiles = realEsrganTiles(px)
     if (tiles > 1) return { ...call(slug, null, { input: realEsrganMaxPixels(), output: px * factor * factor }), times: tiles }
   }
-  // The input enlarged `factor` times on each side.
-  return call(slug, null, { input: px, output: px * factor * factor })
+  // The input enlarged `factor` times on each side; Clarity also by its steps (LC4).
+  const c = call(slug, null, { input: px, output: px * factor * factor })
+  return engine === 'Clarity' ? { ...c, steps: stepsSent(inputs.num_inference_steps, 18) } : c
 }
 
-/** The most pixels Real-ESRGAN takes in one call: its card's (2 096 704, the GPU limit measured on 2026-10-01). */
+/** The most pixels Real-ESRGAN is sent in one call: its card's (1 572 864: LC4, under the 2 096 704 the service states). */
 export function realEsrganMaxPixels(): number {
   const r = EDIT_RATES['nightmareai/real-esrgan']
   if (!r || r.unit !== 'per_input_megapixel') throw new Error('Real-ESRGAN has no listed price')
@@ -391,10 +406,15 @@ export function realEsrganTiles(px: number): number {
   return px <= cap ? 1 : tileCountBound(px, cap)
 }
 
-function enhanceCall(engine: string, px: number): EditCall | null {
+function enhanceCall(engine: string, inputs: NodeInputs, px: number): EditCall | null {
   const slug = hasOwn(ENHANCE_ENGINE_SLUGS, engine) ? ENHANCE_ENGINE_SLUGS[engine]! : null
+  if (!slug) return null
   // In place: Clarity at scale 1.0, Topaz with upscale_factor "None", the refiner at "original".
-  return slug ? call(slug, null, { output: px }) : null
+  const c = call(slug, null, { output: px })
+  // LC4: Clarity and the refiner by the steps they are sent (server/runner/generators/repair.ts enhanceInput).
+  if (engine === 'Creative') return { ...c, steps: stepsSent(inputs.num_inference_steps, 18) }
+  if (engine === 'Diffusion Refine') return { ...c, steps: stepsSent(inputs.refine_steps, 20) }
+  return c
 }
 
 /** The calls a node could make: one, or one per model when the model is linked or missing. */
@@ -432,11 +452,11 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
     // A wired engine (known only at run time): every engine the node offers, priced at the dearest (R3.5 fix round 1).
     if (isLinked(inputs.model)) {
       const engines = Object.keys(classType === 'UpscaleImageNode' ? UPSCALE_ENGINE_SLUGS : ENHANCE_ENGINE_SLUGS)
-      return { calls: engines.map(e => (classType === 'UpscaleImageNode' ? upscaleCall(e, inputs, px) : enhanceCall(e, px))!) }
+      return { calls: engines.map(e => (classType === 'UpscaleImageNode' ? upscaleCall(e, inputs, px) : enhanceCall(e, inputs, px))!) }
     }
     const engine = typeof inputs.model === 'string' ? inputs.model : ''
     if (!engine) return { refused: 'no model selected' }
-    const c = classType === 'UpscaleImageNode' ? upscaleCall(engine, inputs, px) : enhanceCall(engine, px)
+    const c = classType === 'UpscaleImageNode' ? upscaleCall(engine, inputs, px) : enhanceCall(engine, inputs, px)
     return c ? { calls: [c] } : { refused: `unknown engine ${engine}` }
   }
 

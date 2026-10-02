@@ -23,7 +23,9 @@
  *    pause at its densest. The runner asks for 32 kHz mono (speechInput).
  *  - Clone a singing voice (RVC): its sound's first 60 s are sent
  *    (SOUND_IN_MAX_SECONDS), and the voice is changed in time with them: the
- *    input's bound (60 s when it isn't known), plus a second.
+ *    input's bound (60 s when it isn't known), plus a second. CONFIRMED
+ *    2026-10-02 (LC4, live5-clone-60s): 60 s in gave 59.98 s out, at 44.1 kHz
+ *    stereo (within CLONE_RATE_BOUND and CLONE_CHANNELS_BOUND).
  *
  * The rate and channels of a made sound are the service's to choose, so the
  * shape built from these is marked `upTo`: a bound for the holds and the kept
@@ -67,14 +69,16 @@ export const SPEECH_RATE = 32_000
 export const SPEECH_CHANNELS = 1
 
 /**
- * The slowest speaking rate taken, in characters a second at speed 1: one.
- * Ordinary speech runs about 12–15 characters a second in English and 4–6 in
- * Chinese; one leaves room for figures read out in words ("1,234,567" is
- * about four seconds) and for a voice's own pace. Provisional until the
- * owed live check measures a long text at the slowest speed (R11.8's report);
- * lowering it only makes the bound larger.
+ * The slowest speaking rate taken, in characters a second at speed 1: four
+ * (0.25 s a character). MEASURED 2026-10-02 (LC4, owed live check
+ * live5-speech-long): MiniMax Speech-02 HD read 419 characters (figures,
+ * times and money read out in words, one `<#2#>` pause) at speed 0.5 in
+ * 70.5 s, about 0.163 s a character at speed 0.5 (68.5 s without the pause),
+ * so about 0.082 s a character at speed 1. 0.25 s is about 3× that. It was a
+ * provisional one character a second (R11.8) until the measurement; lowering
+ * it only makes the bound larger.
  */
-export const SPEECH_SLOWEST_CHARS_PER_SECOND = 1
+export const SPEECH_SLOWEST_CHARS_PER_SECOND = 4
 /** `speed`'s bounds (IO.Float 0.5–2) and default. */
 export const SPEECH_SPEED = { min: 0.5, max: 2, default: 1 } as const
 /** The longest pause a `<#x#>` marker asks for (the model's own range, 0.01–99.99 s). */

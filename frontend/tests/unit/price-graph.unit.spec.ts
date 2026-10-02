@@ -640,11 +640,12 @@ describe('restore and remove background on the ComfyUI path (R3.5)', () => {
     expect(at('RemoveBackgroundRemoteNode', { image: ['2', 0] })).toBe(1)
   })
   it('Upscale and Enhance detail are unchanged: by the output of the largest input, unmeasured', () => {
-    // R7.11: Real-ESRGAN by the picture sent in; unmeasured, the 18.9 MP cap in twelve tiles at the 2 096 704-px limit
-    // ($0.0755; R11.6 fix rounds 2 and 3).
-    expect(at('UpscaleImageNode', { model: 'Real-ESRGAN', image: ['2', 0], scale_factor: 2 })).toBe(16)
+    // R7.11: Real-ESRGAN by the picture sent in; unmeasured, the 18.9 MP cap in fifteen tiles at the 1 572 864-px limit
+    // ($0.0708; R11.6 fix rounds 2 and 3, LC4).
+    expect(at('UpscaleImageNode', { model: 'Real-ESRGAN', image: ['2', 0], scale_factor: 2 })).toBe(15)
     expect(at('UpscaleImageNode', { model: 'Topaz', image: ['2', 0], topaz_upscale_factor: '2x' })).toBe(48)
-    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine', image: ['2', 0] })).toBe(89)
+    // LC4: the refiner by GPU time, 18.9 MP × 20 steps, squared above 1 MP ($19.95).
+    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine', image: ['2', 0] })).toBe(2993)
   })
   // Fix round 1 (ruling 4): a wired engine was refused as unpriced; it is now priced at the dearest engine the node offers.
   it('Upscale and Enhance detail with a wired engine: the dearest engine, never refused', () => {
@@ -654,8 +655,9 @@ describe('restore and remove background on the ComfyUI path (R3.5)', () => {
       const dearest = Math.max(...list.map(model => at(ct, { ...rest, model })!))
       expect(at(ct, { ...rest, model: ['9', 0] }), ct).toBe(dearest)
     }
-    expect(at('UpscaleImageNode', { image: ['2', 0], scale_factor: 2, topaz_upscale_factor: '2x', model: ['9', 0] })).toBe(240)
-    expect(at('EnhanceDetailNode', { image: ['2', 0], model: ['9', 0] })).toBe(89)
+    // LC4: Clarity (75.5 MP × 18 steps) and the refiner are now the dearest engines unmeasured.
+    expect(at('UpscaleImageNode', { image: ['2', 0], scale_factor: 2, topaz_upscale_factor: '2x', model: ['9', 0] })).toBe(714)
+    expect(at('EnhanceDetailNode', { image: ['2', 0], model: ['9', 0] })).toBe(2993)
     // A missing engine is still refused (nothing says which the node runs).
     expect(() => at('UpscaleImageNode', { image: ['2', 0] })).toThrow(UnpricedGraphError)
   })

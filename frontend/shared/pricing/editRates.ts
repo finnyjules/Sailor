@@ -17,9 +17,14 @@
  *    size (Crystal, Topaz); above the last step, the last step's price, or,
  *    where the service lists no price there, the last step's price per pixel
  *    carried on (`beyondPerPixel`);
- *  - `per_output_megapixel`: a model billed by GPU time, priced per output
- *    megapixel with a floor (an estimate: the service publishes no per-unit
- *    figure);
+ *  - `per_megapixel_step`: a diffusion model billed by GPU time (LC4: Clarity
+ *    and the Magic Image Refiner), a ceiling per megapixel of the picture
+ *    made per denoising step sent: `perMegapixelStep` × steps × MP, the MP
+ *    its pixels / 1,000,000 (not rounded: the rate carries the margin), never
+ *    below `minMegapixels` (the measured picture: its start-up is covered),
+ *    and above `superlinearAboveMegapixels` (a picture diffused whole, whose
+ *    attention grows with the square of its size) multiplied by MP over it.
+ *    Steps not sent (null) are priced at `maxSteps`;
  *  - `per_run_megapixels`: Replicate's FLUX.2 — a price per run, plus one per
  *    megapixel of the picture sent in and one per megapixel of the picture
  *    that comes back (each rounded up, see below);
@@ -58,7 +63,7 @@ export type EditRate =
   | (RateMeta & { unit: 'by_resolution' | 'by_quality', byTier: Record<string, number> })
   | (RateMeta & { unit: 'flux2_megapixels', firstMegapixel: number, extraMegapixel: number, megapixelPixels: number })
   | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[], beyondPerPixel?: number })
-  | (RateMeta & { unit: 'per_output_megapixel', perMegapixel: number, minUsd: number })
+  | (RateMeta & { unit: 'per_megapixel_step', perMegapixelStep: number, minMegapixels: number, maxSteps: number, superlinearAboveMegapixels?: number, note: string })
   | (RateMeta & { unit: 'per_run_megapixels', perRun: number, perInputMegapixel: number, perOutputMegapixel: number })
   | (RateMeta & { unit: 'per_megapixel', perMegapixel: number })
   | (RateMeta & { unit: 'per_input_megapixel', perMegapixel: number, minUsd: number, maxInputPixels: number, note: string })
@@ -83,6 +88,11 @@ export interface EditCall {
    * whichever one runs.
    */
   fallbacks?: EditCall[]
+  /**
+   * Denoising steps the call is sent (LC4: Clarity's `num_inference_steps`, the
+   * refiner's `steps`), where the price depends on them; absent, the card's most.
+   */
+  steps?: number | null
   /**
    * R11.6 fix round 3: how many times the node makes this call in one run
    * (Upscale on Real-ESRGAN over the service's largest picture, in tiles:
@@ -191,13 +201,23 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'fofr/style-transfer': { unit: 'per_image', usd: 0.05, ...estimate(rep('fofr/style-transfer')) },
 
   // ── Upscale and Enhance detail (Replicate) ──────────────────────────────
-  // Billed by GPU time (A100 40GB, $0.00115/s), "approximately $0.036 to run"
-  // for a typical picture (re-read 2026-09-24; it said $0.020 earlier that day). Tiled upscaling time grows with the output size,
-  // so it is priced per output megapixel: $0.0125/MP makes 16 MP out (a 2 × 2K
-  // picture at 2×) $0.20, the figure charged before, which stays the floor.
+  // Billed by GPU time (A100 40GB, $0.00115/s; page re-read 2026-10-02: "approximately $0.013 to run",
+  // "typically complete within 12 seconds"). LC4 (USER go 2026-10-02): the $0.20 floor (the pre-R3 price
+  // policy, 68× the measured bill) is gone; a GPU-time ceiling from the settings sent instead.
+  // MEASURED 2026-10-01 (owed live check upscale-clarity-1x): 2.5 s ($0.0029) for a 512 × 512 picture at
+  // scale 1 (0.262 MP made), 18 steps, creativity 0.35. Clarity is A1111 img2img with tiled diffusion: it
+  // denoises steps × creativity of the steps (6.3), tile by tile (about 1 MP a tile), so its time grows with
+  // the megapixels made times the steps. The slope is taken with the whole run in it (start-up as work, so
+  // never under): 2.5 s / (0.262 MP × 6.3) = 1.51 s a megapixel a denoised step; priced at 2× that
+  // (3.03 s × $0.00115 = $0.0035), on EVERY step sent (creativity 1, the dearest; the node takes 0–1), so
+  // the measured run is held at about 5.7× its bill and creativity 1 at 2×. 2× also covers a tile's own
+  // attention growing from the measured 0.26 MP to a full ~1 MP tile (≤ 2× while attention is ≤ 35% of the
+  // work at 512²). Never below the measured picture's 0.262 MP (its start-up). Steps 10–50 on the node
+  // (validated); a wired one the service's own most, 100. An estimate: one small measurement.
   'philz1337x/clarity-upscaler': {
-    unit: 'per_output_megapixel', perMegapixel: 0.0125, minUsd: 0.20,
-    ...estimate(rep('philz1337x/clarity-upscaler')),
+    unit: 'per_megapixel_step', perMegapixelStep: 0.0035, minMegapixels: 0.262144, maxSteps: 100,
+    note: 'A100-40 at $0.00115/s; live check 2026-10-01: 2.5 s for 512² made, 18 steps × creativity 0.35 = 1.51 s/MP/denoised step; ceiling 2× that on every step sent, at least 0.262 MP',
+    ...estimate(rep('philz1337x/clarity-upscaler')), read: '2026-10-02',
   },
   // By output image pixels: ≤ 4.4M $0.05, ≤ 8.8M $0.10, ≤ 17.6M $0.20,
   // ≤ 27.5M $0.40, ≤ 55M $0.80, ≤ 110M $1.60, above $3.20.
@@ -211,14 +231,13 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // picture (1.33 MP in) at 2×, about $0.00273 — over the $0.002 a picture this card said (read as "$0.002
   // per image output", marked verified, 2026-09-24). Now a ceiling per megapixel sent in: measured 9.14 s a
   // megapixel ($0.00206); carded at $0.003 a megapixel (13.3 s, about 1.46× the measurement), at least $0.003
-  // a call (13.3 s, a small picture's start-up), the picture taken at most the 2 096 704 pixels (1448²) the
-  // service's GPU takes — MEASURED 2026-10-01 by R11.6's live check, whose 1302 × 2160 tile Replicate refused
-  // ("… total number of pixels 2812320 greater than the max size that fits in GPU memory on this hardware,
-  // 2096704"; the page's "1440p", 2560 × 1440, was too high; shared/runner/localModels.ts UPSCALE_2X_MAX_PIXELS):
-  // at most $0.00629 a call. MEASURED 2026-10-01 (R7.11): 12.13 s at 1.33 MP in, 2×, face_enhance off; the ceiling is above it, so the card is verified.
+  // a call (13.3 s, a small picture's start-up), the picture taken at most the 1 572 864 pixels (1536 × 1024)
+  // sent in one call (shared/runner/localModels.ts UPSCALE_2X_MAX_PIXELS): the service states 2 096 704 (R11.6's
+  // live check, 2026-10-01), but a 2 046 000-pixel tile ran out of GPU memory there (LC4, 2026-10-02), so 75% of
+  // it: at most $0.00471859 a call. MEASURED 2026-10-01 (R7.11): 12.13 s at 1.33 MP in, 2×, face_enhance off; the ceiling is above it, so the card is verified.
   'nightmareai/real-esrgan': {
-    unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: 2_096_704,
-    note: 'T4 at $0.000225/s; live check 2026-10-01: 12.13 s for 1152² in (1.33 MP) at 2× = $0.00273 ($0.00206/MP); ceiling $0.003/MP, at least $0.003, input at most 2 096 704 px (1448², the GPU limit Replicate stated on 2026-10-01)',
+    unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: 1_572_864,
+    note: 'T4 at $0.000225/s; live check 2026-10-01: 12.13 s for 1152² in (1.33 MP) at 2× = $0.00273 ($0.00206/MP); ceiling $0.003/MP, at least $0.003, input at most 1 572 864 px (1536 × 1024: 75% of the 2 096 704 Replicate states, after a 2 046 000-px tile ran out of GPU memory on 2026-10-02)',
     ...verified('replicate', rep('nightmareai/real-esrgan')), read: '2026-10-01',
   },
   // "$6 per thousand output images".
@@ -267,12 +286,21 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // (owed live checks, tier 1): public link $0.032 a picture, trained model 7.7 s
   // of H100 = $0.012; the $0.04 is above both, so verified.
   'black-forest-labs/flux-dev-lora': { unit: 'per_image', usd: 0.04, ...verified('replicate', rep('black-forest-labs/flux-dev-lora')), read: '2026-10-01' },
-  // Billed by GPU time (L40S), "approximately $0.031 to run" for a typical
-  // ~1 MP picture. Enhance detail runs it in place, so it is priced per output
-  // megapixel, never below the $0.10 charged before.
+  // Billed by GPU time (L40S, $0.000975/s; page re-read 2026-10-02: "approximately $0.021 to run",
+  // "typically complete within 22 seconds", "varies significantly based on the inputs"). LC4 (USER go
+  // 2026-10-02): the $0.10 floor (42× the measured bill) is gone; a GPU-time ceiling from the settings sent.
+  // MEASURED 2026-10-02 (owed rerun enhance-refine): 2.46 s ($0.0024) for a 512 × 512 picture (0.262 MP) at
+  // "original", 20 steps, creativity 0.15 + 0.4 × 0.45 = 0.33. A diffusers img2img: it denoises steps ×
+  // creativity of the steps (6.6). The slope with the whole run in it: 2.46 s / (0.262 MP × 6.6) = 1.42 s a
+  // megapixel a denoised step; priced at 2× that (2.84 s × $0.000975 = $0.0028), on EVERY step sent
+  // (Enhance sends creativity at most 0.6, so 3.3× at the dearest strength). The picture is diffused whole
+  // at its own size ("original"), so its attention grows with the square of the picture: up to 1 MP the
+  // 3.3× covers attention up to ~70% of the work; above 1 MP the price grows with MP² (superlinear). Never
+  // below the measured 0.262 MP. Steps 10–50 on the node (validated); a wired one 100. An estimate.
   'fermatresearch/magic-image-refiner': {
-    unit: 'per_output_megapixel', perMegapixel: 0.031, minUsd: 0.10,
-    ...estimate(rep('fermatresearch/magic-image-refiner')),
+    unit: 'per_megapixel_step', perMegapixelStep: 0.0028, minMegapixels: 0.262144, maxSteps: 100, superlinearAboveMegapixels: 1,
+    note: 'L40S at $0.000975/s; live check 2026-10-02: 2.46 s for 512² at original, 20 steps × creativity 0.33 = 1.42 s/MP/denoised step; ceiling 2× that on every step sent, at least 0.262 MP, × MP above 1 MP (whole-picture attention)',
+    ...estimate(rep('fermatresearch/magic-image-refiner')), read: '2026-10-02',
   },
 }
 
@@ -316,8 +344,17 @@ export function editUsd(call: EditCall): number | null {
       const last = rate.steps[rate.steps.length - 1]!
       return rate.beyondPerPixel == null ? last[1] : tidy(Math.max(last[1], rate.beyondPerPixel * px))
     }
-    case 'per_output_megapixel':
-      return tidy(Math.max(rate.minUsd, rate.perMegapixel * megapixelsOf(call.outputPixels ?? 0)))
+    case 'per_megapixel_step': {
+      const px = call.outputPixels
+      // The picture made is always known to the builders (editSettings.ts); unknown, unpriced (refused).
+      if (typeof px !== 'number' || !Number.isFinite(px) || px <= 0) return null
+      const sent = call.steps
+      const steps = typeof sent === 'number' && Number.isFinite(sent) && sent > 0 ? Math.min(sent, rate.maxSteps) : rate.maxSteps
+      const mp = Math.max(px / 1e6, rate.minMegapixels)
+      const above = rate.superlinearAboveMegapixels
+      const grow = above != null && mp > above ? mp / above : 1
+      return tidy(rate.perMegapixelStep * steps * mp * grow)
+    }
     case 'per_run_megapixels':
       return tidy(rate.perRun + rate.perInputMegapixel * megapixelsOf(call.inputPixels ?? 0) + rate.perOutputMegapixel * megapixelsOf(call.outputPixels ?? 0))
     case 'per_megapixel':

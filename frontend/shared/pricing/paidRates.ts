@@ -447,7 +447,7 @@ function ownUsd(call: PaidCall, rates: Readonly<Record<string, PaidRate>>): numb
   const paid = own(rates, call.endpoint)
   if (paid) return paidCardUsd(paid, call)
   if (editRate(call.endpoint)) {
-    return editUsd({ endpoint: call.endpoint, tier: call.tier ?? null, inputPixels: call.inputPixels ?? null, outputPixels: call.outputPixels ?? null })
+    return editUsd({ endpoint: call.endpoint, tier: call.tier ?? null, inputPixels: call.inputPixels ?? null, outputPixels: call.outputPixels ?? null, steps: call.steps ?? null })
   }
   const seconds = count(call.outputSeconds)
   const audios = call.audio === undefined ? [false, true] : [call.audio]

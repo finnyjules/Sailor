@@ -76,8 +76,9 @@ describe('estimates corrected', () => {
   it('the cards the measurements kept are verified; Clarity, the Refiner, Seedream and multi-LoRA stay estimates', () => {
     for (const slug of ['firtoz/trellis', 'bytedance/dolphin', 'thomasmol/whisper-diarization', 'ideogram-ai/layerize']) expect(PAID_RATES[slug]?.confidence, slug).toBe('verified')
     expect(EDIT_RATES['black-forest-labs/flux-dev-lora']).toMatchObject({ usd: 0.04, confidence: 'verified' })
-    expect(EDIT_RATES['philz1337x/clarity-upscaler']).toMatchObject({ minUsd: 0.20, confidence: 'estimate' })
-    expect(EDIT_RATES['fermatresearch/magic-image-refiner']).toMatchObject({ minUsd: 0.10, confidence: 'estimate' })
+    // LC4 (USER go 2026-10-02): no floors; a GPU-time ceiling per megapixel a step, still estimates (one small measurement each).
+    expect(EDIT_RATES['philz1337x/clarity-upscaler']).toMatchObject({ unit: 'per_megapixel_step', perMegapixelStep: 0.0035, confidence: 'estimate' })
+    expect(EDIT_RATES['fermatresearch/magic-image-refiner']).toMatchObject({ unit: 'per_megapixel_step', perMegapixelStep: 0.0028, confidence: 'estimate' })
     expect(PAID_RATES['bytedance/seedream/v5/pro/layerize']?.confidence).toBe('estimate')
     expect(PAID_RATES['lucataco/flux-dev-multi-lora']?.confidence).toBe('estimate')
   })

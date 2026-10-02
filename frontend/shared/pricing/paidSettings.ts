@@ -435,6 +435,7 @@ const LORA_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
 function paidCallOf(c: EditCall): PaidCall {
   return {
     endpoint: c.endpoint, tier: c.tier, inputPixels: c.inputPixels, outputPixels: c.outputPixels,
+    ...(typeof c.steps === 'number' ? { steps: c.steps } : {}),
     ...(c.fallbacks ? { fallbacks: c.fallbacks.map(paidCallOf) } : {}),
   }
 }

@@ -33,7 +33,7 @@ import {
   UPSCALE_2X_CLASS, UPSCALE_2X_TILED_MAX_PIXELS, UPSCALE_2X_TILED_MAX_TILES, WHISPER_CLASS, moreThanHeldWords, overCapWords,
 } from '#shared/runner/localModels'
 import {
-  CLONE_RATE_BOUND, MUSIC_RATE, SPEECH_PAUSE_MAX_SECONDS, SPEECH_RATE, cloneSecondsBound, musicChannelsBound, musicSecondsBound,
+  CLONE_RATE_BOUND, MUSIC_RATE, SPEECH_PAUSE_MAX_SECONDS, SPEECH_RATE, SPEECH_SLOWEST_CHARS_PER_SECOND, cloneSecondsBound, musicChannelsBound, musicSecondsBound,
   speechPauseSeconds, speechSecondsBound, speechSpeedOf,
 } from '#shared/runner/sourceBounds'
 import { SPEECH_MAX_CHARS } from '#shared/runner/audioGen'
@@ -265,16 +265,22 @@ describe('music, speech and a cloned voice are bounded by their settings', () =>
     expect(MUSIC_RATE).toBe(32_000)
   })
 
-  it('speech: every character at one a second (speed 1, slower below it), every pause marker, and a second; a text made in the run, its longest', () => {
-    // The live check's 20 characters: at most 21 s at speed 1 (live length check owed: R11.8's report).
-    expect(speechSecondsBound('x'.repeat(20), 1)).toBe(21)
-    expect(speechSecondsBound('x'.repeat(20), 0.5)).toBe(41)
-    expect(speechSecondsBound('x'.repeat(20), 2)).toBe(11)
+  it('speech: every character at four a second (speed 1, slower below it), every pause marker, and a second; a text made in the run, its longest', () => {
+    // LC4: 0.25 s a character at speed 1 (MEASURED 2026-10-02, about 3× the live check's 0.082 s).
+    expect(SPEECH_SLOWEST_CHARS_PER_SECOND).toBe(4)
+    expect(speechSecondsBound('x'.repeat(20), 1)).toBe(6)
+    expect(speechSecondsBound('x'.repeat(20), 0.5)).toBe(11)
+    expect(speechSecondsBound('x'.repeat(20), 2)).toBe(3.5)
+    // The live check (live5-speech-long): 419 characters with one <#2#> pause, at speed 0.5, gave 70.5 s.
+    const live = 'y'.repeat(413) + '<#2#>' + 'z'
+    expect(live.length).toBe(419)
+    expect(speechSecondsBound(live, 0.5)).toBeCloseTo(419 / 2 + 2 * 2 + 1, 9)
+    expect(speechSecondsBound(live, 0.5)).toBeGreaterThanOrEqual(70.5 * 3)
     expect(speechSpeedOf(undefined)).toBe(1)
     expect(speechSpeedOf(['s', 0])).toBe(0.5)
     // Pause markers, each at most the model's 99.99 s.
     expect(speechPauseSeconds('Hi <#2.5#> there <# 1 #> and <#500#>')).toBeCloseTo(2.5 + 1 + SPEECH_PAUSE_MAX_SECONDS, 9)
-    expect(speechSecondsBound('a<#3#>b', 1)).toBeCloseTo(7 + 3 + 1, 9)
+    expect(speechSecondsBound('a<#3#>b', 1)).toBeCloseTo(7 / 4 + 3 + 1, 9)
     // Made in the run: the longest text, every character a full pause at its densest.
     expect(speechSecondsBound(null, 1)).toBeGreaterThanOrEqual(SPEECH_MAX_CHARS * 2)
     expect(speechSecondsBound(null, 1)).toBeGreaterThanOrEqual(Math.floor(SPEECH_MAX_CHARS / 6) * SPEECH_PAUSE_MAX_SECONDS)
@@ -298,9 +304,9 @@ describe('music, speech and a cloned voice are bounded by their settings', () =>
     }
     const shapes = await soundShapes(p, EVERY, async () => ({ rate: 8000, channels: 1, samples: 8000 * 11, exact: false, header: true }))
     expect(shapes.get('m:0')).toEqual({ rate: MUSIC_RATE, channels: 2, samples: 9 * MUSIC_RATE, exact: false, upTo: true })
-    expect(shapes.get('a:0')).toEqual({ rate: SPEECH_RATE, channels: 1, samples: 13 * SPEECH_RATE, exact: false, upTo: true })
+    expect(shapes.get('a:0')).toEqual({ rate: SPEECH_RATE, channels: 1, samples: 4 * SPEECH_RATE, exact: false, upTo: true })
     expect(shapes.get('cl:0')).toEqual({ rate: CLONE_RATE_BOUND, channels: 2, samples: 12 * CLONE_RATE_BOUND, exact: false, upTo: true })
-    expect(soundBoundOf(p, ['a', 0], shapes)).toMatchObject({ seconds: 13 + 1e-3, upTo: true })
+    expect(soundBoundOf(p, ['a', 0], shapes)).toMatchObject({ seconds: 4 + 1e-3, upTo: true })
     expect(soundBoundOf(p, ['l', 0], shapes)).toMatchObject({ seconds: 11 + 1e-3, header: true })
   })
 
@@ -459,12 +465,12 @@ describe('fix round 1 (I2), R11.9a: a maker\'s bound past a length-capped reader
   const speech = (chars: number) => ({ class_type: 'GenerateSpeechNode', inputs: { model: 'MiniMax Speech-02 HD', text: 'x'.repeat(chars), voice_id: 'Wise_Woman', emotion: 'auto', speed: 1, volume: 1, pitch: 0, language_boost: 'auto' } })
   const graphs: Record<string, ApiPrompt> = {
     'long speech → Fade → Save audio': {
-      sp: speech(2500),
+      sp: speech(10000),
       f: { class_type: 'AudioFade', inputs: { audio: ['sp', 0], fade_in: 0.5, fade_out: 0.5, curve: 'linear' } },
       s: { class_type: 'SaveAudio', inputs: { audio: ['f', 0], filename_prefix: 'audio/ComfyUI' } },
     },
     'long speech → Vocal separator (wired directly)': {
-      sp: speech(2500),
+      sp: speech(10000),
       v: { class_type: 'VocalSeparator', inputs: { audio: ['sp', 0], model: 'htdemucs', shifts: 1 } },
       a: { class_type: 'SaveAudio', inputs: { audio: ['v', 0], filename_prefix: 'audio/ComfyUI' } },
     },

@@ -386,10 +386,11 @@ describe('prices (ruling (a))', () => {
     expect(at('UpscaleImageNode', { model: 'Recraft Crisp' })).toBe(creditsForUsd(0.006))
     expect(at('UpscaleImageNode', { model: 'Crystal', scale_factor: 2 })).toBe(creditsForUsd(0.05))
     expect(at('UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '6x' })).toBe(creditsForUsd(0.16))
-    expect(at('UpscaleImageNode', { model: 'Clarity', scale_factor: 2 })).toBe(creditsForUsd(0.20))
+    // LC4: Clarity and the refiner by GPU time and steps (18, 20 by default), no floor.
+    expect(at('UpscaleImageNode', { model: 'Clarity', scale_factor: 2 })).toBe(creditsForUsd(0.0035 * 4 * 18))
     expect(at('EnhanceDetailNode', { model: 'Faithful' })).toBe(creditsForUsd(0.08))
-    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine' })).toBe(creditsForUsd(0.10))
-    expect(at('EnhanceDetailNode', { model: 'Creative' })).toBe(creditsForUsd(0.20))
+    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine' })).toBe(creditsForUsd(0.0028 * 20))
+    expect(at('EnhanceDetailNode', { model: 'Creative' })).toBe(creditsForUsd(0.0035 * 18))
     // Unmeasured (the ComfyUI path with no gate): the input cap (19 MP × 4 = 75 MP out: $0.32).
     const cap = priceNode('UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '2x', image: ['p', 0] }) as { credits: number }
     expect(cap.credits).toBe(creditsForUsd(0.32))

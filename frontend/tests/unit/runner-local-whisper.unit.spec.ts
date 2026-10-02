@@ -478,8 +478,11 @@ describe('fix round 1 · Finding 2: a sound made in the run is bounded before th
     expect(whisperSoundBound(p, ['m', 0], shapes)).toBeCloseTo(9 + WHISPER_RESAMPLE_SLACK, 9)
     expect(whisperSoundBound(p, ['a', 0], shapes)).toBeCloseTo(9 + WHISPER_RESAMPLE_SLACK, 9)
     expect(whisperSoundBound(p, ['w', 0], shapes)).toBeCloseTo(31 + WHISPER_RESAMPLE_SLACK, 9)
-    // "Hello." is 6 characters at one a second (speed 1), and a second.
-    expect(whisperSoundBound(p, ['sp', 0], shapes)).toBeCloseTo(7 + WHISPER_RESAMPLE_SLACK, 9)
+    // "Hello." is 6 characters at four a second (speed 1; LC4, measured 2026-10-02), and a second.
+    expect(whisperSoundBound(p, ['sp', 0], shapes)).toBeCloseTo(6 / 4 + 1 + WHISPER_RESAMPLE_SLACK, 9)
+    // LC4: 1,800 characters (refused at R11.8's provisional one a second: 1,801 s past Whisper's 1,800) is now 451 s.
+    const long = { ...p, sp: { class_type: 'GenerateSpeechNode', inputs: { text: 'x'.repeat(1800) } } }
+    expect(whisperSoundBound(long, ['sp', 0], shapes)).toBeCloseTo(451 + WHISPER_RESAMPLE_SLACK, 9)
     // Its input's 2 s bound, and a second.
     expect(whisperSoundBound(p, ['cl', 0], shapes)).toBeCloseTo(3 + WHISPER_RESAMPLE_SLACK, 9)
     // The hold reads the bound, never past the place's cap.

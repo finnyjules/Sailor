@@ -138,6 +138,28 @@ describe('the runner engine', () => {
     })
   }
 
+  // LC4 (live5-fixfaces, 2026-10-02): a 512 × 512 portrait at upscale 2 was quoted $0.32 "up to" — the start of the
+  // run did not size Fix faces' picture, so it priced the 18.9 MP input cap × 4 (the 96 MP tier). It is sized now.
+  for (const hosted of [true, false]) {
+    it(`a 512 × 512 picture at upscale 2 is quoted and held at the 24 MP tier ($0.08), not "up to" (${hosted ? 'hosted' : 'local'})`, async () => {
+      const k = makeKit({ hosted, deps: { families: () => new Set<RunnerFamily>(['fix-faces', 'cards']) } })
+      fs.writeFileSync(path.join(k.root, 'input', 'portrait.png'), await sharp({ create: { width: 512, height: 512, channels: 3, background: '#a07050' } }).png().toBuffer())
+      const p: ApiPrompt = {
+        l: { class_type: 'LoadImage', inputs: { image: 'portrait.png', upload: 'image' } },
+        f: { class_type: 'FixFacesNode', inputs: { image: ['l', 0], strength: 0.8, creativity: 0, upscale: 2 } },
+        s: { class_type: 'SaveImage', inputs: { images: ['f', 0], filename_prefix: 'fix' } },
+      }
+      const quoted = await k.engine.quoteRun({ userId: k.userId, takes: [p], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+      expect(quoted).toMatchObject({ usd: 0.08, upTo: false })
+      // Unmeasured (the canvas), the cap: $0.32, the price the live check was quoted.
+      expect(editMaxUsd(editCalls('FixFacesNode', { upscale: 2 }).calls[0]!)).toBe(0.32)
+      if (!hosted) return
+      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+      await k.engine.settled(runId)
+      expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([quoted.credits])
+    })
+  }
+
   it('off (every other family on): refused, nothing held or sent', async () => {
     const k = kit(ALL_BUT)
     await expect(start(k)).rejects.toMatchObject({ statusCode: 400 })

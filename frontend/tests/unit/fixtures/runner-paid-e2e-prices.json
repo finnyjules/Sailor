@@ -38,6 +38,20 @@
    "nodes": 1
   },
   {
+   "class": "EnhanceDetailNode",
+   "old": 36,
+   "new": 179,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "EnhanceDetailNode",
+   "old": 36,
+   "new": 179,
+   "source": "saved projects",
+   "nodes": 2
+  },
+  {
    "class": "ExtractTextNode",
    "old": 1,
    "new": 2,
@@ -260,6 +274,20 @@
    "new": 135,
    "source": "defaults",
    "nodes": 1
+  },
+  {
+   "class": "UpscaleImageNode",
+   "old": 143,
+   "new": 714,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "UpscaleImageNode",
+   "old": 143,
+   "new": 714,
+   "source": "saved projects",
+   "nodes": 9
   },
   {
    "class": "WhisperRemoteNode",

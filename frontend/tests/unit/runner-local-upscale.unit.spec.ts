@@ -207,8 +207,9 @@ describe('a picture (the plan, run by hand)', () => {
     const io = { signal: new AbortController().signal, read: async () => big, call } as unknown as PipelineIO
     await expect(plan.run(io)).rejects.toThrow(UPSCALE_2X_WORDS.moreThanHeld)
     expect(call).not.toHaveBeenCalled()
-    // R11.6 fix round 2: the service's measured GPU limit (2026-10-01), not the page's 1440p.
-    expect(UPSCALE_2X_MAX_PIXELS).toBe(2_096_704)
+    // R11.6 fix round 2: under the service's stated GPU limit (2 096 704, 2026-10-01), not the page's 1440p; LC4: 75% of
+    // it (1536 × 1024), after a 2 046 000-px tile ran out of GPU memory at the service (2026-10-02).
+    expect(UPSCALE_2X_MAX_PIXELS).toBe(1_572_864)
   })
 
   it('three pictures: three calls, at most PER_NODE_IN_FLIGHT at once, in order', async () => {
@@ -351,8 +352,8 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2560, 1440) })).problem).toBeNull()
-    // R11.6: over 1440p in tiles (two for 2561 × 1440), past 12288 × 1536's pixels left.
-    expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 2 }, problem: null })
+    // R11.6: over the limit in tiles (three for 2561 × 1440 since LC4), past 12288 × 1536's pixels left.
+    expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 3 }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 4400, 4400) })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
     // LC2: a 2× batch past R5's batch caps is refused plainly before the hold (it would fail as it is
     // written, after its paid calls): a frame past MEDIA_CAPS' largest, or more pixels than a batch holds.
@@ -382,7 +383,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
 // ── Prices, families, tooltip ───────────────────────────────────────────────
 
 describe('prices (R7 rule 4)', () => {
-  it('R3.5\'s Real-ESRGAN card, re-carded by R7.11\'s live check (GPU time: $0.003 a megapixel sent, at least $0.003, at most 2 096 704 px in, R11.6 fix round 2); no flat row', () => {
+  it('R3.5\'s Real-ESRGAN card, re-carded by R7.11\'s live check (GPU time: $0.003 a megapixel sent, at least $0.003, at most 1 572 864 px in, LC4); no flat row', () => {
     expect(EDIT_RATES[UPSCALE_2X_SLUG]).toMatchObject({ unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: UPSCALE_2X_MAX_PIXELS, confidence: 'verified', service: 'replicate' })
     // The live check's run: 12.13 s on T4 ($0.000225/s) for 1152² in, $0.00273 — under the card's $0.00398 for it.
     expect(12.13 * 0.000225).toBeLessThan(paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: 1152 * 1152 })!)
@@ -391,28 +392,28 @@ describe('prices (R7 rule 4)', () => {
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, UPSCALE_2X_CLASS)).toBe(false)
   })
 
-  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: twelve tiles at the service\'s limit), marked up once; one picture when nothing was counted', () => {
+  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: fifteen tiles at the limit), marked up once; one picture when nothing was counted', () => {
     const inputs = { frames: ['l', 0], tile_size: 512 }
-    // R11.6 fix round 2: 2 096 704 px (the GPU limit Replicate stated on 2026-10-01) × $0.003 a megapixel; sums rounded to 1e-8.
-    const CAP_USD = 0.006290112
+    // LC4: 1 572 864 px (1536 × 1024, under the 2 096 704 Replicate states) × $0.003 a megapixel; sums rounded to 1e-8.
+    const CAP_USD = 0.004718592
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs, { families: new Set(['upscale-2x']) })).toBe(true)
-    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to twelve tiles at the limit each (the largest
-    // tiled picture's, with fix round 3's 128-pixel overlaps).
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 0.07548132, credits: creditsForUsd(0.07548132) })
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 22.644396, credits: creditsForUsd(22.644396) })
+    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to fifteen tiles at the limit each (the largest
+    // tiled picture's, with fix round 3's 128-pixel overlaps, at LC4's limit).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 0.07077885, credits: creditsForUsd(0.07077885) })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 21.233655, credits: creditsForUsd(21.233655) })
     // Measured at the start of the run (R7.11): the live check's 1152² picture, three of them.
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 3, picturePixels: 1152 * 1152 } })).toEqual({ usd: 0.01194393, credits: 3 })
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 500 * 375 } })).toEqual({ usd: 0.003, credits: 1 })
     // Each call never above the service's largest picture; R11.6: a larger one in tiles, each held at that largest
-    // (4096 × 4096 with no shape known: the pixel bound's ten tiles; runner-upscale-tiles.unit.spec.ts has the rest).
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 0.0629011, credits: creditsForUsd(0.0629011) })
-    // Ten tiles of $0.00629011 (each call's price rounded to 1e-8 dollars).
-    expect(10 * CAP_USD).toBeCloseTo(0.0629011, 6)
+    // (4096 × 4096 with no shape known: the pixel bound's fourteen tiles; runner-upscale-tiles.unit.spec.ts has the rest).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 0.06606026, credits: creditsForUsd(0.06606026) })
+    // Fourteen tiles of $0.00471859 (each call's price rounded to 1e-8 dollars).
+    expect(14 * CAP_USD).toBeCloseTo(0.06606026, 6)
     expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.003 })))).toBe(creditsForUsd(0.009))
-    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 36 }] })
+    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 45 }] })
     expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }).nodes['1']).toBeUndefined()
-    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(0.07548132))
+    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(0.07077885))
   })
 
   it('sends no text; the tooltip names the service while the family is on; its route has no backup', () => {

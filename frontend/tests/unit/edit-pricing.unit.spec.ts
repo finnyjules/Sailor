@@ -130,6 +130,8 @@ const only = (ct: string, inputs: Record<string, unknown>): EditCall => {
 const ESTIMATES = ['catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'philz1337x/clarity-upscaler']
 /** Cards re-read or re-carded on 2026-10-01: Real-ESRGAN (R7.11), and LC1's (Moondream 2, flux-dev-lora, fal's face swap). */
 const READ_10_01 = ['nightmareai/real-esrgan', 'lucataco/moondream2', 'black-forest-labs/flux-dev-lora', 'fal-ai/face-swap']
+/** LC4: Clarity and the Magic Image Refiner, re-carded from their live checks (pages re-read 2026-10-02). */
+const READ_10_02 = ['philz1337x/clarity-upscaler', 'fermatresearch/magic-image-refiner']
 
 describe('edit rate cards', () => {
   it('every card carries a source, the date read and a confidence; only GPU-time models are estimates', () => {
@@ -144,7 +146,7 @@ describe('edit rate cards', () => {
       expect(r.source, endpoint).toContain(endpoint)
       // Moondream re-read with R3.14 fix round 1 (its page's price had halved).
       // Real-ESRGAN re-carded from R7.11's live check (2026-10-01).
-      expect(r.read, endpoint).toBe(READ_10_01.includes(endpoint) ? '2026-10-01' : '2026-09-24')
+      expect(r.read, endpoint).toBe(READ_10_02.includes(endpoint) ? '2026-10-02' : READ_10_01.includes(endpoint) ? '2026-10-01' : '2026-09-24')
       expect(r.service, endpoint).toBe(r.source.includes('fal.ai') ? 'fal' : 'replicate')
     }
     const est = Object.entries(EDIT_RATES).filter(([, r]) => r.confidence === 'estimate').map(([k]) => k).sort()
@@ -428,19 +430,21 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['RestyleFromImageNode', { model: 'Nano Banana', resolution: '4K' }, 0.039, 8],
   ['RestyleFromImageNode', { model: 'Style Transfer · IP-Adapter' }, 0.05, 10],
   // Upscale: the input (the 12288 × 1536 cap unmeasured) × scale² out.
-  ['UpscaleImageNode', { model: 'Clarity' }, 0.95, 143], // 75.5 M px → 76 MP × $0.0125
-  ['UpscaleImageNode', { model: 'Clarity' }, 0.20, 30, MP1], // 4 MP → the $0.20 floor
-  ['UpscaleImageNode', { model: 'Clarity', scale_factor: 4 }, 0.20, 30, MP1], // 16 MP
+  // LC4: Clarity by GPU time, $0.0035 a megapixel made a step (18 by default), at least 0.262 MP; no floor.
+  ['UpscaleImageNode', { model: 'Clarity' }, 4.75634074, 714], // 75.5 M px × 18 steps
+  ['UpscaleImageNode', { model: 'Clarity' }, 0.252, 38, MP1], // 4 MP × 18
+  ['UpscaleImageNode', { model: 'Clarity', scale_factor: 4 }, 1.008, 152, MP1], // 16 MP × 18
+  ['UpscaleImageNode', { model: 'Clarity', scale_factor: 1 }, 0.01651507, 4, 512 * 512], // the live check's: billed $0.0029
   ['UpscaleImageNode', { model: 'Crystal', scale_factor: 1 }, 0.40, 60], // 18.9 M px ≤ 27.5 M
   ['UpscaleImageNode', { model: 'Crystal' }, 1.60, 240], // 75.5 M px ≤ 110 M
   ['UpscaleImageNode', { model: 'Crystal' }, 0.05, 10, MP1], // 4 M px ≤ 4.4 M
   ['UpscaleImageNode', { model: 'Crystal', scale_factor: 10 }, 3.20, 480],
-  // R7.11: Real-ESRGAN by the picture sent in, $0.003 a megapixel (at least $0.003), at most 2 096 704 px (1448², the
-  // GPU limit Replicate stated on 2026-10-01, R11.6 fix round 2; the page's 1440p was too high):
-  // unmeasured, the largest picture (12288 × 1536) in tiles (R11.6 fix round 3: the controller's ruling), twelve at
-  // the limit's 2.0967 MP each; 3840 × 2160 measured, five; the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
-  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.07548132, 16],
-  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.03145055, 7, 3840 * 2160],
+  // R7.11: Real-ESRGAN by the picture sent in, $0.003 a megapixel (at least $0.003), at most 1 572 864 px a call
+  // (LC4: 1536 × 1024, under the 2 096 704 Replicate states, after a 2 046 000-px tile ran out of GPU memory):
+  // unmeasured, the largest picture (12288 × 1536) in tiles (R11.6 fix round 3: the controller's ruling), fifteen at
+  // the limit's 1.5729 MP each; 3840 × 2160 measured, seven (the most any picture of its pixels makes); the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.07077885, 15],
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.03303013, 7, 3840 * 2160],
   ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.003981312, 1, 1152 * 1152],
   ['UpscaleImageNode', { model: 'Real-ESRGAN' }, 0.003, 1, MP1],
   ['UpscaleImageNode', { model: 'Recraft Crisp' }, 0.006, 2],
@@ -449,11 +453,15 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '4x' }, 0.32, 48, MP1 * 4],
   // 679 MP: past the table's 512 MP row, 17 units per 512 MP carried on.
   ['UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '6x' }, 1.80486144, 271],
-  ['EnhanceDetailNode', { model: 'Creative' }, 0.2375, 36], // 19 MP × $0.0125
-  ['EnhanceDetailNode', { model: 'Creative' }, 0.20, 30, MP1],
+  // LC4: Creative is Clarity in place, by its steps (18).
+  ['EnhanceDetailNode', { model: 'Creative' }, 1.18908518, 179], // 18.9 MP × 18 steps
+  ['EnhanceDetailNode', { model: 'Creative' }, 0.063, 13, MP1],
   ['EnhanceDetailNode', { model: 'Faithful' }, 0.08, 16],
-  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.589, 89], // 19 MP × $0.031
-  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.10, 20, MP1], // the $0.10 floor
+  // LC4: the refiner by GPU time, $0.0028 a megapixel a step (20 by default), at least 0.262 MP, × MP above 1 MP.
+  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 19.94953897, 2993], // 18.9 MP, squared above 1 MP
+  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.056, 12, MP1],
+  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.01468006, 3, 512 * 512], // the live check's: billed $0.0024
+  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.98516242, 148, 2048 * 2048],
 ]
 
 describe('worked examples', () => {
@@ -607,6 +615,44 @@ describe('priced on the size of the picture sent in', () => {
     expect(sourceOutputPixels('GenerateImageNode', { model: 'imagen-4', aspect_ratio: '1:1' })).toBeNull()
     expect(sourceOutputPixels('GenerateImageNode', { model: 'nano-banana-2', model_options: LINK })).toBeNull()
     expect(sourceOutputPixels('Image', { image: 'a.png' })).toBeNull()
+  })
+
+  it('LC4: Clarity and the refiner are held at least twice the GPU bill their live checks give, at the dearest settings', () => {
+    const usdOf = (...a: Parameters<typeof priceNode>) => (priceNode(...a) as { usd: number }).usd
+    // The live checks (owed-live-results.md): Clarity 2.5 s of A100-40 ($0.00115/s) for 512² made at 18 steps ×
+    // creativity 0.35; the refiner 2.46 s of L40S ($0.000975/s) for 512² at 20 steps × creativity 0.33. Each
+    // run's seconds a megapixel a denoised step, start-up counted as work (so never under).
+    const clarityRate = 2.5 / (0.262144 * 18 * 0.35)
+    const refineRate = 2.46 / (0.262144 * 20 * 0.33)
+    // The derived bill: every step sent denoised (creativity 1), at least the measured picture; the refiner's
+    // attention grows with the square above 1 MP.
+    const clarityBill = (px: number, steps: number) => clarityRate * Math.max(px / 1e6, 0.262144) * steps * 0.00115
+    const refineBill = (px: number, steps: number) => {
+      const mp = Math.max(px / 1e6, 0.262144)
+      return refineRate * mp * steps * Math.max(1, mp) * 0.000975
+    }
+    // The measured runs themselves: held at more than twice what they billed ($0.0029, $0.0024).
+    expect(usdOf('UpscaleImageNode', { model: 'Clarity', scale_factor: 1 }, { inputPixels: 512 * 512 })).toBeGreaterThanOrEqual(2 * 0.0029178)
+    expect(usdOf('EnhanceDetailNode', { model: 'Diffusion Refine' }, { inputPixels: 512 * 512 })).toBeGreaterThanOrEqual(2 * 0.0024)
+    for (const px of [64 * 64, 512 * 512, 1024 * 1024, 2048 * 2048, LARGEST_INPUT_PIXELS]) {
+      // Upscale on Clarity at its dearest: 50 steps, creativity 1, scale 10 (capped by the input cap's output).
+      for (const scale_factor of [1, 2, 10]) {
+        const held = usdOf('UpscaleImageNode', { model: 'Clarity', scale_factor, creativity: 1, num_inference_steps: 50 }, { inputPixels: px })
+        expect(held, `Clarity ${px} px ×${scale_factor}`).toBeGreaterThanOrEqual(2 * clarityBill(px * scale_factor ** 2, 50) - 1e-9)
+      }
+      expect(usdOf('EnhanceDetailNode', { model: 'Creative', detail_strength: 1, num_inference_steps: 50 }, { inputPixels: px }))
+        .toBeGreaterThanOrEqual(2 * clarityBill(px, 50) - 1e-9)
+      expect(usdOf('EnhanceDetailNode', { model: 'Diffusion Refine', detail_strength: 1, refine_steps: 50 }, { inputPixels: px }))
+        .toBeGreaterThanOrEqual(2 * refineBill(px, 50) - 1e-9)
+      // A wired step count: the service's most (100).
+      expect(usdOf('UpscaleImageNode', { model: 'Clarity', num_inference_steps: LINK }, { inputPixels: px }))
+        .toBeGreaterThanOrEqual(2 * clarityBill(px * 4, 100) - 1e-9)
+      expect(usdOf('EnhanceDetailNode', { model: 'Diffusion Refine', refine_steps: LINK }, { inputPixels: px }))
+        .toBeGreaterThanOrEqual(2 * refineBill(px, 100) - 1e-9)
+    }
+    // Steps are read as sent: fewer steps, a lower price; the node's defaults (18, 20) when missing.
+    expect(usdOf('UpscaleImageNode', { model: 'Clarity', num_inference_steps: 10 }, { inputPixels: MP1 })).toBeCloseTo(0.0035 * 4 * 10, 9)
+    expect(usdOf('EnhanceDetailNode', { model: 'Diffusion Refine', refine_steps: 10 }, { inputPixels: MP1 })).toBeCloseTo(0.0028 * 10, 9)
   })
 
   it('a measured size above the cap is priced at the cap, so no charge exceeds the ceiling badge', () => {

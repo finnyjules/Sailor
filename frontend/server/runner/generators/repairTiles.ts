@@ -2,7 +2,9 @@
  * Upscale (R3.5's UpscaleImageNode) on Real-ESRGAN, in tiles (step 3, R11.6
  * fix round 3, the controller's ruling): Replicate's Real-ESRGAN refuses a
  * picture over 2 096 704 pixels ("greater than the max size that fits in GPU
- * memory", measured 2026-10-01), so a larger one is never sent whole. It is
+ * memory", measured 2026-10-01), and ran out of GPU memory on a 2 046 000-
+ * pixel tile under it (LC4, 2026-10-02), so a picture over 1 572 864 pixels
+ * (shared/runner/localModels.ts UPSCALE_2X_MAX_PIXELS) is never sent whole. It is
  * cut into the same tiles as Upscale (2×) (shared/runner/upscaleTiles.ts),
  * one call each at a whole scale, each tile's tone matched to the source and
  * faded back (./tiles.ts upscaleInTiles), then, for a scale that isn't whole,

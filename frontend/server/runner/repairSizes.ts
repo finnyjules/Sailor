@@ -22,6 +22,14 @@
  * only when it is larger than that; inside it, it is charged at its real
  * size. A size read from a file (a LoadImage or an Image card's own file,
  * through Image cards) keeps the exact rule.
+ *
+ * LC4 (live5-fixfaces, 2026-10-02): Fix faces (FixFacesNode, fal's Topaz,
+ * billed by the size it makes) is sized here too, so its hold is priced on
+ * its picture, not the 18.9 MP input cap (a 512 × 512 portrait at 2× was
+ * quoted $0.32 "up to", the 96 MP tier, for an $0.08 call). Only the sizes
+ * are taken for it, and a measured picture above the cap (refused at its turn
+ * anyway): a picture the walk can't size keeps the cap's price, as before,
+ * so no graph that ran before is refused here.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { LARGEST_INPUT_PIXELS } from '#shared/pricing/editSettings'
@@ -30,6 +38,9 @@ import { createGateReads, graphInputSizes, pictureSize } from '../utils/graphInp
 import { parseInputFileRef } from './inputs'
 import { measuredInputProblems, type RequestProblem } from './requestRules'
 import type { OutputFile } from './types'
+
+/** LC4: the other classes whose start sizes their picture (sizes only; the walk's refusals stay Upscale's and Enhance's). */
+export const START_SIZED_CLASSES: readonly string[] = ['FixFacesNode']
 
 /** A predicted picture's margin on each side (ruling 1: 1.1, so 1.21× the area). */
 export const PREDICTED_MARGIN = 1.1
@@ -52,7 +63,8 @@ export interface StartPictureSizes {
 
 /** The G1 walk over one prompt, kept to its Upscale and Enhance detail nodes. */
 export async function startPictureSizes(prompt: ApiPrompt, read: (f: OutputFile) => Promise<Uint8Array>): Promise<StartPictureSizes> {
-  const mine = (id: string) => REPAIR_SIZE_PRICED_CLASSES.includes(prompt[id]?.class_type ?? '')
+  const repair = (id: string) => REPAIR_SIZE_PRICED_CLASSES.includes(prompt[id]?.class_type ?? '')
+  const mine = (id: string) => repair(id) || START_SIZED_CLASSES.includes(prompt[id]?.class_type ?? '')
   if (!Object.keys(prompt).some(mine)) return { pixels: {}, predicted: [], problem: null }
   // A file value as the runner names it (LoadImage, an Image card): its header, from the run's store.
   const readFile = async (value: string) => {
@@ -61,7 +73,7 @@ export async function startPictureSizes(prompt: ApiPrompt, read: (f: OutputFile)
   }
   const sizes = await graphInputSizes(prompt, readFile, createGateReads())
   const pixels = Object.fromEntries(Object.entries(sizes.pixels).filter(([id]) => mine(id)))
-  const problems = [...measuredInputProblems(prompt, pixels), ...sizes.problems.filter(p => mine(p.nodeId))]
+  const problems = [...measuredInputProblems(prompt, pixels), ...sizes.problems.filter(p => repair(p.nodeId))]
   const predicted = Object.keys(pixels).filter(id => !readFromFile(prompt, prompt[id]?.inputs?.image))
   return { pixels, predicted, problem: problems[0] ?? null }
 }

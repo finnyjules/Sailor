@@ -188,11 +188,11 @@ describe('R11.9: every named stop-gap, one case per row', () => {
   const PROVEN_IN: Record<number, [string, string]> = {
     2: ['runner-long-sound.unit.spec.ts', 'Karaoke\\\'s chain, hosted, a 10-minute-20 song: two Demucs calls'],
     3: ['runner-long-sound.unit.spec.ts', 'Whisper, hosted, a 30-minute-and-2-second sound: two Wizper calls'],
-    4: ['runner-upscale-tiles.unit.spec.ts', 'a 4K picture: five tiles of 871 × 2160'],
+    4: ['runner-upscale-tiles.unit.spec.ts', 'a 4K picture: six tiles of 1366 × 1144'],
     5: ['runner-clip-caps.unit.spec.ts', '300 frames at ×2: two calls (479 and 121 frames out)'],
     6: ['runner-clip-caps.unit.spec.ts', 'the per-frame classes keep 300 hosted and 900 locally'],
     7: ['runner-source-bounds.unit.spec.ts', 'music: the duration asked, plus a second'],
-    8: ['runner-source-bounds.unit.spec.ts', 'speech: every character at one a second'],
+    8: ['runner-source-bounds.unit.spec.ts', 'speech: every character at four a second'],
     9: ['runner-media-vfx-time.unit.spec.ts', 'Load video → Get video components → Motion blur → Create video → Save video runs in the engine: the same frame count and rate, blurred'],
     11: ['runner-shader-bake.unit.spec.ts', 'a time-animated generative shader: its frames kept as one batch, each frame its bake\\\'s RGB, nothing held or charged (hosted)'],
     12: ['runner-lipsync-engines.unit.spec.ts', 'with sound-in on; with it off (any other families) the engine keeps Fabric and Kling'],
@@ -547,7 +547,7 @@ describe('R11.7 / R11.8 stop-gaps: refused plainly before the hold, never the en
   it('a made sound past a reader’s cap names the maker’s setting to shorten, with the figure', LONG, async () => {
     await requireMediaTools()
     const p: ApiPrompt = {
-      sp: speech(2500),
+      sp: speech(10000),
       f: { class_type: 'AudioFade', inputs: { audio: ['sp', 0], fade_in: 0.5, fade_out: 0.5, curve: 'linear' } },
       s: { class_type: 'SaveAudio', inputs: { audio: ['f', 0], filename_prefix: 'audio/ComfyUI' } },
     }
