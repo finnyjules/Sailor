@@ -185,6 +185,9 @@ function stripVariableFontCssUrlsPlugin(): Plugin {
 const FRAME_LEAN_STUBS: [RegExp, string][] = [
   [/\/app\/lib\/brushTips\/coverage\.ts$/, './app/lib/embed/frame/brushTipsLean.embed.ts'],
   [/\/app\/lib\/motionx\/reveal\/paintPixelReveal\.ts$/, './app/lib/embed/frame/pixelRevealLean.embed.ts'],
+  // Pixel reveal's maths (looks, params, grids): only a `pixelreveal` bar reads it, and those Frames
+  // already take the full bundle.
+  [/\/app\/lib\/motionx\/reveal\/pixelReveal\.ts$/, './app/lib/embed/frame/pixelRevealLean.embed.ts'],
   [/\/app\/lib\/relight\/relightPass\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
   // Relight's light conversion (light layers stage 2) pulls in the effect stack and the Setups.
   [/\/app\/lib\/frame\/lighting\/convertRelight\.ts$/, './app/lib/embed/frame/convertRelightLean.embed.ts'],
@@ -197,6 +200,8 @@ const FRAME_LEAN_STUBS: [RegExp, string][] = [
   // Frame Morph (medial/morph/morphPieces, ~22k): morph Frames take the full bundle.
   [/\/app\/lib\/vector\/morphPieces\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
   [/\/app\/lib\/vector\/morph\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
+  // The morph clone's drawing helpers: only reached once a morph outline exists, never in lean.
+  [/\/app\/lib\/compositor\/morphDraw\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
 ]
 
 function frameLeanStubsPlugin(): Plugin {
