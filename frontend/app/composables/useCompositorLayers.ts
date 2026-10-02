@@ -3763,6 +3763,32 @@ function paintFoilRegion(
 }
 
 /**
+ * A PLAIN paint of the layer being recorded lands over its foil: erase it from the self-lit
+ * recorder, so the recorder holds the foil still SEEN at the end of the layer, not every foil
+ * region drawn. `draw(c)` repeats the site's own statements on `c` in an opaque ink (the same
+ * closures `paintFoilRegion` takes), under `ctx`'s current transform and line state, with
+ * `destination-out`. Nothing recorded yet (no foil under it), no recorder, or a canvas of another
+ * size ⇒ nothing runs: a plain paint BELOW the layer's foil costs nothing extra.
+ */
+function eraseSelfLit(ctx: CanvasRenderingContext2D, draw: (c: CanvasRenderingContext2D) => void): void {
+  const rec = _selfLitRecorder
+  if (!rec?.canvas) return
+  if ((ctx.canvas?.width || 0) !== rec.w || (ctx.canvas?.height || 0) !== rec.h) return
+  const c = rec.canvas.getContext('2d')
+  if (!c) return
+  c.save()
+  try {
+    c.setTransform(ctx.getTransform())
+    c.globalAlpha = 1
+    c.globalCompositeOperation = 'destination-out'
+    c.lineJoin = ctx.lineJoin
+    c.lineCap = ctx.lineCap
+    c.miterLimit = ctx.miterLimit
+    draw(c)
+  } finally { c.restore() }
+}
+
+/**
  * The four corners of `s`'s DEVICE canvas, expressed in `s`'s CURRENT user units.
  *
  * Filling that quad covers every pixel of the surface WITHOUT leaving the transform the
@@ -4642,7 +4668,7 @@ function paintStrokeStack(
       // `shapeId` (the normalised "no payload" case) resolves to no shape and no-ops too.
       const outline = outlineData()
       if (outline && st.shapes) {
-        paintShapeStroke(ctx, {
+        const shapeOpts: Parameters<typeof paintShapeStroke>[1] = {
           pathData: outline,
           distance: (st.distance ?? 0) * o.widthScale,
           spec: st.shapes,
@@ -4656,7 +4682,9 @@ function paintStrokeStack(
           // marching shapes ride the same displaced guide. Asked of `wobbleSpecOf` (not the
           // four raw fields) so "is it on" has one answer for both.
           wobble: wobbleSpecOf(st, o.widthScale),
-        })
+        }
+        paintShapeStroke(ctx, shapeOpts)
+        eraseSelfLit(ctx, c => paintShapeStroke(c, { ...shapeOpts, style: () => '#000' }))
       }
       continue
     }
@@ -4675,6 +4703,12 @@ function paintStrokeStack(
       if (outline) {
         // FOLLOWS THE LINE — the same wobbled centreline, bent paint; the mask is this arm's own
         // band in ink with round corners (a bent fill cannot turn a sharp point).
+        const followMask = (c: CanvasRenderingContext2D) => paintWobbledBand(c, {
+          pathData: outline, width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
+          wobble, align: st.align, join: 'round', dash: strokeDashSegments(st.dash, o.widthScale),
+          style: () => '#000',
+          tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
+        })
         if (strokeFollowsOf(st) && !foil && paintFollowedBand(ctx, {
           pathData: outline,
           tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
@@ -4687,13 +4721,8 @@ function paintStrokeStack(
           fade: strokeFadeOf(st),
           fadeRepeats: strokeFadeRepeatsOf(st),
           subpaths: 'longest',
-          mask: (c) => paintWobbledBand(c, {
-            pathData: outline, width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
-            wobble, align: st.align, join: 'round', dash: strokeDashSegments(st.dash, o.widthScale),
-            style: () => '#000',
-            tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
-          }),
-        })) continue
+          mask: followMask,
+        })) { eraseSelfLit(ctx, followMask); continue }
         const band = (c: CanvasRenderingContext2D, ink?: string) => paintWobbledBand(c, {
           pathData: outline,
           width: st.width * o.widthScale,
@@ -4708,7 +4737,7 @@ function paintStrokeStack(
           tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
         })
         if (foil) paintFoilRegion(ctx, foil, band)
-        else band(ctx)
+        else { band(ctx); eraseSelfLit(ctx, c => band(c, '#000')) }
         continue
       }
       // No outline to wobble (a kind that has none). Falling through paints the straight band
@@ -4754,6 +4783,15 @@ function paintStrokeStack(
     // whatever `lineJoin` its target context has — the mask scratch `c` for centre and inside,
     // but a FRESH scratch of its own for 'outside', which only `build` touches. So the round
     // join is set on `c` AND laid by the `build` handed down.
+    const followMask = (c: CanvasRenderingContext2D) => {
+      const build = (b: CanvasRenderingContext2D) => { if (o.build) o.build(b); b.lineJoin = 'round' }
+      if (!o.path) build(c); else c.lineJoin = 'round'
+      paintStrokeBand(c, {
+        width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
+        style: () => '#000', align: st.align, join: 'round',
+        dash: strokeDashSegments(st.dash, o.widthScale), path: o.path, fillRule: o.fillRule, build,
+      })
+    }
     if (strokeFollowsOf(st) && !foil) {
       const outline = outlineData()
       if (outline && paintFollowedBand(ctx, {
@@ -4767,21 +4805,13 @@ function paintStrokeStack(
         fade: strokeFadeOf(st),
         fadeRepeats: strokeFadeRepeatsOf(st),
         fillRule: o.fillRule,
-        mask: (c) => {
-          const build = (b: CanvasRenderingContext2D) => { if (o.build) o.build(b); b.lineJoin = 'round' }
-          if (!o.path) build(c); else c.lineJoin = 'round'
-          paintStrokeBand(c, {
-            width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
-            style: () => '#000', align: st.align, join: 'round',
-            dash: strokeDashSegments(st.dash, o.widthScale), path: o.path, fillRule: o.fillRule, build,
-          })
-        },
-      })) continue
+        mask: followMask,
+      })) { eraseSelfLit(ctx, followMask); continue }
     }
     // The scratch starts with no path: `build` lays the shape's own path (or, for a path
     // layer that hands its Path2D in, its joins/caps) on it first, as it does on ctx above.
     if (foil) paintFoilRegion(ctx, foil, (c, ink) => { if (o.build) o.build(c); band(c, ink) })
-    else band(ctx)
+    else { band(ctx); eraseSelfLit(ctx, c => { if (o.build) o.build(c); band(c, '#000') }) }
   }
 }
 
@@ -4883,6 +4913,12 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
         ctx.strokeStyle = p.style
         if (anyDash) ctx.setLineDash(p.dash ? [p.dash[0], p.dash[1]] : [])
         ctx.stroke(path)
+        eraseSelfLit(ctx, c => {
+          c.lineWidth = p.lineWidth
+          c.strokeStyle = '#000'
+          if (p.dash) c.setLineDash([p.dash[0], p.dash[1]])
+          c.stroke(path)
+        })
       }
       if (anyDash) ctx.setLineDash([])
       if (isFoilFill(layer.color)) {
@@ -4890,6 +4926,7 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
       } else {
         ctx.fillStyle = resolvePaint(ctx, layer.color, oc.box, _fieldCtx)
         ctx.fill(path)
+        eraseSelfLit(ctx, c => { c.fillStyle = '#000'; c.fill(path) })
       }
     } else {
       // The fillText route. Foil outlines (on the edge or at a distance) are drawn one at a time,
@@ -4910,9 +4947,12 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
           paintFoilRegion(ctx, st.paint as FoilFill, (c, ink) => drawText(c, textWithStrokes(layer, [{ ...st, paint: ink }], clear), W))
         }
         const glyphInk: Paint = foilColor ? clear : layer.color
-        drawText(ctx, foilStrokes.length
+        const rest = foilStrokes.length
           ? textWithStrokes(layer, stack.filter(st => !foilStrokes.includes(st)), glyphInk)
-          : { ...layer, color: glyphInk } as TextLayer, W)
+          : { ...layer, color: glyphInk } as TextLayer
+        drawText(ctx, rest, W)
+        // The plain glyphs and outlines land over the foil outlines drawn above.
+        eraseSelfLit(ctx, c => drawText(c, rest, W))
         if (foilColor) {
           const bare = { ...layer, color: '#ffffff', strokes: [], strokeWidth: 0 } as unknown as TextLayer
           paintFoilRegion(ctx, foilColor, (c, ink) => drawText(c, { ...bare, color: ink } as TextLayer, W))

@@ -21,6 +21,19 @@ vi.mock('~/lib/frame/lighting/lightingPass', async (importOriginal) => {
   return { ...orig, lightingAvailable: () => true, lightFrame: (...a: unknown[]) => lightFrame(...a) }
 })
 
+// The glyph-outline text route needs a font; hand it one whose every run is a 10×10 square.
+vi.mock('~/lib/compositor/textOutline', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('~/lib/compositor/textOutline')>()
+  return {
+    ...orig,
+    getCompositorFont: () => ({ id: 'stub', axes: [], unitsPerEm: 1000, raw: {} }),
+    runToCommands: () => [
+      { command: 'moveTo', args: [0, 0] }, { command: 'lineTo', args: [10, 0] },
+      { command: 'lineTo', args: [10, 10] }, { command: 'closePath', args: [] },
+    ],
+  }
+})
+
 import {
   paintLayerStack, withFlatFoil, currentFinishLights, type StackItem, type LocalLayer,
 } from '~/composables/useCompositorLayers'
@@ -85,6 +98,12 @@ function trackedCtx(tag: string, w: number, h: number) {
 function mkCanvas() {
   const c: any = { _w: 0, _h: 0 }
   const ctx = trackedCtx('offscreen', 0, 0)
+  // Every ink-laying call, with the composite op it ran under: what a recorder ends up holding.
+  ctx._ops = [] as string[]
+  for (const name of ['drawImage', 'fill', 'stroke', 'fillText', 'strokeText', 'fillRect']) {
+    const f = ctx[name]
+    ctx[name] = vi.fn((...a: unknown[]) => { ctx._ops.push(`${ctx.globalCompositeOperation}:${name}`); return f(...a) })
+  }
   Object.defineProperty(c, 'width', { get: () => c._w, set: (v) => { c._w = v; ctx.canvas.width = v } })
   Object.defineProperty(c, 'height', { get: () => c._h, set: (v) => { c._h = v; ctx.canvas.height = v } })
   ctx.canvas = { width: 0, height: 0 }
@@ -220,7 +239,7 @@ describe('a foil region is lit once: punched out of the lit map', () => {
 })
 
 describe('_finishLights is scoped to paintLayerStack', () => {
-  it('set while a lit Frame paints, null after it returns and during a withFlatFoil hit-test', () => {
+  it('set while a lit Frame paints, null after it returns (so a later withFlatFoil hit-test sees null)', () => {
     const l = lamp()
     paint([rect('r', { fill: FOIL }), l])
     expect((finish.seen[0] as { lights: LocalLayer[] }).lights.map(x => x.id)).toEqual([l.id])
@@ -233,4 +252,48 @@ describe('_finishLights is scoped to paintLayerStack', () => {
     expect(() => paint([rect('r', { fill: FOIL }), lamp()])).toThrow('boom')
     expect(currentFinishLights()).toBeNull()
   })
+})
+
+/** The self-lit recorder a layer's stamp draws, and the ink calls it received, in order. */
+function recorderOps(layerId: string): string[] {
+  const t = stampsOf().find(x => x.layer?.id === layerId)!
+  expect(t.selfLit).toBeTypeOf('function')
+  const target = trackedCtx('map', 10, 10)
+  t.selfLit!(target)
+  const rec = target.drawImage.mock.calls[0]![0] as any
+  return rec.getContext()._ops as string[]
+}
+const PLAIN = (extra: Record<string, unknown> = {}) => ({ id: 'p1', paint: '#000000', width: 0.01, distance: 0, style: 'band', ...extra })
+const FOIL_STROKE = { id: 'f1', paint: FOIL, width: 0.004, distance: 0, style: 'band' }
+
+describe('the recorder holds the foil still SEEN at the end of the layer (review fix round 1)', () => {
+  it('a plain stroke over a foil fill is erased from the recorder: the stroke reads lit, the fill stays unlit', () => {
+    paint([rect('r', { fill: FOIL, strokes: [PLAIN()] }), lamp()])
+    const ops = recorderOps('r')
+    // The foil fill lands first (lit by its own shader ⇒ punched), then the stroke erases it.
+    expect(ops[0]).toBe('source-over:drawImage')
+    expect(ops.slice(1).length).toBeGreaterThan(0)
+    expect(ops.slice(1).every(o => o.startsWith('destination-out:'))).toBe(true)
+    expect(ops.filter(o => o === 'source-over:drawImage')).toHaveLength(1)   // the fill is still recorded
+  })
+
+  it('outline route: a plain glyph over a foil outline is erased (the letter reads lit), the outline stays', () => {
+    paint([text({ renderAsOutline: true, color: '#222222', strokes: [FOIL_STROKE] }), lamp()])
+    const ops = recorderOps('t1')
+    expect(ops).toEqual(['source-over:drawImage', 'destination-out:fill'])
+  })
+
+  it('fillText route: the plain glyphs drawn after the foil outline are erased from it', () => {
+    paint([text({ color: '#222222', strokes: [FOIL_STROKE] }), lamp()])
+    const ops = recorderOps('t1')
+    expect(ops[0]).toBe('source-over:drawImage')
+    expect(ops.slice(1)).toContain('destination-out:fillText')
+    expect(ops.slice(1).every(o => o.startsWith('destination-out:'))).toBe(true)
+  })
+
+  it('a plain outline UNDER a foil glyph colour erases nothing: the whole foil glyph stays unlit', () => {
+    paint([text({ renderAsOutline: true, color: FOIL, strokes: [PLAIN({ width: 0.004 })] }), lamp()])
+    expect(recorderOps('t1')).toEqual(['source-over:drawImage'])
+  })
+
 })
