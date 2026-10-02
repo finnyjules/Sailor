@@ -47,6 +47,7 @@ import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_REPLICATE_SLUGS } from '~~/server/runner
 import { MUSE_IMAGE_FAL_APP } from '~~/server/runner/generators/museImage'
 import { NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
 import { REVE_21_FAL_APP } from '~~/server/runner/generators/reve21'
+import { IDEOGRAM_45_FAL_APP } from '~~/server/runner/generators/ideogram45'
 import { RECRAFT_V41_FAL_APP, RECRAFT_V41_REPLICATE_SLUG } from '~~/server/runner/generators/recraftV41'
 import { KREA_2_FAL_APPS, KREA_2_REPLICATE_SLUGS } from '~~/server/runner/generators/krea2'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
@@ -314,6 +315,8 @@ function runnerEndpoints(): string[] {
   out.add(`replicate ${NANO_BANANA_2_LITE_SLUG}`)
   // Task F15: Reve 2.1 on fal, no backup (reve21.ts; its grid is runner-reve-2-1.unit.spec.ts).
   out.add(`fal ${REVE_21_FAL_APP}`)
+  // Ideogram 4.5 on fal, no backup (ideogram45.ts; its grid is runner-ideogram-4-5.unit.spec.ts).
+  out.add(`fal ${IDEOGRAM_45_FAL_APP}`)
   // Task F16: Recraft V4.1 on fal, Replicate the backup (recraftV41.ts; its grid is runner-recraft-v4-1.unit.spec.ts).
   out.add(`fal ${RECRAFT_V41_FAL_APP}`)
   out.add(`replicate ${RECRAFT_V41_REPLICATE_SLUG}`)

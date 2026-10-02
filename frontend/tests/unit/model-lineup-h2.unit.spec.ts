@@ -51,7 +51,7 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
   'UpscaleImageNode.model': ['Real-ESRGAN'],
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
-const RUNNER_ONLY_IMAGES = ['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1']
+const RUNNER_ONLY_IMAGES = ['nano-banana-2-lite', 'ideogram-4.5', 'ideogram-4', 'recraft-v4.1', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1']
 // R11.4 fix round 1: the Recraft SVG models are runner-only under recraft-svg (ComfyUI can't decode their SVG).
 const SVG_IMAGES = ['recraft-v4-pro-svg', 'recraft-v4-svg', 'recraft-v3-svg']
 // R11.4, ruling (p): no verified price yet, so hidden (and refused) until priced.

@@ -279,7 +279,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // estimateFloor.ts): Transcribe and Whisper 2 credits, Identify speakers 10
 // (its card's 1, floored), Clone a singing voice 9. The runner pays the card.
 // Sync lips to audio (+ its twin) keeps its clip price.
-export const PRICE_BOOK_VERSION = 'r3-sound-in'
+// lineup-ideogram-4.5: Ideogram 4.5 on fal, priced by its quality alone
+// ($0.03 low, $0.06 medium, $0.22 high, whatever the size; runner-only,
+// family ideogram-4.5, no backup). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-ideogram-4.5'
 
 export const BASE_RENDER_CREDITS = 1
 

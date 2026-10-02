@@ -69,9 +69,9 @@ describe('the image rate card', () => {
     // Runner-only models have no Python entry: their builder's service (GPT Image 2.5: fal, gptImage25.ts;
     // Qwen Image 3: Replicate, qwenImage3.ts; Grok Imagine 2: Replicate, grokImagine2.ts; Ideogram 4: fal, ideogram4.ts;
     // Muse Image: fal, museImage.ts; Nano Banana 2 Lite: Replicate, nanoBanana2Lite.ts; Reve 2.1: fal, reve21.ts;
-    // Recraft V4.1: fal, recraftV41.ts; the Recraft SVG models, R11.4: Replicate, Python's own primary).
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'recraft-v4-pro-svg', 'recraft-v4-svg', 'recraft-v3-svg', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1'])
-    const runnerOnlyFal = ['gpt-image-2.5', 'ideogram-4', 'muse-image', 'reve-2.1', 'recraft-v4.1']
+    // Recraft V4.1: fal, recraftV41.ts; the Recraft SVG models, R11.4: Replicate, Python's own primary; Ideogram 4.5: fal, ideogram45.ts).
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4.5', 'ideogram-4', 'recraft-v4.1', 'recraft-v4-pro-svg', 'recraft-v4-svg', 'recraft-v3-svg', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1'])
+    const runnerOnlyFal = ['gpt-image-2.5', 'ideogram-4', 'ideogram-4.5', 'muse-image', 'reve-2.1', 'recraft-v4.1']
     for (const [id, r] of Object.entries(IMAGE_RATES)) {
       expect(r.service, id).toBe(falPrimary.includes(id) || runnerOnlyFal.includes(id) ? 'fal' : 'replicate')
     }

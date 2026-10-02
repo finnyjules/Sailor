@@ -548,6 +548,30 @@ export const IMAGE_MODELS: ImageModel[] = [
     advanced: [IDEOGRAM_V3_STYLE, IDEOGRAM_MAGIC_PROMPT],
   },
   {
+    // Runner-only: fal, no backup (server/runner/generators/ideogram45.ts).
+    // No Python builder. The ratios are that file's IDEOGRAM_45_SIZES; the
+    // price follows the quality only, whatever the size.
+    id: 'ideogram-4.5',
+    runnerOnly: true,
+    family: 'ideogram-4.5',
+    label: 'Ideogram 4.5',
+    brand: 'Ideogram',
+    // Cover art only, and Replicate has no Ideogram 4.5: the lookup answers
+    // "not found" and the card keeps its brand wordmark. The runner sends fal.
+    replicateSlug: 'ideogram-ai/ideogram-v4.5',
+    pitch: 'Posters, logos and packaging with lettering spelled right.',
+    description: 'Ideogram\'s newest model. Writes words in the picture accurately and lays out graphic designs well, and makes realistic photos too. Pick a higher quality for finer detail; it costs more.',
+    tags: ['typography', 'design'],
+    pricePerImage: 0.03,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '16:10', '10:16', '5:4', '4:5', '2:1', '1:2'],
+    defaultAspectRatio: '1:1',
+    advanced: [
+      { name: 'quality', type: 'select', label: 'Quality', default: 'low',
+        options: ['low', 'medium', 'high'], optionLabels: ['Standard', 'Fine', 'Finest'],
+        description: 'Fine costs twice as much as Standard, Finest about seven times as much.' },
+    ],
+  },
+  {
     // Runner-only (model line-up F8): fal first, Replicate the backup for a
     // 2K picture (server/runner/generators/ideogram4.ts). No Python builder.
     // The sizes are #shared/pricing/imageSettings IDEOGRAM_4_SIZES.

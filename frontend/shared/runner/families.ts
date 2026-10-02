@@ -50,6 +50,8 @@ export type RunnerFamily =
    * (Ruling 10); off, it runs on ComfyUI as before (its SDXL engine, refused in hosted mode).
    */
   | 'bria-product-shot'
+  /** Ideogram 4.5 on fal, no backup: a runner-only image model (text-to-image only). */
+  | 'ideogram-4.5'
   /** Muse Image (Meta) on fal, no backup (model line-up F13): a runner-only image model. */
   | 'muse-image'
   /** Nano Banana 2 Lite (Google) on Replicate, no backup (model line-up F14): a runner-only image model. */
@@ -350,11 +352,12 @@ export const LOCAL_MODEL_FAMILIES: readonly RunnerFamily[] = [
 export const LOCAL_MODEL_TOOL_FAMILIES: readonly RunnerFamily[] = ['slow-motion-ai', 'whisper-captions', 'vocal-split']
 
 /**
- * Families added after R7 (R11.4's `recraft-svg`): known to parseFamilies,
+ * Families added after R7 (R11.4's `recraft-svg`; the runner-only image
+ * models added since, which need nothing else on): known to parseFamilies,
  * but kept apart from every pinned list, as R7's are. Their requirements are
  * LATE_FAMILY_REQUIRES.
  */
-export const LATE_FAMILIES: readonly RunnerFamily[] = ['recraft-svg']
+export const LATE_FAMILIES: readonly RunnerFamily[] = ['recraft-svg', 'ideogram-4.5']
 
 /**
  * Every family before R7: RUNNER_FAMILIES, the media families and R6's (the

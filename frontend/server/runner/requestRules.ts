@@ -9,11 +9,11 @@
  * The rules come from the providers' saved schemas
  * (tests/unit/fixtures/provider-schemas/; a test holds this table to them):
  *  - a prompt shorter than the schema's `minLength` (Nano Banana 3, Hailuo H3 1,
- *    GPT Image 2.5 1, Muse Image 1, Reve 2.1 1, Recraft V4.1 1, HappyHorse 1.1
+ *    GPT Image 2.5 1, Ideogram 4.5 1, Muse Image 1, Reve 2.1 1, Recraft V4.1 1, HappyHorse 1.1
  *    text-to-video 1), and a transparent JPEG from GPT Image 2.5;
  *  - a prompt longer than the schema's `maxLength` where the table
  *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15; Recraft V4.1
- *    10,000, F16; Krea 2 5,000, F17; Grok Imagine Video 1.5 4,096, F19), or than a limit the schema states only
+ *    10,000, F16; Krea 2 5,000, F17; Grok Imagine Video 1.5 4,096, F19; Ideogram 4.5 10,000), or than a limit the schema states only
  *    in its prompt's description (HappyHorse 1.1 2,500, F18 fix round 1:
  *    PROMPT_MAX_LENGTH_RULINGS);
  *  - Krea 2 Large and Medium (F17) with an empty prompt (the schema's
@@ -164,6 +164,9 @@ import {
 import { QWEN_IMAGE_3_SLUG, isQwenImage3Model } from './generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from './generators/ideogram4'
+import {
+  IDEOGRAM_45_FAL_APP, IDEOGRAM_45_LONG_PROMPT, IDEOGRAM_45_NEEDS_PROMPT, IDEOGRAM_45_PROMPT_MAX, isIdeogram45Model,
+} from './generators/ideogram45'
 import { MUSE_IMAGE_FAL_APP, MUSE_IMAGE_NEEDS_PROMPT, isMuseImageModel } from './generators/museImage'
 import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG, isNanoBanana2LiteModel } from './generators/nanoBanana2Lite'
 import { REVE_21_FAL_APP, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PROMPT_MAX, isReve21Model } from './generators/reve21'
@@ -223,6 +226,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   [`replicate ${GROK_IMAGINE_2_SLUG}`]: { min: 1, message: GROK_IMAGINE_2_NEEDS_PROMPT },
   // Ideogram 4 on fal (ideogram4.ts): a ruling, not the schema. Its Replicate backup's prompt is optional.
   [`fal ${IDEOGRAM_4_FAL_APP}`]: { min: 1, message: IDEOGRAM_4_NEEDS_PROMPT },
+  // Ideogram 4.5 on fal (ideogram45.ts): the schema's own minLength 1.
+  [`fal ${IDEOGRAM_45_FAL_APP}`]: { min: 1, message: IDEOGRAM_45_NEEDS_PROMPT },
   // Muse Image on fal (museImage.ts): the schema's own minLength 1.
   [`fal ${MUSE_IMAGE_FAL_APP}`]: { min: 1, message: MUSE_IMAGE_NEEDS_PROMPT },
   // Nano Banana 2 Lite on Replicate (nanoBanana2Lite.ts): a ruling, not the schema
@@ -257,6 +262,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
  * row to its saved schema).
  */
 export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: string }>> = {
+  // Ideogram 4.5 on fal (ideogram45.ts).
+  [`fal ${IDEOGRAM_45_FAL_APP}`]: { max: IDEOGRAM_45_PROMPT_MAX, message: IDEOGRAM_45_LONG_PROMPT },
   // Reve 2.1 on fal (reve21.ts, Task F15).
   [`fal ${REVE_21_FAL_APP}`]: { max: REVE_21_PROMPT_MAX, message: REVE_21_LONG_PROMPT },
   // Recraft V4.1 on fal (recraftV41.ts, Task F16).
@@ -856,13 +863,14 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const slug = isQwenImage3Model(inputs.model) ? QWEN_IMAGE_3_SLUG : isGrokImagine2Model(inputs.model) ? GROK_IMAGINE_2_SLUG : NANO_BANANA_2_LITE_SLUG
       judge(slug, nodeImagePrompt(inputs), 'replicate')
     }
-    // Ideogram 4, Muse Image, Reve 2.1 and Recraft V4.1 (fal, text-to-image): the prompt as sent must
-    // not be empty (and, for Reve 2.1 and Recraft V4.1, not over its schema's maxLength).
-    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model) || isRecraftV41Model(inputs.model))) {
+    // Ideogram 4, Ideogram 4.5, Muse Image, Reve 2.1 and Recraft V4.1 (fal, text-to-image): the prompt as
+    // sent must not be empty (and, for Ideogram 4.5, Reve 2.1 and Recraft V4.1, not over its schema's maxLength).
+    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isIdeogram45Model(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model) || isRecraftV41Model(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
       const app = isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP
-        : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
-          : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
+        : isIdeogram45Model(inputs.model) ? IDEOGRAM_45_FAL_APP
+          : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
+            : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
       judge(app, nodeImagePrompt(inputs))
     }
     // Krea 2 Large and Medium (fal, text-to-image, F17), on a runner run only: the

@@ -258,6 +258,17 @@ const gpt25Quality = (adv: Adv) => {
 }
 
 const one = (tier: string | null = null): ImageSettings => ({ images: 1, tier, megapixels: null, webSearch: false })
+
+/**
+ * Ideogram 4.5 (runner-only, server/runner/generators/ideogram45.ts): fal's
+ * `quality` low / medium / high, anything else low (the $0.03 tier). The
+ * price is set by the quality alone; the size doesn't move it.
+ */
+const IDEOGRAM_45_QUALITIES = ['low', 'medium', 'high']
+const ideogram45Quality = (adv: Adv) => {
+  const q = optStr(adv, 'quality', 'low')
+  return IDEOGRAM_45_QUALITIES.includes(q) ? q : 'low'
+}
 const flat: Rule = () => one()
 
 /**
@@ -352,6 +363,8 @@ const RULES: Record<string, Rule> = {
   // recraftV41Generate (runner-only, fal first, Replicate the backup): one
   // picture at Recraft's own size for the ratio, one price on each service.
   'recraft-v4.1': flat,
+  // ideogram45Generate (runner-only, fal): the quality is the tier; one picture, the same price at every size.
+  'ideogram-4.5': adv => one(ideogram45Quality(adv)),
   // ideogram4Generate (runner-only, fal first): the speed is the tier, the
   // size's picture the megapixels; one picture. Only a 2K picture has the
   // Replicate backup (ideogram4OnReplicate), so a 1K one doesn't cover it.

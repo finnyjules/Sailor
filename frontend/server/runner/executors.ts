@@ -26,6 +26,7 @@
  * Qwen Image 3 in GenerateImageNode, family qwen-image-3;
  * Grok Imagine 2 in GenerateImageNode, family grok-imagine-2;
  * Ideogram 4 in GenerateImageNode, family ideogram-4;
+ * Ideogram 4.5 in GenerateImageNode, family ideogram-4.5;
  * Muse Image in GenerateImageNode, family muse-image;
  * Nano Banana 2 Lite in GenerateImageNode, family nano-banana-2-lite;
  * Reve 2.1 in GenerateImageNode, family reve-2.1;
@@ -102,6 +103,7 @@ import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage2
 import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
 import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImagine2'
 import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './generators/ideogram4'
+import { ideogram45Generate, isIdeogram45Model } from './generators/ideogram45'
 import { isMuseImageModel, museImageGenerate } from './generators/museImage'
 import { isNanoBanana2LiteModel, nanoBanana2LiteGenerate } from './generators/nanoBanana2Lite'
 import { isReve21Model, reve21Generate } from './generators/reve21'
@@ -760,6 +762,15 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           adv: parseJsonObject(inputs.model_options),
         })
         return stillCall(call, 'generate_image', ideogram4OnReplicate(call) ?? undefined)
+      }
+      // Ideogram 4.5 (family ideogram-4.5): fal, no backup (ideogram45.ts). No moodboard pictures.
+      if (isIdeogram45Model(inputs.model)) {
+        return stillCall(ideogram45Generate({
+          prompt: nodeImagePrompt(inputs),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+          seed: asInt(inputs.seed, 0),
+          adv: parseJsonObject(inputs.model_options),
+        }), 'generate_image')
       }
       // Muse Image (family muse-image): fal, no backup (museImage.ts). No moodboard pictures, no seed.
       if (isMuseImageModel(inputs.model)) {

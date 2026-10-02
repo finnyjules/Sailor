@@ -311,11 +311,13 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:nano-banana-2-lite')).toBe(true)
     expect(keys.has('image:reve-2.1')).toBe(true)
     expect(keys.has('image:recraft-v4.1')).toBe(true)
+    // + Ideogram 4.5 (runner-only, family ideogram-4.5), outside them too.
+    expect(keys.has('image:ideogram-4.5')).toBe(true)
     expect(keys.has('image:krea-2-large')).toBe(true)
     expect(keys.has('image:krea-2-medium')).toBe(true)
     // + the three Recraft SVG models (R11.4, family recraft-svg), their own table.
     for (const id of Object.keys(RUNNER_SVG_IMAGE_MODELS)) expect(keys.has(`image:${id}`), id).toBe(true)
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10 + Object.keys(RUNNER_SVG_IMAGE_MODELS).length)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 11 + Object.keys(RUNNER_SVG_IMAGE_MODELS).length)
     // + Wan 3.0 and Wan 3.0 Prime (Task F1), Hailuo H3 Max Turbo (F3), Gemini Omni Flash (F4), Veo 3.1 Lite (F5),
     // HappyHorse 1.1 (Task F18), Grok Imagine Video 1.5 (Task F19), LTX-2.5 Fast (Task F20) and Luma Ray 3.2
     // (Task F21), runner-only video models outside the two builder tables.

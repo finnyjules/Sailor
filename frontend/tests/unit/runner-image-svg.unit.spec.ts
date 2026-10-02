@@ -78,7 +78,7 @@ function filesUnder(dir: string): string[] {
 describe('the recraft-svg family', () => {
   it('is known, off by default, needs cards, and stays out of every pinned list', () => {
     expect(SVG_IMAGE_FAMILY).toBe('recraft-svg')
-    expect(LATE_FAMILIES).toEqual(['recraft-svg'])
+    expect(LATE_FAMILIES).toEqual(['recraft-svg', 'ideogram-4.5'])
     expect(parseFamilies('recraft-svg,cards')).toEqual(new Set(['recraft-svg', 'cards']))
     // Without cards it is dropped: Save image and Preview image are cards.
     expect(parseFamilies('recraft-svg')).toEqual(NO_FAMILIES)

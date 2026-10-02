@@ -385,7 +385,7 @@ describe('prices (ruling (a))', () => {
       expect(PROVIDER_TYPES.has(c)).toBe(true)
       expect(PAID_NODE_CLASSES.includes(c), c).toBe(!c.startsWith('Lipsync'))
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
   })
 
   it('by the seconds sent: a 75 s sound is priced at 60 s; unmeasured (the ComfyUI path, a sound made in the run) at 60 s', () => {

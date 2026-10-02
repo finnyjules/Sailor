@@ -679,7 +679,7 @@ describe('prices (ruling (a))', () => {
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, RESTYLE_LORA_CLASS)).toBe(false)
     expect(PRE_R3_FLAT[RESTYLE_LORA_CLASS]).toBeUndefined()
     expect(readsEstimateCard(RESTYLE_LORA_CLASS, at('1K'))).toBe(false)
-    expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
     expect(paidNoCall(RESTYLE_LORA_CLASS, {})).toBe(false)
   })
 

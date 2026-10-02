@@ -251,7 +251,7 @@ describe('prices (ruling (a))', () => {
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
       expect(PROVIDER_TYPES.has(c)).toBe(true)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
   })
 
   it('music by the seconds asked for, on both paths: 1 s 9, 8 s 20, 30 s 54; wired 30 s', () => {

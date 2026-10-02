@@ -326,7 +326,7 @@ describe('the price', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'replicate', source: 'https://replicate.com/google/nano-banana-2-lite', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [

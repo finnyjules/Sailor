@@ -3,8 +3,8 @@
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
  * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts),
- * Muse Image (museImage.ts), Reve 2.1 (reve21.ts) and Recraft V4.1
- * (recraftV41.ts), Replicate for the rest,
+ * Ideogram 4.5 (ideogram45.ts), Muse Image (museImage.ts), Reve 2.1
+ * (reve21.ts) and Recraft V4.1 (recraftV41.ts), Replicate for the rest,
  * the runner-only Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite among
  * them (qwenImage3.ts, grokImagine2.ts, nanoBanana2Lite.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
@@ -141,6 +141,17 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     unit: 'per_megapixel', perMegapixel: 0.025, perMegapixelByTier: { TURBO: 0.0075, BALANCED: 0.015, QUALITY: 0.025 },
     minMegapixels: 1, maxMegapixels: IDEOGRAM_4_MAX_MEGAPIXELS,
     service: 'fal', source: fal('ideogram/v4'), read: READ, confidence: 'verified',
+  },
+  // Ideogram 4.5 (runner-only), fal only: "Your request will cost $0.03 per
+  // image with Low, $0.06 with Medium, and $0.22 with High quality. The image
+  // size does not change the price." (llms.txt, read 2026-10-02; the page's
+  // billing: unit "units" at $0.001, so 30 / 60 / 220 units). The builder
+  // sends enable_prompt_expansion false (its fee, if any, isn't published)
+  // and nothing else that costs extra. No backup (Replicate has no Ideogram
+  // 4.5, ideogram45.ts).
+  'ideogram-4.5': {
+    unit: 'by_quality', byTier: { low: 0.03, medium: 0.06, high: 0.22 },
+    service: 'fal', source: fal('ideogram/v4.5'), read: '2026-10-02', confidence: 'verified',
   },
   // Muse Image (Meta; runner-only, Task F13), fal only: "Price: $0.01 per
   // images" (llms.txt, read 2026-09-24), one picture at Muse's own ~2.5 MP
