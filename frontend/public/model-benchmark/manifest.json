@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "results": {
+    "redhead": {
+      "flux-schnell": {
+        "file": "redhead/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "redhead/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-dev": {
+        "file": "redhead/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "redhead/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "redhead/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "redhead/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "redhead/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "redhead/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "redhead/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "redhead/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "redhead/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "redhead/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "redhead/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "redhead/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "redhead/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "redhead/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "redhead/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "redhead/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "redhead/flux-fast.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "redhead/p-image.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "redhead/qwen-image-3.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "redhead/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "redhead/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      }
+    },
+    "neon-sign": {
+      "flux-schnell": {
+        "file": "neon-sign/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "neon-sign/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "neon-sign/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "neon-sign/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "neon-sign/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "neon-sign/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "neon-sign/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "neon-sign/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "neon-sign/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "neon-sign/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "neon-sign/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "neon-sign/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "neon-sign/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "neon-sign/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "neon-sign/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-dev": {
+        "file": "neon-sign/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "neon-sign/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "neon-sign/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "neon-sign/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "neon-sign/p-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "neon-sign/flux-fast.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "neon-sign/qwen-image-3.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "neon-sign/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      }
+    }
+  }
+}
