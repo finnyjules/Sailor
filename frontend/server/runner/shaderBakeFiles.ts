@@ -5,16 +5,23 @@
  * accounts whose frames are byte for byte the same never share a name (the
  * hosted upload gate would refuse the second: the name is the first's), and
  * no one can take a name another bake will use. A bake is "claimed" when a
- * run starts that names its frames (a `.claimed` marker in its folder,
- * written before the run is persisted): its frames are then the run's inputs,
- * kept like any upload. A folder never claimed is not a delivered bake and
+ * run starts that names its frames (a `.claimed` marker in its folder naming
+ * the run, written before the run is persisted, after its checks and
+ * moderation): its frames are then the run's inputs, kept while the run can
+ * still need them (running, or paused at a Gate: a resume or a Gate's redo
+ * renders the node again from them). Fix round 2 (N1): when the run ends
+ * (done, error, stopped: no longer resumable) its claim is let go and a
+ * folder no run claims any more is deleted (`releaseShaderBakes`); a server
+ * start does the same for every run no longer in progress, as it lets go of
+ * their kept files (`releaseInactiveShaderBakes`, beside kept.keepOnly). A
+ * folder never claimed is not a delivered bake and
  * is deleted: when the browser abandons it (Stop, or a failure mid-bake:
  * POST /api/runs/shader-bake-abandon), else once it is older than
  * SHADER_BAKE_UNCLAIMED_MS (`sweepShaderBakes`, run now and then at a run's
  * start and on an abandon). Bakes named before fix round 1 (flat
  * `shader_bake_<hash>.png`) are still read; they are not swept.
  */
-import { readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
@@ -59,14 +66,82 @@ function folderPath(inputRoot: string, folder: string): string | null {
   return p.startsWith(root + sep) && bakeFolderOf(folder) ? p : null
 }
 
-/** A run that reads these bake folders has started: each is claimed (never swept or abandoned). */
-export async function claimShaderBakes(inputRoot: string, folders: readonly string[]): Promise<void> {
+/** The runs a claimed folder's marker names (one per line). */
+async function claimsOf(p: string): Promise<string[] | null> {
+  try { return (await readFile(join(p, CLAIMED_MARKER), 'utf8')).split('\n').map(x => x.trim()).filter(Boolean) }
+  catch { return null }
+}
+
+/**
+ * A run that reads these bake folders has started: each is claimed for it
+ * (never swept or abandoned while claimed). Fix round 2 (N3): `ownsAll`
+ * (hosted) must say every file in the folder is the run's owner's, else the
+ * folder is not claimed (another account's file in it can't pin it). Returns
+ * the folders claimed.
+ */
+export async function claimShaderBakes(inputRoot: string, folders: readonly string[], runId: string, ownsAll: (folder: string, filenames: string[]) => Promise<boolean> = async () => true): Promise<string[]> {
+  const claimed: string[] = []
   for (const f of folders) {
     const p = folderPath(inputRoot, f)
     if (!p) continue
-    try { await writeFile(join(p, CLAIMED_MARKER), '') }
+    try {
+      const names = (await readdir(p)).filter(n => n !== CLAIMED_MARKER)
+      if (!(await ownsAll(f, names))) continue
+      const runs = (await claimsOf(p)) ?? []
+      await writeFile(join(p, CLAIMED_MARKER), [...new Set([...runs, runId])].join('\n'))
+      claimed.push(f)
+    }
     catch { /* a folder that isn't there: its frames fail plainly at the node's turn */ }
   }
+  return claimed
+}
+
+/**
+ * Fix round 2 (N1): this run has ended (no longer resumable): its claim on
+ * each folder is let go, and a folder no run claims any more is deleted.
+ */
+export async function releaseShaderBakes(inputRoot: string, folders: readonly string[], runId: string): Promise<void> {
+  for (const f of folders) {
+    const p = folderPath(inputRoot, f)
+    if (!p) continue
+    const runs = await claimsOf(p)
+    if (!runs) continue
+    const left = runs.filter(r => r !== runId)
+    try {
+      if (left.length) await writeFile(join(p, CLAIMED_MARKER), left.join('\n'))
+      else await rm(p, { recursive: true, force: true })
+    }
+    catch { /* gone meanwhile */ }
+  }
+}
+
+/**
+ * Fix round 2 (N1, N2): at a server start, as the kept files of runs no
+ * longer in progress are let go (kept.keepOnly): every claim naming a run
+ * not in `activeRunIds` is let go, and a folder left unclaimed by it is
+ * deleted (a run that ended while the server was down, or a claim whose run
+ * was never saved).
+ */
+export async function releaseInactiveShaderBakes(inputRoot: string, activeRunIds: ReadonlySet<string>): Promise<number> {
+  let removed = 0
+  const base = join(resolve(inputRoot), SHADER_BAKE_ROOT)
+  let dirs: string[]
+  try { dirs = await readdir(base) }
+  catch { return 0 }
+  for (const d of dirs) {
+    if (!/^[0-9a-f]{32}$/.test(d)) continue
+    const p = join(base, d)
+    const runs = await claimsOf(p)
+    if (!runs) continue
+    const left = runs.filter(r => activeRunIds.has(r))
+    if (left.length === runs.length) continue
+    try {
+      if (left.length) await writeFile(join(p, CLAIMED_MARKER), left.join('\n'))
+      else { await rm(p, { recursive: true, force: true }); removed++ }
+    }
+    catch { /* gone meanwhile */ }
+  }
+  return removed
 }
 
 /**
@@ -107,8 +182,9 @@ export async function sweepShaderBakes(inputRoot: string, now = Date.now()): Pro
     if (!/^[0-9a-f]{32}$/.test(d)) continue
     const p = join(base, d)
     try {
+      // Fix round 2 (N4): a claimed folder is skipped from its marker alone (its frames aren't listed).
+      if (await stat(join(p, CLAIMED_MARKER)).then(() => true, () => false)) continue
       const names = await readdir(p)
-      if (names.includes(CLAIMED_MARKER)) continue
       let newest = (await stat(p)).mtimeMs
       for (const n of names) newest = Math.max(newest, (await stat(join(p, n))).mtimeMs)
       if (now - newest < SHADER_BAKE_UNCLAIMED_MS) continue

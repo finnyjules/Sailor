@@ -23,7 +23,7 @@ import {
   SHADER_MAX_FRAMES, shaderMakesBatch, shaderOverCapWords, shaderPlanCount, shaderSourceOfNode, shaderSourcesOf, shaderTooManyFramesWords,
   SHADER_ENGINE_WORDS, SHADER_FRAMES_TOO_MUCH, shaderBakeProblem, shaderEngineReason, shaderFrameCount,
 } from '#shared/runner/shaderBakeKey'
-import { CLAIMED_MARKER, SHADER_BAKE_UNCLAIMED_MS, __resetShaderBakeSweepForTests, abandonShaderBake, bakeFolderOf, bakeFoldersOf, sweepShaderBakes } from '~~/server/runner/shaderBakeFiles'
+import { CLAIMED_MARKER, SHADER_BAKE_UNCLAIMED_MS, __resetShaderBakeSweepForTests, abandonShaderBake, bakeFolderOf, bakeFoldersOf, claimShaderBakes, releaseInactiveShaderBakes, releaseShaderBakes, sweepShaderBakes } from '~~/server/runner/shaderBakeFiles'
 import { outputKind } from '#shared/runner/values'
 import { outputKindsFor } from '#shared/runner/eligibility'
 import { frameShapes } from '~~/server/runner/video/shapes'
@@ -862,8 +862,13 @@ describe('R11.9c: an animated Shader effect is baked frame by frame and kept as 
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.status).toBe('done')
     const input = join(k.root, 'input')
-    expect(existsSync(join(input, folder, CLAIMED_MARKER))).toBe(true)
-    // Claimed: an abandon keeps it.
+    // Fix round 2 (N1): the run ended (done): its claim is let go and the folder deleted.
+    expect((await k.store.get(runId))!.bakeFolders).toEqual([folder])
+    expect(existsSync(join(input, folder))).toBe(false)
+    // A folder claimed by a run still in progress: an abandon keeps it.
+    put(k.root, `${folder}/${bakeNameOf(new Uint8Array([2]))}`, new Uint8Array([2]))
+    expect(await claimShaderBakes(input, [folder], 'run_live')).toEqual([folder])
+    expect(readFileSync(join(input, folder, CLAIMED_MARKER), 'utf8')).toBe('run_live')
     expect(await abandonShaderBake(input, folder, async () => true)).toBe(false)
     // Unclaimed: abandoned only when every frame is the caller's; then gone.
     const other = `shader_bake/${'cd'.repeat(16)}`
@@ -886,6 +891,55 @@ describe('R11.9c: an animated Shader effect is baked frame by frame and kept as 
     __resetShaderBakeSweepForTests()
     expect(await sweepShaderBakes(input)).toBe(1)
     expect([existsSync(join(input, old)), existsSync(join(input, young)), existsSync(join(input, folder))]).toEqual([false, true, true])
+    // Fix round 2: claims by two runs; one ending keeps the folder for the other; a server start lets go of every
+    // claim whose run is no longer in progress (as kept.keepOnly), deleting a folder left unclaimed.
+    await claimShaderBakes(input, [folder], 'run_other')
+    await releaseShaderBakes(input, [folder], 'run_live')
+    expect(readFileSync(join(input, folder, CLAIMED_MARKER), 'utf8')).toBe('run_other')
+    expect(await releaseInactiveShaderBakes(input, new Set(['run_other']))).toBe(0)
+    expect(existsSync(join(input, folder))).toBe(true)
+    expect(await releaseInactiveShaderBakes(input, new Set())).toBe(1)
+    expect(existsSync(join(input, folder))).toBe(false)
+    // Fix round 2 (N3): a folder holding a file that isn't the run's owner's is not claimed.
+    const mixed = `shader_bake/${'23'.repeat(16)}`
+    put(k.root, `${mixed}/x.png`, new Uint8Array([1]))
+    expect(await claimShaderBakes(input, [mixed], 'run_x', async () => false)).toEqual([])
+    expect(existsSync(join(input, mixed, CLAIMED_MARKER))).toBe(false)
+  })
+
+  it('fix round 2 (N1): a run paused at a Gate keeps its bake through a server restart (its still re-rendered on restart), and lets it go once it ends', async () => {
+    const k = await setUp()
+    const { w, h } = aspectSize(256, '16:9')
+    const folder = `shader_bake/${'45'.repeat(16)}`
+    const bytes = await png(pixels(w, h, 4, 77), w, h, 4)
+    put(k.root, `${folder}/${bakeNameOf(bytes)}`, bytes)
+    const p: ApiPrompt = {
+      fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora', resolution: 256, aspect: '16:9' }) },
+      g: { class_type: 'ComfyGateNode', inputs: { data_in: ['fx', 0], bypass: false } },
+      s: saveImage(['g', 0]),
+    }
+    baked(p, 'fx', [`${folder}/${bakeNameOf(bytes)}`], [])
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.status).toBe('paused')
+    const input = join(k.root, 'input')
+    expect(existsSync(join(input, folder, CLAIMED_MARKER))).toBe(true)
+    // A server restart: the paused run is still in progress, so its bake stays.
+    const k2 = makeKit({ dir: k.dir, root: k.root, deps: { families: () => MEDIA_SHADER } })
+    await k2.engine.reattach()
+    expect(existsSync(join(input, folder, CLAIMED_MARKER))).toBe(true)
+    // Restart renders the shader again, from its bake.
+    await k2.engine.gateAction({ userId: k2.userId, runId, gateId: 'g', action: 'restart' })
+    await k2.engine.settled(runId)
+    expect((await k2.store.get(runId))!.status).toBe('paused')
+    expect(existsSync(join(input, folder))).toBe(true)
+    // Continue: the run ends, and its bake goes.
+    await k2.engine.gateAction({ userId: k2.userId, runId, gateId: 'g', action: 'continue' })
+    await k2.engine.settled(runId)
+    const run = (await k2.store.get(runId))!
+    expect(run.status, JSON.stringify(Object.values(run.takes[0]!.nodes).map(n => n.error))).toBe('done')
+    expect(savedFrames(k2)).toHaveLength(1)
+    expect(existsSync(join(input, folder))).toBe(false)
   })
 
   it('an animated picture (a GIF of two frames on an Image card): two baked frames kept as a batch', async () => {

@@ -374,6 +374,8 @@ export interface RunRecord {
   stopRequested: boolean
   /** Provider jobs whose cancel is not confirmed yet (absent: none). */
   unconfirmedCancels?: UnconfirmedCancel[]
+  /** R11.9c fix round 2: the browser's Shader effect bake folders this run claimed (let go when it ends). */
+  bakeFolders?: string[]
 }
 
 export function stageKeyOf(legId: string, take: number): string {

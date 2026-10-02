@@ -4,6 +4,7 @@
  * comfyui-proxy and the history/view routes call these ONLY under
  * deployMode() === 'hosted'.
  */
+import path from 'node:path'
 import type { H3Event } from 'h3'
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus } from 'h3'
 import { ownedOutputKeys, ownedPromptIds, ownsPrompt, outputKey, pendingRuns } from './graphRuns'
@@ -416,6 +417,16 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
     .some(([name, value]) => normalizeFieldName(name) === 'overwrite' && isOverwriteValue(value))
   const subfolder = form.text('subfolder')
   const type = form.text('type') || 'input'
+
+  // R11.9c fix round 2 (N3): a Shader effect bake's folder (shader_bake/…) takes only the bake's own frames,
+  // `shader_bake_<32 hex>.png`: nothing else (a `.claimed` marker, another file) can be put into one.
+  const bakeTarget = path.posix.normalize((subfolder ?? '').trim().replace(/\\/g, '/') || '.').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
+  if (bakeTarget === 'shader_bake' || bakeTarget.startsWith('shader_bake/')) {
+    const name = (await form.file('image'))?.filename || ''
+    if (!/^shader_bake_[0-9a-f]{32}\.png$/.test(name)) {
+      throw createError({ statusCode: 400, message: 'Only a shader’s own frames can be uploaded there' })
+    }
+  }
 
   if (overwrite) {
     const file = await form.file('image')

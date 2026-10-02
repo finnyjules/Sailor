@@ -629,3 +629,22 @@ describe('local mode — no table, no gate (single user)', () => {
 })
 
 afterAll(() => { if (root) realFs.rmSync(root, { recursive: true, force: true }) })
+
+// ------------------------------------------------------- R11.9c fix round 2
+
+describe('R11.9c fix round 2 (N3): a shader bake folder takes only the bake’s own frames', () => {
+  const FRAME = `shader_bake_${'a'.repeat(32)}.png`
+  const FOLDER = `shader_bake/${'b'.repeat(32)}`
+  it('a frame named as the bake names it is written', async () => {
+    rawBody.mockResolvedValue(upload({ filename: FRAME, fields: { subfolder: FOLDER, overwrite: 'true' } }))
+    await handleHostedUpload(ev())
+    expect(written()).toContain(`input/${FOLDER}/${FRAME}`)
+  })
+  it('anything else (a .claimed marker, another name), by any spelling of the folder, is refused before disk', async () => {
+    for (const [filename, subfolder] of [['.claimed', FOLDER], ['a.png', FOLDER], ['.claimed', ` ./${FOLDER}/ `], ['x.png', 'shader_bake'], ['x.png', `other/../${FOLDER}`], ['x.png', FOLDER.replace('/', '\\')]] as const) {
+      rawBody.mockResolvedValue(upload({ filename, fields: { subfolder } }))
+      await expect(handleHostedUpload(ev()), `${subfolder} ${filename}`).rejects.toMatchObject({ statusCode: 400 })
+    }
+    expect(written()).toEqual([])
+  })
+})

@@ -12,7 +12,7 @@ import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/familie
 import { parseShaderBaked, shaderOverCapWords } from '#shared/runner/shaderBakeKey'
 import { dirname } from 'node:path'
 import { bakedPngSize } from './cards/shaderEffect'
-import { bakeFoldersOf, claimShaderBakes, sweepShaderBakes } from './shaderBakeFiles'
+import { bakeFoldersOf, claimShaderBakes, releaseInactiveShaderBakes, releaseShaderBakes, sweepShaderBakes } from './shaderBakeFiles'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
@@ -1074,6 +1074,11 @@ export function createEngine(deps: EngineDeps) {
       // last save failed, so the in-memory truth is not lost to a stale copy.
       if (saved && (status === 'done' || status === 'error' || status === 'stopped') && live.get(run.id)?.run === run) {
         live.delete(run.id)
+      }
+      // R11.9c fix round 2 (N1): an ended run (no longer resumable) lets go of the bake folders it claimed.
+      if (saved && run.bakeFolders?.length && (status === 'done' || status === 'error' || status === 'stopped')) {
+        const root = inputRoot()
+        if (root) await releaseShaderBakes(root, run.bakeFolders, run.id).catch(e => deps.reportError(e, { site: 'runner.bake.release', runId: run.id }))
       }
     }
   }
@@ -2536,6 +2541,7 @@ export function createEngine(deps: EngineDeps) {
     // plainly before the hold, in words saying what to shorten: the one check the browser makes before it draws
     // (#shared shaderBakeProblem). Fix round 1 (M2): the bake's uploaded frames count in the run's kept room.
     let bakeBytes = 0
+    const bakeCounted = new Set<string>()
     if (familyOn('shader-bake', families)) {
       for (const p of prompts) {
         for (const [id, n] of Object.entries(p)) {
@@ -2549,7 +2555,13 @@ export function createEngine(deps: EngineDeps) {
           if (first && (await files.exists(first))) size = bakedPngSize(await files.read(first))
           const words = shaderOverCapWords(p, id, deps.hosted(), size)
           if (words) throw stopGap({ message: words, nodeId: id, classType: n.class_type, code: 'too-much-work' })
-          for (const r of refs) if (r) bakeBytes += (await files.size(r)) ?? 0
+          for (const r of refs) {
+            // Fix round 2 (N5): a frame several takes name is one file, counted once.
+            const key = r ? `${r.subfolder}/${r.filename}` : ''
+            if (!r || bakeCounted.has(key)) continue
+            bakeCounted.add(key)
+            bakeBytes += (await files.size(r)) ?? 0
+          }
         }
       }
       if (bakeBytes > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {
@@ -2818,13 +2830,6 @@ export function createEngine(deps: EngineDeps) {
   async function startRun(i: StartRunInput): Promise<LegStarted> {
     const prep = await prepareStart(i)
     const { prompts, chosenAtStart, nodeErrors } = prep
-    // R11.9c fix round 1 (I2): the bakes this run reads are claimed (kept as its inputs, never swept);
-    // unclaimed ones older than a few hours are swept now and then.
-    const root = inputRoot()
-    if (root) {
-      await claimShaderBakes(root, bakeFoldersOf(prompts))
-      void sweepShaderBakes(root).catch(() => {})
-    }
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))
 
     const now = deps.now()
@@ -2843,6 +2848,20 @@ export function createEngine(deps: EngineDeps) {
       charges: [],
       baseCharged: false,
       stopRequested: false,
+    }
+    // R11.9c fix rounds 1–2 (I2, N1, N2, N3): the bakes this run reads are claimed for it, after its checks and
+    // moderation and before it is saved (kept as its inputs while it can need them; let go when it ends); in
+    // hosted only a folder whose every file is the run's owner's. Unclaimed ones older than a few hours are swept.
+    const root = inputRoot()
+    if (root) {
+      const ownsAll = async (folder: string, names: string[]) => {
+        if (!deps.hosted()) return true
+        for (const n of names) if (!(await deps.ownership.ownsInput(i.userId ?? '', { filename: n, subfolder: folder, type: 'input' }))) return false
+        return true
+      }
+      const claimed = await claimShaderBakes(root, bakeFoldersOf(prompts), run.id, ownsAll)
+      if (claimed.length) run.bakeFolders = claimed
+      void sweepShaderBakes(root).catch(() => {})
     }
     const leg = await openLeg(run, 'run', null, run.takes.map(t => t.index))
     for (const c of chosenAtStart) {
@@ -2962,6 +2981,9 @@ export function createEngine(deps: EngineDeps) {
     // Held bytes of runs no longer in progress are let go (heldBytes.ts).
     await held.keepOnly(new Set(active.map(r => r.id))).catch(e => deps.reportError(e, { site: 'runner.held.sweep' }))
     await kept.keepOnly(new Set(active.map(r => r.id))).catch(e => deps.reportError(e, { site: 'runner.kept.sweep' }))
+    // R11.9c fix round 2 (N1, N2): bake folders claimed by runs no longer in progress go with their kept files.
+    const bakeRoot = inputRoot()
+    if (bakeRoot) await releaseInactiveShaderBakes(bakeRoot, new Set(active.map(r => r.id))).catch(e => deps.reportError(e, { site: 'runner.bake.sweep' }))
     for (const run of active) {
       if (live.has(run.id)) continue
       const leg = run.legs.find(l => l.status === 'running')
