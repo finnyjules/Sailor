@@ -70,7 +70,7 @@ import { SETTING_PRICED_NODE_CLASSES, editCalls } from './editSettings'
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
-import { REMOTE_VIDEO_NODE_CLASSES, personSwapVideoUsd, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
+import { REMOTE_VIDEO_NODE_CLASSES, billedSeconds, personSwapVideoUsd, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 import type { RunnerFamily } from '../runner/families'
 import { BG_REMOVE_CLASS, BG_REMOVE_SLUG, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_SLUG, isLocalModelClass, localModelCalls, localModelOn } from '../runner/localModels'
@@ -160,14 +160,23 @@ export function videoModelIdFor(model: string): string {
   return hasOwn(LEGACY_VIDEO_MODEL_IDS, model) ? LEGACY_VIDEO_MODEL_IDS[model]! : model
 }
 
-/** Dollars for a video node as configured, or null for an unknown model. */
-function videoNodeUsd(model: string, inputs: NodeInputs): number | null {
+/** VEED Fabric 1.0 (shared/runner/eligibility.ts FABRIC_VIDEO_MODEL_ID; not imported: the price module stays below the runner). */
+const FABRIC_VIDEO_MODEL_ID = 'fabric-1.0'
+
+/**
+ * Dollars for a video node as configured, or null for an unknown model.
+ * Fabric (R11.2, Generate a video on the runner) makes a clip as long as its
+ * sound: priced on the sound's measured seconds, or the bound its maker gives
+ * before the run (`audioUpTo`), never above Python's 60 s; unmeasured, 60 s.
+ */
+function videoNodeUsd(model: string, inputs: NodeInputs, measured?: InputSeconds | null): number | null {
   const id = videoModelIdFor(model)
   if (!videoRate(id)) return null
   const durationLinked = isLinkedInput(inputs.duration)
   const s = effectiveVideoSettings(id, inputs.duration, inputs.aspect_ratio, isLinkedInput(inputs.model_options) ? {} : inputs.model_options, inputs.image)
   if (!s) return null
   if (durationLinked) s.seconds = maxVideoSeconds(id)!
+  if (id === FABRIC_VIDEO_MODEL_ID && measured) s.seconds = billedSeconds(measured.audio ?? measured.audioUpTo, s.seconds)
   if (isLinkedInput(inputs.model_options)) return videoPriceMaxUsd(id, s.seconds)
   return videoPriceUsd(id, s)
 }
@@ -420,7 +429,7 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
     usd = imageNodeUsd(model, inputs!)
   }
   else if (classType === 'GenerateVideoNode' || classType === 'FilmShotNode') {
-    const price = videoNodeUsd(model, inputs!)
+    const price = videoNodeUsd(model, inputs!, classType === 'GenerateVideoNode' ? opts.inputSeconds : null)
     if (price == null) return { refused: `unknown video model id ${model}` }
     usd = price
   }

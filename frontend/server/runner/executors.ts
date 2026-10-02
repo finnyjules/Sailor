@@ -58,11 +58,11 @@
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
-import { AUDIO_CARD_MEDIA_RULE, VIDEO_CARD_MEDIA_RULE, classUpgradeOn, isShotDirected, resolveVideoModelId, runnerRuleFor } from '#shared/runner/eligibility'
+import { AUDIO_CARD_MEDIA_RULE, FABRIC_VIDEO_MODEL_ID, VIDEO_CARD_MEDIA_RULE, classUpgradeOn, isShotDirected, resolveVideoModelId, runnerRuleFor } from '#shared/runner/eligibility'
 import { filmShotPrompt } from '#shared/runner/shotPresets'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
-import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
+import { FABRIC_NEEDS_AUDIO, RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject, pyStrip, pyTruthy } from './generators/opts'
 import {
   DEVELOP_PROMPT, FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP,
@@ -503,7 +503,26 @@ export function staticDerive(ctx: PlanContext, ui?: (values: Record<number, Runn
  * where the model sends one (a text-to-video-only Replicate model ignores a
  * linked picture, as Python does, so it isn't handed off at all).
  */
-async function planVideoGeneration(inputs: Record<string, unknown>, first: (() => Promise<string>) | null): Promise<NodePlan> {
+/**
+ * Fabric's sound (R11.2): Python's WAV of the linked sound, its first 60 s
+ * (`_audio_dict_to_wav_data_url(audio, max_seconds=60)`), the very WAV the
+ * engine measured and priced for this turn (ctx.soundWav), handed off as
+ * `audio.wav` as the sound-in nodes hand theirs. A resumed node takes the
+ * link written down when it was sent. Null for any other model.
+ */
+function fabricSoundUrl(ctx: PlanContext, inputs: Record<string, unknown>): (() => Promise<string>) | null {
+  if (resolveVideoModelId(inputs.model) !== FABRIC_VIDEO_MODEL_ID) return null
+  return async () => {
+    const sent = ctx.recordedPayload?.audio
+    if (typeof sent === 'string') return sent
+    const link = inputs.audio
+    if (!isLink(link) || !ctx.soundWav || !ctx.bytesToUrl) throw new Error(FABRIC_NEEDS_AUDIO)
+    const w = await ctx.soundWav(link as ApiLink)
+    return ctx.bytesToUrl({ filename: 'audio.wav', subfolder: '', type: 'kept' }, w.wav)
+  }
+}
+
+async function planVideoGeneration(inputs: Record<string, unknown>, first: (() => Promise<string>) | null, sound: (() => Promise<string>) | null = null): Promise<NodePlan> {
   const id = resolveVideoModelId(inputs.model)
   // Wan 3.0 (family wan-3): fal only, the endpoint by mode (wan3.ts); no backup.
   if (isWan3Model(id)) {
@@ -566,6 +585,7 @@ async function planVideoGeneration(inputs: Record<string, unknown>, first: (() =
       seed: asInt(inputs.seed, 0),
       image: i2vFirst ? await i2vFirst() : null,
       adv: parseJsonObject(inputs.model_options),
+      audio: sound ? await sound() : null,
     }
     const payload = onReplicate.build(args)
     // Kling 3.0 and PixVerse v6 go to fal first; this Replicate request is their backup (twins.ts).
@@ -828,7 +848,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     case 'GenerateVideoNode': {
       const f = linkedFirstFile('image')
-      return planVideoGeneration(inputs, f ? () => imageUrlOf(ctx, f, inputs.image) : null)
+      return planVideoGeneration(inputs, f ? () => imageUrlOf(ctx, f, inputs.image) : null, fabricSoundUrl(ctx, inputs))
     }
 
     // A shot-directed Film a shot (Task 4, characters stage 3): its `/view`

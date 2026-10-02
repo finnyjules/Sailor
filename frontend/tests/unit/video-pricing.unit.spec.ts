@@ -102,6 +102,8 @@ const SERVICE_DEFAULT: Record<string, { seconds?: number, resolution?: string | 
   'ltx-video': { seconds: 5, resolution: null, audio: false },
   // fal seedance-2.0: generate_audio default true (sent only when set).
   'seedance-2.0': { audio: true },
+  // veed/fabric-1.0 (R11.2): the clip is as long as its sound, unmeasured the 60 s cap; it speaks.
+  'fabric-1.0': { seconds: 60, audio: true },
 }
 
 const PIXVERSE_TIERS = ['360p', '540p', '720p', '1080p']
@@ -184,6 +186,8 @@ describe('settings parity: the price reads what the builder sends', () => {
               const payload = desc.build({
                 prompt: 'p', aspectRatio: '16:9', duration: asInt(dur, desc.defaultDuration), seed: 0,
                 image, adv: parseJsonObject(modelOptions),
+                // R11.2: Fabric's sound (every other builder ignores it).
+                audio: 'https://x/sound.wav',
               })
               const want = sentSettings(id, payload)
               const got = effectiveVideoSettings(id, dur, '16:9', modelOptions, image)

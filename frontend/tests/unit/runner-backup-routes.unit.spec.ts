@@ -232,6 +232,8 @@ function nodeFor(key: string): [string, Record<string, unknown>] {
     // A first frame for the image-to-video-only models (Wan 3.0 Prime among them), and for Grok Imagine Video 1.5 (F19)
     // and Luma Ray 3.2 (F21), whose backups are image-to-video only.
     const i2v = ['wan-2.5-i2v-fast', 'wan-3.0-prime', 'grok-imagine-video-1.5', 'luma-ray-3.2'].includes(id)
+    // Fabric (R11.2): a face and a sound, both linked.
+    if (id === 'fabric-1.0') return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', image: LINK, audio: ['snd', 0] }]
     return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(i2v ? { image: LINK } : {}) }]
   }
   const [ct, model] = key.split(':') as [string, string | undefined]

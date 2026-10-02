@@ -17,11 +17,14 @@
  *     reads make Whisper's WAV for it, ./soundWav.ts whisperWavOf).
  *   - Vocal separator (family vocal-split, R7.8): its whole sound as the
  *     stereo FLAC it sends, the same way (./soundWav.ts vocalsSoundOf).
+ *   - Generate a video on VEED Fabric (family replicate-video, R11.2): its
+ *     linked sound, as the sound-in nodes send theirs (Python's first 60 s).
  * Each check returns what it measured as a MeasuredMedia record: the lengths
  * (and a video's size and frame rate) the price reads, and the sha256 of the
  * bytes measured.
  */
-import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
+import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
+import { FABRIC_VIDEO_MODEL_ID, resolveVideoModelId } from '#shared/runner/eligibility'
 import { isSync3LipSync } from '#shared/runner/lipSync'
 import { SYNC_3_CHANGED, measuredOf, sync3InputFiles, sync3MediaCheck, type Sync3MediaReads } from './sync3Media'
 import { TOPAZ_VIDEO_CHANGED, topazInputFiles, topazMediaCheck } from './topazMedia'
@@ -41,11 +44,18 @@ export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'topaz-vide
   // R7.7: Whisper transcribe measures its sound as the sound-in nodes do (its own WAV: the engine's reads);
   // R7.8: Vocal separator too (its stereo FLAC).
   if (isSoundInClass(node.class_type) || node.class_type === WHISPER_CLASS || node.class_type === VOCALS_CLASS) return 'sound-in'
+  // R11.2: Generate a video on Fabric sends its linked sound the sound-in way (Python's WAV, its first 60 s).
+  if (isFabricVideo(node)) return 'sound-in'
   if (node.class_type === 'LipSyncNode' && isSync3LipSync(node.inputs ?? {})) return 'sync-3'
   if (node.class_type === 'EnhanceVideoNode') return 'topaz-video'
   if (node.class_type === 'PersonSwapVideo') return 'person-swap-video'
   if (node.class_type === 'DescribeVideoNode') return 'describe-video'
   return null
+}
+
+/** Generate a video on Fabric with its sound wired in (R11.2): the one video model whose sound is read. */
+export function isFabricVideo(node: ApiNode | undefined): boolean {
+  return node?.class_type === 'GenerateVideoNode' && resolveVideoModelId(node.inputs?.model) === FABRIC_VIDEO_MODEL_ID && isLink(node.inputs?.audio)
 }
 
 export type NodeMediaCheck = { problem: string } | { problem: null, measured: MeasuredMedia }

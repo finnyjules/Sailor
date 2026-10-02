@@ -284,10 +284,10 @@ describe('the refusals that stay', () => {
     for (const name of WORD_INPUTS.GenerateImageNode!) expect(runnerTakesNode(wire(p, name), 'n', CARDS), name).toBe(true)
   })
 
-  it('Generate a video: model_options (R11)', () => {
+  it('Generate a video: model_options is taken since R11.2 (runner-video-leftovers)', () => {
     const p: ApiPrompt = { n: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', prompt: 'a fox', aspect_ratio: '16:9', duration: '8', seed: 7, model_options: '{}' } } }
     expect(runnerTakesNode(p, 'n', EVERY)).toBe(true)
-    expect(runnerTakesNode(wire(p, 'model_options'), 'n', EVERY)).toBe(false)
+    expect(runnerTakesNode(wire(p, 'model_options'), 'n', EVERY)).toBe(true)
     expect(runnerTakesNode(wire(p, 'prompt'), 'n', CARDS)).toBe(true)
   })
 

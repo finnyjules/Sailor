@@ -292,6 +292,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:wan-2.5-i2v-fast': r('replicate', null, HIDDEN),
   'video:luma-ray-2-720p': r('replicate', null, HIDDEN),
   'video:ltx-video': r('replicate', null, HIDDEN),
+  // VEED Fabric 1.0 with a linked sound (R11.2).
+  'video:fabric-1.0': r('replicate', null, ON_FAL_UNCHECKED),
   // Image edits
   'RemoveObjectNode': r('replicate', 'fal'),
   'TextEditNode': r('replicate', 'fal'),

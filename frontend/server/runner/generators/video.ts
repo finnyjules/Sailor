@@ -409,8 +409,29 @@ function pixverseV6({ prompt, aspectRatio, duration, seed, image, adv }: VideoBu
   return inp
 }
 
+/** _b_fabric_1_0's refusals, in Python's words (it raises before any call). */
+export const FABRIC_NEEDS_IMAGE = 'Fabric 1.0 requires an input image (face).'
+export const FABRIC_NEEDS_AUDIO = 'Fabric 1.0 requires an input audio clip.'
+
+/** veed/fabric-1.0's `resolution` (its schema). */
+export const FABRIC_RESOLUTIONS = ['480p', '720p']
+
+/**
+ * veed/fabric-1.0 (R11.2): a talking head from a face picture and a sound.
+ * Python's _b_fabric_1_0 (:465) ignores the prompt, ratio, length and seed;
+ * the clip is as long as the sound (Python's WAV, its first 60 s, handed
+ * off). Python sends the resolution option as it reads it (`_opt_str`); the
+ * schema takes 480p or 720p, so anything else is sent as the 720p default
+ * (lower-cased first), which the price already charges an unlisted one at.
+ */
+function fabric10({ image, audio, adv }: VideoBuildArgs) {
+  if (!image) throw new Error(FABRIC_NEEDS_IMAGE)
+  if (!audio) throw new Error(FABRIC_NEEDS_AUDIO)
+  return { image, audio, resolution: lowerEnum(adv, 'resolution', FABRIC_RESOLUTIONS, '720p') }
+}
+
 const BOTH = ['t2v', 'i2v'] as const
-/** video_models.py MODELS, the Replicate entries the runner takes (every one but fabric-1.0, which needs sound). */
+/** video_models.py MODELS, the Replicate entries the runner takes (Fabric with a linked sound only, R11.2). */
 export const RUNNER_REPLICATE_VIDEO_MODELS: Record<string, ReplicateVideoModelDesc> = {
   'sora-2': { id: 'sora-2', label: 'Sora 2', slug: 'openai/sora-2', defaultDuration: 5, modes: ['t2v'], build: sora2 },
   'sora-2-pro': { id: 'sora-2-pro', label: 'Sora 2 Pro', slug: 'openai/sora-2-pro', defaultDuration: 5, modes: ['t2v'], build: sora2Pro },
@@ -424,6 +445,7 @@ export const RUNNER_REPLICATE_VIDEO_MODELS: Record<string, ReplicateVideoModelDe
   'luma-ray-2-720p': { id: 'luma-ray-2-720p', label: 'Luma Ray 2 (720p)', slug: 'luma/ray-2-720p', defaultDuration: 5, modes: BOTH, build: lumaRay2720p },
   'ltx-video': { id: 'ltx-video', label: 'LTX-Video', slug: 'lightricks/ltx-video', defaultDuration: 5, modes: BOTH, build: ltxVideo },
   'pixverse-v6': { id: 'pixverse-v6', label: 'PixVerse v6', slug: 'pixverse/pixverse-v6', defaultDuration: 5, modes: BOTH, build: pixverseV6 },
+  'fabric-1.0': { id: 'fabric-1.0', label: 'VEED Fabric 1.0', slug: 'veed/fabric-1.0', defaultDuration: 60, modes: ['i2v'], build: fabric10 },
 }
 
 for (const id of RUNNER_REPLICATE_VIDEO_MODEL_IDS) {

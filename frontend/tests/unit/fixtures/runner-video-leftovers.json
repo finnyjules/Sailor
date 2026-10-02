@@ -1,0 +1,178 @@
+{
+  "cases": [
+    {
+      "name": "Fabric, no options",
+      "model": "fabric-1.0",
+      "model_options": "{}",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, 480p",
+      "model": "fabric-1.0",
+      "model_options": "{\"resolution\":\"480p\"}",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "480p"
+      }
+    },
+    {
+      "name": "Fabric, 720p with extra keys",
+      "model": "fabric-1.0",
+      "model_options": "{\"resolution\":\"720p\",\"seed\":7,\"negative_prompt\":\"x\"}",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, a number for the resolution",
+      "model": "fabric-1.0",
+      "model_options": "{\"resolution\":480}",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "480"
+      }
+    },
+    {
+      "name": "Fabric, a null resolution",
+      "model": "fabric-1.0",
+      "model_options": "{\"resolution\":null}",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, broken options",
+      "model": "fabric-1.0",
+      "model_options": "{\"resolution\":",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, options that are not an object",
+      "model": "fabric-1.0",
+      "model_options": "[\"480p\"]",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, blank options",
+      "model": "fabric-1.0",
+      "model_options": "",
+      "image": true,
+      "audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "IMG:image",
+        "audio": "WAV:audio:60",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, no sound",
+      "model": "fabric-1.0",
+      "model_options": "{}",
+      "image": true,
+      "audio": false,
+      "error": "Fabric 1.0 requires an input audio clip."
+    },
+    {
+      "name": "Fabric, no picture",
+      "model": "fabric-1.0",
+      "model_options": "{}",
+      "image": false,
+      "audio": true,
+      "error": "Model 'VEED Fabric 1.0' requires an input image (image-to-video only). Connect an Image to the optional `image` input."
+    },
+    {
+      "name": "Kling 2.5 Turbo Pro, options as text",
+      "model": "kling-v2.5-turbo-pro",
+      "model_options": "{\"negative_prompt\":\"blur\"}",
+      "image": false,
+      "audio": false,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-v2.5-turbo-pro",
+      "payload": {
+        "prompt": "a person talking",
+        "aspect_ratio": "16:9",
+        "duration": 5,
+        "negative_prompt": "blur"
+      }
+    },
+    {
+      "name": "Hailuo 2.3, options as text",
+      "model": "hailuo-2.3",
+      "model_options": "{\"resolution\":\"1080p\",\"prompt_optimizer\":false}",
+      "image": true,
+      "audio": false,
+      "provider": "replicate",
+      "endpoint": "minimax/hailuo-2.3",
+      "payload": {
+        "prompt": "a person talking",
+        "duration": 6,
+        "resolution": "1080p",
+        "prompt_optimizer": false,
+        "first_frame_image": "IMG:image"
+      }
+    },
+    {
+      "name": "Wan 2.7 T2V, broken options",
+      "model": "wan-2.7-t2v",
+      "model_options": "not json",
+      "image": false,
+      "audio": false,
+      "provider": "replicate",
+      "endpoint": "wan-video/wan-2.7-t2v",
+      "payload": {
+        "prompt": "a person talking",
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "num_frames": 81
+      }
+    }
+  ]
+}

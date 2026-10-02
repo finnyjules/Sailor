@@ -1,0 +1,67 @@
+{
+  "endpoint": "veed/fabric-1.0",
+  "fetchedAt": "2026-10-01",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/veed/fabric-1.0 (latest_version.openapi_schema)"
+  },
+  "versionId": "21b8969754f69b351c76ca49e4f1b10a88b162433a36cbcc9849ff64bbee6283",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "image",
+          "audio"
+        ],
+        "properties": {
+          "audio": {
+            "type": "string",
+            "title": "Audio",
+            "format": "uri",
+            "x-order": 1,
+            "description": "Audio to generate video from"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "x-order": 0,
+            "description": "Image to generate video from"
+          },
+          "resolution": {
+            "enum": [
+              "480p",
+              "720p"
+            ],
+            "type": "string",
+            "title": "resolution",
+            "description": "Resolution of the generated video",
+            "default": "720p",
+            "x-order": 2
+          }
+        }
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      },
+      "resolution": {
+        "enum": [
+          "480p",
+          "720p"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      }
+    }
+  }
+}

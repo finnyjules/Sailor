@@ -81,7 +81,8 @@ describe('replicate-video payloads match the Python builders (where Python keeps
   it('the fixture covers every model, each on Replicate with its Python slug, modes and default duration', () => {
     const byModel = new Map<string, number>()
     for (const c of CASES) byModel.set(c.model, (byModel.get(c.model) ?? 0) + 1)
-    expect([...byModel.keys()].sort()).toEqual([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort())
+    // Fabric (R11.2) has its own fixture, with a sound: runner-video-leftovers.unit.spec.ts.
+    expect([...byModel.keys()].sort()).toEqual(RUNNER_REPLICATE_VIDEO_MODEL_IDS.filter(id => id !== 'fabric-1.0').sort())
     for (const [id, n] of byModel) expect(n, id).toBeGreaterThan(40)
     for (const c of CASES) {
       const d = RUNNER_REPLICATE_VIDEO_MODELS[c.model]!
@@ -143,7 +144,8 @@ describe('replicate-video plans', () => {
       'kling-v3': 'start_image', 'kling-v2.5-turbo-pro': 'start_image',
       'hailuo-2.3': 'first_frame_image', 'luma-ray-2-720p': 'start_image_url',
     }
-    expect(Object.keys(field).sort()).toEqual([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort())
+    // Fabric (R11.2) needs a sound too: runner-video-leftovers.unit.spec.ts.
+    expect(Object.keys(field).sort()).toEqual(RUNNER_REPLICATE_VIDEO_MODEL_IDS.filter(id => id !== 'fabric-1.0').sort())
     // Kling 3.0 and PixVerse v6 go to fal first (Task S3): fal's own field there, the Replicate one in the backup.
     const onFal: Record<string, string> = { 'kling-v3': 'start_image_url', 'pixverse-v6': 'image_url' }
     for (const [id, name] of Object.entries(field)) {
@@ -275,14 +277,13 @@ describe('the Replicate video list', () => {
     expect(byId.get('veo-3.1')!.provider).toBe('fal')
   })
 
-  it('every priced Replicate video model except fabric-1.0 is on the list', () => {
+  it('every priced Replicate video model is on the list (fabric-1.0 too since R11.2)', () => {
     const want = py
       .filter(m => m.provider === 'replicate')
       .filter(m => videoRate(m.id) != null)
-      .filter(m => m.id !== 'fabric-1.0')
       .map(m => m.id)
     expect([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort()).toEqual(want.sort())
-    expect(want).toHaveLength(12)
+    expect(want).toHaveLength(13)
   })
 
   it('every id on the list has the Python slug, modes and builder', () => {
@@ -302,10 +303,10 @@ describe('the Replicate video list', () => {
     }
   })
 
-  it('keeps out fabric-1.0: it needs a sound clip', () => {
+  it('takes fabric-1.0 only with a linked picture and a linked runner sound (R11.2: runner-video-leftovers.unit.spec.ts)', () => {
     expect(byId.get('fabric-1.0')!.provider).toBe('replicate')
-    expect((RUNNER_REPLICATE_VIDEO_MODEL_IDS as readonly string[]).includes('fabric-1.0')).toBe(false)
     expect(isRunnerEligible(withCard(vid('fabric-1.0')), ALL)).toBe(false)
+    // A "sound" from a picture card is no sound.
     const withSound: ApiPrompt = {
       1: { class_type: 'Image', inputs: { image: 'a.png' } },
       2: { class_type: 'Image', inputs: { image: 'b.wav' } },
@@ -344,12 +345,14 @@ describe('replicate-video eligibility', () => {
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort())
     for (const [id, m] of Object.entries(models)) {
       if (id === 'wan-2.5-i2v-fast') expect(m).toEqual({ family: 'replicate-video', mustLink: ['image'] })
+      else if (id === 'fabric-1.0') expect(m).toEqual({ family: 'replicate-video', mustLink: ['image', 'audio'] })
       else expect(m).toBe('replicate-video')
     }
     expect(PROVIDER_TYPES.has('GenerateVideoNode')).toBe(true)
   })
 
-  it.each([...RUNNER_REPLICATE_VIDEO_MODEL_IDS])('%s: taken only with replicate-video on', (id) => {
+  // Fabric needs a sound too (R11.2): runner-video-leftovers.unit.spec.ts.
+  it.each(RUNNER_REPLICATE_VIDEO_MODEL_IDS.filter(id => id !== 'fabric-1.0'))('%s: taken only with replicate-video on', (id) => {
     for (const p of id === 'wan-2.5-i2v-fast' ? [withFrame(vid(id))] : [withCard(vid(id)), withFrame(vid(id))]) {
       expect(isRunnerEligible(p, REPLICATE_VIDEO)).toBe(true)
       expect(isRunnerEligible(p, ALL)).toBe(true)

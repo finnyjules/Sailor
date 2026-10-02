@@ -87,7 +87,8 @@ describe('every value the node\'s menus can set builds a request the model\'s sc
           for (const adv of options) {
             for (const image of [modes.includes('t2v') ? null : undefined, modes.includes('i2v') ? 'https://fal.test/first.png' : undefined]) {
               if (image === undefined) continue
-              const p = d.build({ prompt: 'a wave', aspectRatio: ar, duration, seed: 7, image, adv })
+              // R11.2: Fabric's sound (every other builder ignores it).
+              const p = d.build({ prompt: 'a wave', aspectRatio: ar, duration, seed: 7, image, adv, audio: 'https://fal.test/sound.wav' })
               const [provider, ep] = endpoint(p)
               expect(errorsFor(provider, ep, p), `${d.id} ${ar} ${duration}s ${JSON.stringify(adv)} ${image ? 'i2v' : 't2v'}`).toEqual([])
               n++

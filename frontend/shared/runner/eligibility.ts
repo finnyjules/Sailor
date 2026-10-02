@@ -380,14 +380,19 @@ export const RUNNER_REPLICATE_IMAGE_MODEL_IDS = [
 
 /**
  * The video models whose Python provider is Replicate (family
- * `replicate-video`, Task B6), every one priced. Left out: fabric-1.0, which
- * needs a sound clip (the runner refuses a linked `audio`).
+ * `replicate-video`, Task B6), every one priced. fabric-1.0 (VEED Fabric,
+ * R11.2) is taken only with a linked picture AND a linked sound, the one
+ * video model whose `audio` the runner reads (Python's WAV of it, its first
+ * 60 s: the sound-in hand-off, server/runner/soundWav.ts).
  */
 export const RUNNER_REPLICATE_VIDEO_MODEL_IDS = [
   'sora-2', 'sora-2-pro', 'runway-gen-4.5', 'kling-v3', 'kling-v2.5-turbo-pro',
   'seedance-2.0-fast', 'hailuo-2.3', 'wan-2.7-t2v', 'wan-2.5-i2v-fast',
-  'luma-ray-2-720p', 'ltx-video', 'pixverse-v6',
+  'luma-ray-2-720p', 'ltx-video', 'pixverse-v6', 'fabric-1.0',
 ] as const
+
+/** VEED Fabric 1.0 (R11.2): a talking head from a face picture and a sound. */
+export const FABRIC_VIDEO_MODEL_ID = 'fabric-1.0'
 
 /** comfy_extras/nodes_compositor.py `_BLEND_MODES`. */
 export const COMPOSITOR_BLEND_MODES = [
@@ -849,7 +854,9 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
         ? { family: 'replicate-video' as const, mustLink: ['image'] }
-        : 'replicate-video' as const])),
+        // R11.2: Fabric needs a face and a sound (Python raises without either).
+        : id === FABRIC_VIDEO_MODEL_ID ? { family: 'replicate-video' as const, mustLink: ['image', 'audio'] }
+          : 'replicate-video' as const])),
       'wan-3.0': 'wan-3',
       'wan-3.0-prime': { family: 'wan-3', mustLink: ['image'] },
       'hailuo-h3-max-turbo': 'h3-max-turbo',
@@ -860,9 +867,13 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'ltx-2.5-fast': 'ltx-2.5-fast',
       'luma-ray-3.2': 'luma-ray-3.2',
     },
-    mustNotLink: ['prompt', 'model_options'],
-    // R1.2: the prompt takes a text wire; model_options stays unwired (R11).
-    valueInputs: { prompt: ['text'] },
+    // R1.2: the prompt takes a text wire. R11.2: so does model_options, read at
+    // the node's turn as if typed; the price holds it at its dearest setting
+    // (shared/pricing/nodePrice.ts videoNodeUsd).
+    mustNotLink: ['prompt'],
+    valueInputs: { prompt: ['text'], model_options: ['text'] },
+    // R11.2: Fabric's sound, from any runner sound (each source only while its own family is on).
+    linkSources: { audio: SOUND_OUTPUTS },
   },
   // ── frame: the Frame render, computed by the runner (server/runner/compositor/) ──
   // The static composite, and its protect_mask when Blend scene's
@@ -2378,7 +2389,7 @@ const FILM_SHOT_RUNNER_MODELS: Readonly<Record<string, RunnerFamily | null>> = {
  * video models the runner films for Generate a video with no family, those
  * of `replicate-video`, and VEED Fabric (a lip-sync model Film a shot refuses).
  */
-export const FILM_SHOT_MODEL_IDS: readonly string[] = [...RUNNER_VIDEO_MODEL_IDS, ...RUNNER_REPLICATE_VIDEO_MODEL_IDS, 'fabric-1.0']
+export const FILM_SHOT_MODEL_IDS: readonly string[] = [...RUNNER_VIDEO_MODEL_IDS, ...RUNNER_REPLICATE_VIDEO_MODEL_IDS]
 const FILM_SHOT_MODELS: ReadonlySet<string> = new Set(FILM_SHOT_MODEL_IDS)
 
 /** The Film a shot models with no text-to-video mode (video_models.py `modes`): Python refuses them without a picture. */
@@ -2474,7 +2485,8 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   }
   else if (n.class_type === 'GenerateVideoNode') {
     if (!VIDEO_IDS.has(resolveVideoModelId(inputs.model)) && !byRule) return false
-    if (isLink(inputs.audio)) return false
+    // Only Fabric reads a sound (R11.2), and only on its own row (replicate-video on).
+    if (isLink(inputs.audio) && !(byRule && resolveVideoModelId(inputs.model) === FABRIC_VIDEO_MODEL_ID)) return false
   }
   for (const v of Object.values(inputs)) {
     if (isLink(v) && !(v[0] in prompt)) return false

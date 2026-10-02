@@ -132,7 +132,6 @@ interface Rule {
 }
 
 const lower = (s: string) => s.toLowerCase()
-const res = (key: string, def: string) => (adv: Adv) => lower(optStr(adv, key, def))
 const fixed = <T>(v: T) => () => v
 const audioOpt = (def: boolean) => (adv: Adv) => optBool(adv, 'generate_audio', def)
 /**
@@ -251,13 +250,16 @@ const RULES: Record<string, Rule> = {
   // default on). Priced never below the ComfyUI path's 540p (pixverseResolution).
   'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: pixverseResolution, audio: audioOpt(true) },
 
-  // ── ComfyUI only ──
+  // ── Replicate, with a linked sound (R11.2) ──
   // _b_fabric_1_0 (comfy_api_nodes/video_models.py:465-477) ignores the duration
   // and sends resolution default 720p; the clip is as long as the sound, which
   // GenerateVideoNode caps at 60 s (_audio_dict_to_wav_data_url(max_seconds=60),
-  // nodes_replicate.py:3974). The price can't see the sound, so it charges the
-  // 60 s maximum (controller ruling 1).
-  'fabric-1.0': { durations: null, defaultDuration: 60, fixedSeconds: 60, resolution: res('resolution', '720p'), audio: fixed(true) },
+  // nodes_replicate.py:3974). Unmeasured, the price charges the 60 s maximum
+  // (controller ruling 1); the runner measures the sound (nodePrice.ts
+  // videoNodeUsd). The runner sends 480p or 720p (its schema), anything else
+  // as 720p (video.ts fabric10); Python sends any other value as typed, which
+  // Replicate refuses, so 720p, the dearest, is its price too.
+  'fabric-1.0': { durations: null, defaultDuration: 60, fixedSeconds: 60, resolution: resIn(['480p', '720p'], '720p'), audio: fixed(true) },
 }
 
 /** True when the id has settings rules (every VIDEO_MODELS id does; a test pins it). */

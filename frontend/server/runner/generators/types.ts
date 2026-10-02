@@ -35,6 +35,8 @@ export interface VideoBuildArgs {
   /** Link of the first frame (fal storage), or null. */
   image: string | null
   adv: Record<string, unknown>
+  /** Link of the sound (Python's WAV, handed off), or null: only Fabric reads it (R11.2). */
+  audio?: string | null
 }
 
 export interface VideoModelDesc {
