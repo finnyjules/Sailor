@@ -18,7 +18,7 @@ import {
   EFFECT_FAMILY_OF, EFFECT_OUTPUT_KINDS, EFFECT_PICTURE_OUTPUTS,
   asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
-import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
+import { SHADER_ASPECTS, shaderBakeTaken, shaderMakesBatch } from './shaderBakeKey'
 import { parseMaskPoints } from './samInput'
 import { LENS_BLUR_CLASS, LENS_BLUR_WIDGETS } from './lensBlur'
 import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_FAMILY_OF, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
@@ -1254,6 +1254,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // runner doesn't know is left to the engine, which validates it).
   ShaderEffect: {
     family: 'shader-bake', local: 'render', imageInputs: ['image'],
+    // R11.9c: a clip's frames (Load video frames, Get video components of a file), baked frame by frame.
+    valueInputs: { image: ['files', 'frames'] },
     widgets: {
       effect: { type: 'STRING', required: true },
       params: { type: 'STRING', required: true },
@@ -2199,7 +2201,8 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], families: Reado
     return link[1] === 0 && isLink(d) && carriesImage(prompt, d, families, depth + 1)
   }
   // The Shader effect's picture (R2.10), only while its family is on.
-  if (from.class_type === 'ShaderEffect') return link[1] === 0 && familyOn('shader-bake', families)
+  // R11.9c: not while it hands on a frame batch (an animated one): that is a clip's frames.
+  if (from.class_type === 'ShaderEffect') return link[1] === 0 && familyOn('shader-bake', families) && !shaderMakesBatch(prompt, link[0])
   if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) {
     if (Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, from.class_type) && !effectFamilyOn(from.class_type, families)) return false
     return families.has('cards') && PICTURE_OUTPUTS[from.class_type]!.includes(link[1])

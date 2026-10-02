@@ -92,6 +92,8 @@ export const SOUND_EFFECT_OUTPUTS: readonly (readonly [string, number])[] = MEDI
 export function linkSourceOn(classType: string, families: ReadonlySet<RunnerFamily>): boolean {
   // R7: a local-model node (Background remove's clip) only while its own family is on too.
   if (isLocalModelClass(classType)) return localModelOn(classType, families)
+  // R11.9c: an animated Shader effect only while `shader-bake` is on.
+  if (classType === 'ShaderEffect') return familyOn('shader-bake', families)
   return !Object.prototype.hasOwnProperty.call(MEDIA_EFFECT_FAMILY_OF, classType) || mediaEffectFamilyOn(classType, families)
 }
 
@@ -132,6 +134,8 @@ export const FRAMES_LINK_SOURCES: readonly (readonly [string, number])[] = [
   [SUBJECT_MASK_CLASS, 1],
   // R7.6: Slow motion (AI)'s batch, only while `slow-motion-ai` is on.
   [FRAME_INTERP_AI_CLASS, 0],
+  // R11.9c: an animated Shader effect's batch (a still's picture the value kinds keep out), only while `shader-bake` is on.
+  ['ShaderEffect', 0],
 ]
 
 /** The classes that only encode a batch they read (rule 4: a batch only they read is kept as trunc-8). */

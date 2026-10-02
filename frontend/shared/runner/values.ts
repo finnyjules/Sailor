@@ -2,10 +2,12 @@
  * What each runner class's output slots carry (R0, step 3 spec), read by the
  * browser (routing, the needs-the-engine names) and the server (the runner).
  * A class not listed carries files on every slot, as before step 3.
- * Keep this file free of imports but ./graph and ./svgImage (constants only).
+ * Keep this file free of imports but ./graph, ./svgImage (constants only) and
+ * ./shaderBakeKey (whose own imports are leaves: ./graph, ./pyText, ./families).
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 import { SVG_IMAGE_MODEL_IDS } from './svgImage'
+import { shaderMakesBatch } from './shaderBakeKey'
 
 /**
  * R5.2: 'frames' (an IMAGE batch from a video, one kept lossless file) and
@@ -130,6 +132,9 @@ export function outputKind(
     const d = node.inputs?.[follows.input]
     return isLink(d) && outputKind(prompt, d, kinds, depth + 1) === 'frames' ? 'frames' : 'files'
   }
+  // R11.9c: an animated Shader effect's frames: only once the browser has baked them (it bakes only while
+  // `shader-bake` is on), so the table, and every answer without a bake, is as before.
+  if (node.class_type === 'ShaderEffect' && link[1] === 0 && shaderMakesBatch(prompt, link[0])) return 'frames'
   const byModel = row && Object.prototype.hasOwnProperty.call(KIND_BY_MODEL, node.class_type) ? KIND_BY_MODEL[node.class_type]! : undefined
   if (byModel && byModel.slot === link[1]) {
     const model = node.inputs?.model

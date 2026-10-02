@@ -29,6 +29,9 @@ import { BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MA
 import { PAID_VIDEO_OUTPUTS, resolveVideoModelId } from '#shared/runner/eligibility'
 import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 import { MEDIA_CAPS } from '#shared/runner/media'
+import { familyOn } from '#shared/runner/families'
+import { parseShaderBaked, shaderMakesBatch } from '#shared/runner/shaderBakeKey'
+import { bakedPngSize } from '../cards/shaderEffect'
 
 /**
  * R11.8 (ruling (k)): a clip that can't be sized before the run, held at the
@@ -172,6 +175,12 @@ export function topoOrder(prompt: ApiPrompt): string[] {
 }
 
 /** A video effect the runner takes here: ported, with its family (and chain) on. */
+/** R11.9c: an animated Shader effect the runner keeps a frame batch of (`shader-bake` on, baked, several frames or a clip's). */
+export function takenShaderBatch(prompt: ApiPrompt, id: string, families: ReadonlySet<RunnerFamily>): boolean {
+  const n = prompt[id]
+  return n?.class_type === 'ShaderEffect' && familyOn('shader-bake', families) && !!parseShaderBaked(n.inputs?.sailor_baked) && shaderMakesBatch(prompt, id)
+}
+
 export function takenVideoEffect(classType: string, families: ReadonlySet<RunnerFamily>): boolean {
   return Object.prototype.hasOwnProperty.call(VIDEO_EFFECTS, classType) && mediaEffectFamilyOn(classType, families)
 }
@@ -212,6 +221,8 @@ export function batchesOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>
         if (!on && shapes.has(`${id}:0`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         break
       case 'LoadVideoFrames':
+      // R11.9c: an animated Shader effect keeps its frames as a batch of its own.
+      case 'ShaderEffect':
         if (shapes.has(`${id}:0`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         break
       // R7.1 (ruling (f)): Background remove on a clip makes a batch of its own, frame for frame.
@@ -277,6 +288,11 @@ export async function frameShapes(
         s = at(inputs.video) ?? (isLink(inputs.video) && madeVideoLink(prompt, inputs.video) ? null : await sourceShape(id, n.class_type))
         break
       case 'LoadVideoFrames': s = await sourceShape(id, n.class_type); break
+      // R11.9c: an animated Shader effect's batch: as many frames as its bake holds (the node's turn fails on
+      // any other count), each the size of its first baked frame (every one must be that size).
+      case 'ShaderEffect':
+        if (takenShaderBatch(prompt, id, families)) s = await sourceShape(id, n.class_type)
+        break
       // R7.1 (ruling (f)): Background remove on a clip hands on a batch of the clip's count and size.
       // R7.3: Object removal the same.
       // R7.5: Subject mask's cutout the same, in its slot 1 (batchSlotOf).
@@ -402,6 +418,18 @@ export function videoSourceShapeOf(o: { prompt: ApiPrompt; access: FileAccess; u
         const sound = classType === 'GetVideoComponents' ? keptSoundBound(p) : 0
         if (sound === null) return null
         return { count: bound.frames, w: v.w, h: v.h, exact: false, ...(bound.counted ? { counted: true } : {}), ...(sound ? { soundBytes: sound } : {}) }
+      }
+      // R11.9c: an animated Shader effect: its bake's count, its first baked frame's size (an 8-bit PNG's
+      // header; the node's turn refuses a frame of any other size), else held at the place's largest frame.
+      if (classType === 'ShaderEffect') {
+        const baked = parseShaderBaked(inputs.sailor_baked)
+        if (!baked) return null
+        const count = baked.files.length
+        const first = parseInputFileRef(baked.files[0])
+        const size = first && (await o.access.exists(first)) ? bakedPngSize(await o.access.read(first)) : null
+        if (size) return { count, w: size.w, h: size.h, exact: true, counted: true }
+        const side = Math.floor(Math.sqrt((o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).framePixels))
+        return { count, w: side, h: side, exact: false, counted: true, capped: true }
       }
       if (classType === 'LoadVideoFrames') {
         const file = isLink(inputs.file) ? null : parseInputFileRef(inputs.file)

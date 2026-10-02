@@ -70,7 +70,7 @@ import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEven
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
 import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, needsEngineReasons, blockedRunRefusal } from '~/lib/runner/needsEngine'
 import { outputClassesOf } from '#shared/runner/validate'
-import { bakeShaderEffectsForRun } from '~/lib/runner/shaderBake'
+import { bakeShaderEffectsForRun, stopShaderBakes } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
@@ -885,7 +885,16 @@ async function runVueWorkflow(
   // Shader effects (step 3, R2.10): outside the assembly lock, while `shader-bake` is on,
   // the browser bakes each one the runner can replay, in takes that go to the runner.
   if (useDirect && runnerEnabled && runnerFamilies.has('shader-bake')) {
-    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies)
+    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies, { hosted: hostedShell })
+    // R11.9c: Stop while the shader frames were being drawn: nothing is sent.
+    // An animated shader that couldn't be prepared (or makes too many frames) stops the run in plain words, never the engine.
+    const animatedFailure = bake.failed.find(f => f.animated)
+    if (bake.stopped || animatedFailure) {
+      if (animatedFailure && !bake.stopped) toast.error('A shader effect couldn’t be prepared', { description: animatedFailure.error })
+      if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
+      currentRunSilent.value = false
+      return false
+    }
     if (bake.failed.length) toast.error('A shader effect couldn’t be prepared', { description: 'It will run without Sailor’s runner.' })
   }
 
@@ -1493,6 +1502,8 @@ async function handleRunnerGateAction(e: Event) {
 
 // Stop/interrupt the current ComfyUI execution and clear the queue
 async function stopVueWorkflow() {
+  // R11.9c: a shader bake still drawing or uploading its frames ends, and its run is not sent.
+  stopShaderBakes()
   // Runner runs: only the ones registered to the active tab (other tabs' runs keep going).
   const stopTabId = activeTab.value?.id || ''
   const runnerRunIds = runnerEnabled ? runnerRunIdsForTab(inFlight({ tabId: stopTabId }), stopTabId) : []

@@ -8,7 +8,8 @@
  */
 import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, outputKindsFor, rendersLocally, svgReaderProblems } from '#shared/runner/eligibility'
 import { outputKind } from '#shared/runner/values'
-import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/families'
+import { shaderOverCapWords } from '#shared/runner/shaderBakeKey'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
@@ -2526,6 +2527,16 @@ export function createEngine(deps: EngineDeps) {
       const bad = await frameStartProblems(p, f => files.exists(f), f => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted() }), f => framesSoundVerdict(files, f, { userId: i.userId }))
       if (bad?.engine) throw stopGap(bad)
       if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}) })
+    }
+    // R11.9c: an animated Shader effect's frames past the cap (hosted 300, locally 900), refused plainly before
+    // the hold, in words saying what to shorten (the browser checks the same before it bakes).
+    if (familyOn('shader-bake', families)) {
+      for (const p of prompts) {
+        for (const [id, n] of Object.entries(p)) {
+          const words = n.class_type === 'ShaderEffect' ? shaderOverCapWords(p, id, deps.hosted()) : null
+          if (words) throw stopGap({ message: words, nodeId: id, classType: n.class_type, code: 'too-much-work' })
+        }
+      }
     }
     // The video effects' start pass (R6 rule 3, ./video/start.ts): every frame batch's count and size
     // through the chain, from the sources' headers and the widgets; a node past a limit (frames held,

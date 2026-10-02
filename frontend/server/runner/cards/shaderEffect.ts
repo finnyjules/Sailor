@@ -14,6 +14,13 @@
  * (`save_live_preview(unique=True)`). The picture is read downstream as the
  * tensor it is (compositor/plan.ts pictureSourceOf: 'tensor'): bytes / 255,
  * three channels.
+ *
+ * R11.9c (USER ruling (d)): an animated Shader effect (its time setting
+ * making several frames, an animated picture, a clip's frames) is baked a
+ * PNG a frame; here they are counted against what the node makes from its
+ * source (`frame_plan`: the source's frames, else the time setting's), each
+ * checked as above, and kept as one frame batch (`frames`, FFV1) within the
+ * batch caps and the run's kept room. Shaders are free: nothing is held or charged.
  */
 import sharp from 'sharp'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
@@ -21,7 +28,9 @@ import type { OutputFile, RunnerValue } from '../types'
 import { parseInputFileRef } from '../inputs'
 import { isLink } from '#shared/runner/graph'
 import { pyIntOf } from '#shared/runner/pyText'
-import { aspectSize, bakedFileHash, parseShaderBaked } from '#shared/runner/shaderBakeKey'
+import { aspectSize, bakedFileHash, parseShaderBaked, shaderFrameCap, shaderMakesBatch, shaderPlanCount, shaderTooManyFramesWords } from '#shared/runner/shaderBakeKey'
+import { keepFrames } from '../../media/values'
+import { FRAMES_NEED_RUN } from '../media/frameNodes'
 import { sha256Hex } from '../handoff'
 import { EFFECT_PICTURE_ANIMATED, effectPictureCap } from '#shared/runner/effects'
 import { pictureHasFrames, pictureMeta, pictureRefusalOf, pngChunksBeforePixels } from '../pictures/pythonView'
@@ -59,27 +68,56 @@ export function bakedPngSize(b: Uint8Array): { w: number; h: number } | null {
   return { w, h }
 }
 
-/** The size Python renders at: the picture's own (EXIF turned as its loader turns it), or `_aspect_size`. */
-async function renderSize(ctx: PlanContext, io: DeriveIO, inputs: Record<string, unknown>): Promise<{ w: number; h: number }> {
-  if (!isLink(inputs.image)) return aspectSize(intOf(inputs.resolution), String(inputs.aspect))
+/** R11.9c: Python's LoadImage frame count of an animated picture: an APNG's acTL (plus its default image when that isn't a frame, as PIL counts it), else sharp's pages. */
+export function pictureFrameCount(meta: { pages?: number }, b: Uint8Array): number {
+  const chunks = pngChunksBeforePixels(b)
+  if (chunks?.includes('acTL')) {
+    const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
+    for (let o = 8; o + 12 <= b.length;) {
+      const len = view.getUint32(o)
+      const type = String.fromCharCode(b[o + 4]!, b[o + 5]!, b[o + 6]!, b[o + 7]!)
+      if (type === 'acTL' && len >= 8) {
+        const n = view.getUint32(o + 8)
+        // PIL: an IDAT with no fcTL before it is a default image, not a frame, and is counted as one more.
+        return n + (chunks.includes('fcTL') ? 0 : 1)
+      }
+      if (type === 'IDAT') break
+      o += 12 + len
+    }
+  }
+  return Math.max(1, meta.pages ?? 1)
+}
+
+/** What the node renders over, as the run has it: its size, and its frames (1 for a still or no picture). */
+async function sourceOf(ctx: PlanContext, io: DeriveIO, inputs: Record<string, unknown>): Promise<{ w: number; h: number; frames: number; clip: boolean }> {
+  if (!isLink(inputs.image)) return { ...aspectSize(intOf(inputs.resolution), String(inputs.aspect)), frames: 1, clip: false }
+  // R11.9c: a clip's frames (Load video frames, Get video components): the batch as the run made it.
+  const value = ctx.valueFrom?.(inputs.image)
+  if (value?.kind === 'frames') return { w: value.w, h: value.h, frames: value.count, clip: true }
   const files = ctx.filesFrom(inputs.image)
   if (!files.length) throw new Error(PICTURE_NOT_MADE)
+  // Python's loader makes a batch of every file's frames; the runner hands one file on (an Image card, LoadImage).
+  if (files.length > 1) throw new Error(EFFECT_PICTURE_ANIMATED)
   let bytes: Uint8Array
   try { bytes = await io.read(files[0]!) }
   catch { throw new Error(PICTURE_UNREAD) }
   const meta = await pictureMeta(bytes)
   const why = pictureRefusalOf(meta, bytes)
   if (why) throw new Error(why)
-  // Python's loader makes a batch of every frame, and the node a frame of each (the start of the take refuses it first).
-  if (files.length > 1 || pictureHasFrames(meta, bytes)) throw new Error(EFFECT_PICTURE_ANIMATED)
   if (!meta.width || !meta.height) throw new Error(PICTURE_UNREAD)
-  return (meta.orientation ?? 1) >= 5 ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
+  // R11.9c: an animated picture is a batch of its frames (LoadImage), each its first frame's size.
+  const frames = pictureHasFrames(meta, bytes) ? pictureFrameCount(meta, bytes) : 1
+  const size = (meta.orientation ?? 1) >= 5 ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
+  return { ...size, frames, clip: false }
 }
 
 /** The PNG of 8-bit RGB pixels. */
 async function rgbPng(px: Uint8Array, w: number, h: number, compressionLevel: number): Promise<Uint8Array> {
   return new Uint8Array(await sharp(px, { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel }).toBuffer())
 }
+
+/** R11.9c: the baked frames don't match what the node makes from its source (their count). */
+export const SHADER_BAKE_FRAMES = 'The shader’s baked frames don’t match its source. Run it again.'
 
 export function planShaderEffect(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
@@ -89,19 +127,27 @@ export function planShaderEffect(ctx: PlanContext): NodePlan {
   const files = names.map(parseInputFileRef)
   const hashes = names.map(bakedFileHash)
   if (!files.length || files.some(f => !f) || hashes.some(h => !h)) throw new Error(SHADER_BAKE_MISSING)
+  const batch = shaderMakesBatch(ctx.prompt, ctx.nodeId)
   return {
     kind: 'derive',
     async derive(io) {
-      const size = await renderSize(ctx, io, inputs)
+      const src = await sourceOf(ctx, io, inputs)
+      const size = { w: src.w, h: src.h }
       if (size.w > MAX_RENDER_DIM || size.h > MAX_RENDER_DIM) throw new Error(SHADER_PICTURE_TOO_WIDE)
       const cap = effectPictureCap('ShaderEffect', io.hosted)
       if (size.w * size.h > cap.max) throw new Error(cap.message)
-      const kept: OutputFile[] = []
+      // frame_plan: a batch's own frames (a clip, an animated picture), else the time setting's.
+      const expected = src.clip || src.frames > 1 ? src.frames : shaderPlanCount(inputs)
+      // R11.9c: the cap the start checked before the hold, again here (a backstop).
+      const frameCap = shaderFrameCap(io.hosted)
+      if (files.length > frameCap) throw new Error(shaderTooManyFramesWords(frameCap, src.clip || src.frames > 1))
+      if (expected !== files.length) throw new Error(SHADER_BAKE_FRAMES)
       let preview: OutputFile | null = null
-      for (const [i, file] of (files as OutputFile[]).entries()) {
+      /** Each baked file, checked against its name and the size, as 8-bit RGB. */
+      const frameAt = async (i: number): Promise<Uint8Array> => {
         stopped(io)
         let bytes: Uint8Array
-        try { bytes = await io.read(file) }
+        try { bytes = await io.read(files[i]!) }
         catch { throw new Error(SHADER_BAKE_MISSING) }
         // The name the key covers is the bytes' hash: other bytes under it are not the bake.
         if (sha256Hex(bytes).slice(0, 32) !== hashes[i]) throw new Error(SHADER_BAKE_CHANGED)
@@ -118,11 +164,27 @@ export function planShaderEffect(ctx: PlanContext): NodePlan {
         }
         catch { throw new Error(SHADER_BAKE_UNREADABLE) }
         stopped(io)
+        // save_live_preview(unique=True): the first frame, compress level 1, a new name each run.
+        if (!preview) preview = await io.savePreview(await rgbPng(rgb, size.w, size.h, 1), { nodeId: ctx.nodeId })
+        return rgb
+      }
+      if (batch) {
+        // R11.9c: an animated shader's frames, kept as one frame batch (FFV1, server/media/values.ts keepFrames),
+        // within the batch caps and the run's kept room as they stream; Stop ends the stream and keeps nothing.
+        const media = io.media
+        if (!media) throw new Error(FRAMES_NEED_RUN)
+        async function* stream(): AsyncIterable<Uint8Array> {
+          for (let i = 0; i < files.length; i++) yield await frameAt(i)
+        }
+        const value = await keepFrames(media.runId, stream(), size.w, size.h, media)
+        return { values: { 0: value }, ui: { images: [preview!], animated: [false] } }
+      }
+      const kept: OutputFile[] = []
+      for (let i = 0; i < files.length; i++) {
+        const rgb = await frameAt(i)
         const png = await rgbPng(rgb, size.w, size.h, 6)
         stopped(io)
         kept.push(await io.keep(png, 'png'))
-        // save_live_preview(unique=True): the first frame, compress level 1, a new name each run.
-        if (!preview) preview = await io.savePreview(await rgbPng(rgb, size.w, size.h, 1), { nodeId: ctx.nodeId })
       }
       const value: RunnerValue = { kind: 'files', files: kept }
       return { values: { 0: value }, ui: { images: [preview!], animated: [false] } }

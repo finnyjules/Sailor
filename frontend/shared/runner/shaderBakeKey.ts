@@ -16,7 +16,10 @@
  * one's own files is replayed (hosted, only one's own files: inputs.ts); and it
  * does not cover the source's bytes, so a source overwritten under the same
  * name after the bake is not noticed. Settings changed after the bake are. The
- * key is worked out synchronously here
+ * R11.9c (USER ruling (d)): an animated Shader effect (its time setting
+ * making several frames, an animated picture, or a clip's frames) is baked
+ * the same way, a PNG a frame, and the runner keeps them as one frame batch.
+ * The key is worked out synchronously here
  * (eligibility is synchronous, in the browser and on the server alike); the
  * browser's `shaderBakeKey` computes the same digest over Web Crypto.
  *
@@ -26,7 +29,7 @@
  * `_aspect_size` and `frame_plan`. Pure, relative imports only: the browser
  * and the server share it.
  */
-import { isLink, type ApiLink, type ApiPrompt } from './graph'
+import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 import { pyFloatOf } from './pyText'
 import { familyOn, type RunnerFamily } from './families'
 
@@ -243,8 +246,34 @@ export function shaderBakedText(files: readonly string[], key: string): string {
   return JSON.stringify({ files: [...files], key })
 }
 
-/** Where a picture wire starts: a card's file, a card with none, or a node that makes it in the run. */
-type SourceEnd = { kind: 'file'; nodeId: string; file: string } | { kind: 'empty' } | { kind: 'made' }
+/**
+ * R11.9c: a clip the browser has before the run, as the node's picture: Load
+ * video frames of a file (its pick, from its settings as sent), or Get video
+ * components of a file (a Load video's, or a Video card's). The browser
+ * decodes its frames and renders the shader on each one.
+ */
+export type ShaderClipSource =
+  | { loader: 'LoadVideoFrames'; nodeId: string; file: string; settings: Record<string, unknown> }
+  | { loader: 'GetVideoComponents'; nodeId: string; file: string }
+
+/** Load video frames' settings, as the prompt carries them (what picks its frames). */
+const LOAD_FRAMES_SETTINGS = ['max_seconds', 'max_frames', 'max_size', 'start_frame', 'stride'] as const
+
+/** Where a picture wire starts: a card's file, a clip's file, a card with none, or a node that makes it in the run. */
+type SourceEnd = { kind: 'file'; nodeId: string; file: string } | { kind: 'clip'; clip: ShaderClipSource } | { kind: 'empty' } | { kind: 'made' }
+
+const fileText = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+
+/** The video file a VIDEO wire brings before the run: a Load video's, or a Video card's own (not one fed by another node). */
+function clipFileOf(prompt: ApiPrompt, link: ApiLink, depth = 0): string | null {
+  const from = prompt[link[0]]
+  if (!from || depth > 64 || link[1] !== 0) return null
+  const inputs = from.inputs ?? {}
+  if (from.class_type === 'LoadVideo') return isLink(inputs.file) ? null : fileText(inputs.file)
+  if (from.class_type === GATE_CLASS) return isLink(inputs.data_in) ? clipFileOf(prompt, inputs.data_in, depth + 1) : null
+  if (from.class_type === 'Video') return isLink(inputs.source) ? clipFileOf(prompt, inputs.source, depth + 1) : fileText(inputs.file)
+  return null
+}
 
 function sourceEnd(prompt: ApiPrompt, link: ApiLink, depth = 0): SourceEnd {
   const node = prompt[link[0]]
@@ -253,7 +282,19 @@ function sourceEnd(prompt: ApiPrompt, link: ApiLink, depth = 0): SourceEnd {
   const own = (v: unknown): SourceEnd => typeof v === 'string' && v.trim() ? { kind: 'file', nodeId: link[0], file: v } : { kind: 'empty' }
   if (node.class_type === 'Image') return isLink(inputs.images) ? sourceEnd(prompt, inputs.images, depth + 1) : own(inputs.image)
   if (node.class_type === 'LoadImage') return link[1] === 0 ? own(inputs.image) : { kind: 'made' }
-  if (node.class_type === 'ComfyGateNode' && link[1] === 0 && isLink(inputs.data_in)) return sourceEnd(prompt, inputs.data_in, depth + 1)
+  if (node.class_type === GATE_CLASS && link[1] === 0 && isLink(inputs.data_in)) return sourceEnd(prompt, inputs.data_in, depth + 1)
+  // R11.9c: a clip's frames the browser can decode before the run.
+  if (node.class_type === 'LoadVideoFrames' && link[1] === 0) {
+    const file = isLink(inputs.file) ? null : fileText(inputs.file)
+    if (!file || LOAD_FRAMES_SETTINGS.some(k => isLink(inputs[k]))) return { kind: 'made' }
+    const settings: Record<string, unknown> = {}
+    for (const k of LOAD_FRAMES_SETTINGS) settings[k] = inputs[k]
+    return { kind: 'clip', clip: { loader: 'LoadVideoFrames', nodeId: link[0], file, settings } }
+  }
+  if (node.class_type === 'GetVideoComponents' && link[1] === 0 && isLink(inputs.video)) {
+    const file = clipFileOf(prompt, inputs.video)
+    return file ? { kind: 'clip', clip: { loader: 'GetVideoComponents', nodeId: link[0], file } } : { kind: 'made' }
+  }
   return { kind: 'made' }
 }
 
@@ -261,7 +302,7 @@ function sourceEnd(prompt: ApiPrompt, link: ApiLink, depth = 0): SourceEnd {
  * The file a picture wire brings when the browser has it before the run: an
  * Image card's own file or a LoadImage's picture, followed back through Image
  * cards fed by a wire and Gates (the card's widget text, as sent). Null when
- * the picture is made in the run (or the card holds none).
+ * the picture is made in the run (or the card holds none, or it is a clip).
  */
 export function shaderSourceOf(prompt: ApiPrompt, link: ApiLink): { nodeId: string; file: string } | null {
   const end = sourceEnd(prompt, link)
@@ -269,15 +310,38 @@ export function shaderSourceOf(prompt: ApiPrompt, link: ApiLink): { nodeId: stri
 }
 
 /**
+ * R11.9c: what a Shader effect renders over, before the run: nothing (no
+ * picture wired: a generative effect), a picture file (a still or an
+ * animated picture), or a clip; null when its picture is made in the run.
+ */
+export type ShaderSource = { kind: 'none' } | { kind: 'picture'; file: string } | { kind: 'clip'; clip: ShaderClipSource }
+
+export function shaderSourceOfNode(prompt: ApiPrompt, nodeId: string): ShaderSource | null {
+  const image = prompt[nodeId]?.inputs?.image
+  if (!isLink(image)) return { kind: 'none' }
+  const end = sourceEnd(prompt, image)
+  if (end.kind === 'file') return { kind: 'picture', file: end.file }
+  if (end.kind === 'clip') return { kind: 'clip', clip: end.clip }
+  return null
+}
+
+/** A clip's part of the key: its loader and, for Load video frames, the settings that pick its frames (as sent). */
+function clipKeyText(clip: ShaderClipSource): string {
+  return clip.loader === 'LoadVideoFrames' ? `LoadVideoFrames ${canonicalJson(clip.settings)}` : 'GetVideoComponents'
+}
+
+/**
  * The source files a Shader effect's key covers: none with no picture wired
- * (a generative effect), the one file the browser had before the run, or
- * null when its picture is made in the run.
+ * (a generative effect), the one file the browser had before the run (R11.9c:
+ * a clip's file and how its frames are picked), or null when its picture is
+ * made in the run.
  */
 export function shaderSourcesOf(prompt: ApiPrompt, nodeId: string): string[] | null {
-  const image = prompt[nodeId]?.inputs?.image
-  if (!isLink(image)) return []
-  const src = shaderSourceOf(prompt, image)
-  return src ? [src.file] : null
+  const src = shaderSourceOfNode(prompt, nodeId)
+  if (!src) return null
+  if (src.kind === 'none') return []
+  if (src.kind === 'picture') return [src.file]
+  return [src.clip.file, clipKeyText(src.clip)]
 }
 
 /** A number widget as Python's float() reads it (the widgets are already valid), or null. */
@@ -289,30 +353,92 @@ function floatOf(v: unknown): number | null {
 }
 
 /**
+ * R11.9c: how many frames `frame_plan` makes from a still (or with no picture):
+ * one, or `duration · fps` of them when the shader moves over time. Null when
+ * the settings can't be read.
+ */
+export function shaderPlanCount(inputs: Record<string, unknown>): number | null {
+  const time = floatOf(inputs.time)
+  const duration = floatOf(inputs.duration)
+  const fps = floatOf(inputs.fps)
+  if (time === null || duration === null || fps === null || ![time, duration, fps].every(Number.isFinite)) return null
+  return framePlan(1, time, duration, Math.trunc(fps)).length
+}
+
+/**
+ * R11.9c: whether the Shader effect hands on a frame batch (a clip's frames
+ * value) rather than one picture, read from its bake: several frames (its
+ * time setting's, an animated picture's), or any over a clip (Python's
+ * batch). Without a bake (the browser bakes only while `shader-bake` is on)
+ * it is one picture, as before R11.9c, so nothing is answered differently
+ * for a graph that isn't baked.
+ */
+export function shaderMakesBatch(prompt: ApiPrompt, nodeId: string): boolean {
+  const baked = parseShaderBaked(prompt[nodeId]?.inputs?.sailor_baked)
+  if (!baked) return false
+  return baked.files.length > 1 || shaderSourceOfNode(prompt, nodeId)?.kind === 'clip'
+}
+
+/**
+ * R11.9c: the most frames a Shader effect's bake may hold (the per-frame
+ * classes' cap: hosted 300, locally 900). Checked in the browser before the
+ * bake and by the runner before the hold.
+ */
+export const SHADER_MAX_FRAMES = { hosted: 300, local: 900 } as const
+
+/** The cap where the run happens. */
+export const shaderFrameCap = (hosted: boolean): number => (hosted ? SHADER_MAX_FRAMES.hosted : SHADER_MAX_FRAMES.local)
+
+/** R11.9c: a Shader effect past the cap, in plain words (its source says what to shorten). */
+export function shaderTooManyFramesWords(cap: number, overSource: boolean): string {
+  return overSource
+    ? `This shader would make too many frames here. Use a clip or animation of ${cap} frames or fewer.`
+    : `This shader would make too many frames here. Keep it to ${cap} frames or fewer: shorten its duration or lower its frame rate.`
+}
+
+/**
+ * R11.9c: the start's cap check (before the hold): the frames this Shader
+ * effect's bake holds against the place's cap, in plain words; null when
+ * within it (or not baked).
+ */
+export function shaderOverCapWords(prompt: ApiPrompt, nodeId: string, hosted: boolean): string | null {
+  const baked = parseShaderBaked(prompt[nodeId]?.inputs?.sailor_baked)
+  const cap = shaderFrameCap(hosted)
+  if (!baked || baked.files.length <= cap) return null
+  const src = shaderSourceOfNode(prompt, nodeId)
+  return shaderTooManyFramesWords(cap, src?.kind === 'clip' || (src?.kind === 'picture' && baked.files.length !== shaderPlanCount(prompt[nodeId]!.inputs ?? {})))
+}
+
+/**
  * Whether the runner replays this Shader effect's bake (eligibility's
- * 'shader-bake'): an effect of the catalog; a still (`duration` 0; an animated
- * one stays on the engine for now, ruling f); its picture unwired (a
- * generative effect) or one the browser had before the run; and a bake of one
- * frame, named as the bake names its files, whose key agrees with the prompt
- * as sent. (A source's frames can't be seen here: the browser doesn't bake an
- * animated one, which goes to the engine; the batch path is deferred with
- * ruling f.)
+ * 'shader-bake'): an effect of the catalog; its picture unwired (a
+ * generative effect), one the browser had before the run, or (R11.9c) a clip
+ * it decoded; a bake named as the bake names its files, whose key agrees
+ * with the prompt as sent; and as many frames as the node makes, where that
+ * is known now: `frame_plan`'s from a still or with no picture (R11.9c: an
+ * animated one is a frame batch), or several over an animated picture or a
+ * clip, counted against the source's own frames at the node's turn
+ * (cards/shaderEffect.ts). The cap is the start's, in plain words
+ * (shaderOverCapWords), not a reason to leave it to the engine.
  */
 export function shaderBakeTaken(prompt: ApiPrompt, nodeId: string): boolean {
   const inputs = prompt[nodeId]?.inputs ?? {}
   if (typeof inputs.effect !== 'string') return false
   const effect = resolveShaderEffectId(inputs.effect)
   if (!SHADER_EFFECT_IDS.includes(effect)) return false
-  const duration = floatOf(inputs.duration)
-  if (duration === null || duration > 0 || Number.isNaN(duration)) return false
-  const sources = shaderSourcesOf(prompt, nodeId)
-  if (!sources) return false
-  if (!sources.length && !SHADER_GENERATIVE_IDS.includes(effect)) return false
+  const plan = shaderPlanCount(inputs)
+  if (plan === null) return false
+  const src = shaderSourceOfNode(prompt, nodeId)
+  if (!src) return false
+  if (src.kind === 'none' && !SHADER_GENERATIVE_IDS.includes(effect)) return false
   const baked = parseShaderBaked(inputs.sailor_baked)
-  if (!baked || baked.files.length !== 1) return false
+  if (!baked) return false
+  const n = baked.files.length
+  if (src.kind === 'none' && n !== plan) return false
+  if (src.kind === 'picture' && n !== plan && n < 2) return false
   // A name that isn't one of the bake's own input files is left to the engine now, not failed late.
   if (baked.files.some(f => bakedFileHash(f) === null)) return false
-  return baked.key === shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION, baked.files)
+  return baked.key === shaderBakeKeySync(inputs, shaderSourcesOf(prompt, nodeId)!, SHADER_CATALOG_VERSION, baked.files)
 }
 
 /** Why the runner leaves a Shader effect to the engine, when there is a plain reason to give (else null). */

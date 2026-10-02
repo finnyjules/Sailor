@@ -34,6 +34,8 @@ export const KEPT_MEDIA_MAKERS: ReadonlySet<string> = new Set([
   ...Object.keys(MEDIA_EFFECT_FAMILY_OF),
   // R7 (ruling (f)): the local-model picture nodes keep a clip's batch of their own.
   ...Object.keys(LOCAL_MODEL_FAMILY_OF),
+  // R11.9c: an animated Shader effect keeps its frames as a batch.
+  'ShaderEffect',
 ])
 
 const FINISHED_BADLY: ReadonlySet<string> = new Set(['error', 'skipped', 'stopped', 'dropped'])

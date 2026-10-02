@@ -14,13 +14,14 @@ import sharp from 'sharp'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { runnerTakesNode } from '#shared/runner/eligibility'
-import { SHADER_CATALOG_VERSION, aspectSize, parseShaderBaked, shaderBakeKeySync } from '#shared/runner/shaderBakeKey'
+import { SHADER_CATALOG_VERSION, aspectSize, framePlan, parseShaderBaked, shaderBakeKeySync, shaderMakesBatch, shaderSourcesOf, shaderTooManyFramesWords } from '#shared/runner/shaderBakeKey'
+import { loadFramesPick } from '~~/server/runner/media/frameNodes'
 import { catalogPayload } from '~~/server/native/shaderCatalog'
 import { planNode, type DeriveIO, type NodePlan } from '~~/server/runner/executors'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import {
-  bakeShaderEffects, bakeShaderTakes, bakeUniforms, paramsPortable, pictureIsAnimated, shaderBakeKey, takeWantsShaderBake, viewUrlOf,
-  type ShaderBakeContext, type ShaderBakeRunContext,
+  bakeShaderEffects, bakeShaderTakes, bakeUniforms, loadFramesPickOf, paramsPortable, pictureIsAnimated, shaderBakeKey, stopShaderBakes, takeWantsShaderBake, viewUrlOf,
+  type BakeFramesSource, type ShaderBakeContext, type ShaderBakeRunContext,
 } from '~/lib/runner/shaderBake'
 import { parseParams, resolveUniforms } from '~/lib/shaderfx/params'
 import type { ShaderPass } from '~/lib/shaderfx/renderer'
@@ -103,22 +104,41 @@ function pixels(n: number, seed: number): Uint8Array {
 }
 
 /** A fake page: the renderer records what it is asked; readPixels gives pixels made from the size (alpha not 255). */
-function fakePage(o: { failRender?: (passes: ShaderPass[]) => boolean; animated?: boolean; clamp?: boolean } = {}) {
+function fakePage(o: {
+  failRender?: (passes: ShaderPass[]) => boolean; animated?: boolean; clamp?: boolean
+  /** R11.9c: the frames an animated picture or a clip holds (its count, and how many it yields). */
+  frames?: number; count?: number
+  onRender?: (n: number) => void; onUpload?: (n: number) => void
+} = {}) {
   const renders: { passes: ShaderPass[]; base: unknown; w: number; h: number }[] = []
   const uploads: { bytes: Uint8Array; name: string }[] = []
   const read: Uint8Array[] = []
   const sources: string[] = []
+  const opened: BakeFramesSource[] = []
+  const events: string[] = []
+  let closed = 0
   const ctx: ShaderBakeContext = {
     catalog: CATALOG,
     renderer: {
       render(passes, base, w, h) {
         if (o.failRender?.(passes)) throw new Error('WebGL2 unavailable')
         renders.push({ passes, base, w, h })
+        events.push('render')
+        o.onRender?.(renders.length)
         return { w, h } as unknown as HTMLCanvasElement
       },
     },
-    async upload(bytes, name) { uploads.push({ bytes, name }); return `u_x/${name}` },
+    async upload(bytes, name, signal) {
+      if (signal?.aborted) throw new Error('aborted')
+      uploads.push({ bytes, name }); events.push('upload'); o.onUpload?.(uploads.length); return `u_x/${name}`
+    },
     async sourceFile(file) { sources.push(file); return { image: { src: file } as unknown as TexImageSource, width: 23, height: 19, ...(o.animated ? { animated: true } : {}) } },
+    async sourceFrames(src) {
+      opened.push(src)
+      const n = o.frames ?? 2
+      async function* frames(): AsyncIterable<TexImageSource> { for (let i = 0; i < n; i++) yield { frame: i } as unknown as TexImageSource }
+      return { count: o.count ?? n, width: 17, height: 11, frames: frames(), close() { closed++ } }
+    },
     async texture(_def, t) { return { texture: t.file } as unknown as TexImageSource },
     blank(w, h) { return { blank: [w, h] } as unknown as TexImageSource },
     readPixels(_canvas, w, h) {
@@ -126,7 +146,7 @@ function fakePage(o: { failRender?: (passes: ShaderPass[]) => boolean; animated?
       const px = pixels(w * h * 4, w * 31 + h); read.push(px.slice()); return px },
     async encodePng(rgba, w, h) { return new Uint8Array(await sharp(rgba, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer()) },
   }
-  return { ctx, renders, uploads, read, sources }
+  return { ctx, renders, uploads, read, sources, opened, events, closed: () => closed }
 }
 
 describe('bakeShaderEffects (a fake renderer and upload)', () => {
@@ -199,7 +219,6 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
       0: card('src.png'),
       g: gen,
       made: { class_type: 'ShaderEffect', inputs: { image: ['g', 0], ...shaderInputs() } },
-      animated: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ duration: 2 }) } },
       mine: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: 'mine_abc~v1' }) } },
       junk: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ params: '{"u_x": "0.5"}'.replace('u_x', defOf('halftone').params[0]!.uniform) }) } },
       still: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'halftone' }) },
@@ -208,7 +227,7 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
     const r = await bakeShaderEffects(p, page.ctx)
     expect(r).toEqual({ baked: [], failed: [] })
     expect(page.renders).toHaveLength(0)
-    for (const id of ['made', 'animated', 'mine', 'junk', 'still', 'wired']) expect(p[id]!.inputs.sailor_baked, id).toBeUndefined()
+    for (const id of ['made', 'mine', 'junk', 'still', 'wired']) expect(p[id]!.inputs.sailor_baked, id).toBeUndefined()
   })
 
   it('a render that fails leaves that node without a bake and reports it; the others still bake', async () => {
@@ -255,14 +274,20 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
     expect(made.ui).toEqual({ images: [{ filename: 'live_preview_fx_00001.png', subfolder: '', type: 'temp' }], animated: [false] })
   })
 
-  it('an animated source is not baked (no render, no upload, no failure): it goes to the engine, unrefused', async () => {
-    const page = fakePage({ animated: true })
-    const p: ApiPrompt = { 0: card('anim.gif'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } }, s: saveImage(['fx', 0]) }
-    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: [], failed: [] })
-    expect(page.renders).toHaveLength(0)
-    expect(page.uploads).toHaveLength(0)
-    expect(p.fx!.inputs.sailor_baked).toBeUndefined()
-    expect(runnerTakesNode(p, 'fx', SHADER)).toBe(false)
+  it('R11.9c: an animated picture is baked frame by frame (u_time stepped by 1 / fps), its frames uploaded after every render, and taken', async () => {
+    const page = fakePage({ animated: true, frames: 3 })
+    const p: ApiPrompt = { 0: card('anim.gif'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ fps: 8 }) } }, s: saveImage(['fx', 0]) }
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: ['fx'], failed: [] })
+    expect(page.opened).toEqual([{ kind: 'picture', file: 'anim.gif' }])
+    expect(page.renders.map(r => r.base)).toEqual([{ frame: 0 }, { frame: 1 }, { frame: 2 }])
+    expect(page.renders.map(r => [r.w, r.h])).toEqual([[17, 11], [17, 11], [17, 11]])
+    expect(page.renders.map(r => r.passes[0]!.uniforms.u_time)).toEqual([0.5, 0.625, 0.75])
+    expect(page.renders.every(r => r.passes[0]!.uniforms.u_hasInput === 1)).toBe(true)
+    expect(page.events).toEqual(['render', 'render', 'render', 'upload', 'upload', 'upload'])
+    expect(page.closed()).toBe(1)
+    expect(parseShaderBaked(p.fx!.inputs.sailor_baked)!.files).toHaveLength(3)
+    expect(runnerTakesNode(p, 'fx', SHADER)).toBe(true)
+    expect(shaderMakesBatch(p, 'fx')).toBe(true)
   })
 
   it('a drawing buffer the browser clamped is not uploaded; the node goes to the engine', async () => {
@@ -335,7 +360,7 @@ describe('bakeShaderTakes: only takes going to the runner, one context per run, 
   })
 })
 
-describe('pictureIsAnimated (an animated source is left to the engine)', () => {
+describe('pictureIsAnimated (R11.9c: an animated source is baked frame by frame)', () => {
   it('a GIF of two frames, an APNG and an animated WebP are animated; single frames are not', async () => {
     const two = new Uint8Array(await sharp(pixels(8 * 16 * 3, 1), { raw: { width: 8, height: 16, channels: 3, pageHeight: 8 } as never }).gif().toBuffer())
     const one = new Uint8Array(await sharp(pixels(8 * 8 * 3, 1), { raw: { width: 8, height: 8, channels: 3 } }).gif().toBuffer())
@@ -348,5 +373,132 @@ describe('pictureIsAnimated (an animated source is left to the engine)', () => {
     apng.set(png.subarray(0, 33)); apng.set(actl, 33); apng.set(png.subarray(33), 33 + actl.length)
     expect([pictureIsAnimated(two), pictureIsAnimated(apng), pictureIsAnimated(webpAnim)]).toEqual([true, true, true])
     expect([pictureIsAnimated(one), pictureIsAnimated(webp), pictureIsAnimated(png), pictureIsAnimated(new Uint8Array(3))]).toEqual([false, false, false, false])
+  })
+})
+
+// ── R11.9c: the animated Shader effect (USER ruling (d)) ─────────────────────
+
+describe('R11.9c: an animated Shader effect, every frame baked in the browser', () => {
+  const gen = (over: Record<string, unknown> = {}): ApiPrompt => ({ fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora', ...over }) }, s: saveImage(['fx', 0]) })
+  const loadFrames = { class_type: 'LoadVideoFrames', inputs: { file: 'clip.mp4', max_seconds: 10, max_frames: 600, max_size: 720, start_frame: 2, stride: 3 } }
+  const MEDIA_SHADER: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake', 'media-video'])
+
+  it('a time-animated shader renders frame_plan\'s frames on one base, u_time stepped as the node steps it', async () => {
+    const page = fakePage()
+    const p = gen({ time: 1, duration: 0.5, fps: 6 })
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: ['fx'], failed: [] })
+    const plan = framePlan(1, 1, 0.5, 6)
+    expect(plan.map(([, t]) => t)).toEqual([1, 1 + 1 / 6, 1 + 2 / 6])
+    expect(page.renders.map(r => r.passes[0]!.uniforms.u_time)).toEqual(plan.map(([, t]) => t))
+    const { w, h } = aspectSize(256, '16:9')
+    expect(page.renders.every(r => r.w === w && r.h === h && JSON.stringify(r.base) === JSON.stringify({ blank: [w, h] }))).toBe(true)
+    // Every frame rendered before the first upload; one PNG a frame, named by its content.
+    expect(page.events).toEqual(['render', 'render', 'render', 'upload', 'upload', 'upload'])
+    const baked = parseShaderBaked(p.fx!.inputs.sailor_baked)!
+    expect(baked.files).toEqual(page.uploads.map(u => `u_x/${u.name}`))
+    expect(baked.key).toBe(shaderBakeKeySync(p.fx!.inputs, [], SHADER_CATALOG_VERSION, baked.files))
+    expect(runnerTakesNode(p, 'fx', SHADER)).toBe(true)
+    // The same graph as a still: one frame.
+    const still = fakePage()
+    await bakeShaderEffects(gen({ time: 1 }), still.ctx)
+    expect(still.renders).toHaveLength(1)
+  })
+
+  it('a clip\'s frames (Load video frames): each frame rendered at time + i / fps; a clip of one frame gives frame_plan\'s frames from it', async () => {
+    const page = fakePage({ frames: 4 })
+    const p: ApiPrompt = { l: loadFrames, fx: { class_type: 'ShaderEffect', inputs: { image: ['l', 0], ...shaderInputs({ duration: 3 }) } }, s: saveImage(['fx', 0]) }
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: ['fx'], failed: [] })
+    expect(page.opened).toEqual([{ kind: 'clip', clip: { loader: 'LoadVideoFrames', nodeId: 'l', file: 'clip.mp4', settings: { max_seconds: 10, max_frames: 600, max_size: 720, start_frame: 2, stride: 3 } } }])
+    // A batch: its own frames (the duration is ignored, as frame_plan ignores it).
+    expect(page.renders.map(r => r.passes[0]!.uniforms.u_time)).toEqual([0.5, 0.5 + 1 / 24, 0.5 + 2 / 24, 0.5 + 3 / 24])
+    expect(page.renders.map(r => r.base)).toEqual([0, 1, 2, 3].map(frame => ({ frame })))
+    const baked = parseShaderBaked(p.fx!.inputs.sailor_baked)!
+    expect(baked.key).toBe(shaderBakeKeySync(p.fx!.inputs, shaderSourcesOf(p, 'fx')!, SHADER_CATALOG_VERSION, baked.files))
+    expect(runnerTakesNode(p, 'fx', MEDIA_SHADER)).toBe(true)
+
+    const one = fakePage({ frames: 1 })
+    const q: ApiPrompt = { l: loadFrames, fx: { class_type: 'ShaderEffect', inputs: { image: ['l', 0], ...shaderInputs({ duration: 0.125, fps: 24 }) } }, s: saveImage(['fx', 0]) }
+    await bakeShaderEffects(q, one.ctx)
+    expect(one.renders.map(r => r.base)).toEqual([0, 0, 0].map(frame => ({ frame })))
+    expect(one.renders.map(r => r.passes[0]!.uniforms.u_time)).toEqual(framePlan(1, 0.5, 0.125, 24).map(([, t]) => t))
+  })
+
+  it('over the frame cap (hosted 300, locally 900): refused before any render or upload, in plain words, marked animated', async () => {
+    const local = fakePage()
+    const p = gen({ duration: 60, fps: 60 })
+    const r = await bakeShaderEffects(p, local.ctx)
+    expect(r).toEqual({ baked: [], failed: [{ nodeId: 'fx', error: shaderTooManyFramesWords(900, false), animated: true }] })
+    expect([local.renders.length, local.uploads.length]).toEqual([0, 0])
+    expect(p.fx!.inputs.sailor_baked).toBeUndefined()
+    // 301 frames: within locally's 900, past hosted's 300.
+    const hosted = fakePage()
+    const q = gen({ duration: 301 / 7, fps: 7 })
+    expect(framePlan(1, 0.5, 301 / 7, 7)).toHaveLength(301)
+    expect((await bakeShaderEffects(q, hosted.ctx, { hosted: true })).failed).toEqual([{ nodeId: 'fx', error: shaderTooManyFramesWords(300, false), animated: true }])
+    expect(hosted.renders).toHaveLength(0)
+    // A clip past it, from its count before any frame is decoded: the clip words.
+    const clip = fakePage({ count: 301, frames: 0 })
+    const c: ApiPrompt = { l: loadFrames, fx: { class_type: 'ShaderEffect', inputs: { image: ['l', 0], ...shaderInputs() } } }
+    expect((await bakeShaderEffects(c, clip.ctx, { hosted: true })).failed).toEqual([{ nodeId: 'fx', error: shaderTooManyFramesWords(300, true), animated: true }])
+    expect(clip.closed()).toBe(1)
+  })
+
+  it('a failed animated bake is marked animated (the run is refused in plain words, never the engine); a still\'s is not', async () => {
+    const page = fakePage({ failRender: () => true })
+    const p: ApiPrompt = { ...gen({ duration: 1, fps: 2 }), st: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora' }) } }
+    const r = await bakeShaderEffects(p, page.ctx)
+    expect(r.failed).toEqual([{ nodeId: 'fx', error: 'WebGL2 unavailable', animated: true }, { nodeId: 'st', error: 'WebGL2 unavailable' }])
+  })
+
+  it('Stop while drawing: nothing is uploaded, no bake is written, the run is marked stopped; Stop while uploading: no more uploads', async () => {
+    const take = () => gen({ duration: 1, fps: 4 })
+    const drawing = fakePage({ onRender: n => { if (n === 2) stopShaderBakes() } })
+    const p = take()
+    const r = await bakeShaderTakes([p], SHADER, async () => ({ ...drawing.ctx, release: () => {} }))
+    expect(r).toEqual({ baked: [], failed: [], stopped: true })
+    expect(drawing.renders).toHaveLength(2)
+    expect(drawing.uploads).toHaveLength(0)
+    expect(p.fx!.inputs.sailor_baked).toBeUndefined()
+
+    const uploading = fakePage({ onUpload: n => { if (n === 1) stopShaderBakes() } })
+    const q = take()
+    const r2 = await bakeShaderTakes([q], SHADER, async () => ({ ...uploading.ctx, release: () => {} }))
+    expect(r2.stopped).toBe(true)
+    expect(uploading.renders).toHaveLength(4)
+    expect(uploading.uploads).toHaveLength(1)
+    expect(q.fx!.inputs.sailor_baked).toBeUndefined()
+    // A later run is not stopped by an earlier Stop.
+    const after = fakePage()
+    expect((await bakeShaderTakes([take()], SHADER, async () => ({ ...after.ctx, release: () => {} }))).baked).toEqual(['fx'])
+  })
+
+  it('a take whose reader needs the frames (Create video) is judged as the bake will leave it, and baked', async () => {
+    const video = (from: ApiPrompt) => ({ ...from, c: { class_type: 'CreateVideo', inputs: { images: ['fx', 0], fps: 8 } }, v: { class_type: 'SaveVideo', inputs: { video: ['c', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } } })
+    const moving = video({ fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora', duration: 0.5, fps: 8 }) } })
+    expect(takeWantsShaderBake(moving, MEDIA_SHADER)).toBe(true)
+    const page = fakePage()
+    const r = await bakeShaderTakes([moving], MEDIA_SHADER, async () => ({ ...page.ctx, release: () => {} }))
+    expect(r.baked).toEqual(['fx'])
+    expect(page.renders).toHaveLength(4)
+    expect(runnerTakesNode(moving, 'c', MEDIA_SHADER)).toBe(true)
+    // An Image card's picture into Create video: baked in case it is animated (known once read).
+    expect(takeWantsShaderBake(video({ 0: card('anim.gif'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } } }), MEDIA_SHADER)).toBe(true)
+    // Still bound for the engine (a class the runner doesn't run): not baked.
+    expect(takeWantsShaderBake({ ...moving, k: { class_type: 'KSampler', inputs: { seed: 0 } } }, MEDIA_SHADER)).toBe(false)
+  })
+
+  it('loadFramesPickOf is the server\'s Load video frames pick (size, start, stride, count)', () => {
+    const cases: [number, number, number | null, Record<string, number>][] = [
+      [1920, 1080, 30, { max_seconds: 10, max_frames: 600, max_size: 720, start_frame: 0, stride: 1 }],
+      [1280, 720, 24, { max_seconds: 2.5, max_frames: 600, max_size: 720, start_frame: 3, stride: 2 }],
+      [641, 361, 29.97, { max_seconds: 0, max_frames: 77, max_size: 64, start_frame: 0, stride: 5 }],
+      [100, 50, null, { max_seconds: 1, max_frames: 600, max_size: 2048, start_frame: 0, stride: 1 }],
+      [333, 999, 60, { max_seconds: 0.01, max_frames: 600, max_size: 333, start_frame: 0, stride: 7 }],
+    ]
+    for (const [w, h, fps, s] of cases) {
+      const server = loadFramesPick({ w, h, rate: fps ? { num: Math.round(fps * 1000), den: 1000 } : null }, s as never)
+      const browser = loadFramesPickOf({ w, h, fps: fps ? Math.round(fps * 1000) / 1000 : null }, s)
+      expect(browser, JSON.stringify([w, h, fps, s])).toEqual({ tw: server.tw, th: server.th, start: server.start, stride: server.stride, count: server.count })
+    }
   })
 })

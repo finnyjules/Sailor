@@ -38,7 +38,7 @@ import { pythonInputRef, takenLuts, takenWaveforms } from '../inputs'
 import type { OutputFile } from '../types'
 import { parseCubeLut } from './core/look'
 import { LUT_HOSTED_MAX_BYTES, LUT_HOSTED_MAX_SIZE, VIDEO_EFFECTS, mediaEffectParams, type FrameShape, type SoundShape } from './table'
-import { batchSlotOf, batchesOf, takenVideoEffect, topoOrder } from './shapes'
+import { batchSlotOf, batchesOf, takenShaderBatch, takenVideoEffect, topoOrder } from './shapes'
 import { waveSoundOf } from './waveSound'
 import type { SoundReadIO } from '../../media/values'
 
@@ -71,7 +71,8 @@ export function keptBatchBoundWithin(s: FrameShape, caps: { batchFrames: number;
 
 /** Whether the workflow has a video effect the runner takes (the start pass has nothing to check otherwise). */
 export function hasVideoEffect(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): boolean {
-  return Object.values(prompt).some(n => takenVideoEffect(n.class_type, families))
+  // R11.9c: an animated Shader effect's batch counts too (its batch caps, the run's kept room).
+  return Object.entries(prompt).some(([id, n]) => takenVideoEffect(n.class_type, families) || takenShaderBatch(prompt, id, families))
 }
 
 type Problem = { message: string; nodeId: string; classType: string; engine: true }
@@ -171,9 +172,20 @@ function figuresOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, caps:
       ...(spec.limits?.(params, shaped) ?? []).map(f => ({ nodeId: id, ...f })),
     )
   }
+  // R11.9c: an animated Shader effect's batch against R5's batch caps (values.ts batchWord), as a video effect's.
+  for (const id of topoOrder(prompt)) {
+    if (!takenShaderBatch(prompt, id, families)) continue
+    const out = shapes.get(`${id}:0`)
+    if (!out) return { unknown: problem(id, MEDIA_EFFECT_WORDS.unknownLength), figures }
+    figures.push(
+      { nodeId: id, message: MEDIA_WORDS.tooBig, value: out.w * out.h, limit: caps.framePixels },
+      { nodeId: id, message: MEDIA_WORDS.tooManyFrames, value: out.count, limit: caps.batchFrames },
+      { nodeId: id, message: MEDIA_WORDS.tooManyFrames, value: out.count * out.w * out.h, limit: caps.batchPixels },
+    )
+  }
   if (Number.isFinite(caps.keptBytesPerRun)) {
     const kept = keptPeak(prompt, families, shapes, { release: o.release, caps })
-    const first = Object.keys(prompt).find(id => takenVideoEffect(prompt[id]!.class_type, families))!
+    const first = Object.keys(prompt).find(id => takenVideoEffect(prompt[id]!.class_type, families) || takenShaderBatch(prompt, id, families))!
     if (!kept) return { unknown: problem(first, MEDIA_EFFECT_WORDS.unknownLength), figures }
     figures.push({ nodeId: kept.at ?? first, message: MEDIA_EFFECT_WORDS.keptTooMuch, value: kept.bytes + o.keptOthers, limit: caps.keptBytesPerRun })
   }
