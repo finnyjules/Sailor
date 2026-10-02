@@ -1079,6 +1079,22 @@ function layerWords(layer: LocalLayer | undefined, fallback?: string): string {
   return KIND_WORD[layer.kind] ?? 'Layer'
 }
 
+/** A seconds argument: null, absent, empty or not a number ⇒ null (so an optional `end: null`
+ *  from the model means "not given", never 0). */
+function secondsArg(v: unknown): number | null {
+  if (v == null || v === '' || typeof v === 'boolean') return null
+  const n = +(v as number)
+  return Number.isFinite(n) ? n : null
+}
+/** animateDial / animateLight's band span: `start` defaults to 0 (never below), `end` to the
+ *  Frame's duration — where every other band seeding ends. An end at or before the start is refused. */
+function bandSpan(state: CompositorState, a: Record<string, unknown>): { start: number; end: number } | string {
+  const start = Math.max(0, secondsArg(a.start) ?? 0)
+  const end = secondsArg(a.end) ?? (state.motion?.duration ?? DEFAULT_FRAME_MOTION.duration)
+  if (!(end > start)) return `end (${end}s) must be after start (${start}s)`
+  return { start, end }
+}
+
 /** Where an `animateLight` key lands, and how its value is checked and clamped. */
 function lightBand(state: CompositorState, target: string, key: string): { path: string; color: boolean; clampTo: (v: number | string) => number | string } | string {
   if (target === 'frame') {
@@ -1543,8 +1559,9 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
         from = clamp(a.from, spec.min ?? 0, spec.max ?? 1, spec.min ?? 0)
         to = clamp(a.to, spec.min ?? 0, spec.max ?? 1, spec.max ?? 1)
       }
-      const start = Number.isFinite(+(a.start as number)) ? Math.max(0, +(a.start as number)) : 0
-      const end = Number.isFinite(+(a.end as number)) ? +(a.end as number) : (state.motion?.duration ?? DEFAULT_FRAME_MOTION.duration)
+      const span = bandSpan(state, a)
+      if (typeof span === 'string') return { ok: false, reason: 'invalid', detail: span }
+      const { start, end } = span
       const target = `layers.${layer.id}.effects.${fx.id}.${spec.key}`
       // Author a plain motionx band (the timeline's own model): two control points, replacing
       // any band already on this dial. Colour bands keep the oklch mix the old tracks used.
@@ -1623,8 +1640,9 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
         if (typeof a.from !== 'number' || !Number.isFinite(a.from) || typeof a.to !== 'number' || !Number.isFinite(a.to)) return { ok: false, reason: 'invalid', detail: 'from/to must be numbers' }
         from = where.clampTo(a.from); to = where.clampTo(a.to)
       }
-      const start = Number.isFinite(+(a.start as number)) ? Math.max(0, +(a.start as number)) : 0
-      const end = Number.isFinite(+(a.end as number)) ? +(a.end as number) : (state.motion?.duration ?? DEFAULT_FRAME_MOTION.duration)
+      const span = bandSpan(state, a)
+      if (typeof span === 'string') return { ok: false, reason: 'invalid', detail: span }
+      const { start, end } = span
       const ease = typeof a.ease === 'string' && NAMED_EASES.has(a.ease) ? a.ease as MotionxTrack['keyframes'][number]['ease'] : 'easeInOut'
       const band: MotionxTrack = {
         path: where.path,

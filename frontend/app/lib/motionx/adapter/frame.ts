@@ -332,8 +332,10 @@ export const CLONER_PROPERTIES: ReadonlyArray<{ key: keyof Cloner & string; labe
  *  Transform (x/y/scale/rotation/opacity), Fill (gradient + scroll phase, when the fill
  *  is a gradient), Effects (every number/colour/gradient dial of every effect in the
  *  stack, with its range; enum/bool dials are not animatable). Paths are
- *  `layers.<id>.<prop>` — exactly what the render fold applies. */
-export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
+ *  `layers.<id>.<prop>` — exactly what the render fold applies.
+ *  `hasLight`: the Frame has a light layer. Lift (group Light) is offered only then, as the
+ *  Layers panel's light switches are; a lookup of an existing band's property passes true. */
+export function animatableProperties(layer: LocalLayer, opts: { hasLight?: boolean } = {}): AnimatableProperty[] {
   const id = layer.id
   const out: AnimatableProperty[] = [
     { path: `layers.${id}.x`, type: 'number', label: 'Position X', group: 'Transform', min: 0, max: 1 },
@@ -380,7 +382,7 @@ export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
     }
   }
   // How high a casting layer stands above the Frame for the lights' shadows.
-  if (effectiveCasts(layer)) out.push({ path: `layers.${id}.lift`, type: 'number', label: 'Lift', group: 'Light', min: 0.005, max: 0.15 })
+  if (opts.hasLight && effectiveCasts(layer)) out.push({ path: `layers.${id}.lift`, type: 'number', label: 'Lift', group: 'Light', min: 0.005, max: 0.15 })
   return out
 }
 

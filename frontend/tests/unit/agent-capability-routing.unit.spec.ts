@@ -318,6 +318,16 @@ describe('lighting phrases route to the Frame', () => {
       expect(topN(phrase, 3)).toContain('Compositor')
     })
   }
+  // The neighbours those intents must not steal: a photo made darker is an image edit, a light
+  // added to a 3D scene is 3D Studio's.
+  for (const phrase of ['make the photo darker', 'make it darker']) {
+    it(`"${phrase}" is still #1 → EditImageNode`, () => {
+      expect(topN(phrase, 3)[0]).toBe('EditImageNode')
+    })
+  }
+  it('"add a light to the scene" → Scene3DStudio in top-3', () => {
+    expect(topN('add a light to the scene', 3)).toContain('Scene3DStudio')
+  })
 })
 
 describe('ambiguous requests stay discoverable (top-6)', () => {

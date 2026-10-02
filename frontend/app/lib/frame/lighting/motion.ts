@@ -1,24 +1,15 @@
 /**
  * Frame light layers, stage 4: light dials, a layer's Lift and the Frame's Darkness on the
- * Motion timeline. Pure and self-contained (settings.ts + the motionx core only) — the motion
+ * Motion timeline. Pure and self-contained (settings.ts, bandPaths.ts + the motionx core only) — the motion
  * fold calls `applyLightValue`, the painter calls `applyLightingTracks` once per frame.
  * No light band, no Lift band, no Darkness band ⇒ the same refs back: byte-identical.
  */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { evaluateTracks, type PropertyValue, type Track } from '~/lib/motionx'
 import { HEX, effectiveLift, sanitizeLightLayer, type FrameLighting, type LightLayer, DEFAULT_LIGHTING } from './settings'
-
-/** The light dials a band can drive (`layers.<id>.light.<key>`). Type and Edge are not animated. */
-export const LIGHT_MOTION_KEYS = ['height', 'color', 'brightness', 'reach', 'aimX', 'aimY', 'cone'] as const
-export type LightMotionKey = typeof LIGHT_MOTION_KEYS[number]
+import { LIGHT_MOTION_KEYS, DARKNESS_PATH } from './bandPaths'
+export { LIGHT_MOTION_KEYS, DARKNESS_PATH, isLightBandPath, type LightMotionKey } from './bandPaths'
 const KEYS: ReadonlySet<string> = new Set(LIGHT_MOTION_KEYS)
-
-/** The Frame's Darkness band path. */
-export const DARKNESS_PATH = 'frame.darkness'
-
-/** A band this file evaluates: a light dial, a layer's Lift, or the Frame's Darkness. */
-export const isLightBandPath = (path: string): boolean =>
-  /^layers\.[^.]+\.(light\.[a-zA-Z]+|lift)$|^frame\.darkness$/.test(path)
 
 /** `light.<key>` on a light layer (clamped by the light sanitizer; colour only as `#rrggbb`), or
  *  `lift` on any other layer (clamped 0.005..0.15). Anything else ⇒ the same ref. */

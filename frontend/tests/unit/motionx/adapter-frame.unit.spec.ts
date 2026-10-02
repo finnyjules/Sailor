@@ -61,7 +61,7 @@ describe('frameTarget + animatableProperties', () => {
     expect(paths).toContain('layers.L1.fill.phase')
   })
   it('tags every property with a group (Transform / Fill / Effects / Light)', () => {
-    const props = animatableProperties(layer())
+    const props = animatableProperties(layer(), { hasLight: true })
     expect(props.find(p => p.path === 'layers.L1.x')!.group).toBe('Transform')
     expect(props.find(p => p.path === 'layers.L1.fill')!.group).toBe('Fill')
     expect(props.find(p => p.path === 'layers.L1.lift')!.group).toBe('Light')
@@ -360,11 +360,16 @@ describe('light bands (Frame light layers stage 4)', () => {
     expect(spot.find(p => p.label === 'Cone')).toMatchObject({ path: 'layers.sp.light.cone', min: 0.1, max: 0.8 })
   })
 
-  it('animatableProperties: a casting text gains Lift; a non-casting one does not', () => {
-    expect(animatableProperties(textL()).find(p => p.label === 'Lift'))
+  it('animatableProperties: a casting text gains Lift while the Frame has a light; a non-casting one does not', () => {
+    const lit = { hasLight: true }
+    expect(animatableProperties(textL(), lit).find(p => p.label === 'Lift'))
       .toEqual({ path: 'layers.tx.lift', type: 'number', label: 'Lift', group: 'Light', min: 0.005, max: 0.15 })
-    expect(animatableProperties(textL({ castsShadow: false })).some(p => p.label === 'Lift')).toBe(false)
+    expect(animatableProperties(textL({ castsShadow: false }), lit).some(p => p.label === 'Lift')).toBe(false)
     // An image does not cast by default.
-    expect(animatableProperties(textL({ kind: 'image' })).some(p => p.label === 'Lift')).toBe(false)
+    expect(animatableProperties(textL({ kind: 'image' }), lit).some(p => p.label === 'Lift')).toBe(false)
+  })
+  it('animatableProperties: no light in the Frame ⇒ no Lift, and no Light group (final review I1)', () => {
+    expect(animatableProperties(textL()).some(p => p.label === 'Lift' || p.group === 'Light')).toBe(false)
+    expect(animatableProperties(textL(), { hasLight: false }).some(p => p.group === 'Light')).toBe(false)
   })
 })

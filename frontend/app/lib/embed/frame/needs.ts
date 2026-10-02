@@ -22,7 +22,7 @@
 import { effectStackOf, isGeometryKind, type EffectKind } from '~/lib/compositor/effectStack'
 import { isTipStroke } from '~/lib/brushTips/record'
 import { isFoilFill } from '~/lib/compositor/paint'
-import { isLightBandPath } from '~/lib/frame/lighting/motion'
+import { isLightBandPath } from '~/lib/frame/lighting/bandPaths'
 import { strokeStackOf } from '~/lib/compositor/strokeStack'
 
 /** The three F3 geometry kinds that read paper.js — `boolean`/`shatter` directly

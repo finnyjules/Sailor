@@ -16,9 +16,10 @@ describe('Add property groups (Frame light layers stage 4)', () => {
     expect(g.map((x) => x.group)).toEqual(['Transform', 'Light'])
     expect(g[1]!.items.map((p) => p.label)).toEqual(['Height', 'Colour', 'Brightness', 'Reach'])
   })
-  it('a casting layer offers Lift under Light', () => {
-    const g = groupAnimatableProperties(animatableProperties(text))
+  it('a casting layer offers Lift under Light while the Frame has a light, and no Light group without one', () => {
+    const g = groupAnimatableProperties(animatableProperties(text, { hasLight: true }))
     expect(g.at(-1)).toMatchObject({ group: 'Light', items: [{ label: 'Lift', min: 0.005, max: 0.15 }] })
+    expect(groupAnimatableProperties(animatableProperties(text)).map((x) => x.group)).not.toContain('Light')
   })
   it('the All lights row offers just Darkness', () => {
     expect(FRAME_DARKNESS_PROPERTY).toEqual({ path: 'frame.darkness', type: 'number', label: 'Darkness', group: 'Light', min: 0, max: 1 })

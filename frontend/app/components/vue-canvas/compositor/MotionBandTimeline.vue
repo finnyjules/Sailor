@@ -11,6 +11,8 @@ import { isTextBehaviour } from '~/lib/motionx/text'
 import { bandsForLayer, bandsForFrame, FRAME_ROW_ID, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties, FRAME_DARKNESS_PROPERTY, MOTION_ONLY_LABELS, isMotionOnlyPath, type AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import { expandClones, type Cloner } from '~/composables/useCloner'
+import { lightLabel } from '~/lib/frame/lighting/labels'
+import type { LightLayer } from '~/lib/frame/lighting/settings'
 import { staggerOf, echoOffsets, staggerOverrun, echoCut, fitFrameDuration, type StaggerOverrun } from '~/lib/motionx/copies'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
@@ -93,14 +95,16 @@ const FLAG_W = 52
 const flagX = computed(() => clampN(playheadX.value, FLAG_W / 2, Math.max(FLAG_W / 2, laneWidth.value - FLAG_W / 2)))
 
 const rowLabel = (l: LocalLayer) =>
-  l.id === FRAME_ROW_ID ? 'All lights' : (l as { name?: string }).name || (l.kind === 'text' ? ((l as { text?: string }).text?.split('\n')[0] || 'Text') : l.kind)
+  l.id === FRAME_ROW_ID ? 'All lights'
+    : l.kind === 'light' ? lightLabel(l as unknown as LightLayer)     // the Layers panel's label: its name, else Lamp / Spot / Sun
+    : (l as { name?: string }).name || (l.kind === 'text' ? ((l as { text?: string }).text?.split('\n')[0] || 'Text') : l.kind)
 
 // ── The All lights row: the Frame itself, as a pseudo-layer at the top. Its id never matches a
 //    real layer (see FRAME_ROW_ID), it has no behaviours, letters, copies or older animation, and
 //    its only property is the Frame's Darkness — so every row/band helper below serves it as is.
 const FRAME_ROW = { id: FRAME_ROW_ID, kind: 'frame' } as unknown as LocalLayer
 const rowLayers = computed<LocalLayer[]>(() => (props.lightsRow ? [FRAME_ROW, ...props.layers] : props.layers))
-const propsFor = (l: LocalLayer): AnimatableProperty[] => (l.id === FRAME_ROW_ID ? [FRAME_DARKNESS_PROPERTY] : animatableProperties(l))
+const propsFor = (l: LocalLayer): AnimatableProperty[] => (l.id === FRAME_ROW_ID ? [FRAME_DARKNESS_PROPERTY] : animatableProperties(l, { hasLight: true }))  // labels of existing bands
 
 // ── Layer groups (each layer is a collapsible header; its behaviours + property
 //    bands are the rows under it — DialKit's clip-per-row model). ──────────────

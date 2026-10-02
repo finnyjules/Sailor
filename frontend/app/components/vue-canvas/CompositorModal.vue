@@ -148,7 +148,7 @@ import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
 import { lightingDragging } from '~/lib/frame/lighting/drag'
-import { MAX_LIGHTS, visibleLights, type LightLayer, type LightType } from '~/lib/frame/lighting/settings'
+import { MAX_LIGHTS, visibleLights, effectiveCasts, effectiveLit, defaultCastsShadow, effectiveLift, DEFAULT_LIGHTING, LIGHT_DEFAULTS, type LightLayer, type LightType, type LightParams } from '~/lib/frame/lighting/settings'
 import { LIGHT_PLACEMENT } from '~/lib/frame/lighting/handles'
 import LightHandles from '~/components/vue-canvas/compositor/LightHandles.vue'
 import LightInspector from '~/components/vue-canvas/compositor/LightInspector.vue'
@@ -156,8 +156,6 @@ import LightShadowControls from '~/components/vue-canvas/compositor/LightShadowC
 import LightDarknessSlider from '~/components/vue-canvas/compositor/LightDarknessSlider.vue'
 import LayerLightToggles from '~/components/vue-canvas/compositor/LayerLightToggles.vue'
 import { lightingAvailable, releaseLighting } from '~/lib/frame/lighting/lightingPass'
-import { effectiveCasts, effectiveLit, defaultCastsShadow, type LightParams } from '~/lib/frame/lighting/settings'
-import { effectiveLift, DEFAULT_LIGHTING, LIGHT_DEFAULTS } from '~/lib/frame/lighting/settings'
 import { lightLabel } from '~/lib/frame/lighting/labels'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
@@ -1664,12 +1662,14 @@ const compositorAgent = useCompositorAgent({
     motion: motionDoc.value,
     lighting: frameLighting.value,
   }),
+  // A proposal is ONE undo step: the agent records once, before its first write (recordHistory
+  // below), so every write here goes in without a step of its own.
   setState: (s) => {
     commit(s.layers)
-    if (s.background !== background.value) setBackground(s.background)
-    if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
-    if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(layoutGrid.value)) setLayoutGrid(s.grid)
-    if (s.lighting && JSON.stringify(s.lighting) !== JSON.stringify(frameLighting.value)) editor.setLighting(s.lighting)
+    if (s.background !== background.value) setBackground(s.background, false)
+    if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [], false)
+    if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(layoutGrid.value)) setLayoutGrid(s.grid, false)
+    if (s.lighting && JSON.stringify(s.lighting) !== JSON.stringify(frameLighting.value)) editor.setLighting(s.lighting, false)
     // Only the agent's timeline BANDS flow back (animateDial authors them) — fps/duration are
     // the timeline's own controls, never touched by the agent.
     // The agent's state is a snapshot from when the user asked and is replayed on accept / reject,
@@ -1682,6 +1682,7 @@ const compositorAgent = useCompositorAgent({
       commitMotionTimeline()
     }
   },
+  recordHistory: () => recordHistory(),
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: editorDims,
   getLight: () => frameLight.value,
@@ -4085,7 +4086,7 @@ function onViewPointerDown(e: PointerEvent) {
   if (viewDrag.value) { e.preventDefault(); e.stopPropagation(); return }
   const r = resolved.value; if (!r) return
   const id = viewHitAt(e)
-  if (!id) { lastDownHitLayer = false; if (!e.shiftKey) selectLocal(null); return } // no marquee at a view (later work)
+  if (!id) { lastDownHitLayer = false; if (!e.shiftKey) deselectOnCanvas(); return } // no marquee at a view (later work)
   e.preventDefault(); e.stopPropagation()
   lastDownHitLayer = true
   if (e.shiftKey) { toggleSelect(id); return }
@@ -4319,7 +4320,7 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
   } else {
     // Empty space → begin a marquee (rubber-band) selection.
     lastDownHitLayer = false
-    if (!e.shiftKey) selectLocal(null)
+    if (!e.shiftKey) deselectOnCanvas()
     const p = clientToNorm(e)
     if (p) startMarquee(p.nx, p.ny)
   }
@@ -4585,7 +4586,7 @@ function onCanvasClick(e: MouseEvent) {
   // nothing. Same idiom as `lastDownHitLayer` above.
   if (penJustFinished) { penJustFinished = false; return }
   if (penSession.value) return // the pen's clicks are its own
-  if (e.target === canvasRef.value) selectLocal(null)
+  if (e.target === canvasRef.value) deselectOnCanvas()
 }
 // Click in the empty stage gutter (outside the artboard) → deselect. A pan that
 // ends on the gutter also fires a click here, so swallow it.
@@ -4595,7 +4596,7 @@ function onStageBackgroundClick(e: MouseEvent) {
   if (smartActive.value) return // smart select owns the canvas
   if (genActive.value && genTool.value !== 'shape') return
   if (didPan) { didPan = false; return }
-  if (e.target === stageBoxRef.value || e.target === stageWrapRef.value) selectLocal(null)
+  if (e.target === stageBoxRef.value || e.target === stageWrapRef.value) deselectOnCanvas()
 }
 
 // ── Text editing: focus the inline textarea when editing starts ─────────────
@@ -5177,10 +5178,20 @@ function selectMotionRow(id: string) {
   motionFrameRow.value = true
 }
 watch(() => selectedLocal.value?.id, (id) => { if (id) motionFrameRow.value = false })
-watch(hasLights, (v) => { if (!v) motionFrameRow.value = false })
+/** A click on empty canvas or stage: deselect the layers and the All lights row alike. */
+function deselectOnCanvas() { selectLocal(null); motionFrameRow.value = false }
+// The last light gone: the row goes, and so do the Frame's Darkness bands (Darkness means nothing
+// without a light). No step of its own: the delete's step, recorded before it, holds both, so one
+// undo brings the light and its Darkness animation back together.
+watch(hasLights, (v) => {
+  if (v) return
+  motionFrameRow.value = false
+  const cur = motionDoc.value.motionx ?? []
+  if (cur.some((t) => t.path === FRAME_DARKNESS_PROPERTY.path)) setMotion({ motionx: cur.filter((t) => t.path !== FRAME_DARKNESS_PROPERTY.path) } as Partial<FrameMotion>)
+})
 const selectedAnimatableProps = computed<AnimatableProperty[]>(() =>
   motionFrameRow.value && hasLights.value ? [FRAME_DARKNESS_PROPERTY]
-    : selectedLocal.value ? animatableProperties(selectedLocal.value as LocalLayer) : [])
+    : selectedLocal.value ? animatableProperties(selectedLocal.value as LocalLayer, { hasLight: hasLights.value }) : [])
 const animatedPropertyPaths = computed<string[]>(() =>
   motionxTracks.value.filter((t) => !t.behaviourId).map((t) => t.path))
 function currentPropertyValue(l: LocalLayer | null, p: AnimatableProperty): number | string | Array<{ pos: number; color: string }> {
@@ -5239,7 +5250,7 @@ const motionSelProp = computed<AnimatableProperty | null>(() => {
   if (sel.path === FRAME_DARKNESS_PROPERTY.path) return FRAME_DARKNESS_PROPERTY
   const id = /^layers\.([^.]+)\./.exec(sel.path)?.[1]
   const l = id ? localLayers.value.find((x) => x.id === id) : undefined
-  return l ? animatableProperties(l as LocalLayer).find((p) => p.path === sel.path) ?? null : null
+  return l ? animatableProperties(l as LocalLayer, { hasLight: true }).find((p) => p.path === sel.path) ?? null : null
 })
 const motionSelRange = computed(() => {
   const p = motionSelProp.value
@@ -5251,7 +5262,7 @@ const motionSelLabel = computed<string>(() => {
   if (!sel) return ''
   if (motionSelProp.value) return motionSelProp.value.label
   if (!l) return ''
-  return animatableProperties(l).find((p) => p.path === sel.path)?.label || sel.path.split('.').pop() || ''
+  return animatableProperties(l, { hasLight: true }).find((p) => p.path === sel.path)?.label || sel.path.split('.').pop() || ''
 })
 // Letter/word/line counts of the selected TEXT layer, for the letter-behaviour inspector's
 // "runs for" line (Task 5). Wrapped lines aren't known here — the inspector says "about" for lines.

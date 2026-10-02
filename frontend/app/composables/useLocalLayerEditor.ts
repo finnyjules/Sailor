@@ -261,7 +261,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (p === undefined || p === 'none' || p === '') delete (n.data.properties as any).sailor_localBg
     else (n.data.properties as any).sailor_localBg = p
   }
-  function setBackground(p: Paint | undefined) { recordHistory(); writeBg(p) }
+  /** `record: false` when the caller has already recorded the step (an assistant proposal). */
+  function setBackground(p: Paint | undefined, record = true) { if (record) recordHistory(); writeBg(p) }
 
   // Doc-level post-processing chain (adjust/bloom/grain/vignette/duotone over
   // the finished composite). Persisted like the background: on node properties.
@@ -273,7 +274,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!fx || !fx.length) delete (n.data.properties as any).sailor_localFx
     else (n.data.properties as any).sailor_localFx = fx
   }
-  function setPostEffects(fx: PostEffect[]) { recordHistory(); writeFx(fx) }
+  function setPostEffects(fx: PostEffect[], record = true) { if (record) recordHistory(); writeFx(fx) }
 
   // Doc-level light for Gold foil / Spot UV. Absent key = the default light (readFrameLight).
   const frameLight = computed<FrameLight>(() => readFrameLight(node()?.data?.properties))

@@ -150,8 +150,8 @@ const GENERATORS: AgentCapability[] = [
     intents: ['make a text effect', 'stylize this word', 'typographic art', 'chrome text', 'holographic letters', 'make a logo word', 'fancy text', 'word art', '3d text effect', 'liquid metal text', 'title treatment', 'neon text'] },
 
   // ---- Image · editing & transformation ----
-  { nodeType: 'EditImageNode', kind: 'effect', title: 'Edit an image', summary: 'Natural-language image editing (Nano Banana 2 / Flux 2 Pro) — change, add, remove anything.', inputs: [{ name: 'input_image', type: 'IMAGE' }], outputs: IMG,
-    intents: ['edit this image', 'change her shirt', 'make her hair blue', 'change the background', 'edit the photo', 'modify this picture', 'alter the image', 'change the sky', 'make it nighttime', 'make it look like nighttime', 'tweak this image', 'photoshop this', 'add an object', 'add a hat', 'put glasses on', 'add a logo to the image'] },
+  { nodeType: 'EditImageNode', kind: 'effect', boost: 3.5, title: 'Edit an image', summary: 'Natural-language image editing (Nano Banana 2 / Flux 2 Pro) — change, add, remove anything.', inputs: [{ name: 'input_image', type: 'IMAGE' }], outputs: IMG,
+    intents: ['make the photo darker', 'make it darker', 'edit this image', 'change her shirt', 'make her hair blue', 'change the background', 'edit the photo', 'modify this picture', 'alter the image', 'change the sky', 'make it nighttime', 'make it look like nighttime', 'tweak this image', 'photoshop this', 'add an object', 'add a hat', 'put glasses on', 'add a logo to the image'] },
     // Removal, recolor and in-image text edits have DEDICATED nodes below
     // (RemoveObjectNode / RecolorObjectNode / TextEditNode) — their verbs
     // moved there; EditImageNode keeps the broad/ambiguous edits.

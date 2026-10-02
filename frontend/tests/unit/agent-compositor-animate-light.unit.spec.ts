@@ -68,3 +68,29 @@ describe('animateLight', () => {
     expect(back.ok && back.template.motion).toBeUndefined()
   })
 })
+
+// Final review M1: animateLight and animateDial share one start/end rule.
+describe('band span (animateLight and animateDial)', () => {
+  const dialState = (): CompositorState => ({
+    layers: [{ id: 'G', kind: 'rect', x: 0.5, y: 0.5, rotation: 0, opacity: 1, w: 0.4, h: 0.3, fill: '#fff', stroke: '', strokeWidth: 0, radius: 0,
+      effects: [{ id: 'e-grain', type: 'grain', amount: 0.5, size: 3, visible: true }] } as any] as LocalLayer[],
+    motion: { fps: 30, duration: 6 } as any,
+  })
+  const light = (args: Record<string, unknown>) => applyCompositorCommand({ ...state(), motion: { fps: 30, duration: 6 } as any }, { op: 'animateLight', target: 'L', args: { key: 'brightness', from: 0, to: 3, ...args } })
+  const dial = (args: Record<string, unknown>) => applyCompositorCommand(dialState(), { op: 'animateDial', target: 'G', args: { effect: 'grain', dial: 'amount', from: 0, to: 1, ...args } })
+  const times = (r: ReturnType<typeof light>) => { expect(r.ok).toBe(true); if (!r.ok) throw new Error(r.detail); return r.template.motion!.motionx![0]!.keyframes.map(k => k.t) }
+  for (const [name, run] of [['animateLight', light], ['animateDial', dial]] as const) {
+    it(`${name}: end null or absent ⇒ the Frame's duration`, () => {
+      expect(times(run({ end: null }))).toEqual([0, 6])
+      expect(times(run({}))).toEqual([0, 6])
+      expect(times(run({ start: 2, end: null }))).toEqual([2, 6])
+      expect(times(run({ start: null, end: 4 }))).toEqual([0, 4])
+    })
+    it(`${name}: an end at or before the start is refused`, () => {
+      expect(run({ start: 3, end: 3 }).ok).toBe(false)
+      expect(run({ start: 3, end: 1 }).ok).toBe(false)
+      expect(run({ end: 0 }).ok).toBe(false)
+      expect(run({ start: 7 }).ok).toBe(false)      // past the Frame's end with no end given
+    })
+  }
+})

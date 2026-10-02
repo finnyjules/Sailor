@@ -6,13 +6,8 @@
  * applied something.
  */
 import { leanFeatureUsed } from './leanStub.embed'
-
-export const LIGHT_MOTION_KEYS = ['height', 'color', 'brightness', 'reach', 'aimX', 'aimY', 'cone'] as const
-export type LightMotionKey = typeof LIGHT_MOTION_KEYS[number]
-export const DARKNESS_PATH = 'frame.darkness'
-
-export const isLightBandPath = (path: string): boolean =>
-  /^layers\.[^.]+\.(light\.[a-zA-Z]+|lift)$|^frame\.darkness$/.test(path)
+import { DARKNESS_PATH } from '~/lib/frame/lighting/bandPaths'
+export { LIGHT_MOTION_KEYS, DARKNESS_PATH, isLightBandPath, type LightMotionKey } from '~/lib/frame/lighting/bandPaths'
 
 export function applyLightValue<L>(layer: L, prop: string, _value: unknown): L {
   if (prop === 'lift' || prop.startsWith('light.')) leanFeatureUsed('Animated lights')

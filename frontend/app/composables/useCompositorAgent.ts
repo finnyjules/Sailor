@@ -22,6 +22,9 @@ import type { FrameLighting } from '~/lib/frame/lighting/settings'
 
 const REROLLABLE = new Set(['setText', 'setTextStyle', 'setFill', 'setStroke', 'setBackground'])
 const clone = (s: CompositorState): CompositorState => JSON.parse(JSON.stringify(s)) as CompositorState
+/** What a push writes to the Frame (setState): layers, the doc fields and the timeline bands. */
+const docOf = (s: CompositorState): string =>
+  JSON.stringify([s.layers, s.background ?? null, s.postEffects ?? [], s.grid ?? null, s.lighting ?? null, s.motion?.motionx ?? []])
 
 function dataUrlToBlob(dataUrl: string): Blob {
   const [head, b64] = dataUrl.split(',')
@@ -51,6 +54,9 @@ async function uploadDataUrl(dataUrl: string): Promise<string> {
 
 export function useCompositorAgent(opts: {
   getState: () => CompositorState; setState: (s: CompositorState) => void; apiKey: () => string; tier?: string; dims?: () => { w: number; h: number }
+  /** The editor's undo step. A proposal is ONE step: recorded once, before its first write
+   *  (setState then writes without recording). Row toggles, rerolls and a revert add none. */
+  recordHistory?: () => void
   /** The Frame's light, so the review render lights foil / Spot UV as the canvas does (and does
    *  not reset the painter's module light to the default behind the canvas's back). */
   getLight?: () => FrameLight
@@ -72,8 +78,13 @@ export function useCompositorAgent(opts: {
   // The agent's view of the doc as of its last push. Every push is a three-way merge against
   // it, so edits the user makes while a proposal is open survive accept / reject / revert.
   let lastPushed: CompositorState | null = null
+  // Whether this proposal has recorded its undo step yet (reset when a proposal starts or ends).
+  let recorded = false
   function push(next: CompositorState): CompositorState {
-    const merged = mergeCompositorState(clone(opts.getState()), lastPushed ?? original ?? next, next)
+    const cur = clone(opts.getState())
+    const merged = mergeCompositorState(cur, lastPushed ?? original ?? next, next)
+    // Record only once something actually changes, so a failed or empty ask records nothing.
+    if (!recorded && docOf(merged) !== docOf(cur)) { opts.recordHistory?.(); recorded = true }
     opts.setState(merged)
     lastPushed = clone(next)
     return merged
@@ -223,6 +234,7 @@ export function useCompositorAgent(opts: {
     try {
       original = clone(opts.getState())
       lastPushed = clone(original)
+      recorded = false
       const { commands, changeRationales, message } = await callModel(buildAgentPrompt(describeCompositor(original), p))
       const { resolved, genFailed } = await resolveMedia(commands, changeRationales)
       const built: ProposedChange[] = []
@@ -276,8 +288,8 @@ export function useCompositorAgent(opts: {
     }
   }
 
-  function keep() { changes.value = []; original = null; lastPushed = null; notice.value = ''; issues.value = []; review.value = null }
-  function revert() { if (original) push(original); changes.value = []; original = null; lastPushed = null; notice.value = ''; issues.value = []; review.value = null }
+  function keep() { changes.value = []; original = null; lastPushed = null; recorded = false; notice.value = ''; issues.value = []; review.value = null }
+  function revert() { if (original) push(original); changes.value = []; original = null; lastPushed = null; recorded = false; notice.value = ''; issues.value = []; review.value = null }
 
   return { busy, error, notice, reasoning, changes, issues, review, reviewing, hasProposal, hovered, ask, acceptChange, rejectChange, reroll, keep, revert }
 }
