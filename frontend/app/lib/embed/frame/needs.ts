@@ -21,6 +21,8 @@
  */
 import { effectStackOf, isGeometryKind, type EffectKind } from '~/lib/compositor/effectStack'
 import { isTipStroke } from '~/lib/brushTips/record'
+import { isFoilFill } from '~/lib/compositor/paint'
+import { strokeStackOf } from '~/lib/compositor/strokeStack'
 
 /** The three F3 geometry kinds that read paper.js — `boolean`/`shatter` directly
  *  (booleanGeometry.ts), `morph` (blendPath, ~/lib/vector/morph.ts) grouped in per Task 10's
@@ -58,7 +60,7 @@ export function layersNeedPaper(layers: readonly unknown[]): boolean {
 export function frameNeedsFullBundle(
   layers: readonly unknown[],
   behaviours?: ReadonlyArray<{ kind?: unknown }> | null,
-): 'brush tips' | 'Pixel reveal' | 'Relight' | 'Morph' | null {
+): 'brush tips' | 'Pixel reveal' | 'Relight' | 'Morph' | 'Print finishes under lights' | null {
   for (const l of layers) {
     const strokes = (l as { strokes?: unknown } | null)?.strokes
     if (Array.isArray(strokes) && strokes.some(s => isTipStroke(s as Parameters<typeof isTipStroke>[0]))) return 'brush tips'
@@ -71,5 +73,24 @@ export function frameNeedsFullBundle(
       if (e.type === 'relight') return 'Relight'
     }
   }
+  if (hasVisibleLight(layers) && layers.some(layerHasPrintFinish)) return 'Print finishes under lights'
   return null
+}
+
+/** A visible light layer (light layers stage 3: finishes read the Frame's lights). */
+function hasVisibleLight(layers: readonly unknown[]): boolean {
+  return layers.some(l => (l as { kind?: unknown; visible?: unknown } | null)?.kind === 'light' && (l as { visible?: unknown }).visible !== false)
+}
+
+/** A foil paint (fill, text colour / outline, line stroke, tint, or any stroke-stack entry) or a
+ *  `spot_uv` effect: the two finishes the lights relight with `finishLights.ts`, which the lean
+ *  bundle stubs out. Pure data check, no painter import. */
+function layerHasPrintFinish(l: unknown): boolean {
+  const o = l as Record<string, unknown> | null
+  if (!o) return false
+  for (const k of ['fill', 'color', 'strokeColor', 'stroke', 'tint']) {
+    if (isFoilFill(o[k] as Parameters<typeof isFoilFill>[0])) return true
+  }
+  if (strokeStackOf(o as Parameters<typeof strokeStackOf>[0]).some(st => isFoilFill(st.paint))) return true
+  return effectStackOf(l as Parameters<typeof effectStackOf>[0]).some(e => e.type === 'spot_uv')
 }

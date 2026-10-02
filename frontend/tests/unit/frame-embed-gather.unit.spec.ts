@@ -541,6 +541,18 @@ describe('frameNeedsFullBundle', () => {
     ;(img as any).effects = [{ ...createEffect('relight'), visible: false }]
     expect(frameNeedsFullBundle([img])).toBe('Relight')
   })
+  it('a visible light plus a foil paint or a Spot UV effect takes the full bundle', () => {
+    const foilRect = createRectLayer({}) as any
+    foilRect.fill = { type: 'foil', metal: 'gold' }
+    const uvRect = createRectLayer({}) as any
+    uvRect.effects = [{ ...createEffect('spot_uv'), visible: true }]
+    const light = { id: 'li', kind: 'light', visible: true }
+    expect(frameNeedsFullBundle([foilRect, light])).toBe('Print finishes under lights')
+    expect(frameNeedsFullBundle([uvRect, light])).toBe('Print finishes under lights')
+    expect(frameNeedsFullBundle([foilRect])).toBeNull()
+    expect(frameNeedsFullBundle([foilRect, { ...light, visible: false }])).toBeNull()
+    expect(frameNeedsFullBundle([createRectLayer({}), light])).toBeNull()
+  })
   it('a Shape morph between two shapes (no text partner) is not an outline need, but still takes the full bundle', () => {
     const a = createRectLayer({}), b = createRectLayer({})
     const behaviours = [{ id: 'm', kind: 'morph', layerId: a.id, params: { style: 'shape', target: `l:${b.id}` } }]
