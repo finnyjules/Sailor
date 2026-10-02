@@ -39,8 +39,6 @@ import { frameSourceEpoch } from '~/lib/studio/frameSource'
 import { loadImage } from '~/lib/shaderstudio/source'
 import { BLEND_MODES } from '~/lib/studio/blend'
 import { cloneConfig, defaultConfig, defaultMask, hydrateConfig, LAYER_MAX, newLayerId, outputDims, type EffectMask, type MaskShape, type MotionTrack, type ShaderStudioConfig, type StudioEffect } from '~/lib/shaderstudio/types'
-import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { useStudioAgent } from '~/composables/useStudioAgent'
 import { settleTakesOnRender } from '~/lib/prompt/studioTakes'
 import { LAYERS_FULL, layerAddActions, studioActions } from '~/lib/studio/studioActions'
@@ -57,9 +55,8 @@ import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import type { ShaderEmbedConfig } from '~/lib/embed/surfaces/shader'
-import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
-import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { exportStudioVideo, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { EffectTarget } from '~/composables/useEffectTakes'
 import type { StudioEffectTargetRequest } from '~/composables/useStudioPrompt'
@@ -651,8 +648,8 @@ async function generateImage() {
   finally { baking.value = false; startPreview() }
 }
 
-/** Make the current Shader Studio state into a video: recorded in the browser,
- *  or — local mode only, with a notice — by today's server route. `publish`
+/** Make the current Shader Studio state into a video, recorded in the browser
+ *  (a browser that can't record says why). `publish`
  *  uploads the file (Assets / canvas Video node); a download does not need it.
  *  Callers own baking.value/stopPreview/startPreview and the source guard. */
 async function bakeShaderVideo(publish: boolean): Promise<StudioVideoResult | null> {
@@ -676,26 +673,7 @@ async function bakeShaderVideo(publish: boolean): Promise<StudioVideoResult | nu
         await renderShaderFrame(i / total, ctx)   // copies onto ctx right after the render
       },
       onStatus: t => { bakeMsg.value = t },
-      serverFallback: async (signal) => {
-        const bakeCfg = { fps: clock.fps, loopDuration: clock.duration, W: w, H: h, seed: 'shader', sig: JSON.stringify(config.value) }
-        const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-          renderFrame: async (i) => {
-            throwIfAborted(signal)   // Cancel stops a long bake between frames
-            bakeMsg.value = `Baking ${i + 1}/${total}`
-            return await renderBlob(i / total)
-          },
-        })
-        throwIfAborted(signal)
-        bakeMsg.value = 'Encoding…'
-        try {
-          return await encodeFrames({ frames: bake.frames, fps: clock.fps, width: w, height: h })
-        } catch (encErr) {
-          bakeMsg.value = 'Encode failed — restart ComfyUI to load the encoder.'
-          console.error('[shader-studio] encode failed', encErr)
-          return null
-        }
-      },
-    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public) })
   } finally {
     exportingVideo.value = false
     videoAbort = null
@@ -711,9 +689,8 @@ async function generateVideo() {
     if (!made?.filename) return
     await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
     window.dispatchEvent(new CustomEvent('sailor:shaderStudioOutput', { detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } } }))
-    bakeMsg.value = made.notice ?? ''
-    // A fallback notice must be seen: keep the studio open when there is one.
-    if (!made.notice) { settleTakesOnRender(shaderAgent); closeEditor() }
+    bakeMsg.value = ''
+    settleTakesOnRender(shaderAgent); closeEditor()
   } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }
@@ -744,8 +721,8 @@ async function downloadVideoFile() {
   try {
     const made = await bakeShaderVideo(false)
     if (!made) return
-    downloadBlobAsFile(await resultBlob(made), `shader_${Date.now()}.${made.ext}`)
-    bakeMsg.value = made.notice ?? ''
+    downloadBlobAsFile(made.blob, `shader_${Date.now()}.${made.ext}`)
+    bakeMsg.value = ''
   } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }

@@ -206,7 +206,6 @@ import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/cont
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
 import { bakeAndUpload, bakeSourceKey, type MotionParams, prepareMotionFramePainter, type FrameDocPaint } from '~/lib/motion/bake'
 import { exportStudioVideo, videoErrorText } from '~/lib/studio/studioVideoExport'
-import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
 import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import LayoutGridOverlay from './LayoutGridOverlay.vue'
@@ -272,7 +271,6 @@ import {
   showsTextDistantNote, TEXT_DISTANT_STROKE_NOTE, strokeFollowPatch,
   type StrokeWobbleChoice,
 } from '~/lib/compositor/strokeInspector'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
 import {
   samplePointsFromStroke, layerAffine, invertAffine, applyAffine, wiredImageAffine,
   luminanceToAlpha, alphaBounds, cutoutPlacement, wiredCutoutPlacement,
@@ -5996,7 +5994,7 @@ async function generateVideo() {
   videoStatus.value = ''
   webExportNotice.value = ''   // a stale "Downloaded" must not hide this export's progress or notice
   // The output shape (the card's), taken once: a viewing-size change mid-export must not
-  // change later frames, nor the server fallback's bake.
+  // change later frames.
   const out = outputFrame()
   const { W, H } = out
   const motion = effectiveMotion.value
@@ -6024,24 +6022,14 @@ async function generateVideo() {
         await painter.paint(i, ctx)
       },
       onStatus: t => { videoStatus.value = t },
-      serverFallback: async (signal) => {
-        await bakeMotion(undefined, { signal, keepPaused: true, out })
-        throwIfAborted(signal)
-        if (bakeError.value) throw new Error(bakeError.value)
-        videoStatus.value = 'Encoding…'
-        return await encodeFrames({
-          frames: storedMotionParams.value!.rendered, fps: motion.fps, width: W, height: H, alpha,
-        })
-      },
-    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public) })
     if (!made?.filename) { videoStatus.value = ''; return }
     await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
     window.dispatchEvent(new CustomEvent('sailor:compositorOutput', {
       detail: { sourceNodeId: node.id, nodeType: 'Video', widgetOverrides: { file: made.filename } },
     }))
-    videoStatus.value = made.notice ?? ''
-    // A fallback notice must be seen: keep the editor open when there is one.
-    if (!made.notice) emit('close')
+    videoStatus.value = ''
+    emit('close')
   } catch (err) {
     if (isAbortError(err)) { videoStatus.value = 'Export cancelled.'; return }
     console.error('[frame] video export failed', err)
@@ -6058,9 +6046,8 @@ async function generateVideo() {
 // ── The right panel's footer (StudioActionsFooter, as in every studio) ──────────
 // The status line puts the running job first — a finished web export's "Downloaded" must not
 // hide a video that is rendering now — then the web export's notice, then how the last video
-// went (a fallback notice or "Export cancelled."). These are the texts the old buttons wore.
-// Baking is checked first: it only runs inside a video export's server fallback, where
-// exportingVideo is already true and would otherwise hide its percentage.
+// went ("Export cancelled."). These are the texts the old buttons wore.
+// Baking (the Motion panel's bake) is checked first.
 const frameFooterProgress = computed(() =>
   baking.value ? `Baking ${Math.round((bakeProgress.value ?? 0) * 100)}%`
     : exportingVideo.value ? (videoStatus.value || 'Rendering…')

@@ -19,13 +19,10 @@ import { DEFAULT_POST, type PostSettings } from '~/lib/spacetype/post'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
 import { ensureSpaceTypeStateFont, texOptsFromState, type SpaceTypeState } from '~/lib/spacetype/state'
-import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { canvasHasAlpha } from '~/lib/engine/hasAlpha'
 import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
-import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
-import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { exportStudioVideo, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { useStudioAutosave } from '~/lib/studio/autosave'
 import { loopMultiplier, previewFrameAt } from '~/lib/spacetype/loop'
@@ -1566,8 +1563,7 @@ function sendToTimeline() {
  * baking.value/stopPreview/startPreview and engine.setBake(false) cleanup —
  * this only does the bake and either returns the result or throws (a bake
  * failure looks the same to a caller: nothing to dispatch/download).
- * Records in the browser, or — local mode only, with a notice — through
- * today's server route.
+ * Records in the browser; a browser that can't record says why.
  */
 async function bakeSpaceTypeVideo(publish: boolean): Promise<StudioVideoResult | null> {
   if (!engine) return null
@@ -1602,20 +1598,7 @@ async function bakeSpaceTypeVideo(publish: boolean): Promise<StudioVideoResult |
         engine!.drawFrameInto(ctx, W.value, H.value)
       },
       onStatus: t => { videoNotice.value = t },
-      serverFallback: async (signal) => {
-        const bake = await ensureSpaceTypeBake(loopCfg, undefined, {
-          renderFrame: async (i) => {
-            throwIfAborted(signal)   // Cancel stops a long bake between frames
-            videoNotice.value = `Baking ${i + 1}/${total}`
-            engine!.renderFrameAt(i / origFrames, params)
-            return engine!.frameToBlob(W.value, H.value)
-          },
-        })
-        throwIfAborted(signal)
-        videoNotice.value = 'Encoding…'
-        return encodeFrames({ frames: bake.frames, fps: fps.value, width: W.value, height: H.value, alpha: wantAlpha })
-      },
-    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public) })
   } finally {
     engine?.setSize(W.value, H.value)
     exportingVideo.value = false
@@ -1636,8 +1619,8 @@ async function generateVideo() {
     window.dispatchEvent(new CustomEvent('sailor:spaceTypeOutput', {
       detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
     }))
-    videoNotice.value = made.notice ?? ''
-    if (!made.notice) closeEditor()
+    videoNotice.value = ''
+    closeEditor()
   } catch (e) {
     if (isAbortError(e)) { videoNotice.value = 'Export cancelled.'; return }
     console.error('[spacetype] video export failed', e)
@@ -1665,8 +1648,8 @@ async function downloadVideoFile() {
   try {
     const made = await bakeSpaceTypeVideo(false)
     if (!made) { videoNotice.value = ''; return }
-    downloadBlobAsFile(await resultBlob(made), `spacetype_${Date.now()}.${made.ext}`)
-    videoNotice.value = made.notice ?? ''
+    downloadBlobAsFile(made.blob, `spacetype_${Date.now()}.${made.ext}`)
+    videoNotice.value = ''
   } catch (e) {
     if (isAbortError(e)) { videoNotice.value = 'Export cancelled.'; return }
     console.error('[spacetype] video download failed', e)

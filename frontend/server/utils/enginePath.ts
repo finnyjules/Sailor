@@ -223,8 +223,7 @@ export const SAILOR_DATA_PREFIXES = [
  *   /sailor/models/status                        read-only bundle-presence check.
  * NOTE space_thumbnail/{id} is handled by VERB in classifySailor: GET reads a
  * shared thumb (proxy), POST writes one (refuse) — so it is NOT a flat prefix
- * here. spacetype_encode LOOKS like a stateless capability but WRITES a video
- * into the shared input/ dir, so it is REFUSE, not proxy (see SAILOR_REFUSE).
+ * here.
  */
 export const HOSTED_SAILOR_PROXY = [
   '/sailor/shader_effects',
@@ -242,12 +241,11 @@ const SPACE_THUMB_WRITE_MSG = 'Space preset thumbnails are operator content in h
  * compute that will be metered later. `verb` narrows the two routes whose
  * refusal is method-specific (space_default/{id} POST; space_thumbnail/{id}
  * POST is refused in classifySailor's verb branch above the proxy list).
- * The engine's Timeline render routes are no longer listed (Task R9.3):
- * nothing in Sailor calls them, so in hosted they fall to `unknown` and are
- * refused by default.
+ * The engine's Timeline render routes (Task R9.3) and its video encode route
+ * (Task R10.4) are no longer listed: nothing in Sailor calls them, so in
+ * hosted they fall to `unknown` and are refused by default.
  */
 const SAILOR_REFUSE: { prefix: string, verb?: string, message: string }[] = [
-  { prefix: '/sailor/spacetype_encode', message: 'Video encode is not available in hosted mode — it writes to the shared input directory' },
   { prefix: '/sailor/motion', message: 'Frame cleanup is not available in hosted mode — it deletes from the shared input directory' },
   { prefix: '/sailor/lora', message: 'Dataset writes are not available in hosted mode — they mutate the shared training directory' },
   { prefix: '/sailor/models/download', message: 'Model download is not available in hosted mode — it writes to the operator model disk' },

@@ -21,10 +21,8 @@ import { visibleLights } from '~/lib/frame/lighting/settings'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { onCanvasOcclusion, createOcclusionRepaintGate } from '~/lib/studio/occlusion'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
-import { exportStudioVideo, resultBlob, videoErrorText } from '~/lib/studio/studioVideoExport'
-import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { exportStudioVideo, videoErrorText } from '~/lib/studio/studioVideoExport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
@@ -1132,10 +1130,9 @@ watch(exportingVideo, (on) => { frozenExportView.value = on && exportView.value 
 const videoStatus = ref('')
 function stopVideoExport() { videoAbort?.abort() }
 
-// Export an animated Frame as a video: recorded in the browser (the same
-// renderCompositeAtTime the old route baked PNGs from), or — local mode only,
-// with a visible notice — through the server route. Records to Assets and
-// downloads. The live preview loop is paused so it can't interleave pulls.
+// Export an animated Frame as a video, recorded in the browser frame by frame
+// from renderCompositeAtTime; a browser that can't record says why. Records to
+// Assets and downloads. The live preview loop is paused so it can't interleave pulls.
 async function downloadVideo() {
   const mc = masterClock.value
   if (!mc || mc.duration <= 0 || exportingVideo.value) return
@@ -1160,25 +1157,11 @@ async function downloadVideo() {
         ctx.drawImage(cv, 0, 0, W, H)   // a fresh 2D canvas: no WebGL buffer to lose
       },
       onStatus: t => { videoStatus.value = t },
-      serverFallback: async (signal) => {
-        const { ensureSpaceTypeBake } = await import('~/lib/spacetype/bake')
-        const bakeCfg = { fps: mc.fps, loopDuration: mc.duration, W, H, seed: 'frame', sig: JSON.stringify({ id: props.id, n: total, w: W, h: H }) }
-        const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-          renderFrame: async (i) => {
-            throwIfAborted(signal)
-            videoStatus.value = `${i + 1}/${total}`
-            const cv = await renderCompositeAtTime(i / mc.fps)
-            return await new Promise<Blob>((res, rej) => cv ? cv.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png') : rej(new Error('no composite')))
-          },
-        })
-        throwIfAborted(signal)
-        return encodeFrames({ frames: bake.frames, fps: mc.fps, width: W, height: H, alpha })
-      },
-    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public) })
     if (!made?.filename) { videoStatus.value = ''; return }
     await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
-    downloadBlobAsFile(await resultBlob(made), `frame-${props.id}.${made.ext}`)
-    videoStatus.value = made.notice ?? ''
+    downloadBlobAsFile(made.blob, `frame-${props.id}.${made.ext}`)
+    videoStatus.value = ''
   } catch (err) {
     if (isAbortError(err)) { videoStatus.value = 'Cancelled'; return }
     console.error('[Frame] video export failed', err)

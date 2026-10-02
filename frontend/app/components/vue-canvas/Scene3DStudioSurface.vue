@@ -102,7 +102,6 @@ import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
 import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
 import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { SCENE_TEMPLATES, animateSceneDefaults } from '~/lib/scene3d/motion/defaults'
 import { LOOP_OPTIONS, IN_OPTIONS, OUT_OPTIONS, CAMERA_OPTIONS, LOOP_USES_AMOUNT, CAMERA_USES_CYCLES, CAMERA_USES_AMOUNT, setObjectLoop, setObjectTransition, setObjectDirection } from '~/lib/scene3d/motion/panel'
 import { sceneHasMotion, sceneLoop, renderMotionFrame } from '~/lib/scene3d/motion/render'
@@ -139,9 +138,8 @@ import {
 import { setByPath } from '~/lib/studio/path'
 import { showIfVisible } from '~/lib/studio/sections'
 import type { PostSettings } from '~/lib/spacetype/post'
-import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
-import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { exportStudioVideo, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = withDefaults(defineProps<{ nodeId: string; nodes?: any[]; edges?: any[] }>(), {
@@ -605,12 +603,12 @@ function togglePlay() {
   playing.value = willPlay
   if (playing.value) playStart = performance.now() - playhead.value * 1000
 }
-// Bake the Motion timeline to an encoded file (reuses the studios' bake→encode
-// pipeline). Frames go through the shared export renderer (renderExportFrame: the
+// Record the Motion timeline as a video in the browser (the studios' shared
+// exportStudioVideo). Frames go through the shared export renderer (renderExportFrame: the
 // same motion sampling as live playback, with the floor grid and gizmos hidden and
 // film grain moving) so the clip matches every other 3D export. Renders N = fps*duration frames off-screen at the output
-// resolution, bakes/encodes server-side, and lands a file under input/ — it does NOT
-// download or dispatch anything; that's each caller's job (exportVideo downloads,
+// resolution, records them in the browser and, when publishing, uploads the file to
+// input/ — it does NOT download or dispatch anything; that's each caller's job (exportVideo downloads,
 // renderVideoToCanvas dispatches a Video node). Playback is paused for the duration
 // so it can't interleave renders with the export loop, and the viewport render size
 // + Build pose are restored in `finally` regardless of outcome.
@@ -642,29 +640,8 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
         ctx.drawImage(cv, 0, 0, W, H)   // same turn as the render
       },
       onStatus: t => { videoNotice.value = t },
-      serverFallback: async (signal) => {
-        const { ensureSpaceTypeBake } = await import('~/lib/spacetype/bake')
-        const cfg = { fps, loopDuration: dur, W, H, seed: 'scene3d', sig: JSON.stringify({ id: props.nodeId, n: total, w: W, h: H, s: serializeDoc(doc) }) }
-        const bake = await ensureSpaceTypeBake(cfg as any, undefined, {
-          renderFrame: async (i) => {
-            throwIfAborted(signal)   // Cancel stops a long bake between frames
-            videoNotice.value = `Baking ${i + 1}/${total}`
-            const cv = renderExportFrame(engine!, doc, total > 1 ? i / total : 0)
-            return await new Promise<Blob>((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'))
-          },
-        })
-        throwIfAborted(signal)
-        videoNotice.value = 'Encoding…'
-        try {
-          return await encodeFrames({ frames: bake.frames, fps, width: W, height: H })
-        } catch {
-          bakeError.value = 'Video encode failed'
-          return null
-        }
-      },
-    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
-    // Drop the progress line; the caller shows the notice (or bakeError says why
-    // nothing was made).
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public) })
+    // Drop the progress line; a failure lands in bakeError below.
     videoNotice.value = ''
     return made
   } catch (err) {
@@ -682,29 +659,20 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
     videoAbort = null
   }
 }
-// Download video: bake, then fetch the encoded file back and save it locally.
+// Download video: record it, then save the file locally.
 // NOTE: no tab store here (unlike ArtifactFrameNode), so this does not record the
 // export to the Assets panel — follow-up for 2b if that's wanted from this surface.
 async function exportVideo() {
   const made = await bakeSceneVideo(false)
   if (!made) return
-  try {
-    // Server route: the file comes back over /view, which can fail.
-    const blob = await resultBlob(made)
-    const obj = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = obj; a.download = `scene3d-${props.nodeId}.${made.ext}`
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj)
-    videoNotice.value = made.notice ?? ''
-  } catch (err) {
-    console.error('[Scene3D] video download failed:', err)
-    bakeError.value = videoErrorText(err)
-  }
+  const obj = URL.createObjectURL(made.blob)
+  const a = document.createElement('a'); a.href = obj; a.download = `scene3d-${props.nodeId}.${made.ext}`
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj)
 }
 // As video (canvas): bake, then dispatch a Video node onto the canvas instead of
 // downloading — mirrors exportToCanvas's dispatch/close exactly (same event name,
 // same commitSculptIfNeeded guard so a live sculpt session isn't left uncommitted),
 // just with a Video node + the encoded filename instead of the beauty image.
-// A fallback notice keeps the studio open so it is seen.
 async function renderVideoToCanvas() {
   if (!(await commitSculptIfNeeded())) return
   const made = await bakeSceneVideo(true)
@@ -712,8 +680,7 @@ async function renderVideoToCanvas() {
   window.dispatchEvent(new CustomEvent('sailor:scene3dStudioOutput', {
     detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
   }))
-  videoNotice.value = made.notice ?? ''
-  if (!made.notice) emit('close')
+  emit('close')
 }
 watch(playing, (v) => {
   if (!v && engine) { engine.syncFromDoc(doc); engine.applyObjectOpacities({}) }

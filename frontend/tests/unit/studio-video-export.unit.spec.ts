@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { exportStudioVideo, resultBlob, videoErrorText } from '../../app/lib/studio/studioVideoExport'
+import { exportStudioVideo, videoErrorText } from '../../app/lib/studio/studioVideoExport'
 import { publishVideo, HOSTED_UPLOAD_LIMIT } from '../../app/lib/engine/publishVideo'
 
 const recorded = { blob: new Blob(['x'], { type: 'video/mp4' }), ext: 'mp4' as const, contentType: 'video/mp4', width: 4, height: 2 }
@@ -7,14 +7,13 @@ const base = {
   prefix: 'shader', width: 4, height: 2, fps: 30, frameCount: 3,
   drawFrame: () => {},
 }
-const server = vi.fn(async () => ({ filename: 'spacetype_1.mp4', ext: 'mp4' as const }))
 
 describe('exportStudioVideo', () => {
   it('records in the browser and publishes when asked', async () => {
     const publish = vi.fn(async () => 'shader_9.mp4')
-    const r = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
+    const r = await exportStudioVideo({ ...base, publish: true },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish })
-    expect(r).toEqual({ ext: 'mp4', blob: recorded.blob, filename: 'shader_9.mp4', via: 'browser', notice: null })
+    expect(r).toEqual({ ext: 'mp4', blob: recorded.blob, filename: 'shader_9.mp4' })
     expect(publish).toHaveBeenCalledWith(recorded.blob, 'mp4', 'shader', undefined, undefined)
   })
 
@@ -25,102 +24,65 @@ describe('exportStudioVideo', () => {
       if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
       return 'x.mp4'
     })
-    await expect(exportStudioVideo({ ...base, publish: true, signal: ac.signal, serverFallback: server },
+    await expect(exportStudioVideo({ ...base, publish: true, signal: ac.signal },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish })).rejects.toThrow(/aborted/i)
     expect(publish.mock.calls[0]![4]).toBe(ac.signal)
   })
 
-  it('a download-only export never uploads', async () => {
+  it('a download-only export never uploads, and hands back the browser file', async () => {
     const publish = vi.fn()
-    const r = await exportStudioVideo({ ...base, publish: false, serverFallback: server },
+    const r = await exportStudioVideo({ ...base, publish: false },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish })
-    expect(r?.filename).toBeNull()
+    expect(r.filename).toBeNull()
+    expect(r.blob).toBe(recorded.blob)
     expect(publish).not.toHaveBeenCalled()
   })
 
-  it('local: a browser that cannot record falls back to the server, and says so', async () => {
-    const r = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
-      { hosted: false, canRecord: async () => false, record: async () => { throw new Error('not called') } })
-    expect(r?.via).toBe('server')
-    expect(r?.filename).toBe('spacetype_1.mp4')
-    expect(r?.blob).toBeNull()
-    expect(r?.notice).toBe("Made on the server, because this browser can't record video.")
-  })
+  // R10.4 (spec ruling 7): no server route. A browser that can't make the
+  // video fails, and says why, locally exactly as in hosted.
+  for (const hosted of [false, true]) {
+    const where = hosted ? 'hosted' : 'local'
 
-  it('local: a recording that fails falls back to the server, and says why', async () => {
-    const r = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
-      { hosted: false, canRecord: async () => true, record: async () => { throw new Error('encoder crashed') } })
-    expect(r?.via).toBe('server')
-    expect(r?.notice).toBe("Made on the server, because the browser's video encoder failed.")
-  })
+    it(`${where}: a browser that cannot record is a plain error, and nothing is recorded or uploaded`, async () => {
+      const record = vi.fn(async () => recorded)
+      const publish = vi.fn(async () => 'x.mp4')
+      const err = await exportStudioVideo({ ...base, publish: true },
+        { hosted, canRecord: async () => false, record, publish }).then(() => null, e => e)
+      expect(err?.message).toBe("Video export failed: this browser can't record video.")
+      expect(videoErrorText(err)).toBe("Video export failed: this browser can't record video.")
+      expect(record).not.toHaveBeenCalled()
+      expect(publish).not.toHaveBeenCalled()
+    })
 
-  it('hosted: a recording that fails is a plain error, without the encoder text', async () => {
-    const err = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
-      { hosted: true, canRecord: async () => true, record: async () => { throw new Error('EncodingError: encoder crashed') } })
-      .then(() => null, e => e)
-    expect(err?.message).toBe("Video export failed: the browser's video encoder failed.")
-  })
+    it(`${where}: a recording that fails is a plain error, without the encoder text`, async () => {
+      const publish = vi.fn(async () => 'x.mp4')
+      const err = await exportStudioVideo({ ...base, publish: true },
+        { hosted, canRecord: async () => true, record: async () => { throw new Error('EncodingError: encoder crashed') }, publish })
+        .then(() => null, e => e)
+      expect(err?.message).toBe("Video export failed: the browser's video encoder failed.")
+      expect(videoErrorText(err)).toBe("Video export failed: the browser's video encoder failed.")
+      expect(publish).not.toHaveBeenCalled()
+    })
+  }
 
-  it('hosted: no server fallback — a clear error instead', async () => {
-    const err = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
-      { hosted: true, canRecord: async () => false }).then(() => null, e => e)
-    expect(err?.message).toBe("Video export failed: this browser can't record video.")
-  })
-
-  it('cancel is never turned into a fallback', async () => {
+  it('cancel is passed through as cancel', async () => {
     const abort = new DOMException('Export cancelled', 'AbortError')
-    const fallback = vi.fn(async () => ({ filename: 'spacetype_1.mp4', ext: 'mp4' as const }))
-    const err = await exportStudioVideo({ ...base, publish: true, serverFallback: fallback },
+    const err = await exportStudioVideo({ ...base, publish: true },
       { hosted: false, canRecord: async () => true, record: async () => { throw abort } }).then(() => null, e => e)
     expect(err).toBe(abort)
-    expect(fallback).not.toHaveBeenCalled()
   })
 
-  it('an upload failure after a good recording is an error, not a fallback', async () => {
-    const fallback = vi.fn(async () => ({ filename: 'spacetype_1.mp4', ext: 'mp4' as const }))
-    const err = await exportStudioVideo({ ...base, publish: true, serverFallback: fallback },
+  it('an upload failure after a good recording is that error', async () => {
+    const err = await exportStudioVideo({ ...base, publish: true },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish: async () => { throw new Error('video upload failed (500)') } })
       .then(() => null, e => e)
     expect(err?.message).toBe('video upload failed (500)')
-    expect(fallback).not.toHaveBeenCalled()
-  })
-
-  it('the server switch skips the browser in local mode, and says so; hosted ignores it', async () => {
-    const record = vi.fn(async () => recorded)
-    const r = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
-      { hosted: false, forceServer: true, canRecord: async () => true, record })
-    expect(r?.via).toBe('server')
-    expect(r?.notice).toBe('Made on the server (browser recording is switched off).')
-    expect(record).not.toHaveBeenCalled()
-    const h = await exportStudioVideo({ ...base, publish: false, serverFallback: server },
-      { hosted: true, forceServer: true, canRecord: async () => true, record })
-    expect(h?.via).toBe('browser')
-  })
-
-  it('cancel during the server fallback rejects with AbortError, nothing returned', async () => {
-    const ac = new AbortController()
-    const fallback = vi.fn(async (_signal?: AbortSignal) => {
-      ac.abort()   // the user presses Cancel while the server bakes
-      return { filename: 'shader_1.mp4', ext: 'mp4' as const }
-    })
-    const err = await exportStudioVideo({ ...base, publish: true, signal: ac.signal, serverFallback: fallback },
-      { hosted: false, canRecord: async () => false }).then(r => r, e => e)
-    expect(err).toBeInstanceOf(DOMException)
-    expect(err.name).toBe('AbortError')
-  })
-
-  it('the server fallback receives the signal', async () => {
-    const ac = new AbortController()
-    const fallback = vi.fn(async (_signal?: AbortSignal) => ({ filename: 'shader_1.mp4', ext: 'mp4' as const }))
-    await exportStudioVideo({ ...base, publish: true, signal: ac.signal, serverFallback: fallback },
-      { hosted: false, canRecord: async () => false })
-    expect(fallback).toHaveBeenCalledWith(ac.signal)
   })
 
   it('cancel during the upload rejects with AbortError, not a success', async () => {
     const ac = new AbortController()
     const publish = vi.fn(async () => { ac.abort(); return 'shader_9.mp4' })
-    const err = await exportStudioVideo({ ...base, publish: true, signal: ac.signal, serverFallback: server },
+    const err = await exportStudioVideo({ ...base, publish: true, signal: ac.signal },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish }).then(r => r, e => e)
     expect(publish).toHaveBeenCalledTimes(1)
     expect(err).toBeInstanceOf(DOMException)
@@ -130,7 +92,7 @@ describe('exportStudioVideo', () => {
   it('cancel after recording, before the upload, never uploads', async () => {
     const ac = new AbortController()
     const publish = vi.fn(async () => 'shader_9.mp4')
-    const err = await exportStudioVideo({ ...base, publish: true, signal: ac.signal, serverFallback: server },
+    const err = await exportStudioVideo({ ...base, publish: true, signal: ac.signal },
       { hosted: false, canRecord: async () => true, record: async () => { ac.abort(); return recorded }, publish }).then(r => r, e => e)
     expect(err?.name).toBe('AbortError')
     expect(publish).not.toHaveBeenCalled()
@@ -139,7 +101,7 @@ describe('exportStudioVideo', () => {
   it('hosted: a video over the upload limit is refused before uploading', async () => {
     const big = { ...recorded, blob: { size: HOSTED_UPLOAD_LIMIT + 1, type: 'video/mp4' } as unknown as Blob }
     const publish = vi.fn(async () => 'shader_9.mp4')
-    const err = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
+    const err = await exportStudioVideo({ ...base, publish: true },
       { hosted: true, canRecord: async () => true, record: async () => big, publish }).then(() => null, e => e)
     expect(err?.message).toBe('This video is larger than 100 MB, the upload limit.')
     expect(publish).not.toHaveBeenCalled()
@@ -148,9 +110,9 @@ describe('exportStudioVideo', () => {
   it('local: a video over the hosted limit still uploads', async () => {
     const big = { ...recorded, blob: { size: HOSTED_UPLOAD_LIMIT + 1, type: 'video/mp4' } as unknown as Blob }
     const publish = vi.fn(async () => 'shader_9.mp4')
-    const r = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
+    const r = await exportStudioVideo({ ...base, publish: true },
       { hosted: false, canRecord: async () => true, record: async () => big, publish })
-    expect(r?.filename).toBe('shader_9.mp4')
+    expect(r.filename).toBe('shader_9.mp4')
     expect(publish).toHaveBeenCalledTimes(1)
   })
 
@@ -158,32 +120,16 @@ describe('exportStudioVideo', () => {
     const order: string[] = []
     const onStatus = vi.fn((t: string) => { order.push(`status:${t}`) })
     const publish = vi.fn(async () => { order.push('publish'); return 'shader_9.mp4' })
-    await exportStudioVideo({ ...base, publish: true, onStatus, serverFallback: server },
+    await exportStudioVideo({ ...base, publish: true, onStatus },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish })
     expect(onStatus).toHaveBeenCalledTimes(1)
     expect(onStatus).toHaveBeenCalledWith('Uploading…')
     expect(order).toEqual(['status:Uploading…', 'publish'])
 
     const quiet = vi.fn()
-    await exportStudioVideo({ ...base, publish: false, onStatus: quiet, serverFallback: server },
+    await exportStudioVideo({ ...base, publish: false, onStatus: quiet },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish })
     expect(quiet).not.toHaveBeenCalled()
-  })
-
-  it('a fallback that makes nothing returns null', async () => {
-    const r = await exportStudioVideo({ ...base, publish: true, serverFallback: async () => null },
-      { hosted: false, canRecord: async () => false })
-    expect(r).toBeNull()
-  })
-})
-
-describe('resultBlob', () => {
-  it('uses the browser blob, or fetches the server file', async () => {
-    const b = new Blob(['y'])
-    expect(await resultBlob({ ext: 'mp4', blob: b, filename: null, via: 'browser', notice: null })).toBe(b)
-    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, blob: async () => b })) as any
-    expect(await resultBlob({ ext: 'mp4', blob: null, filename: 'a b.mp4', via: 'server', notice: null }, fetchImpl)).toBe(b)
-    expect(fetchImpl).toHaveBeenCalledWith('/view?filename=a+b.mp4&type=input')
   })
 })
 

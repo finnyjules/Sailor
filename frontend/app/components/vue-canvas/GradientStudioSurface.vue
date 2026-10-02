@@ -5,8 +5,6 @@ import { gradientFx } from '~/lib/gradientfx/renderer'
 import { LIQUID_PRESETS, buildConfig, defaultConfig, liquidConfig, liquidPresetConfig, meshConfig, reroll, rippleConfig, stackConfig, type RerollScope } from '~/lib/gradientfx/randomize'
 import { MESH_MAX_POINTS, buildMeshPoints, defaultMesh, recolorMeshPoints } from '~/lib/gradientfx/mesh'
 import { randomSeed } from '~/lib/gradientfx/rng'
-import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { useStudioAutosave } from '~/lib/studio/autosave'
 import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import { animatableTargets, dropTracksForLayer, remapTracksOnInsert, remapTracksOnReorder } from '~/lib/gradientfx/motion'
@@ -47,9 +45,8 @@ import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import type { GradientEmbedConfig } from '~/lib/embed/surfaces/gradient'
 import { clampExportDims } from '~/lib/gradientfx/exportDims'
-import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
-import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { exportStudioVideo, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import {
   ASPECTS, CURVE_DEFAULTS, DEFAULT_CENTER, DEFAULT_FOCUS, DEFAULT_LIGHT, DIRECTIONS, GRADIENT_DIRS, LAYER_MAX, LAYOUTS, LAYOUT_LABELS, MAPPINGS, MIRROR_KINDS, RAMP_DEFAULTS, RING_SHAPES, SHAPE_KINDS,
@@ -754,8 +751,8 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
   }
 }
 
-/** Make the current Gradient Studio state into a video: recorded in the
- *  browser, or — local mode only, with a notice — by today's server route. */
+/** Make the current Gradient Studio state into a video, recorded in the
+ *  browser. A browser that can't record says why. */
 async function bakeGradientVideo(publish: boolean): Promise<StudioVideoResult | null> {
   const m = config.value.motion
   const { w, h } = { w: m.size && aspectRatio(config.value.canvas.aspect) >= 1 ? Math.round(m.size * aspectRatio(config.value.canvas.aspect)) : m.size, h: m.size }
@@ -772,26 +769,7 @@ async function bakeGradientVideo(publish: boolean): Promise<StudioVideoResult | 
         gradientFx.renderInto(ctx, config.value, w, h, i / m.fps)
       },
       onStatus: t => { bakeMsg.value = t },
-      serverFallback: async (signal) => {
-        const bakeCfg = { fps: m.fps, loopDuration: m.duration, W: w, H: h, seed: config.value.seed, sig: JSON.stringify(config.value) }
-        const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-          renderFrame: async (i) => {
-            throwIfAborted(signal)   // Cancel stops a long bake between frames
-            bakeMsg.value = `Baking ${i + 1}/${total}`
-            return gradientFx.renderToBlob(config.value, w, h, (i / m.fps))
-          },
-        })
-        throwIfAborted(signal)
-        bakeMsg.value = 'Encoding…'
-        try {
-          return await encodeFrames({ frames: bake.frames, fps: m.fps, width: w, height: h })
-        } catch (encErr) {
-          bakeMsg.value = 'Encode failed — restart ComfyUI to load the encoder.'
-          console.error('[gradient] encode failed', encErr)
-          return null
-        }
-      },
-    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public) })
   } finally {
     exportingVideo.value = false
     videoAbort = null
@@ -808,8 +786,8 @@ async function generateVideo() {
     window.dispatchEvent(new CustomEvent('sailor:gradientStudioOutput', {
       detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
     }))
-    bakeMsg.value = made.notice ?? ''
-    if (!made.notice) { settleTakesOnRender(gradientAgent); closeEditor() }
+    bakeMsg.value = ''
+    settleTakesOnRender(gradientAgent); closeEditor()
   } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }
@@ -832,8 +810,8 @@ async function downloadVideoFile() {
   try {
     const made = await bakeGradientVideo(false)
     if (!made) return
-    downloadBlobAsFile(await resultBlob(made), `gradient_${Date.now()}.${made.ext}`)
-    bakeMsg.value = made.notice ?? ''
+    downloadBlobAsFile(made.blob, `gradient_${Date.now()}.${made.ext}`)
+    bakeMsg.value = ''
   } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }

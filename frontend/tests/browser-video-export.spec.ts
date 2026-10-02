@@ -2,16 +2,13 @@ import { test, expect, type Page } from '@playwright/test'
 
 // Quality gate for the browser video recorder (spec: docs/superpowers/specs/
 // 2026-09-21-browser-video-export-design.md, "Correctness gates"). A known
-// test pattern is recorded, read back and measured; where ComfyUI is running,
-// the SAME frames go through the server encoder too, and the browser file must
-// be at least as close to the source as the server's.
+// test pattern is recorded, read back and measured against absolute ceilings.
+// There is no server encoder to compare to any more (engine-free step 3, R10.4):
+// the browser is the only route.
 
-// Browser must be within 10 % or half a level (0–255 scale) of the server.
-const passMark = (serverMae: number) => Math.max(serverMae * 1.1, serverMae + 0.5)
-// Without ComfyUI there is nothing to compare to; hold an absolute ceiling.
 const ABSOLUTE_MAE_CEILING = 3.0
-// The transparent WebM's ceiling without ComfyUI: set at the first measured
-// browser mae (1.41) + 1.0. Measured 2026-09-22 after the BT.709 I420A change
+// The transparent WebM's ceiling: set at the first measured browser mae (1.41)
+// + 1.0. Measured 2026-09-22 after the BT.709 I420A change
 // (Chromium, 320×180, 30 frames): browser 1.668, server 1.615 — still 0.7 under.
 const WEBM_ABSOLUTE_MAE_CEILING = 2.4
 
@@ -24,7 +21,7 @@ const call = (page: Page, fn: string, o: object) => page.evaluate(([f, a]) => (w
 test.describe('browser video export — quality gate', () => {
   test.setTimeout(180_000)
 
-  test('MP4: every frame, the right length, BT.709, and at least as close to the source as the server', async ({ page }) => {
+  test('MP4: every frame, the right length, BT.709, and close to the source', async ({ page }) => {
     await harness(page)
     const o = { width: 640, height: 360, fps: 30, frames: 60, alpha: false }
     const b: any = await call(page, 'run', o)
@@ -37,16 +34,7 @@ test.describe('browser video export — quality gate', () => {
     expect(b.colorSpace.matrix).toBe('bt709')
     expect(b.colorSpace.fullRange).toBe(false)
 
-    const serverUp = await page.evaluate(() => fetch('/system_stats').then(r => r.ok).catch(() => false))
-    if (serverUp) {
-      const s: any = await call(page, 'runServer', o)
-      test.info().annotations.push({ type: 'server', description: JSON.stringify(s) })
-      expect(s.frames).toBe(60)
-      expect(b.mae).toBeLessThanOrEqual(passMark(s.mae))
-    } else {
-      test.info().annotations.push({ type: 'server', description: 'ComfyUI not running — absolute ceiling used' })
-      expect(b.mae).toBeLessThanOrEqual(ABSOLUTE_MAE_CEILING)
-    }
+    expect(b.mae).toBeLessThanOrEqual(ABSOLUTE_MAE_CEILING)
   })
 
   test('odd sizes come out rounded up to even', async ({ page }) => {
@@ -56,7 +44,7 @@ test.describe('browser video export — quality gate', () => {
     expect(b.frames).toBe(10)
   })
 
-  test('WebM keeps transparency, BT.709, and is at least as close to the source as the server', async ({ page }) => {
+  test('WebM keeps transparency, BT.709, and is close to the source', async ({ page }) => {
     await harness(page)
     const o = { width: 320, height: 180, fps: 30, frames: 30, alpha: true }
     const b: any = await call(page, 'run', o)
@@ -70,16 +58,7 @@ test.describe('browser video export — quality gate', () => {
     expect(b.colorSpace.matrix).toBe('bt709')
     expect(b.colorSpace.fullRange).toBe(false)
 
-    const serverUp = await page.evaluate(() => fetch('/system_stats').then(r => r.ok).catch(() => false))
-    if (serverUp) {
-      const s: any = await call(page, 'runServer', o)
-      test.info().annotations.push({ type: 'server', description: JSON.stringify(s) })
-      expect(s.frames).toBe(30)
-      expect(b.mae).toBeLessThanOrEqual(passMark(s.mae))
-    } else {
-      test.info().annotations.push({ type: 'server', description: 'ComfyUI not running — absolute ceiling used' })
-      expect(b.mae).toBeLessThanOrEqual(WEBM_ABSOLUTE_MAE_CEILING)
-    }
+    expect(b.mae).toBeLessThanOrEqual(WEBM_ABSOLUTE_MAE_CEILING)
   })
 
   test('cancel stops the export with an AbortError', async ({ page }) => {

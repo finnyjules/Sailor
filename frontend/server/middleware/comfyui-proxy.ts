@@ -179,10 +179,10 @@ export default defineEventHandler(async (event) => {
         ? path.replace(/^\/comfyui/, '') || '/'
         : path
       // Spec ruling 4: with the main engine known down (the cached health
-      // check, server/native/engineHealth.ts), an engine-only route — /prompt,
-      // the timeline renders, spacetype_encode, … — answers a plain 503 rather
-      // than h3's 502 from a refused proxy. Local and hosted alike (hosted gets
-      // here only for what its gate classified 'proxy').
+      // check, server/native/engineHealth.ts), an engine-only route (/prompt, …)
+      // answers a plain 503 rather than h3's 502 from a refused proxy. Local
+      // and hosted alike (hosted gets here only for what its gate classified
+      // 'proxy').
       if (!isWsPath(backendPath) && await engineHealth() === 'down') {
         setResponseStatus(event, 503)
         return { error: NEEDS_LOCAL_ENGINE_MESSAGE }

@@ -264,7 +264,8 @@ describe('classifySailor — the audited bucket table', () => {
       ['/sailor/render_timeline', 'POST', 'unknown'],
       ['/sailor/render_timeline_stream', 'POST', 'unknown'],
       ['/sailor/timeline/render_frame', 'POST', 'unknown'],
-      ['/sailor/spacetype_encode', 'POST', 'refuse'],
+      // The engine's video encode (Task R10.4): unlisted, so refused by default.
+      ['/sailor/spacetype_encode', 'POST', 'unknown'],
       ['/sailor/motion/cleanup_frames', 'POST', 'refuse'],
       ['/sailor/lora/save_captions', 'POST', 'refuse'],
       ['/sailor/lora/clear_dataset', 'POST', 'refuse'],
@@ -282,10 +283,10 @@ describe('classifySailor — the audited bucket table', () => {
     expect(classifySailor('/sailor/space_thumbnail/x', 'POST').bucket).toBe('refuse')
   })
 
-  it('CORRECTION from the brief: spacetype_encode writes to input/ → refuse, not proxy', () => {
-    // Handler audit: `out_path = os.path.join(input_dir, out_name)` — it writes
-    // a video into the SHARED input directory, so it is compute+shared-write.
-    expect(classifySailor('/sailor/spacetype_encode', 'POST').bucket).toBe('refuse')
+  it('the engine video encode is unlisted (R10.4): never proxied, refused by default', () => {
+    // It writes a video into the SHARED input directory; Sailor no longer calls it.
+    expect(classifySailor('/sailor/spacetype_encode', 'POST').bucket).toBe('unknown')
+    expect(hostedEngineDecision('/sailor/spacetype_encode', 'POST').kind).toBe('forbid')
   })
 
   it('an unrecognised /sailor route is unknown → fail closed', () => {
@@ -669,7 +670,6 @@ const EXPECTED: Record<string, string> = {
   'DELETE /sailor/input_file': 'data',
   'DELETE /sailor/output_file': 'data',
   // compute / shared-state write (refuse)
-  'POST /sailor/spacetype_encode': 'refuse',
   'POST /sailor/space_default/{effect_id}': 'refuse',
   'POST /sailor/space_thumbnail/{effect_id}': 'refuse',
   'POST /sailor/lora/save_captions': 'refuse',
@@ -681,6 +681,8 @@ const EXPECTED: Record<string, string> = {
   'POST /sailor/render_timeline_stream': 'unknown',
   'POST /sailor/render_timeline': 'unknown',
   'POST /sailor/timeline/render_frame': 'unknown',
+  // Task R10.4: the engine's video encode, likewise unlisted.
+  'POST /sailor/spacetype_encode': 'unknown',
 }
 
 /** Engine routes nothing in Sailor calls any more, left unclassified on purpose (deny by default). */
@@ -688,6 +690,7 @@ const RETIRED_ROUTES = new Set([
   'POST /sailor/render_timeline_stream',
   'POST /sailor/render_timeline',
   'POST /sailor/timeline/render_frame',
+  'POST /sailor/spacetype_encode',
 ])
 
 /** Turn a `{param}` template into a concrete path classifySailor can match. */

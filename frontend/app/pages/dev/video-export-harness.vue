@@ -5,8 +5,6 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { recordVideo } from '~/lib/engine/videoRecorder'
-import { uploadFrameBatch } from '~/lib/studio/frameUpload'
-import { encodeFrames } from '~/lib/engine/encodeVideo'
 
 interface Opts { width: number; height: number; fps: number; frames: number; alpha: boolean }
 
@@ -88,11 +86,11 @@ async function readEmbedVideo(blob: Blob) {
   return { frames, width: await track.getDisplayWidth(), height: await track.getDisplayHeight(), colorSpace, lumaSpread }
 }
 
-// The last file each route made, so a debugging script can pull it out of the
-// page (fileBase64) and inspect it with compare_videos.py.
-const lastFile: { browser?: Blob; server?: Blob } = {}
+// The last file the recorder made, so a debugging script can pull it out of
+// the page (fileBase64) and inspect it with compare_videos.py.
+const lastFile: { browser?: Blob } = {}
 
-async function fileBase64(which: 'browser' | 'server') {
+async function fileBase64(which: 'browser') {
   const b = lastFile[which]
   if (!b) return null
   const bytes = new Uint8Array(await b.arrayBuffer())
@@ -111,25 +109,6 @@ async function run(o: Opts) {
   return readBack(rec.blob, o, performance.now() - t0)
 }
 
-async function runServer(o: Opts) {
-  const t0 = performance.now()
-  const { c, ctx } = referenceCanvas(o.width, o.height)
-  const blobs: Blob[] = []
-  for (let i = 0; i < o.frames; i++) {
-    ctx.clearRect(0, 0, o.width, o.height)
-    if (!o.alpha) { ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, o.width, o.height) }
-    paintTestFrame(ctx, i, o.width, o.height, o.alpha)
-    blobs.push(await new Promise<Blob>((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('toBlob'))), 'image/png')))
-  }
-  const frames = await uploadFrameBatch(blobs, 'vtest')
-  const enc = await encodeFrames({ frames, fps: o.fps, width: o.width, height: o.height, alpha: o.alpha })
-  const res = await fetch(`/view?${new URLSearchParams({ filename: enc.filename, type: 'input' })}`)
-  if (!res.ok) throw new Error(`/view ${res.status}`)
-  const blob = await res.blob()
-  lastFile.server = blob
-  return readBack(blob, o, performance.now() - t0)
-}
-
 async function runCancel(o: Opts) {
   const ac = new AbortController()
   try {
@@ -143,5 +122,5 @@ async function runCancel(o: Opts) {
   }
 }
 
-onMounted(() => { (window as any).__videoHarness = { run, runServer, runCancel, fileBase64, readEmbedVideo } })
+onMounted(() => { (window as any).__videoHarness = { run, runCancel, fileBase64, readEmbedVideo } })
 </script>
