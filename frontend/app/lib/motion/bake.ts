@@ -46,6 +46,18 @@ export function motionSourceKey(
   return (h >>> 0).toString(36)
 }
 
+/** THE key a bake stores and the stale check recomputes — both go through here with the same
+ *  `FrameDocPaint` the painter gets, so a lit Frame's two keys can never disagree. */
+export function bakeSourceKey(
+  localLayers: LocalLayer[],
+  motion: FrameMotion,
+  W: number,
+  H: number,
+  doc?: FrameDocPaint,
+): string {
+  return motionSourceKey(localLayers, motion, W, H, doc?.lighting)
+}
+
 export interface MotionParams {
   fps: number
   duration: number
@@ -201,6 +213,6 @@ export async function bakeAndUpload(
     fps: motion.fps,
     duration: motion.duration,
     rendered,
-    source_key: motionSourceKey(localLayers, motion, W, H, doc?.lighting),
+    source_key: bakeSourceKey(localLayers, motion, W, H, doc),
   }
 }

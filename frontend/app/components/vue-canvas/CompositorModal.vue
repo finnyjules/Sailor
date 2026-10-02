@@ -206,7 +206,7 @@ import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
-import { bakeAndUpload, motionSourceKey, type MotionParams, prepareMotionFramePainter, type FrameDocPaint } from '~/lib/motion/bake'
+import { bakeAndUpload, bakeSourceKey, type MotionParams, prepareMotionFramePainter, type FrameDocPaint } from '~/lib/motion/bake'
 import { exportStudioVideo, videoErrorText } from '~/lib/studio/studioVideoExport'
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
 import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
@@ -5604,7 +5604,8 @@ const motionStale = computed(() => {
   const stored = storedMotionParams.value
   if (!stored) return false
   const out = outputFrame()
-  return stored.source_key !== motionSourceKey(paintLayersFor(out.resolved), outputMotion(effectiveMotion.value, out.resolved), out.W, out.H)
+  // Same key function and same doc as bakeAndUpload (bakeMotion passes frameDocPaint()).
+  return stored.source_key !== bakeSourceKey(paintLayersFor(out.resolved), outputMotion(effectiveMotion.value, out.resolved), out.W, out.H, frameDocPaint())
 })
 
 async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortSignal; keepPaused?: boolean; out?: FrameOutput }) {

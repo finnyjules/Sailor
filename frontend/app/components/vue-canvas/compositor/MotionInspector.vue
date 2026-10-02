@@ -490,10 +490,10 @@ function setValue(v: PropertyValue, key?: string) {
   apply(setPointValue(track.value, i, v), key)
 }
 /**
- * The range a control point's number drags against. The five Transform properties (and the
- * gradient's scroll phase) declare theirs in the Frame adapter's `animatableProperties`;
- * this panel never sees the layer, so they are listed here, and anything else — an effect
- * dial — falls back to a range wide enough not to fence a value in.
+ * The range a control point's number drags against. The modal passes the band's own range
+ * (`range`, from the Frame adapter's `animatableProperties`) and that wins. This table is only
+ * the fallback when it doesn't: the five Transform properties and the gradient's scroll phase;
+ * anything else falls back to a range wide enough not to fence a value in.
  */
 const PROPERTY_RANGE: Record<string, { min: number; max: number }> = {
   x: { min: 0, max: 1 },
