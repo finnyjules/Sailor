@@ -126,7 +126,7 @@ const {
 const { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } = await import('#shared/runner/validate')
 const { nodesNeedingEngine } = await import('#shared/runner/needsEngine')
 const { MEDIA_CAPS, MEDIA_LEASE_PROCESSES, MEDIA_WORDS } = await import('#shared/runner/media')
-const { RUNNER_NOT_ELIGIBLE } = await import('#shared/runner/messages')
+const { TOO_MUCH_WORK_WORDS, withAdvice } = await import('#shared/runner/messages')
 const { MediaError, leaseProcesses, mediaLease, mediaLimiter, runMedia } = await import('~~/server/media/run')
 const { framesQuantOf } = await import('~~/server/runner/video/plan')
 const { mediaEffectStartProblems, keptBatchBound } = await import('~~/server/runner/video/start')
@@ -337,13 +337,13 @@ describe('the rows (rule 1)', () => {
     expect(runnerTakesWorkflow(chain, ON)).toBe(true)
   })
 
-  it('ruling (k): a picture wired into a video effect, and a video effect wired into Save image, leave the workflow to the engine', () => {
+  it('ruling (k): a picture wired into a video effect leaves the workflow to the engine; a video effect wired into Save image saves each frame (R11.9a, row 15)', () => {
     const picture: ApiPrompt = { i: imageCard(), r: reverse(['i', 0]), c: createVideo(['r', 0]), s: saveVideo('c') }
     expect(runnerTakesNode(picture, 'r', ON)).toBe(false)
     expect(runnerTakesWorkflow(picture, ON)).toBe(false)
     const intoPicture: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), r: reverse(['g', 0]), s: saveImage(['r', 0]) }
-    expect(runnerTakesNode(intoPicture, 's', ON)).toBe(false)
-    expect(runnerTakesWorkflow(intoPicture, ON)).toBe(false)
+    expect(runnerTakesNode(intoPicture, 's', ON)).toBe(true)
+    expect(runnerTakesWorkflow(intoPicture, ON)).toBe(true)
   })
 })
 
@@ -641,7 +641,7 @@ describe('the start pass: what the runner can’t do leaves the whole workflow t
     expect(await mediaEffectStartProblems(two, ON, { hosted: false, shapes: shapesOf(two, 320) })).toBeNull()
   })
 
-  it('in the engine: each leaves the workflow to the engine before the run, with no tool process started', LONG, async () => {
+  it('in the engine: each is refused plainly before the run (R11.9a, row 23), with no tool process started', LONG, async () => {
     await requireMediaTools()
     const dir = mkdtempSync(join(scratch, 'runs-'))
     const k = makeKit({ hosted: true, dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
@@ -652,7 +652,9 @@ describe('the start pass: what the runner can’t do leaves the whole workflow t
       for (const [p, count, words] of [[held, 100, MEDIA_EFFECT_WORDS.heldTooMuch], [kept, 320, MEDIA_EFFECT_WORDS.keptTooMuch]] as const) {
         shapeHook.source = async (_id, cls) => (cls === 'GetVideoComponents' ? { count, ...HD, exact: false } : null)
         const from = jobs.list.length
-        await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toMatchObject({ statusCode: 400, message: words, data: { reason: RUNNER_NOT_ELIGIBLE } })
+        const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
+        expect(err).toMatchObject({ statusCode: 400, message: withAdvice(words, TOO_MUCH_WORK_WORDS), data: { code: 'too-much-work' } })
+        expect(err.data.reason).toBeUndefined()
         // The start checks read the file's header (ffprobe); no decode or encode started.
         expect(jobs.list.slice(from).filter(j => j.tool === 'ffmpeg')).toEqual([])
       }
@@ -766,9 +768,14 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
    * the new answers' hash.
    *  - R11.3: a saved Lip-sync a character on Fabric (project 2bd03ba8…, an
    *    uploaded face and sound) is taken by the runner while `sound-in` is on.
+   *  - R11.9a (R11.3's stop-gaps 2–3, ruling (e)): a saved Lip-sync a character
+   *    on Kling whose face video and sound are web addresses (project 704abdae…)
+   *    goes to the runner, which refuses it plainly ("Upload the video to Sailor."),
+   *    while `sound-in` is on; no longer the engine.
    */
   const MOVED_SINCE_PIN: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     '84c5a886e7292bc5': { 'every family before R6': '616e955e1256b39d', 'every family and R6, media families off': 'c5b6389438f1d6c6' },
+    '109d3e9f164b88a4': { 'every family before R6': 'c40b4e5ebaca1193', 'every family and R6, media families off': '44cc11f2927044a9' },
   }
   const PROJECTS = fileURLToPath(new URL('../../../user/sailor/projects/', import.meta.url))
   const projectsIt = existsSync(PROJECTS) ? it : it.skip
@@ -842,7 +849,7 @@ describe('fix round 1 (I1): the start pass bounds a source’s frames, never est
     expect(reverseHeld(8, 32, 24)).toBeGreaterThan(caps.heldFrameBytes)
     try {
       await expect(k.engine.startRun({ userId: k.userId, takes: [reversedFrom(clip)], ...START }))
-        .rejects.toMatchObject({ statusCode: 400, message: MEDIA_EFFECT_WORDS.heldTooMuch, data: { reason: RUNNER_NOT_ELIGIBLE } })
+        .rejects.toMatchObject({ statusCode: 400, message: withAdvice(MEDIA_EFFECT_WORDS.heldTooMuch, TOO_MUCH_WORK_WORDS), data: { code: 'too-much-work' } })
       expect(k.ledger.hold).not.toHaveBeenCalled()
       // Had it run, Reverse would have failed at its turn, plainly (the backstop).
       await asHosted(async () => {

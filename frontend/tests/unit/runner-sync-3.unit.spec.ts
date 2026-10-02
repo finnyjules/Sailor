@@ -686,7 +686,7 @@ describe('the engine', () => {
       [{ 'face.mp4': await mp4(5), 'voice.wav': wav(61) }, { 1: lip({ mode: 'loop' }), 2: videoCard() }, SYNC_3_TOO_LONG],
       [{ 'face.mp4': wav(5), 'voice.wav': wav(3) }, { 1: lip(), 2: videoCard() }, SYNC_3_VIDEO_RULE.words.wrongFormat],
       [{ 'face.mp4': await mp4(5), 'voice.wav': wav(3) }, { 1: lip({ mode: 'silence' }), 2: videoCard() }, SYNC_3_SILENCE_REFUSED],
-      [{ 'face.mp4': await mp4(5), 'voice.wav': wav(3) }, { 1: lip(), 2: videoCard() }, 'can’t run on the Sailor runner', ALL_BUT],
+      [{ 'face.mp4': await mp4(5), 'voice.wav': wav(3) }, { 1: lip(), 2: videoCard() }, 'is switched off right now', ALL_BUT],
     ]
     for (const [entries, take, message, families] of cases) {
       const k = await kitWith(entries, { families })

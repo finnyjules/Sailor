@@ -61,7 +61,7 @@ import { MEDIA_EFFECTS_PORTED, MEDIA_EFFECT_WORDS, mediaEffectRows, mediaEffectS
 import { PICTURE_OUTPUTS, SOUND_OUTPUTS } from '#shared/runner/eligibility'
 import { RUNNER_OUTPUT_CLASSES, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { TOO_MUCH_WORK_WORDS, withAdvice } from '#shared/runner/messages'
 import type { RunnerValue } from '~~/server/runner/types'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
 import { soundInWorker, workerScript } from '~~/server/runner/compositor/worker'
@@ -435,7 +435,9 @@ describe('the start pass', () => {
     }
     expect(runnerTakesWorkflow(q, fam)).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [q], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
-    expect(err).toMatchObject({ statusCode: 400, message: MEDIA_EFFECT_WORDS.soundTooLong, data: { nodeId: 'e', reason: RUNNER_NOT_ELIGIBLE } })
+    // R11.9a (row 23): refused plainly before the hold, never the engine.
+    expect(err).toMatchObject({ statusCode: 400, message: withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS), data: { nodeId: 'e', code: 'too-much-work' } })
+    expect(err.data.reason).toBeUndefined()
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 })

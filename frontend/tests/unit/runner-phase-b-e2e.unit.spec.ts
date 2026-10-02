@@ -1130,9 +1130,10 @@ describe('B10 · each family switched off in turn', () => {
     const res = await startRun([f.prompt])
     expect(res.status).toBe(400)
     const body = (await res.json()) as { statusMessage?: string; data?: unknown }
-    expect(body.statusMessage).toBe('This workflow can’t run on the Sailor runner')
+    // R11.9a (row 25): still declined to the engine until R10, the switched-off node named in plain words.
+    expect(body.statusMessage).toMatch(/is switched off right now\.$/)
     // The stable marker: the browser reads it (as $fetch's FetchError: statusCode + parsed body) and runs on ComfyUI.
-    expect(body.data).toEqual({ reason: 'not-eligible' })
+    expect(body.data).toMatchObject({ reason: 'not-eligible', code: 'switched-off' })
     expect(isRunnerDeclined({ statusCode: res.status, data: body })).toBe(true)
     expect(k.fal.client.submit).not.toHaveBeenCalled()
     expect(k.replicate.client.submit).not.toHaveBeenCalled()

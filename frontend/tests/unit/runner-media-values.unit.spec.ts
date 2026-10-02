@@ -215,8 +215,13 @@ describe('the new kinds on wires', () => {
     expect(runnerTakesWorkflow(v, CARDS)).toBe(true)
   })
 
-  it('a Save image reading a frames slot (directly or through a Gate) leaves the workflow to the engine, and nodesNeedingEngine names it', () => {
-    for (const graph of [{ m: maker(), s: saveImage('m') }, { m: maker(), g: gate('m', true), s: saveImage('g') }, { m: videoMaker(), s: saveImage('m') }] as ApiPrompt[]) {
+  it('a Save image reading a frames slot (directly or through a Gate) saves each frame (R11.9a, row 15); a made video (not frames) into it leaves the workflow to the engine', () => {
+    for (const graph of [{ m: maker(), s: saveImage('m') }, { m: maker(), g: gate('m', true), s: saveImage('g') }] as ApiPrompt[]) {
+      expect(runnerTakesNode(graph, 's', CARDS)).toBe(true)
+      expect(runnerTakesWorkflow(graph, CARDS)).toBe(true)
+      expect(nodesNeedingEngine(graph, { runnerOn: true, families: CARDS, titleOf: id => id })).toEqual([])
+    }
+    for (const graph of [{ m: videoMaker(), s: saveImage('m') }] as ApiPrompt[]) {
       expect(runnerTakesNode(graph, 's', CARDS)).toBe(false)
       expect(runnerTakesWorkflow(graph, CARDS)).toBe(false)
       expect(nodesNeedingEngine(graph, { runnerOn: true, families: CARDS, titleOf: id => id })).toContain('s')

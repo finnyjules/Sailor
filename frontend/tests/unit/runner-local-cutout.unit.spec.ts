@@ -492,8 +492,8 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(outputKind(p, ['n', 1], outputKindsFor(ON_CLIP))).toBe('mask')
     expect(outputKind({ l: LOAD, n: bgNode(c) }, ['n', 0], outputKindsFor(ON_CLIP))).toBe('files')
     expect(isRunnerEligible(p, ON_CLIP)).toBe(true)
-    // A clip's batch into a picture reader is left to the engine (the value kinds).
-    expect(runnerTakesNode({ ...p, s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } } }, 's', ON_CLIP)).toBe(false)
+    // R11.9a (row 15, ruling (q)): Save image saves a clip's frames one file each, as Python saves a batch.
+    expect(runnerTakesNode({ ...p, s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } } }, 's', ON_CLIP)).toBe(true)
     // A video file (not a batch) into it is left to the engine.
     expect(runnerTakesNode({ f: { class_type: 'LoadVideo', inputs: { file: clip } }, n: bgNode(c, ['f', 0]), s: saveFrames(['n', 0]) }, 'n', ON_CLIP)).toBe(false)
     expect(FRAMES_LINK_SOURCES.map(x => x.join(':'))).toContain(`${BG_REMOVE_CLASS}:0`)

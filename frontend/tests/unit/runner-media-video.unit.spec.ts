@@ -31,6 +31,8 @@ import {
 } from '#shared/runner/eligibility'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
+import { stopGapRefusal } from '#shared/runner/stopGaps'
+import { CARD_EXPORT_ADVICE, withAdvice } from '#shared/runner/messages'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
@@ -731,7 +733,6 @@ describe('the family', () => {
 
   it('never makes a working graph fail: what the runner can’t do yet leaves the whole workflow to the engine', () => {
     const left: Record<string, ApiPrompt> = {
-      'frames into Save image': { l: loadVideo('a.mp4'), g: getComp('l'), s: saveImage(['g', 0]) },
       'an Image card into CreateVideo': { i: { class_type: 'Image', inputs: { image: 'a.png', export: false, batch_index: -1 } }, v: createVideo(['i', 0], 24), s: saveVideo('v') },
       'a card with a made video read by a Gate': { l: loadVideo('a.mp4'), g: getComp('l'), v: createVideo(['g', 0], 24), c: videoCard({ source: ['v', 0] }), gt: { class_type: GATE_CLASS, inputs: { data_in: ['c', 0], bypass: true } }, c2: videoCard({ source: ['gt', 0] }) },
       'a wired file name': { t: { class_type: 'PrimitiveString', inputs: { value: 'x' } }, l: { class_type: 'LoadVideo', inputs: { file: ['t', 0] } }, s: saveVideo('l') },
@@ -740,9 +741,16 @@ describe('the family', () => {
     const every = new Set<RunnerFamily>([...ALL_RUNNER_FAMILIES])
     for (const [name, p] of Object.entries(left)) {
       for (const fam of [ON, ON_BOTH, every]) {
-        expect(runnerTakesWorkflow(p, fam), `${name} with ${fam.size} families`).toBe(false)
-        expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }).length, `${name}: named`).toBeGreaterThan(0)
+        // R11.9a: either left to the engine and named, or (rows 15–19) sent to the runner to be refused plainly before the hold.
+        if (runnerTakesWorkflow(p, fam)) expect(stopGapRefusal(p, fam)?.code, `${name} with ${fam.size} families: refused plainly`).toBeTruthy()
+        else expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }).length, `${name}: named`).toBeGreaterThan(0)
       }
+    }
+    // R11.9a (row 15, ruling (q)): a clip's frames into Save image are saved one file per frame, as Python saves a batch.
+    const framesSaved: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), s: saveImage(['g', 0]) }
+    for (const fam of [ON, ON_BOTH, every]) {
+      expect(runnerTakesWorkflow(framesSaved, fam), `frames into Save image with ${fam.size} families`).toBe(true)
+      expect(stopGapRefusal(framesSaved, fam), 'frames into Save image: not refused').toBeNull()
     }
     // R11.8 (ruling (k)): a music node into CreateVideo is taken once its own family is on (its maker bounds its
     // sound, #shared/runner/sourceBounds); with audio-gen off it stays with the engine, as before.
@@ -1202,7 +1210,7 @@ describe('fix round 1 (Important 2): every container a person can upload that Py
     })
   }
 
-  it('a file the build can’t read leaves the whole workflow to the engine (never refused)', async () => {
+  it('a file the build can’t read: R11.9a (row 20) refuses it plainly before the hold, saying what to change, never the engine', async () => {
     await requireMediaTools()
     const dir = mkdtempSync(join(scratch, 'runs-'))
     const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
@@ -1213,12 +1221,15 @@ describe('fix round 1 (Important 2): every container a person can upload that Py
       { c: videoCard({ file: 'odd.mp4' }), g: getComp('c'), v: createVideo(['g', 0], 24), s: saveVideo('v') },
       { c: videoCard({ file: 'odd.mp4' }), s: saveVideo('c') },
     ] as ApiPrompt[]) {
-      await expect(k.engine.startRun({ userId: null, takes: [take], ...START }), Object.keys(take).join(' ')).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+      const err = await k.engine.startRun({ userId: null, takes: [take], ...START }).catch(e => e)
+      expect(err, Object.keys(take).join(' ')).toMatchObject({ statusCode: 400, data: { code: 'video-format' } })
+      expect(err.data.reason).toBeUndefined()
+      expect(err.message).toMatch(/Convert it to an MP4/)
     }
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 
-  it('a Video card export the runner can’t do (ProRes into MP4) leaves the workflow to the engine; one it can do runs', LONG, async () => {
+  it('a Video card export the runner can’t do (ProRes into MP4: the build has no ProRes encoder) is refused plainly (R11.9a, row 20); one it can do runs', LONG, async () => {
     await requireMediaTools()
     const dir = mkdtempSync(join(scratch, 'runs-'))
     const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
@@ -1227,7 +1238,10 @@ describe('fix round 1 (Important 2): every container a person can upload that Py
       { c: videoCard({ file: 'v_prores.mov', export: true }) },
       { l: loadVideo('v_prores.mov'), c: videoCard({ source: ['l', 0], export: true }) },
     ] as ApiPrompt[]) {
-      await expect(k.engine.startRun({ userId: null, takes: [take], ...START })).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+      const err = await k.engine.startRun({ userId: null, takes: [take], ...START }).catch(e => e)
+      expect(err).toMatchObject({ statusCode: 400, data: { code: 'video-format', nodeId: 'c' } })
+      expect(err.data.reason).toBeUndefined()
+      expect(err.message).toBe(withAdvice(VIDEO_NOT_MP4, CARD_EXPORT_ADVICE))
     }
     // Shown only (export off), the ProRes file is handed on as before.
     const shown = await k.engine.startRun({ userId: null, takes: [{ c: videoCard({ file: 'v_prores.mov' }) }], ...START })

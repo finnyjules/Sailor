@@ -303,7 +303,7 @@ describe('on the engine', () => {
   it('off: the runner declines an SVG model (and the ComfyUI path refuses it: runner-only)', async () => {
     const k = kitOn(false, { families: CARDS })
     await expect(k.engine.startRun({ userId: k.userId, takes: [{ 1: gen('recraft-v4-svg'), 2: save(['1', 0]) }], ...START }))
-      .rejects.toThrow('This workflow can’t run on the Sailor runner')
+      .rejects.toMatchObject({ message: '“Generate an image” is switched off right now.', data: { reason: 'not-eligible', code: 'switched-off' } })
     expect(k.replicate.submitted()).toEqual([])
   })
 })

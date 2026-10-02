@@ -405,7 +405,7 @@ describe('fix round 1 (I1): an effect\'s wired size setting is only a bound, nev
 
 // ── Fix round 1 (I2): the named graphs, in the engine ────────────────────────
 
-describe('fix round 1 (I2): a maker\'s bound past a length-capped reader goes to the engine before the hold, nothing charged (hosted)', () => {
+describe('fix round 1 (I2), R11.9a: a maker\'s bound past a length-capped reader is refused plainly before the hold, naming the setting to shorten; nothing charged (hosted)', () => {
   const speech = (chars: number) => ({ class_type: 'GenerateSpeechNode', inputs: { model: 'MiniMax Speech-02 HD', text: 'x'.repeat(chars), voice_id: 'Wise_Woman', emotion: 'auto', speed: 1, volume: 1, pitch: 0, language_boost: 'auto' } })
   const graphs: Record<string, ApiPrompt> = {
     'long speech → Fade → Save audio': {
@@ -435,10 +435,18 @@ describe('fix round 1 (I2): a maker\'s bound past a length-capped reader goes to
       const k = makeKit({ hosted: true, deps: { families: () => EVERY } })
       if (p.l) copyFileSync(clipPath('e_stitch_0.mp4'), join(k.root, 'input', 'a.mp4'))
       const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
-      expect(err?.data?.reason, `${name}: ${err?.message}`).toBe(RUNNER_NOT_ELIGIBLE)
+      // R11.9a: never the engine; plain words naming the text to shorten, with the figure.
+      expect(err?.data?.reason, `${name}: ${err?.message}`).toBeUndefined()
+      expect(err?.data?.code, `${name}: ${err?.message}`).toBe('made-sound-too-long')
       expect(err?.data?.nodeId, `${name}: ${err?.message}`).toBe(at[name])
+      expect(err?.message).toMatch(/^This speech could run past .+, which is the most .+ takes here\. Shorten the text to under [\d,]+ characters\.$/)
       expect(k.ledger.hold).not.toHaveBeenCalled()
       expect(k.replicate.submitted()).toEqual([])
+      // The figure is true: the text shortened to it is no longer refused for its length.
+      const under = Number(/under ([\d,]+) characters/.exec(err.message)![1]!.replaceAll(',', ''))
+      const shorter = { ...p, sp: speech(under) }
+      const again = await k.engine.quoteRun({ userId: k.userId, takes: [shorter], ...START }).catch(e => e)
+      expect(again?.data?.code, `${name} at ${under}: ${again?.message}`).not.toBe('made-sound-too-long')
     }, 60_000)
   }
 })

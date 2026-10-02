@@ -75,7 +75,7 @@ import { PICTURE_OUTPUTS } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { LUT_OUTSIDE_WORDS } from '#shared/runner/messages'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { decodeFrames } from '~~/server/media/decode'
 import { framesOf } from '~~/server/media/values'
@@ -524,8 +524,10 @@ describe('the LUT’s file (rule 8, ruling (p), the matching rule)', () => {
     // Nothing ran for either: no run was made, and no tool is left (the source's header probes are all that start).
     expect(readdirSync(dir).filter(n => n.endsWith('.json'))).toEqual([])
     for (const pid of PROCS.pids.slice(before)) expect(() => process.kill(pid, 0), `pid ${pid}`).toThrow()
-    // Locally, a name outside the folders goes to the engine (Python opens it there).
-    await expect(k.engine.startRun({ userId: null, takes: [lutTake('../grade.cube')], ...START })).rejects.toMatchObject({ data: { reason: RUNNER_NOT_ELIGIBLE } })
+    // Locally, a name outside the folders is refused plainly (R11.9a, row 21), saying what to change; never the engine.
+    const outside = await k.engine.startRun({ userId: null, takes: [lutTake('../grade.cube')], ...START }).catch(e => e)
+    expect(outside).toMatchObject({ message: LUT_OUTSIDE_WORDS, data: { code: 'lut' } })
+    expect(outside.data.reason).toBeUndefined()
     const { runId } = await k.engine.startRun({ userId: null, takes: [lutTake('warm.cube')], ...START })
     await k.engine.settled(runId)
     const t = (await k.store.get(runId))!.takes[0]!

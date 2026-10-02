@@ -33,6 +33,7 @@ import {
   isRunnerEligible, outputKindsFor, runnerRuleFor, runnerTakesNode, valueWiresAllowed,
 } from '#shared/runner/eligibility'
 import { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
+import { stopGapRefusal } from '#shared/runner/stopGaps'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { AUDIO_GEN_CLASSES } from '#shared/runner/audioGen'
 import { MEDIA_WORDS } from '#shared/runner/media'
@@ -576,7 +577,11 @@ describe('the family', () => {
       'a card with an unknown format': { c: { ...card({ audio: 'a.wav' }), inputs: { ...card({ audio: 'a.wav' }).inputs, format: 'wav' } } },
       'Save audio (Opus), not ported': { l: loadAudio('a.wav'), o: { class_type: 'SaveAudioOpus', inputs: { audio: ['l', 0], filename_prefix: 'audio/ComfyUI', quality: '128k' } } },
     }
-    for (const [name, p] of Object.entries(refused)) expect(runnerTakesWorkflow(p, ON), name).toBe(false)
+    // R11.9a (row 17): a wired setting is sent to the runner, to be refused plainly before the hold.
+    for (const [name, p] of Object.entries(refused)) {
+      if (name === 'a wired file name') expect(stopGapRefusal(p, ON)?.code, name).toBe('wired-setting')
+      else expect(runnerTakesWorkflow(p, ON), name).toBe(false)
+    }
     // An MP3 quality ComfyUI's validation refuses: the runner refuses the prompt with ComfyUI's own error, as ComfyUI would.
     const badQuality: ApiPrompt = { l: loadAudio('a.wav'), m: saveMp3('l', '192k') }
     expect(runnerTakesWorkflow(badQuality, ON)).toBe(true)

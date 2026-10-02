@@ -555,8 +555,9 @@ describe('R1.7 · with `cards` off, every workflow above is refused as before st
     const res = await startRun([f.prompt])
     expect(res.status).toBe(400)
     const body = (await res.json()) as { statusMessage?: string; data?: unknown }
-    expect(body.statusMessage).toBe('This workflow can’t run on the Sailor runner')
-    expect(body.data).toEqual({ reason: 'not-eligible' })
+    // R11.9a (row 25): still declined to the engine until R10, with a reason code and plain words naming the node.
+    expect(body.statusMessage).toMatch(/is switched off right now\.$/)
+    expect(body.data).toMatchObject({ reason: 'not-eligible', code: 'switched-off' })
     expect(isRunnerDeclined({ statusCode: res.status, data: body })).toBe(true)
     expect(k.fal.client.submit).not.toHaveBeenCalled()
     expect(k.replicate.client.submit).not.toHaveBeenCalled()

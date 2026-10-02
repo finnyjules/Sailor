@@ -53,9 +53,10 @@ import {
 } from '#shared/runner/eligibility'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
+import { stopGapRefusal } from '#shared/runner/stopGaps'
+import { VIDEO_FORMAT_ADVICE, withAdvice } from '#shared/runner/messages'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { pixelsCore } from '~~/server/runner/pixels/core'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
 import { createEngineResultStore, type ResultStore } from '~~/server/runner/results'
@@ -615,7 +616,6 @@ describe('the rows', () => {
 
   it('never makes a working graph fail: what the runner can’t do leaves the whole workflow to the engine', () => {
     const left: Record<string, ApiPrompt> = {
-      'frames into Save image': { l: loadFrames('a.mp4'), s: saveImage(['l', 0]) },
       'an Image card into Save video frames': { i: { class_type: 'Image', inputs: { image: 'a.png', export: false, batch_index: -1 } }, s: saveFrames(['i', 0]) },
       'a wired file name': { t: { class_type: 'PrimitiveString', inputs: { value: 'x' } }, l: loadFrames(['t', 0]), s: saveFrames(['l', 0]) },
       'a wired size': { t: { class_type: 'PrimitiveInt', inputs: { value: 64 } }, l: { class_type: 'LoadVideoFrames', inputs: { ...loadFrames('a.mp4').inputs, max_size: ['t', 0] } }, s: saveFrames(['l', 0]) },
@@ -624,9 +624,16 @@ describe('the rows', () => {
     const every = new Set<RunnerFamily>([...ALL_RUNNER_FAMILIES])
     for (const [name, p] of Object.entries(left)) {
       for (const fam of [ON, ON_BOTH, every]) {
-        expect(runnerTakesWorkflow(p, fam), `${name} with ${fam.size} families`).toBe(false)
-        expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }).length, `${name}: named`).toBeGreaterThan(0)
+        // R11.9a: either left to the engine and named, or (rows 15–19) sent to the runner to be refused plainly before the hold.
+        if (runnerTakesWorkflow(p, fam)) expect(stopGapRefusal(p, fam)?.code, `${name} with ${fam.size} families: refused plainly`).toBeTruthy()
+        else expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }).length, `${name}: named`).toBeGreaterThan(0)
       }
+    }
+    // R11.9a (row 15, ruling (q)): a clip's frames into Save image are saved one file per frame, as Python saves a batch.
+    const framesSaved: ApiPrompt = { l: loadFrames('a.mp4'), s: saveImage(['l', 0]) }
+    for (const fam of [ON, ON_BOTH, every]) {
+      expect(runnerTakesWorkflow(framesSaved, fam), `frames into Save image with ${fam.size} families`).toBe(true)
+      expect(stopGapRefusal(framesSaved, fam), 'frames into Save image: not refused').toBeNull()
     }
     // Frames wired into a Frame's layer: the Frame is not taken (its picture inputs take pictures only).
     const frame: ApiPrompt = { l: loadFrames('a.mp4'), f: { class_type: 'Compositor', inputs: { layer1: ['l', 0] } } }
@@ -796,14 +803,17 @@ describe('the engine', () => {
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 
-  it('a file the build can’t read (a video, or the sound to add) leaves the whole workflow to the engine, never refused', LONG, async () => {
+  it('a file the build can’t read (a video, or the sound to add): R11.9a (row 20) refuses it plainly before the hold, saying what to change, never the engine', LONG, async () => {
     await requireMediaTools()
     const k = framesKit()
     for (const p of [
       { l: loadFrames('mystery.mp4'), s: saveFrames(['l', 0]) },
       { l: loadFrames('g_frames_big.mp4'), s: saveFrames(['l', 0], { audio: 'mystery.wav' }) },
     ] as ApiPrompt[]) {
-      await expect(k.engine.startRun({ userId: null, takes: [p], ...START }), JSON.stringify(p)).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+      const err = await k.engine.startRun({ userId: null, takes: [p], ...START }).catch(e => e)
+      expect(err, JSON.stringify(p)).toMatchObject({ statusCode: 400, data: { code: 'video-format' } })
+      expect(err.data.reason, JSON.stringify(p)).toBeUndefined()
+      expect(err.message).toBe(withAdvice(MEDIA_WORDS.unreadable, VIDEO_FORMAT_ADVICE))
     }
     expect(k.ledger.hold).not.toHaveBeenCalled()
     // The checks on their own: the unknown sound leaves to the engine; a missing one or a broken one is Python's skip.

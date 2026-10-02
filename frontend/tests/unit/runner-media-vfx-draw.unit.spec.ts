@@ -75,7 +75,7 @@ import { PICTURE_OUTPUTS } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { SOUND_RATE_ADVICE, withAdvice } from '#shared/runner/messages'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { decodeAudio, decodeFrames } from '~~/server/media/decode'
 import { probeMedia, pyFrameCount, pyFrameRate } from '~~/server/media/probe'
@@ -85,7 +85,7 @@ import { LOCAL_LIVE_PREVIEW_SUBFOLDER } from '~~/server/runner/results'
 import { workerScript } from '~~/server/runner/compositor/worker'
 import { videoCores } from '~~/server/runner/video/cores'
 import { VIDEO_EFFECTS, mediaEffectParams } from '~~/server/runner/video/table'
-import { mediaEffectStartProblems, waveformStartProblems } from '~~/server/runner/video/start'
+import { WAVE_SOUND_OUTSIDE_WORDS, mediaEffectStartProblems, waveformStartProblems } from '~~/server/runner/video/start'
 import { WAVE_MAX_RATE, waveSamplesPerFrame } from '~~/server/runner/video/waveSound'
 import { NOT_YOURS, assertFilesOwned, collectInputFiles, unsafeWaveformNames } from '~~/server/runner/inputs'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
@@ -403,8 +403,8 @@ describe('the family', () => {
         expect(runnerTakesWorkflow(p, fam)).toBe(false)
         expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id })).toContain('e')
       }
-      // Its frames into a picture node leave the workflow to the engine (ruling (k)).
-      expect(runnerTakesWorkflow({ e: made(c.class_type, c.widgets), p: { class_type: 'PreviewImage', inputs: { images: ['e', 0] } } }, ON)).toBe(false)
+      // Its frames into Preview image: saved one file per frame, as Python saves a batch (R11.9a, row 15, ruling (q)).
+      expect(runnerTakesWorkflow({ e: made(c.class_type, c.widgets), p: { class_type: 'PreviewImage', inputs: { images: ['e', 0] } } }, ON)).toBe(true)
     }
   })
 
@@ -476,7 +476,8 @@ describe('the sound’s file: judged by name and owner, left to the engine where
     expect(rate).toBeGreaterThan(WAVE_MAX_RATE)
     const io = mediaIo(h, vfxRunId(++runs))
     for (const name of ['a_mono.mp3', 'a_s16.wav', 'gone.wav', 'junk.wav', '(no audio found)']) expect(await waveformStartProblems(take(name), ON, io), name).toBeNull()
-    expect(await waveformStartProblems(take('fast.wav'), ON, io)).toEqual({ message: MEDIA_EFFECT_WORDS.waveSoundTooBig, nodeId: 'e', classType: 'AudioWaveform', engine: true })
+    // R11.9a (row 21): refused plainly at the start, saying what to change.
+    expect(await waveformStartProblems(take('fast.wav'), ON, io)).toEqual({ message: withAdvice(MEDIA_EFFECT_WORDS.waveSoundTooBig, SOUND_RATE_ADVICE), nodeId: 'e', classType: 'AudioWaveform', engine: true, code: 'sound-rate' })
     expect(await waveformStartProblems(take('../x.wav'), ON, io)).toMatchObject({ nodeId: 'e', engine: true })
     expect(await waveformStartProblems(take('fast.wav'), OFF, io)).toBeNull()
     // A file that won't read draws silence at the node's turn, as Python's does.
@@ -486,7 +487,7 @@ describe('the sound’s file: judged by name and owner, left to the engine where
     expect(sha256(await batchBytes(h, runId, got.values[0] as Extract<RunnerValue, { kind: 'frames' }>))).toBe(silent.out!.round8_sha256)
   })
 
-  it('in the engine, hosted: `../x.wav` is refused by its name alone before any hold; locally it goes to the engine', LONG, async () => {
+  it('in the engine, hosted: `../x.wav` is refused by its name alone before any hold; locally refused plainly too (R11.9a, row 21)', LONG, async () => {
     await requireMediaTools()
     const asked: string[] = []
     const k = makeKit({ hosted: true, dir: mkdtempSync(join(scratch, 'runs-')), deps: { families: () => ON, ownership: { ownsInput: async (_u, f) => { asked.push(f.filename); return true }, ownsOutput: async () => true } } })
@@ -498,7 +499,9 @@ describe('the sound’s file: judged by name and owner, left to the engine where
     expect(asked.filter(n => n.includes('x.wav'))).toEqual([])
     expect(k.ledger.hold.mock.calls.length).toBe(held)
     const local = makeKit({ dir: mkdtempSync(join(scratch, 'runs-')), deps: { families: () => ON } })
-    await expect(local.engine.startRun({ userId: null, takes: [take('../x.wav')], ...START })).rejects.toMatchObject({ data: { reason: RUNNER_NOT_ELIGIBLE } })
+    const localErr = await local.engine.startRun({ userId: null, takes: [take('../x.wav')], ...START }).catch(e => e)
+    expect(localErr).toMatchObject({ message: WAVE_SOUND_OUTSIDE_WORDS, data: { code: 'sound-rate', nodeId: 'e' } })
+    expect(localErr.data.reason).toBeUndefined()
   })
 })
 

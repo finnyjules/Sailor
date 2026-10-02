@@ -14,6 +14,7 @@
  * LipSyncNode.execute makes (scripts/runner_lipsync_engines_fixtures.py →
  * fixtures/runner-lipsync-engines.json). Nothing reaches a provider.
  */
+import { stopGapRefusal } from '#shared/runner/stopGaps'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -34,7 +35,7 @@ import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import {
   FABRIC_LIPSYNC_NEEDS_FACE, FABRIC_LIPSYNC_SLUG, KLING_LIPSYNC_NEEDS_VIDEO, KLING_LIPSYNC_SLUG, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, pythonWavBytesBound,
-  LIPSYNC_ENGINE_TOO_LONG, LIPSYNC_NEEDS_SOUND, fabricLipSyncResolution, lipSyncRunEngine,
+  LIPSYNC_ENGINE_TOO_LONG, LIPSYNC_NEEDS_SOUND, LIPSYNC_SILENCE_NEEDS_UPLOAD, LIPSYNC_UPLOAD_FACE, LIPSYNC_UPLOAD_SOUND, LIPSYNC_UPLOAD_VIDEO, fabricLipSyncResolution, lipSyncRunEngine,
 } from '#shared/runner/lipSyncEngines'
 import { LIPSYNC_SILENCE_TOO_LONG, RVC_MODELS, RVC_PITCH_ALGORITHMS, RVC_PITCH_CHANGES, RVC_PRESET_VOICES } from '#shared/runner/soundIn'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
@@ -215,6 +216,13 @@ describe('what the runner takes', () => {
     p.img = { class_type: 'Image', inputs: { image: 'face.png' } }
     p.n!.inputs!.image = ['img', 0]
     expect(runnerTakesNode(p, 'n', ON)).toBe(false)
+    // R11.9a (R11.3's stop-gaps 1–3): the runner refuses these plainly instead, before the hold.
+    expect(stopGapRefusal(node(fabricOpts({ audio: 'https://example.com/v.mp3' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_SOUND })
+    expect(stopGapRefusal(node(fabricOpts({ face_image: 'data:image/png;base64,AA' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_FACE })
+    expect(stopGapRefusal(node(klingOpts({ face_video: 'https://example.com/f.mp4' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_VIDEO })
+    expect(stopGapRefusal(node(klingOpts({ audio: 'http://example.com/v.mp3' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_SOUND })
+    // A wired face picture still stays with the engine (not a plain refusal: R11.3's stop-gap 4, a port).
+    expect(stopGapRefusal(p, ON)).toBeNull()
     // An https face (Fabric) and an https sound (Kling) are sent as typed: taken.
     expect(runnerTakesNode(node(fabricOpts({ face_image: 'https://example.com/f.png' })), 'n', ON)).toBe(true)
     expect(runnerTakesNode(node(klingOpts({ audio: 'https://example.com/v.mp3' })), 'n', ON)).toBe(true)
@@ -244,7 +252,9 @@ describe('what the runner takes', () => {
       v: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'v', source: ['n', 0] } },
     })
     expect(runnerTakesWorkflow(sync('/view?filename=face.mp4&type=input'), ON)).toBe(true)
-    expect(runnerTakesWorkflow(sync('https://example.com/face.mp4'), ON)).toBe(false)
+    // R11.9a (R11.3's stop-gap 6): sent to the runner, refused plainly before the hold.
+    expect(runnerTakesWorkflow(sync('https://example.com/face.mp4'), ON)).toBe(true)
+    expect(stopGapRefusal(sync('https://example.com/face.mp4'), ON)).toMatchObject({ nodeId: 'n', code: 'not-a-file', message: LIPSYNC_SILENCE_NEEDS_UPLOAD })
     expect(runnerTakesWorkflow(sync('https://example.com/face.mp4', 'cut_off'), ON)).toBe(true)
     expect(runnerTakesWorkflow(sync('/view?filename=face.mp4&type=input'), new Set<RunnerFamily>(['cards', 'media-sound']))).toBe(false)
   })

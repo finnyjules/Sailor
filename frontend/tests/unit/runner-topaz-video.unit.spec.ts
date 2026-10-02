@@ -635,7 +635,7 @@ describe('the engine', () => {
       [{ 'clip.mp4': wav(3) }, { 1: enhance(), 2: videoCard() }, TOPAZ_VIDEO_RULE.words.wrongFormat],
       [{ 'clip.mp4': await mp4(1) }, { 1: enhance({ video_url: 'https://example.com/a.mp4' }), 2: videoCard() }, TOPAZ_VIDEO_NOT_A_FILE],
       [{ 'clip.mp4': await mp4(1, 320, 180, 10) }, { 1: enhance({ target_resolution: '4k' }), 2: videoCard() }, 'at most 4 times larger'],
-      [{ 'clip.mp4': await mp4(1) }, { 1: enhance(), 2: videoCard() }, 'can’t run on the Sailor runner', ALL_BUT],
+      [{ 'clip.mp4': await mp4(1) }, { 1: enhance(), 2: videoCard() }, 'is switched off right now', ALL_BUT],
     ]
     for (const [entries, take, message, families] of cases) {
       const { k } = kitWith(entries, { families })

@@ -614,8 +614,9 @@ describe('the family', () => {
         expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id })).toContain('e')
       }
     }
-    // Its frames into a picture node, or a still picture into Caption track, leave the workflow to the engine (ruling (k)).
-    expect(runnerTakesWorkflow({ e: made('TextClip', TEXTS[0]!.widgets), p: { class_type: 'PreviewImage', inputs: { images: ['e', 0] } } }, ON)).toBe(false)
+    // Its frames into Preview image are saved one file per frame (R11.9a, row 15, ruling (q)); a still picture into
+    // Caption track leaves the workflow to the engine (ruling (k)).
+    expect(runnerTakesWorkflow({ e: made('TextClip', TEXTS[0]!.widgets), p: { class_type: 'PreviewImage', inputs: { images: ['e', 0] } } }, ON)).toBe(true)
     expect(runnerTakesWorkflow({ i: { class_type: 'LoadImage', inputs: { image: 'a.png' } }, e: captioned(CAPS[0]!.widgets, 'i'), c: createVideo('e'), s: saveVideo('c') }, ON)).toBe(false)
   })
 

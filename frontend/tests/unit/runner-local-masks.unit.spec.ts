@@ -134,11 +134,19 @@ describe('the clicks (#shared/runner/samInput parseMaskPoints): exactly what Pyt
         expect(r, c.name).toEqual({ ok: false, why: c.widgets.points.includes('NaN') ? 'unreadable' : 'fails' })
         continue
       }
-      if (c.sent_labels!.some(l => l !== 0 && l !== 1)) {
+      // R11.9a (row 16): −1 (padding) is dropped; 2 and 3 are a box's corners, paired in order; any other label,
+      // a corner with no partner, or nothing left to send is refused (SAM_MASK_WORDS.pointsFail at the start).
+      const labels = c.sent_labels!
+      const pts = c.sent_coords!.map(([x, y], i) => ({ x: x!, y: y!, l: labels[i]! }))
+      const starts = pts.filter(p => p.l === 2)
+      const ends = pts.filter(p => p.l === 3)
+      const kept = pts.filter(p => p.l === 0 || p.l === 1).map(p => ({ x: p.x, y: p.y, label: p.l }))
+      if (labels.some(l => ![-1, 0, 1, 2, 3].includes(l)) || starts.length !== ends.length || (!kept.length && !starts.length)) {
         expect(r, c.name).toEqual({ ok: false, why: 'label' })
         continue
       }
-      expect(r, c.name).toEqual({ ok: true, points: c.sent_coords!.map(([x, y], i) => ({ x, y, label: c.sent_labels![i] })) })
+      const boxes = starts.map((a, i) => ({ xMin: Math.min(a.x, ends[i]!.x), yMin: Math.min(a.y, ends[i]!.y), xMax: Math.max(a.x, ends[i]!.x), yMax: Math.max(a.y, ends[i]!.y) }))
+      expect(r, c.name).toEqual({ ok: true, points: kept, boxes })
       expect(c.sent_size).toEqual([W, H])
     }
   })
@@ -850,8 +858,8 @@ describe('Subject mask on a clip: one call per frame, in Sailor', () => {
     expect(outputKind(p, ['m', 0], outputKindsFor(ON_SUBJECT_CLIP))).toBe('mask')
     expect(outputKind({ l: LOAD, m: subjectNode() }, ['m', 1], outputKindsFor(ON_SUBJECT_CLIP))).toBe('files')
     expect(isRunnerEligible(p, ON_SUBJECT_CLIP)).toBe(true)
-    // A clip's cutout into a picture reader is left to the engine (the value kinds), as R7.1's.
-    expect(runnerTakesNode({ ...p, s: save(['m', 1]) }, 's', ON_SUBJECT_CLIP)).toBe(false)
+    // R11.9a (row 15, ruling (q)): Save image saves a clip's frames one file each, as Python saves a batch.
+    expect(runnerTakesNode({ ...p, s: save(['m', 1]) }, 's', ON_SUBJECT_CLIP)).toBe(true)
     expect(FRAMES_LINK_SOURCES.map(x => x.join(':'))).toContain(`${SUBJECT_MASK_CLASS}:1`)
     expect(KEPT_MEDIA_MAKERS.has(SUBJECT_MASK_CLASS)).toBe(true)
     expect(batchSlotOf(SUBJECT_MASK_CLASS)).toBe(1)

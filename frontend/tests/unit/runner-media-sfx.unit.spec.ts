@@ -75,7 +75,7 @@ import { PICTURE_OUTPUTS, RUNNER_NODE_RULES, SOUND_OUTPUTS } from '#shared/runne
 import { RUNNER_OUTPUT_CLASSES, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { TOO_MUCH_WORK_WORDS, withAdvice } from '#shared/runner/messages'
 import type { RunnerValue } from '~~/server/runner/types'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
 import { workerScript } from '~~/server/runner/compositor/worker'
@@ -453,8 +453,8 @@ describe('the family', () => {
     }
     // A sound from a node the runner doesn't take (a music node with audio-gen off) leaves it to the engine.
     expect(runnerTakesWorkflow({ g: music(), e: fade('g'), s: saveAudio('e') }, ON)).toBe(false)
-    // Silence cut's frames into a picture node leave the workflow to the engine (ruling (k)).
-    expect(runnerTakesWorkflow({ l: loader(), v: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }, g: { class_type: 'GetVideoComponents', inputs: { video: ['v', 0] } }, e: { class_type: 'VideoSilenceCut', inputs: { frames: ['g', 0], audio: ['g', 1], fps: 30, threshold_db: -40, min_silence_ms: 300, keep_padding_ms: 80 } }, p: { class_type: 'PreviewImage', inputs: { images: ['e', 0] } } }, ON)).toBe(false)
+    // Silence cut's frames into Preview image: saved one file per frame, as Python saves a batch (R11.9a, row 15, ruling (q)).
+    expect(runnerTakesWorkflow({ l: loader(), v: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }, g: { class_type: 'GetVideoComponents', inputs: { video: ['v', 0] } }, e: { class_type: 'VideoSilenceCut', inputs: { frames: ['g', 0], audio: ['g', 1], fps: 30, threshold_db: -40, min_silence_ms: 300, keep_padding_ms: 80 } }, p: { class_type: 'PreviewImage', inputs: { images: ['e', 0] } } }, ON)).toBe(true)
   })
 
   it('rule 12 over the synthetic graphs: with the family off, or on with its media family off, every answer is the pinned one', () => {
@@ -508,7 +508,9 @@ describe('the start pass: every sound bounded before the run', () => {
     const p: ApiPrompt = { e: { class_type: 'EmptyAudio', inputs: { duration: 700, sample_rate: 48000, channels: 2 } }, s: saveAudio('e') }
     expect(runnerTakesWorkflow(p, ON)).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [p], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
-    expect(err).toMatchObject({ statusCode: 400, message: MEDIA_EFFECT_WORDS.soundTooLong, data: { nodeId: 'e', reason: RUNNER_NOT_ELIGIBLE } })
+    // R11.9a (row 23): refused plainly before the hold, never the engine.
+    expect(err).toMatchObject({ statusCode: 400, message: withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS), data: { nodeId: 'e', code: 'too-much-work' } })
+    expect(err.data.reason).toBeUndefined()
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 })

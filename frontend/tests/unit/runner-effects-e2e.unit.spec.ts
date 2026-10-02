@@ -444,7 +444,8 @@ describe('R2.12 · each effects workflow, POST /api/runs to the last event (host
     const res = await startRun([grainFlowPrompt()])
     expect(res.status).toBe(400)
     const body = (await res.json()) as { statusMessage?: string; data?: unknown }
-    expect(body.data).toEqual({ reason: 'not-eligible' })
+    // R11.9a (row 25): declined with a reason code naming the switched-off node.
+    expect(body.data).toEqual({ reason: 'not-eligible', code: 'switched-off', nodeId: 'edit', classType: 'EditImageNode' })
     expect(isRunnerDeclined({ statusCode: res.status, data: body })).toBe(true)
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })

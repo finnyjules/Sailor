@@ -34,7 +34,7 @@ import {
 } from '#shared/runner/localModels'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { WIZPER_APP } from '#shared/runner/soundIn'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { RUNNER_NOT_ELIGIBLE, TOO_MUCH_WORK_WORDS, withAdvice } from '#shared/runner/messages'
 import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
@@ -431,8 +431,9 @@ describe('fix round 1 · Finding 2: a sound made in the run is bounded before th
     }
     expect(isRunnerEligible(p, FX_ON)).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).then(() => null, (e: Error) => e)
-    // 40 minutes held at once by the effects is past R6's hosted limit for them (R6.9: that leaves the workflow).
-    expect(err?.message).toBe(MEDIA_EFFECT_WORDS.soundTooLong)
+    // 40 minutes held at once by the effects is past R6's hosted limit for them: R11.9a refuses it plainly (row 23).
+    expect(err?.message).toBe(withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS))
+    expect((err as { data?: { code?: string } } | null)?.data?.code).toBe('too-much-work')
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(fal.submitted()).toEqual([])
   }, 120_000)

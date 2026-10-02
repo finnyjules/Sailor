@@ -552,7 +552,8 @@ describe('R3.18 · each paid workflow, POST /api/runs to the last event (hosted,
     const res = await startRun([splitFramePrompt()])
     expect(res.status).toBe(400)
     const body = (await res.json()) as { data?: unknown }
-    expect(body.data).toEqual({ reason: 'not-eligible' })
+    // R11.9a (row 25): declined with a reason code naming the switched-off node.
+    expect(body.data).toMatchObject({ reason: 'not-eligible', code: 'switched-off' })
     expect(isRunnerDeclined({ statusCode: res.status, data: body })).toBe(true)
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.sent).toEqual([])

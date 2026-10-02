@@ -299,7 +299,7 @@ describe('eligibility (shader-bake and cards on)', () => {
     expect(reasons).toEqual([SHADER_NEEDS_PICTURE_FIRST])
     expect(SHADER_NEEDS_PICTURE_FIRST).toBe('This shader needs its picture before the run. Put the picture in an Image card first.')
     expect(needsEngineDescription(['Shader effect'], reasons)).toBe(`Only the engine can run “Shader effect”. ${SHADER_NEEDS_PICTURE_FIRST}`)
-    // With the family off, no reason: nothing of the runner's is said about it.
+    // With the family off, no reason: nothing of the runner's is said about it (it isn't taken with every family on either).
     expect(needsEngineReasons(p, { runnerOn: true, families: new Set(['cards']) })).toEqual([])
     expect(needsEngineReasons(p, { runnerOn: false, families: SHADER })).toEqual([])
     // An Image card holding no picture is not a picture made in the run: no reason (the engine gives Python's own).
@@ -334,7 +334,8 @@ describe('with shader-bake off, a Shader effect is exactly an unknown class (as 
       const families = new Set(fam)
       const titleOf = (id: string) => id
       expect(nodesNeedingEngine(p, { runnerOn: true, families, titleOf }), `${label}, ${name}`).toEqual(nodesNeedingEngine(old, { runnerOn: true, families, titleOf }))
-      expect(needsEngineReasons(p, { runnerOn: true, families }), `${label}, ${name}`).toEqual([])
+      // R11.9a (row 25): the only reasons with the family off are switched-off words.
+      for (const why of needsEngineReasons(p, { runnerOn: true, families })) expect(why, `${label}, ${name}`).toMatch(/is switched off right now\.$/)
       expect(runnerTakesWorkflow(p, families), `${label}, ${name}`).toBe(runnerTakesWorkflow(old, families))
       expect(isRunnerEligible(p, families), `${label}, ${name}`).toBe(isRunnerEligible(old, families))
     }
