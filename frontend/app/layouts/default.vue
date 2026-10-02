@@ -68,7 +68,7 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { workflowNodeTitles, blockedRunRefusal, engineRoute, engineRunPrompt, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
+import { workflowNodeTitles, blockedRunRefusal, engineRoute, engineRunPrompt, leftOutNotice, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
 import { outputClassesOf } from '#shared/runner/validate'
 import { bakeShaderEffectsForRun, stopShaderBakes } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
@@ -966,6 +966,11 @@ async function runVueWorkflow(
             started => { for (const promptId of started.promptIds) registerResult({ prompt_id: promptId, worker: RUNNER_WORKER }) },
           )
           sentToRunner = true
+          // Fix round 3 (M-2): what the pruned run left out is named, as ComfyUI's node errors named it.
+          const leftOut = runnerPrompts === pruned
+            ? leftOutNotice([firstTake, ...extraTakes].map((tk, i) => ({ prompt: asBuilt[i], pruned: pruned[i], titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })))
+            : null
+          if (leftOut) toast.warning(leftOut.title, { description: leftOut.description })
         }
         catch (err) {
           // 404 (runner off) or a not-eligible 400 (a family off, a class the runner doesn't run): R10.2's

@@ -21,7 +21,7 @@ import { RETIRED_CLASSES } from '#shared/runner/retired'
 import { LOCAL_ONLY_CLASSES, NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_SHADER_CASES, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from '#shared/runner/localOnly'
 import { NOT_TAKEN_NODE_WORDS, switchedOffWords } from '#shared/runner/messages'
 import { SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST, shaderBakedText } from '#shared/runner/shaderBakeKey'
-import { RUNNER_OFF_WORDS, WORKFLOW_CANT_RUN_WORDS, engineRoute, engineRunPrompt, localOnlyHostedWords, needsEngineDescription, type EngineRoute } from '~/lib/runner/needsEngine'
+import { CUSTOM_NODE_WORDS, RUNNER_OFF_WORDS, WORKFLOW_CANT_RUN_WORDS, engineRoute, engineRunPrompt, isCustomClass, leftOutNotice, localOnlyHostedWords, needsEngineDescription, type EngineRoute } from '~/lib/runner/needsEngine'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, runnerTakesWorkflow } from '#shared/runner/validate'
 
 const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { output?: string[]; output_node?: boolean; input?: { required?: Record<string, unknown> } }>
@@ -224,16 +224,61 @@ describe('fix round 1 (a): Sailor classes that still need the local engine are n
   })
 })
 
-describe('fix round 1 (b): a class the catalogue doesn’t list is a custom node: local engine locally, words in hosted', () => {
+describe('fix round 3 (I-1): a class the committed catalogue doesn’t hold is a custom node: local engine, named', () => {
   const custom: ApiPrompt = { l: loadImage(), c: { class_type: 'MyCustomUpscaler', inputs: { image: ['l', 0] } } }
-  it('goes to the local engine locally, with the engine up', () => {
-    expect(route(custom)).toEqual({ to: 'engine' })
+  /** The live /object_info with ComfyUI up: it lists every installed custom node. */
+  const LIVE = { ...CATALOG, MyCustomUpscaler: { input: { required: { image: ['IMAGE', {}] } }, output: ['IMAGE'], output_node: true } }
+  const named = { to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['My node']) } }
+
+  it('every class of the committed catalogue is Sailor’s or stock: none counts as custom', () => {
+    for (const ct of Object.keys(CATALOG)) expect(isCustomClass(ct), ct).toBe(false)
+    expect(isCustomClass('MyCustomUpscaler')).toBe(true)
   })
-  it('hosted refuses it, naming it', () => {
-    expect(route(custom, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(['My node']) })
+  it('engine up: it goes there, named, whether the live catalogue lists it (installed) or not', () => {
+    expect(route(custom, { catalog: LIVE })).toEqual(named)
+    expect(route(custom)).toEqual(named)
+    expect(route(custom, { catalog: undefined })).toEqual(named)
   })
-  it('without a catalogue nothing counts as custom', () => {
-    expect(route(custom, { catalog: undefined }).to).toBe('refused')
+  it('engine down (the saved catalogue, or none loaded yet): the needs-the-engine toast naming it', () => {
+    for (const catalog of [CATALOG, {}, undefined]) {
+      expect(route(custom, { engineUp: false, catalog })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['My node']) })
+    }
+  })
+  it('hosted refuses it in plain words, naming it', () => {
+    expect(route(custom, { hosted: true, catalog: LIVE })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“My node”: ${CUSTOM_NODE_WORDS}` })
+  })
+  it('a Sailor class missing from the live catalogue (empty until it loads) is never silent: listed classes keep their toast', () => {
+    for (const catalog of [{}, undefined]) {
+      for (const ct of ['RenderType', 'PreviewVideo', 'KineticType', 'FluxProRemoteNode']) {
+        const p: ApiPrompt = { r: { class_type: ct, inputs: {} }, rs: saveImage(['r', 0]) }
+        expect(route(p, { catalog }), ct).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Poster type']) } })
+      }
+    }
+  })
+})
+
+describe('fix round 3: the review’s minors', () => {
+  it('M-1: an autogrow input (images.image0…) is not a missing wire', () => {
+    const p: ApiPrompt = {
+      a: loadImage(), b: loadImage(),
+      g: { class_type: 'BatchImagesNode', inputs: { 'images.image0': ['a', 0], 'images.image1': ['b', 0] } },
+      s: saveImage(['g', 0]),
+    }
+    expect(engineRunPrompt(p, CATALOG)).toBe(p)
+  })
+  it('M-2: a pruned run names what it left out', () => {
+    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), d: { class_type: 'VAEDecode', inputs: {} }, pa: { class_type: 'PreviewAny', inputs: { source: ['d', 0] } } }
+    const pruned = engineRunPrompt(p, CATALOG)
+    const t = (id: string) => ({ d: 'Decode', pa: 'Show any' } as Record<string, string>)[id] ?? id
+    expect(leftOutNotice([{ prompt: p, pruned, titleOf: t }])).toEqual({ title: 'Some nodes were left out', description: '“Decode” and “Show any” won’t run: something they need isn’t wired in.' })
+    expect(leftOutNotice([{ prompt: p, pruned: p, titleOf: t }])).toBeNull()
+  })
+  it('M-3: an unbaked Shader effect with nothing wrong rides along in a run bound for the local engine', () => {
+    const p: ApiPrompt = { ...kSampler(), ...shader({}) }
+    p.s2 = saveImage(['d', 0])
+    expect(route(p)).toEqual({ to: 'engine' })
+    // Alone it is not sent: nothing else needs the engine.
+    expect(route(shader({})).to).toBe('refused')
   })
 })
 

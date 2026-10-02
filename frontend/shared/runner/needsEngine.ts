@@ -118,7 +118,9 @@ function requiredWires(catalog: NodeCatalog | null | undefined, ct: string): str
   if (!req) return []
   return Object.entries(req).filter(([, spec]) => {
     const t = Array.isArray(spec) ? spec[0] : undefined
-    return typeof t === 'string' && !WIDGET_TYPES.has(t)
+    // Fix round 3 (M-1): the V3 meta-types (autogrow, dynamic combo, match type) arrive under other keys
+    // (`images.image0`…): not counted as a missing wire.
+    return typeof t === 'string' && !WIDGET_TYPES.has(t) && !/^COMFY_.*_V3$/.test(t)
   }).map(([name]) => name)
 }
 
@@ -205,6 +207,24 @@ export function engineRunPrompt(prompt: ApiPrompt, catalog?: NodeCatalog | null)
 }
 
 /**
+ * Fix round 3 (M-2): the toast for nodes a pruned run left out
+ * (engineRunPrompt), by their titles, each once, or null when none was: ComfyUI
+ * used to report them as node errors.
+ */
+export function leftOutNotice(
+  takes: { prompt: ApiPrompt | null | undefined; pruned: ApiPrompt | null | undefined; titleOf: (id: string) => string }[],
+): { title: string; description: string } | null {
+  const titles = new Set<string>()
+  for (const t of takes) {
+    if (!t.prompt || !t.pruned || t.pruned === t.prompt) continue
+    for (const id of Object.keys(t.prompt)) if (!(id in t.pruned)) titles.add(t.titleOf(id))
+  }
+  if (!titles.size) return null
+  const list = [...titles]
+  return { title: 'Some nodes were left out', description: `${quotedList(list)} won’t run: something ${list.length === 1 ? 'it needs' : 'they need'} isn’t wired in.` }
+}
+
+/**
  * R10.2: whether a run the runner won't take (declined, or skipped because the
  * browser already knows it won't) may go to the local engine. Only when:
  *   - this is local, not hosted;
@@ -213,8 +233,8 @@ export function engineRunPrompt(prompt: ApiPrompt, catalog?: NodeCatalog | null)
  *     (engineRunPart: an empty Frame or a Save image with nothing wired in is
  *     dropped, as ComfyUI drops it), is one of:
  *       - decision 4's local-only classes (./localOnly.ts);
- *       - a class the node catalogue doesn't list (a custom node installed
- *         locally; fix round 1 (b)): `catalog`;
+ *       - a class the committed node catalogue doesn't hold (a custom node
+ *         installed locally; fix round 1 (b), round 3: isCustomClass), named;
  *       - a Sailor node that still needs the local engine (fix round 1 (a),
  *         (c): NEEDS_LOCAL_ENGINE, a Shader effect showing one of your own
  *         effects). The run then goes with the local-engine toast naming them.
@@ -239,7 +259,7 @@ export function engineRoute(
     families?: ReadonlySet<RunnerFamily>
     hosted: boolean
     engineUp: boolean
-    /** The node catalogue (/object_info): outputs, required wires, output types; a class it doesn't list goes to the local engine. */
+    /** The live node catalogue (/object_info): outputs, required wires, output types (never which classes are custom: isCustomClass). */
     catalog?: NodeCatalog | null
     /** The runner's words when it declined the run (the server's refusal message). */
     declined?: string | null
@@ -262,19 +282,21 @@ export function engineRoute(
     if (part === 'no-outputs') { noOutputs = true; continue }
     const { run, ids } = blockedNodes(part, families)
     if (!ids.length) continue
-    const toEngine = (id: string) => {
-      const ct = run[id]!.class_type
-      return isLocalOnlyClass(ct) || (!!opts.catalog && !catalogEntry(opts.catalog, ct) && !runnerKnowsClass(ct) && !RETIRED_CLASSES.has(ct))
-    }
+    const toEngine = (id: string) => isLocalOnlyClass(run[id]!.class_type)
     for (const id of ids) if (toEngine(id)) localOnly.add(take.titleOf(id))
     const blocked = new Set(ids)
     const off = new Set(switchedOffNodes(run, families))
     for (const id of ids) {
       if (toEngine(id)) continue
-      if (runnerTakesNode(withStandIns(run, id, blocked, opts.catalog), id, families, lenient)) continue
       const title = take.titleOf(id)
+      // Fix round 3 (I-1): a class Sailor doesn't know (a custom node) goes to the local engine, named.
+      if (isCustomClass(run[id]!.class_type)) { if (!listed.has(title)) listed.set(title, CUSTOM_NODE_WORDS); continue }
+      if (runnerTakesNode(withStandIns(run, id, blocked, opts.catalog), id, families, lenient)) continue
       if (refused.has(title) || listed.has(title)) continue
       const shaderWhy = shaderEngineReason(run, id, families)
+      // Fix round 3 (M-3): a Shader effect the browser didn't bake (it bakes only for a run the runner
+      // takes) with nothing wrong of its own rides along in a run bound for the local engine, as it ran before.
+      if (!shaderWhy && isUnbakedShader(run[id]!)) continue
       const needs = needsLocalEngineWords(run[id]!, shaderWhy, off.has(id))
       if (needs) { listed.set(title, needs); continue }
       refused.set(title, shaderWhy ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS))
@@ -298,6 +320,29 @@ export function engineRoute(
   return listed.size
     ? { to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription([...listed.keys()]) } }
     : { to: 'engine' }
+}
+
+/**
+ * Fix round 3 (I-1): a class the committed node catalogue
+ * (server/native/objectInfo.baseline.json.gz) doesn't hold and Sailor doesn't
+ * know: a custom node installed locally. Judged without the live /object_info
+ * (which lists every installed custom node, and is empty until it loads):
+ * every catalogue class is local-only, runner-known, retired, editor-only or
+ * on NEEDS_LOCAL_ENGINE (held to the catalogue by
+ * tests/unit/runner-no-silent-engine.unit.spec.ts), so a class that is none
+ * of these isn't in it.
+ */
+export function isCustomClass(classType: string): boolean {
+  return !isLocalOnlyClass(classType) && !runnerKnowsClass(classType) && !RETIRED_CLASSES.has(classType)
+    && !isEditorOnlyClass(classType) && !Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, classType)
+}
+
+/** Where a custom node can't go (hosted, or the engine off). */
+export const CUSTOM_NODE_WORDS = 'This node isn’t part of Sailor. It runs only on the local engine, on your own computer.'
+
+/** A Shader effect with no bake on it yet (fix round 3, M-3). */
+function isUnbakedShader(node: ApiNode): boolean {
+  return node.class_type === 'ShaderEffect' && (node.inputs?.sailor_baked === undefined || node.inputs?.sailor_baked === '')
 }
 
 /**
