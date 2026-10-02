@@ -6,7 +6,8 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, rendersLocally, svgReaderProblems } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, outputKindsFor, rendersLocally, svgReaderProblems } from '#shared/runner/eligibility'
+import { outputKind } from '#shared/runner/values'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
@@ -17,10 +18,11 @@ import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiLink, type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
-import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
-import { stopGapRefusal, switchedOffNodes } from '#shared/runner/stopGaps'
+import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, paidVideoSettingsAdvice, withAdvice, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
+import { stopGapRefusal, switchedOffNodes, withStaticWiredSettings } from '#shared/runner/stopGaps'
+import { objectInfoDisplayName } from '../native/objectInfo'
 import { UNNAMED_NODE, workflowNodeTitles } from '#shared/runner/needsEngine'
-import { madeSoundWords, paidVideoSoundRefusal, soundReaderName, startStopGap, type StartProblem } from './stopGapWords'
+import { madeSoundWords, paidVideoAncestor, paidVideoSoundRefusal, soundReaderName, startStopGap, type StartProblem } from './stopGapWords'
 import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
@@ -62,7 +64,8 @@ import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
-import { frameShapes, videoSourceShapeOf } from './video/shapes'
+import { clipAtCaps, frameShapes, videoSourceShapeOf } from './video/shapes'
+import { saveFramesStartProblem } from './cards/saveImage'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
 import { lensStartRefusal } from './cards/lensBlur'
 import { keepStartRefusal } from './compositor/keep'
@@ -80,6 +83,7 @@ import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } 
 import { pythonWavOf, silentCardAt, soundMakerOf, vocalsSoundOf, whisperWavOf, type PythonWav } from './soundWav'
 import { removeSoundPieces } from '../media/split'
 import { cardSilenceFor } from './soundInMedia'
+import { deliveredClipSeconds, httpsHeldBasis } from './lipSyncMedia'
 import { lipsyncUploadProblem } from './soundInMedia'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { switchedSinceHold } from './switches'
@@ -287,6 +291,9 @@ interface LiveRun {
 /** Provider calls one user may have queued or in flight across all their runs. */
 export const MAX_QUEUED_CALLS = 32
 const refuse = (message: string, status: number, data?: unknown) => new MeterRefusalError(message, status, data)
+
+/** A workflow the engine declines (a class Sailor doesn't run yet, R10.2), in plain words (fix round 1, m5: no "runner"). */
+export const WORKFLOW_NOT_TAKEN = 'Sailor can’t run this workflow yet.'
 
 /** R11.9a: the longest sound whose Vocal separator stems stay readable where it runs (vocalsStemsReadable), within the ceiling. */
 function vocalsReadableSeconds(place: 'hosted' | 'local', ceiling: number): number {
@@ -1895,6 +1902,16 @@ export function createEngine(deps: EngineDeps) {
           saved.push(file)
         }
       }
+      // R11.9a fix round 1 (ruling (k)): a lip-sync held at its cap on an https medium is charged on the clip it
+      // delivered, never above the hold (lipSyncMedia.ts httpsHeldBasis); a clip that can't be read charges the hold.
+      const basis = resuming ? null : httpsHeldBasis(take.prompt[id]!.class_type, take.prompt[id]!.inputs ?? {}, inputSeconds)
+      if (basis && inputSeconds && saved[0]) {
+        const delivered = await deliveredClipSeconds(await files.read(saved[0])).catch(() => null)
+        if (delivered != null) {
+          const at = basis === 'audio' ? { ...inputSeconds, audio: delivered, audioUpTo: null } : { ...inputSeconds, video: delivered, videoUpTo: null }
+          rec.credits = Math.min(rec.credits, nodeCredits(take.prompt[id]!, inputPixels, families, at))
+        }
+      }
       rec.outputs = saved
       rec.status = 'done'
       rec.servedBy = providerOf(rec.request!)
@@ -2195,14 +2212,28 @@ export function createEngine(deps: EngineDeps) {
       const t = titleOf(nodeId)
       return t && t !== UNNAMED_NODE ? t : null
     }
+    // Fix round 1 (m5): else its plain class name, else its display name (object_info).
+    const nodeName = (prompt: ApiPrompt, nodeId: string): string | null => {
+      const own = ownTitle(nodeId)
+      if (own) return own
+      const plain = promptNodeTitle(prompt, nodeId)
+      if (plain !== UNNAMED_NODE) return plain
+      const cls = prompt[nodeId]?.class_type
+      return cls ? objectInfoDisplayName(cls) : null
+    }
+    /** Every take's nodes (takes share their node ids): what a refusal's node is named from. */
+    let namingPrompt: ApiPrompt = {}
     const named = (nodeId: string | undefined, words: string) => {
-      const t = ownTitle(nodeId)
+      const t = nodeId === undefined ? null : nodeName(namingPrompt, nodeId)
       return t ? `“${t}”: ${words}` : words
     }
     // R11.9a: a start-pass problem that once left the workflow to the engine, refused plainly (ruling (e)).
     const stopGap = (p: StartProblem) => {
       const r = startStopGap(p)
-      return refuse(named(p.nodeId, r.message), 400, { nodeId: p.nodeId, classType: p.classType, ...(p.file ? { file: p.file } : {}), code: r.code })
+      // Fix round 1 (I1): past a work or batch figure on frames a paid video makes, the advice is that video's own settings.
+      const maker = r.code === 'too-much-work' && p.nodeId !== undefined ? paidVideoAncestor(namingPrompt, p.nodeId) : null
+      const message = maker ? withAdvice(p.message, paidVideoSettingsAdvice(nodeName(namingPrompt, maker) ?? 'Generate a video')) : r.message
+      return refuse(named(p.nodeId, message), 400, { nodeId: p.nodeId, classType: p.classType, ...(p.file ? { file: p.file } : {}), code: r.code })
     }
     // R11.8's stop-gaps: a made sound past a reader's cap names the maker's setting to shorten; a paid video
     // model's sound into a sound effect names the model and the limit; anything else as stopGap.
@@ -2238,44 +2269,48 @@ export function createEngine(deps: EngineDeps) {
     const prompts: ApiPrompt[] = []
     let nodeErrors: Record<string, ComfyNodeError> | undefined
     for (const p of takes) {
-      if (!p || typeof p !== 'object') throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE, code: 'not-taken' satisfies RunnerReasonCode })
+      if (!p || typeof p !== 'object') throw refuse(WORKFLOW_NOT_TAKEN, 400, { reason: RUNNER_NOT_ELIGIBLE, code: 'not-taken' satisfies RunnerReasonCode })
       const pruned = pruneInvalidOutputs(p as ApiPrompt, families)
       // ComfyUI: "Prompt has no outputs" (R3.8 fix round 1) or "Prompt outputs failed
       // validation". No marker: ComfyUI would refuse it too. Nothing is held.
       if (pruned.noOutputs) throw refuse(NO_OUTPUTS_MESSAGE, 400)
       if (pruned.failed) throw refuse(NO_VALID_OUTPUTS_MESSAGE, 400, { node_errors: pruned.nodeErrors })
+      // R11.9a fix round 1 (M1): a setting wired to a card's own value (a Primitive, a Text card) is put in as if
+      // typed: the run is judged, priced and run on that (the node's turn would substitute the same value).
+      const run = withStaticWiredSettings(pruned.prompt, families)
+      namingPrompt = { ...namingPrompt, ...run }
       // R11.4: a model with no price yet (ruling (p)) never runs, and a Recraft SVG model's SVG wired
       // into a node that needs a picture can't be read: both refused now, before anything is priced or
       // held, and with no marker, since ComfyUI can't run either (shared/runner/blockedModels.ts, svgImage.ts).
-      const unpriced = blockedModelUses(pruned.prompt, { families, runnerTakes: true }).filter(u => u.reason === 'unpriced')
+      const unpriced = blockedModelUses(run, { families, runnerTakes: true }).filter(u => u.reason === 'unpriced')
       if (unpriced.length) {
-        const body = blockedModelsResponse(pruned.prompt, unpriced, { families })
+        const body = blockedModelsResponse(run, unpriced, { families })
         throw refuse(body.error.message, 400, { node_errors: body.node_errors })
       }
-      const svgReader = svgReaderProblems(pruned.prompt, families)[0]
+      const svgReader = svgReaderProblems(run, families)[0]
       if (svgReader) throw refuse(svgReader.message, 400, { nodeId: svgReader.nodeId, classType: svgReader.classType })
       const eligibility = { hosted: deps.hosted(), afterPruning: prunedAny(pruned), plainRefusals: true }
-      if (!isRunnerEligible(pruned.prompt, families, eligibility)) {
+      if (!isRunnerEligible(run, families, eligibility)) {
         // R11.9a (row 24): a family switched on whose tools or model aren't installed: refused plainly.
         const missing = deps.uninstalled?.() ?? NO_FAMILIES
-        if (missing.size && isRunnerEligible(pruned.prompt, new Set([...families, ...missing]), eligibility)) {
-          const [nodeId] = switchedOffNodes(pruned.prompt, families, missing)
-          throw refuse(named(nodeId, NOT_INSTALLED_WORDS), 400, { nodeId, classType: nodeId ? pruned.prompt[nodeId]?.class_type : undefined, code: 'not-installed' satisfies RunnerReasonCode })
+        if (missing.size && isRunnerEligible(run, new Set([...families, ...missing]), eligibility)) {
+          const [nodeId] = switchedOffNodes(run, families, missing)
+          throw refuse(named(nodeId, NOT_INSTALLED_WORDS), 400, { nodeId, classType: nodeId ? run[nodeId]?.class_type : undefined, code: 'not-installed' satisfies RunnerReasonCode })
         }
         // Row 25: a family off still goes to the engine until R10, named; anything else the runner doesn't run too.
-        const [off] = switchedOffNodes(pruned.prompt, families)
+        const [off] = switchedOffNodes(run, families)
         if (off !== undefined) {
-          throw refuse(switchedOffWords(ownTitle(off) ?? (() => { const t = promptNodeTitle(pruned.prompt, off); return t === UNNAMED_NODE ? null : t })()), 400, {
-            reason: RUNNER_NOT_ELIGIBLE, code: 'switched-off' satisfies RunnerReasonCode, nodeId: off, classType: pruned.prompt[off]?.class_type,
+          throw refuse(switchedOffWords(nodeName(run, off)), 400, {
+            reason: RUNNER_NOT_ELIGIBLE, code: 'switched-off' satisfies RunnerReasonCode, nodeId: off, classType: run[off]?.class_type,
           })
         }
-        throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE, code: 'not-taken' satisfies RunnerReasonCode })
+        throw refuse(WORKFLOW_NOT_TAKEN, 400, { reason: RUNNER_NOT_ELIGIBLE, code: 'not-taken' satisfies RunnerReasonCode })
       }
       // R11.9a (rows 15–19): what the runner takes only to refuse plainly, before anything is priced or held.
-      const gap = stopGapRefusal(pruned.prompt, families, { hosted: deps.hosted() })
+      const gap = stopGapRefusal(run, families, { hosted: deps.hosted() })
       if (gap) throw refuse(named(gap.nodeId, gap.message), 400, { nodeId: gap.nodeId, classType: gap.classType, code: gap.code })
       if (pruned.dropped.length) nodeErrors ??= pruned.nodeErrors
-      prompts.push(pruned.prompt)
+      prompts.push(run)
     }
     // A discontinued model is refused before anything is priced or held,
     // with the same words as the browser (shared/runner/blockedModels.ts).
@@ -2570,6 +2605,15 @@ export function createEngine(deps: EngineDeps) {
         const pictured = typeof picture === 'number' ? { picturePixels: picture, ...(typeof tiled === 'number' ? { pictureTiles: tiled } : {}) } : {}
         measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized, ...pictured }, sha: was?.sha ?? {} }
       }
+    }
+    // Fix round 1 (I2, ruling (q)): Save image and Preview image saving every frame of a clip, counted against the run's
+    // kept room before the hold (hosted), "too much work for one run here" past it.
+    for (const p of prompts) {
+      if (!Object.values(p).some(n => (n.class_type === 'SaveImage' || n.class_type === 'PreviewImage') && isLink(n.inputs?.images) && outputKind(p, n.inputs.images as ApiLink, outputKindsFor(families)) === 'frames')) continue
+      const caps = deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+      const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
+      const bad = saveFramesStartProblem(p, families, shapes, { hosted: deps.hosted(), clipAtCaps: () => clipAtCaps(caps) })
+      if (bad) throw stopGap(bad)
     }
     // The sound effects' start pass (R6.9, ./video/soundShapes.ts): every sound's rate, channels and length
     // through the chain, from the sources' headers and the widgets. Where Python itself raises on what is known

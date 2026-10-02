@@ -432,7 +432,8 @@ describe('fix round 1 · Finding 2: a sound made in the run is bounded before th
     expect(isRunnerEligible(p, FX_ON)).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).then(() => null, (e: Error) => e)
     // 40 minutes held at once by the effects is past R6's hosted limit for them: R11.9a refuses it plainly (row 23).
-    expect(err?.message).toBe(withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS))
+    // Fix round 1 (m5): an untitled node is named by its display name.
+    expect(err?.message).toBe(`“Audio Concat”: ${withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS)}`)
     expect((err as { data?: { code?: string } } | null)?.data?.code).toBe('too-much-work')
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(fal.submitted()).toEqual([])

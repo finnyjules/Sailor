@@ -813,7 +813,9 @@ describe('the engine', () => {
       const err = await k.engine.startRun({ userId: null, takes: [p], ...START }).catch(e => e)
       expect(err, JSON.stringify(p)).toMatchObject({ statusCode: 400, data: { code: 'video-format' } })
       expect(err.data.reason, JSON.stringify(p)).toBeUndefined()
-      expect(err.message).toBe(withAdvice(MEDIA_WORDS.unreadable, VIDEO_FORMAT_ADVICE))
+      // The node named by its display name, then the words (R11.9a fix round 1, m5).
+      expect(err.message).toMatch(/^“(Load|Save) Video Frames”: /)
+      expect(err.message.endsWith(withAdvice(MEDIA_WORDS.unreadable, VIDEO_FORMAT_ADVICE))).toBe(true)
     }
     expect(k.ledger.hold).not.toHaveBeenCalled()
     // The checks on their own: the unknown sound leaves to the engine; a missing one or a broken one is Python's skip.

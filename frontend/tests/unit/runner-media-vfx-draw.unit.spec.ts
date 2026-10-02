@@ -500,7 +500,8 @@ describe('the sound’s file: judged by name and owner, left to the engine where
     expect(k.ledger.hold.mock.calls.length).toBe(held)
     const local = makeKit({ dir: mkdtempSync(join(scratch, 'runs-')), deps: { families: () => ON } })
     const localErr = await local.engine.startRun({ userId: null, takes: [take('../x.wav')], ...START }).catch(e => e)
-    expect(localErr).toMatchObject({ message: WAVE_SOUND_OUTSIDE_WORDS, data: { code: 'sound-rate', nodeId: 'e' } })
+    // Fix round 1 (m5): an untitled node is named by its display name.
+    expect(localErr).toMatchObject({ message: `“Audio Waveform”: ${WAVE_SOUND_OUTSIDE_WORDS}`, data: { code: 'sound-rate', nodeId: 'e' } })
     expect(localErr.data.reason).toBeUndefined()
   })
 })

@@ -80,14 +80,31 @@ export const NOT_INSTALLED_WORDS = 'This isn’t installed on this server.'
 /** Row 15: a clip's frames into a node that takes one picture. */
 export const CLIP_INTO_PICTURE_WORDS = 'This takes one picture, not a clip’s frames. Save the frames with Save image or Preview image instead.'
 
-/** Row 17: a setting read as typed, wired (the words are the ruling's own). */
+/**
+ * Row 17: a setting whose value another node makes in the run, where it can't
+ * be bounded before the run (or one row 17 names), by the label the node
+ * shows. The last sentence is the ruling's own.
+ */
 export function wiredSettingWords(label: string): string {
-  return `The ${label} setting is wired. Type this setting in; it can’t be wired.`
+  return `“${label}” gets its value from another node during the run. Type this setting in; it can’t be wired.`
 }
 
-/** Row 18: text Python reads its own way, naming the field. */
-export function oddTextWords(label: string): string {
-  return `The ${label} can’t be read here. Set it again on the node.`
+/** Row 18: a setting's value Python reads its own way (or an object where a value belongs), by the label the node shows. */
+export function oddSettingWords(label: string): string {
+  return `The “${label}” setting can’t be read here. Set it again on the node.`
+}
+
+/** Row 18: text Python reads its own way, named in plain words (a painter file’s name, a moodboard’s reading). */
+export function oddTextWords(what: string): string {
+  return `The ${what} can’t be read here. Set it again on the node.`
+}
+
+/** Fix round 1 (m4): a setting the runner can't take, for a reason no word above names. */
+export const ODD_SETTING_WORDS = 'A setting on this node can’t be read here. Set it again on the node.'
+
+/** Fix round 1 (I1): a paid video whose own settings make a clip past what one run here can work on. */
+export function paidVideoSettingsAdvice(title: string): string {
+  return `Pick a shorter duration or lower resolution on “${title}”.`
 }
 
 /** Row 19. */

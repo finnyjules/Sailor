@@ -1241,7 +1241,7 @@ describe('fix round 1 (Important 2): every container a person can upload that Py
       const err = await k.engine.startRun({ userId: null, takes: [take], ...START }).catch(e => e)
       expect(err).toMatchObject({ statusCode: 400, data: { code: 'video-format', nodeId: 'c' } })
       expect(err.data.reason).toBeUndefined()
-      expect(err.message).toBe(withAdvice(VIDEO_NOT_MP4, CARD_EXPORT_ADVICE))
+      expect(err.message.endsWith(`: ${withAdvice(VIDEO_NOT_MP4, CARD_EXPORT_ADVICE)}`), err.message).toBe(true)
     }
     // Shown only (export off), the ProRes file is handed on as before.
     const shown = await k.engine.startRun({ userId: null, takes: [{ c: videoCard({ file: 'v_prores.mov' }) }], ...START })

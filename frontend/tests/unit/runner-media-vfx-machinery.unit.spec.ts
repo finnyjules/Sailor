@@ -649,11 +649,12 @@ describe('the start pass: what the runner can’t do leaves the whole workflow t
     const held: ApiPrompt = { ...reversed(), l: loadVideo('v_stereo_aac.mp4') }
     const kept: ApiPrompt = { l: loadVideo('v_stereo_aac.mp4'), g: getComp('l'), t: trim(['g', 0], 1), s: saveFrames(['t', 0]) }
     try {
-      for (const [p, count, words] of [[held, 100, MEDIA_EFFECT_WORDS.heldTooMuch], [kept, 320, MEDIA_EFFECT_WORDS.keptTooMuch]] as const) {
+      // Fix round 1 (m5): an untitled node is named by its display name.
+      for (const [p, count, words] of [[held, 100, `“Reverse / Ping-Pong”: ${withAdvice(MEDIA_EFFECT_WORDS.heldTooMuch, TOO_MUCH_WORK_WORDS)}`], [kept, 320, `“Trim”: ${withAdvice(MEDIA_EFFECT_WORDS.keptTooMuch, TOO_MUCH_WORK_WORDS)}`]] as const) {
         shapeHook.source = async (_id, cls) => (cls === 'GetVideoComponents' ? { count, ...HD, exact: false } : null)
         const from = jobs.list.length
         const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
-        expect(err).toMatchObject({ statusCode: 400, message: withAdvice(words, TOO_MUCH_WORK_WORDS), data: { code: 'too-much-work' } })
+        expect(err).toMatchObject({ statusCode: 400, message: words, data: { code: 'too-much-work' } })
         expect(err.data.reason).toBeUndefined()
         // The start checks read the file's header (ffprobe); no decode or encode started.
         expect(jobs.list.slice(from).filter(j => j.tool === 'ffmpeg')).toEqual([])
@@ -849,7 +850,7 @@ describe('fix round 1 (I1): the start pass bounds a source’s frames, never est
     expect(reverseHeld(8, 32, 24)).toBeGreaterThan(caps.heldFrameBytes)
     try {
       await expect(k.engine.startRun({ userId: k.userId, takes: [reversedFrom(clip)], ...START }))
-        .rejects.toMatchObject({ statusCode: 400, message: withAdvice(MEDIA_EFFECT_WORDS.heldTooMuch, TOO_MUCH_WORK_WORDS), data: { code: 'too-much-work' } })
+        .rejects.toMatchObject({ statusCode: 400, message: `“Reverse / Ping-Pong”: ${withAdvice(MEDIA_EFFECT_WORDS.heldTooMuch, TOO_MUCH_WORK_WORDS)}`, data: { code: 'too-much-work' } })
       expect(k.ledger.hold).not.toHaveBeenCalled()
       // Had it run, Reverse would have failed at its turn, plainly (the backstop).
       await asHosted(async () => {

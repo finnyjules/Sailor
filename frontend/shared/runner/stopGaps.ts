@@ -18,18 +18,21 @@
  * Row 25 (a family off) is named by `switchedOffNodes`: those still go to the
  * engine until R10, with words.
  */
-import { linksOf, type ApiPrompt } from './graph'
+import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from './graph'
+import { staticValueOf } from './staticValues'
 import { EVERY_KNOWN_FAMILY, familyOn, type RunnerFamily } from './families'
 import {
   INPUT_CHECKS, PLAIN_REFUSAL_CHECKS, clipIntoPictureInput, outputKindsFor, ownRuleFamilies, runnerRuleFor, runnerTakesNode, widgetError,
-  type InputCheckContext, type InputCheckName, type RunnerEligibilityOptions,
+  type InputCheckContext, type InputCheckName, type RunnerEligibilityOptions, type RunnerNodeRule, type RunnerWidgetSpec,
 } from './eligibility'
 import { outputKind } from './values'
-import { asciiRampOf, effectTextNotPortable, painterFileIsPortable } from './effects'
-import { SAM_MASK_WORDS } from './localModels'
-import { LIPSYNC_SILENCE_NEEDS_UPLOAD, LIPSYNC_UPLOAD_SOUND, lipSyncEngineMediaWords } from './lipSyncEngines'
+import { EFFECT_FAMILY_OF, asciiRampOf, effectTextNotPortable, painterFileIsPortable } from './effects'
+import { SAM_MASK_WORDS, VOCALS_CLASS, WHISPER_CLASS } from './localModels'
+import { parseMaskPoints } from './samInput'
+import { LIPSYNC_UPLOAD_SOUND, lipSyncEngineMediaWords } from './lipSyncEngines'
+import { LIPSYNC_SILENCE_NEEDS_UPLOAD } from './soundIn'
 import {
-  CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, oddTextWords, wiredSettingWords, type RunnerReasonCode,
+  CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, ODD_SETTING_WORDS, oddSettingWords, oddTextWords, wiredSettingWords, type RunnerReasonCode,
 } from './messages'
 
 export interface StopGapRefusal {
@@ -39,26 +42,118 @@ export interface StopGapRefusal {
   message: string
 }
 
-/** A widget's or input's name as the node shows it: plain words, no underscores. */
-export function fieldLabel(name: string): string {
-  return name.replace(/_/g, ' ').trim().toLowerCase()
+/**
+ * Fix round 1 (m1): a widget's label as the node shows it, the canvas's own
+ * rule (app/components/vue-canvas/ComfyNodeWidget.vue formatLabel): its
+ * per-node overrides, else the name's words in sentence case, "(frames)"
+ * after a widget that counts frames. Held to the canvas by
+ * tests/unit/runner-stop-gaps.unit.spec.ts.
+ */
+export const SHOWN_LABEL_OVERRIDES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  RestyleWithLoRANode: { style_strength: 'Transformation' },
+}
+export const FRAME_WIDGET_NAMES: ReadonlySet<string> = new Set([
+  'duration', 'length', 'total_duration', 'frame_count', 'start', 'start_frame', 'end_frame', 'fade_in', 'fade_out', 'radius',
+])
+export function shownLabel(classType: string, name: string): string {
+  const override = SHOWN_LABEL_OVERRIDES[classType]?.[name]
+  if (override) return override
+  const pretty = name.split(/[_\s]+/).map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase())).join(' ')
+  return FRAME_WIDGET_NAMES.has(name) ? `${pretty} (frames)` : pretty
+}
+
+/** Row 17 (as ruled in fix round 1): settings the brief names, refused whenever their value is made in the run. */
+export const ROW_17_NAMED: Readonly<Record<string, readonly string[]>> = {
+  [VOCALS_CLASS]: ['model', 'shifts'],
+  [WHISPER_CLASS]: ['model_size'],
+}
+
+/**
+ * Fix round 1 (M1): whether a setting wired to a value the run makes has a
+ * dearest bound the price and the start can rest on: a number with a most,
+ * a choice, a switch, on a paid node (priced at its dearest, R3) or a picture
+ * effect (its work judged at its turn, before any pixel). Anything else (a
+ * free text, a model choice that picks the service, a setting the start
+ * passes must read: video and sound effects, R7's nodes, cards) has none.
+ */
+export function wiredDearestBound(classType: string, rule: RunnerNodeRule, spec: RunnerWidgetSpec | undefined): boolean {
+  if (!spec) return false
+  const bounded = spec.type === 'BOOLEAN' || (spec.type === 'COMBO' && !!spec.options?.length) || ((spec.type === 'INT' || spec.type === 'FLOAT') && spec.max !== undefined)
+  if (!bounded) return false
+  return rule.local === undefined || Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, classType)
+}
+
+/** The input a row keyed by model reads its model from, where it is a plain `model` setting (not Lip-sync's engine). */
+const modelSetting = (classType: string, rule: RunnerNodeRule | undefined): string | null =>
+  rule?.models && classType !== 'LipSyncNode' ? 'model' : null
+
+/** Follows a wire back through Gates (a Gate hands its value on as it came). */
+function throughGates(prompt: ApiPrompt, link: ApiLink): ApiLink {
+  let l = link
+  for (let i = 0; i < 64; i++) {
+    const n = prompt[l[0]]
+    const d = n?.class_type === GATE_CLASS ? n.inputs?.data_in : undefined
+    if (!isLink(d)) return l
+    l = d
+  }
+  return l
+}
+
+/**
+ * Fix round 1 (M1): the workflow with every wired setting whose value a card
+ * decides before the run (a Primitive, a Text card, through Gates;
+ * #shared/runner/staticValues) put in as if typed, where it is a valid value
+ * for that setting. The run then judges, prices and runs it as typed (the
+ * node's turn would substitute the same value, server/runner/values.ts
+ * withWiredValues). A value the run makes stays wired.
+ */
+export function withStaticWiredSettings(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): ApiPrompt {
+  let out: ApiPrompt | null = null
+  for (const [id, node] of Object.entries(prompt)) {
+    const rule = runnerRuleFor(node.class_type, node.inputs ?? {}, families)
+    if (!rule) continue
+    let inputs: Record<string, unknown> | null = null
+    for (const [name, v] of Object.entries(node.inputs ?? {})) {
+      if (!isLink(v) || rule.valueInputs?.[name]) continue
+      const spec = rule.widgets?.[name]
+      if (!spec && modelSetting(node.class_type, rule) !== name) continue
+      const known = staticValueOf(prompt, throughGates(prompt, v))
+      if (!known) continue
+      const value = known.kind === 'text' ? known.text : known.value
+      if (spec && widgetError({ [name]: value }, name, spec) !== null) continue
+      inputs ??= { ...node.inputs }
+      inputs[name] = value
+    }
+    if (inputs) {
+      out ??= { ...prompt }
+      out[id] = { ...node, inputs }
+    }
+  }
+  return out ?? prompt
 }
 
 /** The plain words for a refusing input check that failed (PLAIN_REFUSAL_CHECKS). */
 function checkRefusal(check: InputCheckName, classType: string, inputs: Record<string, unknown>): { code: RunnerReasonCode; message: string } {
   switch (check) {
-    case 'sam-points': return { code: 'click-points', message: SAM_MASK_WORDS.pointsFail }
+    // Fix round 1 (m3): a label SAM 3 can't be sent has its own words; anything else, the brief's pointsFail.
+    case 'sam-points': {
+      const read = parseMaskPoints(inputs.points, 2, 2)
+      return { code: 'click-points', message: !read.ok && read.why === 'label' ? SAM_MASK_WORDS.pointsLabel : SAM_MASK_WORDS.pointsFail }
+    }
     case 'ascii-glyphs':
       return asciiRampOf(inputs.preset, inputs.characters) === null
-        ? { code: 'odd-text', message: oddTextWords('characters') }
+        ? { code: 'odd-text', message: oddSettingWords(shownLabel(classType, 'characters')) }
         : { code: 'letters', message: LETTERS_WORDS }
-    case 'effect-text': return { code: 'odd-text', message: oddTextWords(fieldLabel(effectTextNotPortable(classType, inputs) ?? 'colour')) }
-    case 'painter': return { code: 'odd-text', message: oddTextWords(painterFileIsPortable(inputs.mask) ? 'background color' : 'painter file’s name') }
+    case 'effect-text': {
+      const field = effectTextNotPortable(classType, inputs)
+      return { code: 'odd-text', message: field ? oddSettingWords(shownLabel(classType, field)) : ODD_SETTING_WORDS }
+    }
+    case 'painter': return { code: 'odd-text', message: painterFileIsPortable(inputs.mask) ? oddSettingWords(shownLabel(classType, 'bg_color')) : oddTextWords('painter file’s name') }
     case 'moodboard-reading': return { code: 'odd-text', message: oddTextWords('moodboard’s reading') }
     case 'bake-params': return { code: 'odd-text', message: 'This node’s saved settings can’t be read here. Set them again on the node.' }
     case 'lip-sync-media': return { code: 'not-a-file', message: lipSyncEngineMediaWords(inputs) ?? LIPSYNC_UPLOAD_SOUND }
     case 'lipsync-silence-video': return { code: 'not-a-file', message: LIPSYNC_SILENCE_NEEDS_UPLOAD }
-    default: return { code: 'odd-text', message: oddTextWords('setting') }
+    default: return { code: 'odd-text', message: ODD_SETTING_WORDS }
   }
 }
 
@@ -90,12 +185,26 @@ export function nodeStopGap(prompt: ApiPrompt, id: string, families: ReadonlySet
       }
     }
   }
-  for (const [name, spec] of Object.entries(rule?.widgets ?? {})) {
+  // Row 17, as ruled in fix round 1 (M1): what is still wired here is a value the run makes (a card's own value
+  // was put in before the start, withStaticWiredSettings), or an object where a value belongs.
+  const wiredSettings: [string, RunnerWidgetSpec | undefined][] = Object.entries(rule?.widgets ?? {})
+  const model = modelSetting(n.class_type, rule)
+  if (model) wiredSettings.push([model, undefined])
+  let lenient = false
+  for (const [name, spec] of wiredSettings) {
     if (rule?.valueInputs?.[name]) continue
-    if (widgetError(inputs, name, spec) === 'wired') return out('wired-setting', wiredSettingWords(fieldLabel(name)))
+    const v = inputs[name]
+    if (spec ? widgetError(inputs, name, spec) !== 'wired' : !isLink(v)) continue
+    lenient = true
+    // m2: an object value (`{"__value__": …}`) isn't wired: its value can't be read.
+    if (!isLink(v)) return out('odd-text', oddSettingWords(shownLabel(n.class_type, name)))
+    const named = ROW_17_NAMED[n.class_type]?.includes(name) ?? false
+    if (named || !rule || !wiredDearestBound(n.class_type, rule, spec)) return out('wired-setting', wiredSettingWords(shownLabel(n.class_type, name)))
   }
-  // Taken only leniently for a reason not named above: the clip wire (a Gate's) is the one left.
-  return out('clip-into-picture', CLIP_INTO_PICTURE_WORDS)
+  // A value the run makes, with a dearest bound: taken (priced at its dearest, substituted at the node's turn).
+  if (lenient) return null
+  // m4: taken only leniently for a reason no word above names.
+  return out('odd-text', ODD_SETTING_WORDS)
 }
 
 /** The first node of the prompt the runner refuses in plain words (nodeStopGap), in prompt order, or null. */

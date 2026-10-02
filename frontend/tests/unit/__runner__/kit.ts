@@ -1,9 +1,9 @@
 /** Test helpers for the runner engine: a fake fal, a fake Replicate, a fake ledger, and an engine wired to real file storage in a temp folder. */
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { crc32, deflateSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { vi } from 'vitest'
+import { afterAll, vi } from 'vitest'
 import { falOutputUrls, type ProviderClient } from '~~/server/runner/falQueue'
 import { isTransientReplicateError, replicateOutputUrls } from '~~/server/runner/replicateQueue'
 import { createEngine, type EngineDeps } from '~~/server/runner/engine'
@@ -187,15 +187,34 @@ export function createFakeLedger(available = 1000) {
   return ledger
 }
 
+/**
+ * Every temp folder a kit made (its root and its runs folder), removed when the
+ * spec file ends. A spec can make thousands of kits, and left behind they fill
+ * the disk (10-02: ~3.4M folders). afterAll, not afterEach: a kit made in a
+ * beforeAll serves every test, and a run can still write as its test ends.
+ * Folders a spec passes in (`dir`, `root`) are the spec's own to remove.
+ */
+const kitTempDirs: string[] = []
+const kitTempDir = (prefix: string): string => {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  kitTempDirs.push(d)
+  return d
+}
+/** Removes the kits' temp folders now (also run when the spec file ends). */
+export function disposeKits(): void {
+  for (const d of kitTempDirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 3 })
+}
+afterAll(disposeKits)
+
 let uuidSeq = 0
 export const testUuid = () => `00000000-0000-4000-8000-${String(++uuidSeq).padStart(12, '0')}`
 
 export function makeKit(opts: { hosted?: boolean; available?: number; dir?: string; root?: string; fal?: ReturnType<typeof createFakeFal>; replicate?: ReturnType<typeof createFakeReplicate>; ledger?: ReturnType<typeof createFakeLedger>; moderate?: (text: string) => Promise<{ ok: true } | { ok: false; categories: string[] }>; deps?: Partial<EngineDeps> } = {}) {
   const hosted = !!opts.hosted
   const userId = hosted ? 'user_1' : null
-  const root = opts.root ?? mkdtempSync(join(tmpdir(), 'runner-engine-root-'))
+  const root = opts.root ?? kitTempDir('runner-engine-root-')
   for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
-  const dir = opts.dir ?? mkdtempSync(join(tmpdir(), 'runner-engine-runs-'))
+  const dir = opts.dir ?? kitTempDir('runner-engine-runs-')
   const store = createFileRunStore(dir)
   const results = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => hosted })
   const fal = opts.fal ?? createFakeFal()

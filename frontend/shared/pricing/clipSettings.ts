@@ -519,8 +519,9 @@ function sync3Calls(inputs: Inputs, measured: InputSeconds): ClipCall[] | { refu
 
 function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] | { refused: string } {
   // Fabric bills the sound clip; Kling lip-sync bills the source video (its output).
-  const fabric = (resolution: string): ClipCall => ({ endpoint: 'veed/fabric-1.0', seconds: billedSeconds(measured.audio), resolution, audio: false })
-  const kling: ClipCall = { endpoint: 'kwaivgi/kling-lip-sync', seconds: billedSeconds(measured.video), resolution: null, audio: false }
+  // R11.9a fix round 1 (ruling (k)): an https medium is held at its cap (`audioUpTo` / `videoUpTo`: Fabric 60 s, Kling 10 s).
+  const fabric = (resolution: string): ClipCall => ({ endpoint: 'veed/fabric-1.0', seconds: billedSeconds(measured.audio ?? measured.audioUpTo), resolution, audio: false })
+  const kling: ClipCall = { endpoint: 'kwaivgi/kling-lip-sync', seconds: billedSeconds(measured.video ?? measured.videoUpTo), resolution: null, audio: false }
   // model_options linked: the engine and resolution can't be read — both engines, Fabric at its dearest.
   if (linked(inputs.model_options)) return [fabric(UNLISTED), kling]
   // LipSyncNode.execute: `opts = json.loads(model_options or "{}")` (non-dict → {}),

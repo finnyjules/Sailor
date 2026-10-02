@@ -277,6 +277,8 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   // R11.3: Fabric's and Kling's media, each one the runner can read before the run.
   'lip-sync-media': inputs => lipSyncEngineMediaTaken(inputs),
   // R11.3, ruling (o): Sync lips in "silence" bills the whole face video: only an uploaded one (measured).
+  // R11.9a fix round 1: an https face video stays refused plainly. Unlike Fabric's 60 s and Kling's 10 s, nothing
+  // caps what the service bills for a long one, so a hold at 60 s would not bound the cost (money never relaxes).
   'lipsync-silence-video': inputs => inputs.sync_mode !== 'silence' || 'upload' in lipsyncVideoOf(inputs.video_url),
   'audio-card-lip-sync': (inputs, ctx) => {
     // R11.3: with `sound-in` on, Lip-sync sends any wired sound as Python's WAV (R5.3 case A closed).
@@ -2094,7 +2096,13 @@ export function nodeRuleAllows(
 ): boolean {
   const need: string[] = [...(rule.mustLink ?? [])]
   let family: RunnerFamily | undefined = rule.family
-  if (rule.models) {
+  if (rule.models && opts.plainRefusals && classType !== 'LipSyncNode' && isLink(inputs.model)) {
+    // R11.9a fix round 1 (M1): a model the run makes (a static one is put in before the start): taken only to be
+    // refused plainly (./stopGaps.ts), while any of the row's models is on.
+    family = Object.values(rule.models).map(m => (typeof m === 'string' ? m : m.family)).find(f => familyOn(f, families))
+    if (!family) return false
+  }
+  else if (rule.models) {
     const key = modelKey(classType, inputs)
     const m = Object.prototype.hasOwnProperty.call(rule.models, key) ? rule.models[key] : undefined
     if (!m) return false
@@ -2455,7 +2463,8 @@ export function valueWiresAllowed(
   if (!node) return false
   const takes = valueInputsOf(node.class_type, families)
   // R11.9a (row 17): a value wired into a setting the row reads as typed is refused plainly instead.
-  const widgets = o.plainRefusals ? runnerRuleFor(node.class_type, node.inputs ?? {}, families ?? NO_FAMILIES)?.widgets : undefined
+  const rowOf = o.plainRefusals ? runnerRuleFor(node.class_type, node.inputs ?? {}, families ?? NO_FAMILIES) : undefined
+  const widgets = rowOf?.models && node.class_type !== 'LipSyncNode' ? { ...rowOf.widgets, model: { type: 'STRING' } as RunnerWidgetSpec } : rowOf?.widgets
   for (const l of linksOf(node)) {
     const kind = outputKind(prompt, [l.from, l.slot], kinds)
     const allowed = Object.prototype.hasOwnProperty.call(takes, l.input) ? takes[l.input] : undefined

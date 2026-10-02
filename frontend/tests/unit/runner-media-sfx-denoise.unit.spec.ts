@@ -436,7 +436,8 @@ describe('the start pass', () => {
     expect(runnerTakesWorkflow(q, fam)).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [q], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
     // R11.9a (row 23): refused plainly before the hold, never the engine.
-    expect(err).toMatchObject({ statusCode: 400, message: withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS), data: { nodeId: 'e', code: 'too-much-work' } })
+    // Fix round 1 (m5): an untitled node is named by its display name.
+    expect(err).toMatchObject({ statusCode: 400, message: `“Audio Denoise”: ${withAdvice(MEDIA_EFFECT_WORDS.soundTooLong, TOO_MUCH_WORK_WORDS)}`, data: { nodeId: 'e', code: 'too-much-work' } })
     expect(err.data.reason).toBeUndefined()
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })

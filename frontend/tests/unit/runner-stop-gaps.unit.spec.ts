@@ -13,39 +13,40 @@
  *
  * No paid calls: the providers are fakes; keys unset.
  */
-import { copyFileSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { EVERY_KNOWN_FAMILY, MEDIA_TOOL_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, LOCAL_MODEL_TOOL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
-  CARD_EXPORT_ADVICE, CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, LUT_OUTSIDE_WORDS, NOT_INSTALLED_WORDS, PICTURE_BATCH_ADVICE, RUNNER_NOT_ELIGIBLE,
-  TOO_MUCH_WORK_WORDS, VIDEO_FORMAT_ADVICE, captionsTooLongWords, lengthWords, madeSoundTooLongWords, oddTextWords, switchedOffWords, wiredSettingWords, withAdvice,
-  type RunnerReasonCode,
+  CARD_EXPORT_ADVICE, CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, LUT_OUTSIDE_WORDS, NOT_INSTALLED_WORDS, PICTURE_BATCH_ADVICE, RUNNER_NOT_ELIGIBLE, SOUND_RATE_ADVICE,
+  TOO_MUCH_WORK_WORDS, VIDEO_FORMAT_ADVICE, captionsTooLongWords, lengthWords, madeSoundTooLongWords, oddSettingWords, oddTextWords, paidVideoSettingsAdvice, switchedOffWords,
+  wiredSettingWords, withAdvice, type RunnerReasonCode,
 } from '#shared/runner/messages'
-import { stopGapRefusal, switchedOffNodes } from '#shared/runner/stopGaps'
+import { FRAME_WIDGET_NAMES, shownLabel, stopGapRefusal, switchedOffNodes, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
-import { needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { MEDIA_WORDS } from '#shared/runner/media'
+import { blockedRunRefusal, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import {
-  FRAME_INTERP_AI_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, MASK_EXTRACTOR_CLASS, SAM_MASK_WORDS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
-  UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_TILED_MAX_PIXELS, UPSCALE_2X_WORDS, VOCALS_CLASS, VOCALS_PIECE_SECONDS, WHISPER_CLASS, overCapWords, whisperCeilingSeconds, whisperMaxSeconds,
+  BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, MASK_EXTRACTOR_CLASS, SAM_MASK_WORDS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
+  UPSCALE_2X_CLASS, UPSCALE_2X_WORDS, VOCALS_CLASS, WHISPER_CLASS, overCapWords,
 } from '#shared/runner/localModels'
+import { CHAT_LLM_MODELS } from '#shared/runner/llm'
 import { parseMaskPoints, samPointsInput } from '#shared/runner/samInput'
 import { isEditorOnlyClass, retiredAdviceOf } from '#shared/runner/retired'
-import { blockedRunRefusal } from '#shared/runner/needsEngine'
-import { lipSyncRunEngine } from '#shared/runner/lipSyncEngines'
-import { cloneSecondsBound, musicSecondsBound, speechSecondsBound } from '#shared/runner/sourceBounds'
-import { CAPTIONS_MAX_CHARS, VIDEO_EFFECTS } from '~~/server/runner/video/table'
+import { CAPTIONS_MAX_CHARS } from '~~/server/runner/video/table'
+import { WAVE_SOUND_OUTSIDE_WORDS } from '~~/server/runner/video/start'
 import { VIDEO_NOT_MP4 } from '~~/server/runner/media/videoNodes'
 import { MEDIA_TOOLS_MISSING } from '~~/server/media/tools'
 import { startStopGap } from '~~/server/runner/stopGapWords'
 import { localModelStartProblems, slowMotionAiStart } from '~~/server/runner/localModelStart'
+import { saveFramesStartProblem, savedFrameBytesBound } from '~~/server/runner/cards/saveImage'
+import { clipAtCaps } from '~~/server/runner/video/shapes'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
+import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { makeKit } from './__runner__/kit'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 
@@ -53,6 +54,7 @@ const EVERY: ReadonlySet<RunnerFamily> = EVERY_KNOWN_FAMILY
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const LONG = { timeout: 120_000 }
 const scratch = mkdtempSync(join(tmpdir(), 'runner-stop-gaps-'))
+afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 type Link = [string, number]
 
 const SAVE_DEFAULTS = { filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true }
@@ -75,8 +77,11 @@ async function refusedPlainly(k: ReturnType<typeof makeKit>, take: ApiPrompt, co
   expect(err, 'refused').toBeInstanceOf(Error)
   expect(err.data?.code, err.message).toBe(code)
   expect(err.data?.reason, `${code}: never the engine`).toBeUndefined()
-  if (typeof words === 'string') expect(err.message).toBe(words)
-  else if (words) expect(err.message).toMatch(words)
+  // The node is named first, by its title or its display name (fix round 1, m5), then the words.
+  expect(err.message, 'names the node').toMatch(/^“[^”]+”: /)
+  const said = err.message.replace(/^“[^”]+”: /, '')
+  if (typeof words === 'string') expect(said).toBe(words)
+  else if (words) expect(said).toMatch(words)
   expect(k.ledger.hold).not.toHaveBeenCalled()
   expect(k.fal.submitted()).toEqual([])
   expect(k.replicate.submitted()).toEqual([])
@@ -107,41 +112,57 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([1, 9, 11, 27, 28])
   })
 
-  // Rows 2–8, 10, 12–14 and 26: closed by their own tasks, asserted where true now.
-  it('row 2 (R11.5): songs past Karaoke’s cap run in pieces at quiet points', () => {
-    expect(VOCALS_PIECE_SECONDS).toBe(600)
+  // Rows 2–8 and 12–14: closed by their own tasks. Each is probed where a probe is cheap (its graph is the runner's
+  // with every family on: it fails if the row went back to the engine), and its own spec is named and must keep
+  // the case that proves it.
+  const LA = { class_type: 'LoadAudio', inputs: { audio: 'a.wav' } }
+  const saveAudio = (from: string) => ({ class_type: 'SaveAudio', inputs: { audio: [from, 0] as Link, filename_prefix: 'audio/ComfyUI' } })
+  const getComp = (from: string) => ({ class_type: 'GetVideoComponents', inputs: { video: [from, 0] as Link } })
+  const createVideo = (from: string) => ({ class_type: 'CreateVideo', inputs: { images: [from, 0] as Link, fps: 24 } })
+  const PROBES: Record<number, ApiPrompt> = {
+    2: { s: LA, v: { class_type: VOCALS_CLASS, inputs: { audio: ['s', 0], model: 'htdemucs', shifts: 1 } }, a: saveAudio('v') },
+    3: { s: LA, w: { class_type: WHISPER_CLASS, inputs: { audio: ['s', 0], model_size: 'base', language: 'auto', fps: 24 } }, t: { class_type: 'Text', inputs: { source: ['w', 2], text: '' } } },
+    4: { l: loadImage(), u: { class_type: UPSCALE_2X_CLASS, inputs: { frames: ['l', 0], tile_size: 512 } }, s: saveImage(['u', 0]) },
+    5: { l: loadVideo('a.mp4'), g: getComp('l'), n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['g', 0], multiplier: 2 } }, c: createVideo('n'), s: saveVideo('c') },
+    6: { l: loadVideo('a.mp4'), g: getComp('l'), b: { class_type: BG_REMOVE_CLASS, inputs: { frames: ['g', 0], output: 'transparent', edge_softness: 0 } }, s: saveImage(['b', 0]) },
+    7: { m: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration: 8, model_version: 'stereo-large', temperature: 1, top_p: 0, seed: 0 } }, f: { class_type: 'AudioFade', inputs: { audio: ['m', 0], fade_in: 0.5, fade_out: 0.5, curve: 'linear' } }, a: saveAudio('f') },
+    8: { sp: speech(40), w: { class_type: WHISPER_CLASS, inputs: { audio: ['sp', 0], model_size: 'base', language: 'auto', fps: 24 } }, t: { class_type: 'Text', inputs: { source: ['w', 2], text: '' } } },
+  }
+  /** Each row's own spec and the case in it that proves the row (fails if the case is removed or renamed). */
+  const PROVEN_IN: Record<number, [string, string]> = {
+    2: ['runner-long-sound.unit.spec.ts', 'Karaoke\\\'s chain, hosted, a 10-minute-20 song: two Demucs calls'],
+    3: ['runner-long-sound.unit.spec.ts', 'Whisper, hosted, a 30-minute-and-2-second sound: two Wizper calls'],
+    4: ['runner-upscale-tiles.unit.spec.ts', 'a 4K picture: five tiles of 871 × 2160'],
+    5: ['runner-clip-caps.unit.spec.ts', '300 frames at ×2: two calls (479 and 121 frames out)'],
+    6: ['runner-clip-caps.unit.spec.ts', 'the per-frame classes keep 300 hosted and 900 locally'],
+    7: ['runner-source-bounds.unit.spec.ts', 'music: the duration asked, plus a second'],
+    8: ['runner-source-bounds.unit.spec.ts', 'speech: every character at one a second'],
+    12: ['runner-lipsync-engines.unit.spec.ts', 'with sound-in on; with it off (any other families) the engine keeps Fabric and Kling'],
+    13: ['runner-replicate-video.unit.spec.ts', 'takes fabric-1.0 only with a linked picture and a linked runner sound'],
+    14: ['runner-relight-wired.unit.spec.ts', 'takes a wired light and wired instructions as text'],
+  }
+  for (const [row, p] of Object.entries(PROBES)) {
+    it(`row ${row}: its graph runs in Sailor with every family on (proven in ${PROVEN_IN[Number(row)]![0]})`, () => {
+      expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
+      expect(stopGapRefusal(p, EVERY)).toBeNull()
+      expect(nodesNeedingEngine(p, { runnerOn: true, families: EVERY, titleOf: id => id })).toEqual([])
+    })
+  }
+  it('rows 2–8, 12–14: each row’s own spec still holds the case that proves it', () => {
+    for (const [row, [file, name]] of Object.entries(PROVEN_IN)) {
+      const text = readFileSync(join(__dirname, file), 'utf8')
+      expect(text.includes(name), `row ${row}: ${file} — “${name}”`).toBe(true)
+    }
   })
-  it('row 3 (R11.5): Whisper over one call’s hour runs in pieces, up to its ceiling', () => {
-    expect(whisperCeilingSeconds('local')).toBeGreaterThan(whisperMaxSeconds('local'))
-    expect(whisperCeilingSeconds('hosted')).toBeGreaterThan(whisperMaxSeconds('hosted'))
+  it('row 12 (R11.3): Fabric and Kling lip-sync on uploads run in Sailor', () => {
+    const lip = (opts: Record<string, unknown>): ApiPrompt => ({ n: { class_type: 'LipSyncNode', inputs: { engine: 'auto', resolution: '720p', sync_mode: 'cut_off', model_options: JSON.stringify(opts) } }, v: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'v', source: ['n', 0] } } })
+    expect(runnerTakesWorkflow(lip({ engine: 'fabric', face_image: '/view?filename=f.png&type=input', audio: '/view?filename=a.wav&type=input' }), EVERY)).toBe(true)
+    expect(runnerTakesWorkflow(lip({ engine: 'sync', face_video: '/view?filename=f.mp4&type=input', audio: '/view?filename=a.wav&type=input' }), EVERY)).toBe(true)
   })
-  it('row 4 (R11.6): Upscale (2×) past its service’s largest picture runs in tiles', () => {
-    expect(UPSCALE_2X_TILED_MAX_PIXELS).toBeGreaterThan(UPSCALE_2X_MAX_PIXELS)
-  })
-  it('row 5 (R11.7): Slow motion (AI) past 240 frames runs in segments; past the cap refused with the cap in words', () => {
-    expect(SLOW_MOTION_AI_MAX_FRAMES.hosted).toBeGreaterThan(240)
-    expect(slowMotionAiStart({ multiplier: 2 }, { count: SLOW_MOTION_AI_MAX_FRAMES.hosted + 1, w: 64, h: 64, exact: true }, true))
-      .toEqual({ refused: overCapWords(FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES.hosted) })
-  })
-  it('row 6 (R11.7): per-frame classes keep measured caps, refused plainly past them', () => {
-    expect(LOCAL_MODEL_MAX_FRAMES).toEqual({ hosted: 300, local: 900 })
-    expect(overCapWords(FRAME_INTERP_AI_CLASS, 300)).toMatch(/300/)
-  })
-  it('rows 7–8 (R11.8): every maker bounded (music, speech, a cloned voice), never left', () => {
-    expect(musicSecondsBound(8)).toBe(9)
-    expect(speechSecondsBound('hello', 1)).toBeGreaterThan(5)
-    expect(cloneSecondsBound(20)).toBe(21)
-  })
+
   it('row 10 (R10.0): Face swap runs in Sailor with its family on (its provider is the user’s call, ruling (b))', () => {
     const p: ApiPrompt = { a: loadImage('a.png'), b: loadImage('b.png'), f: { class_type: 'FaceSwap', inputs: { source_face: ['a', 0], target_frames: ['b', 0] } }, s: saveImage(['f', 0]) }
     expect(nodesNeedingEngine(p, { runnerOn: true, families: EVERY, titleOf: id => id })).not.toContain('f')
-  })
-  it('rows 12–13 (R11.2, R11.3): Fabric and Kling lip-sync engines are known to the runner', () => {
-    expect(lipSyncRunEngine({ model_options: JSON.stringify({ engine: 'fabric' }) })).toBe('fabric')
-    expect(lipSyncRunEngine({ model_options: JSON.stringify({ face_video: '/view?filename=f.mp4&type=input' }) })).toBe('kling')
-  })
-  it('row 14 (R11.1): Relight is in the runner (its wired light ported)', () => {
-    expect(EVERY.has('nano-extras')).toBe(true)
   })
   it('row 26 (R9.1): the Timeline node in a workflow is refused with advice to use its editor', () => {
     expect(isEditorOnlyClass('Timeline')).toBe(true)
@@ -189,97 +210,179 @@ describe('R11.9: every named stop-gap, one case per row', () => {
   })
 
   // ── Row 16: SAM 3's typed points ──
-  it('row 16: −1 is dropped and 2/3 sent as a box; what can’t be sent is refused with pointsFail', () => {
+  it('row 16: −1 is dropped and 2/3 sent as a box; a label SAM 3 can’t be sent has its own words, anything else pointsFail', () => {
     expect(parseMaskPoints('[{"x":0.5,"y":0.5,"label":1},{"x":0.1,"y":0.1,"label":-1}]', 100, 100)).toEqual({ ok: true, points: [{ x: 50, y: 50, label: 1 }], boxes: [] })
     const box = parseMaskPoints('[{"x":0.8,"y":0.7,"label":3},{"x":0.2,"y":0.1,"label":2}]', 100, 100)
     expect(box).toEqual({ ok: true, points: [], boxes: [{ xMin: 20, yMin: 10, xMax: 80, yMax: 70 }] })
     expect(samPointsInput('u', [], (box as { boxes: [] }).boxes).box_prompts).toEqual([{ x_min: 20, y_min: 10, x_max: 80, y_max: 70 }])
     const node = (points: string): ApiPrompt => ({ l: loadImage(), n: { class_type: MASK_EXTRACTOR_CLASS, inputs: { image: ['l', 0], points, feather: 0, invert: false } } })
     expect(runnerTakesNode(node('[{"x":0.5,"y":0.5,"label":2},{"x":0.9,"y":0.9,"label":3}]'), 'n', EVERY)).toBe(true)
-    for (const bad of ['[1, 2]', '[{"x":0.5,"y":0.5,"label":7}]', '[{"x":NaN,"y":0}]', '[{"x":0.5,"y":0.5,"label":2}]', '[{"x":0.5,"y":0.5,"label":-1}]']) {
+    for (const [bad, words] of [
+      ['[1, 2]', SAM_MASK_WORDS.pointsFail], ['[{"x":NaN,"y":0}]', SAM_MASK_WORDS.pointsFail],
+      ['[{"x":0.5,"y":0.5,"label":7}]', SAM_MASK_WORDS.pointsLabel], ['[{"x":0.5,"y":0.5,"label":2}]', SAM_MASK_WORDS.pointsLabel], ['[{"x":0.5,"y":0.5,"label":-1}]', SAM_MASK_WORDS.pointsLabel],
+    ] as const) {
       expect(runnerTakesWorkflow(node(bad), EVERY), bad).toBe(true)
-      expect(stopGapRefusal(node(bad), EVERY), bad).toEqual({ nodeId: 'n', classType: MASK_EXTRACTOR_CLASS, code: 'click-points', message: SAM_MASK_WORDS.pointsFail })
+      expect(stopGapRefusal(node(bad), EVERY), bad).toEqual({ nodeId: 'n', classType: MASK_EXTRACTOR_CLASS, code: 'click-points', message: words })
     }
+    expect(SAM_MASK_WORDS.pointsLabel).toMatch(/box’s two corners/)
   })
 
-  // ── Row 17: a wired setting read as typed ──
-  it('row 17: Demucs’ shifts or model, and Whisper’s model size, wired: "Type this setting in; it can’t be wired."', () => {
-    const k: ApiPrompt = { k: { class_type: 'PrimitiveInt', inputs: { value: 2 } }, t: { class_type: 'PrimitiveString', inputs: { value: 'htdemucs' } } }
-    const vocals = (w: Record<string, unknown>): ApiPrompt => ({
-      ...k, s: { class_type: 'LoadAudio', inputs: { audio: 'song.wav' } },
-      v: { class_type: VOCALS_CLASS, inputs: { audio: ['s', 0], model: 'htdemucs', shifts: 1, ...w } },
-      a: { class_type: 'SaveAudio', inputs: { audio: ['v', 0], filename_prefix: 'audio/ComfyUI' } },
-    })
-    expect(stopGapRefusal(vocals({ shifts: ['k', 0] }), EVERY)).toEqual({ nodeId: 'v', classType: VOCALS_CLASS, code: 'wired-setting', message: wiredSettingWords('shifts') })
-    expect(stopGapRefusal(vocals({ model: ['t', 0] }), EVERY)).toEqual({ nodeId: 'v', classType: VOCALS_CLASS, code: 'wired-setting', message: wiredSettingWords('model') })
-    expect(wiredSettingWords('shifts')).toBe('The shifts setting is wired. Type this setting in; it can’t be wired.')
-    const whisper: ApiPrompt = {
-      ...k, s: { class_type: 'LoadAudio', inputs: { audio: 'talk.wav' } },
-      w: { class_type: WHISPER_CLASS, inputs: { audio: ['s', 0], model_size: ['t', 0], language: 'auto', fps: 24 } },
-      t2: { class_type: 'Text', inputs: { source: ['w', 2], text: '' } },
-    }
-    const r = stopGapRefusal(whisper, EVERY)
-    expect(runnerTakesWorkflow(whisper, EVERY)).toBe(true)
-    expect(r).toEqual({ nodeId: 'w', classType: WHISPER_CLASS, code: 'wired-setting', message: wiredSettingWords('model size') })
-    // Typed in, both are taken as they are.
-    expect(stopGapRefusal(vocals({}), EVERY)).toBeNull()
+  // ── Row 17 (as ruled in fix round 1, M1) ──
+  const k: ApiPrompt = { k: { class_type: 'PrimitiveInt', inputs: { value: 2 } }, t: { class_type: 'PrimitiveString', inputs: { value: 'htdemucs' } }, b: { class_type: 'PrimitiveString', inputs: { value: 'base' } } }
+  const llm = { class_type: 'ChatLLMNode', inputs: { model: CHAT_LLM_MODELS[0], prompt: 'x', system_prompt: '', temperature: 1, max_tokens: 100 } }
+  const vocals = (w: Record<string, unknown>): ApiPrompt => ({
+    ...k, q: llm, s: { class_type: 'LoadAudio', inputs: { audio: 'song.wav' } },
+    v: { class_type: VOCALS_CLASS, inputs: { audio: ['s', 0], model: 'htdemucs', shifts: 1, ...w } },
+    a: { class_type: 'SaveAudio', inputs: { audio: ['v', 0], filename_prefix: 'audio/ComfyUI' } },
+  })
+  const whisper = (modelSize: unknown): ApiPrompt => ({
+    ...k, q: llm, s: { class_type: 'LoadAudio', inputs: { audio: 'talk.wav' } },
+    w: { class_type: WHISPER_CLASS, inputs: { audio: ['s', 0], model_size: modelSize, language: 'auto', fps: 24 } },
+    t2: { class_type: 'Text', inputs: { source: ['w', 2], text: '' } },
+  })
+  const grain = (seed: unknown, extra: ApiPrompt = {}): ApiPrompt => ({ ...extra, l: loadImage(), f: { class_type: 'FilmGrain', inputs: { image: ['l', 0], amount: 0.2, size: 1, seed } }, s: saveImage(['f', 0]) })
+
+  it('row 17: a card’s own value wired into a setting is put in as if typed and runs (Primitive int → Film grain seed)', LONG, async () => {
+    const p = grain(['k', 0], { k: k.k! })
+    expect(withStaticWiredSettings(p, EVERY).f!.inputs!.seed).toBe(2)
+    expect(stopGapRefusal(withStaticWiredSettings(p, EVERY), EVERY)).toBeNull()
+    const kit = makeKit({ deps: { families: () => EVERY } })
+    await writePng(join(kit.root, 'input', 'p.png'))
+    const { runId } = await kit.engine.startRun({ userId: kit.userId, takes: [p], ...START })
+    await kit.engine.settled(runId)
+    const t = (await kit.store.get(runId))!.takes[0]!
+    for (const id of ['l', 'f', 's']) expect(t.nodes[id]!.status, `${id}: ${t.nodes[id]!.error ?? ''}`).toBe('done')
+    // The named settings from a card run as typed too; an invalid card value stays wired and is refused.
+    expect(stopGapRefusal(withStaticWiredSettings(vocals({ shifts: ['k', 0], model: ['t', 0] }), EVERY), EVERY)).toBeNull()
+    expect(stopGapRefusal(withStaticWiredSettings(whisper(['b', 0]), EVERY), EVERY)).toBeNull()
+  })
+
+  it('row 17: a value the run makes with a dearest bound is taken (priced at its dearest, put in at the node’s turn)', () => {
+    const p = grain(['z', 0], { z: { class_type: 'GetImageSize', inputs: { image: ['l', 0] } } })
+    expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
+    expect(stopGapRefusal(withStaticWiredSettings(p, EVERY), EVERY)).toBeNull()
+  })
+
+  it('row 17: a value the run makes for a model choice (no bound), or for a setting the brief names, is refused: "Type this setting in; it can’t be wired."', async () => {
+    const edit: ApiPrompt = { q: llm, l: loadImage(), e: { class_type: 'EditImageNode', inputs: { model: ['q', 0], input_image: ['l', 0], prompt: 'x' } }, s: saveImage(['e', 0]) }
+    expect(runnerTakesWorkflow(edit, EVERY)).toBe(true)
+    expect(stopGapRefusal(edit, EVERY)).toEqual({ nodeId: 'e', classType: 'EditImageNode', code: 'wired-setting', message: wiredSettingWords('Model') })
+    expect(wiredSettingWords('Model')).toBe('“Model” gets its value from another node during the run. Type this setting in; it can’t be wired.')
+    expect(stopGapRefusal(vocals({ shifts: ['q', 0] }), EVERY)).toMatchObject({ nodeId: 'v', code: 'wired-setting', message: wiredSettingWords('Shifts') })
+    expect(stopGapRefusal(whisper(['q', 0]), EVERY)).toMatchObject({ nodeId: 'w', code: 'wired-setting', message: wiredSettingWords('Model size') })
+    // Through the engine: refused before the hold, the node named.
+    const kit = makeKit({ deps: { families: () => EVERY } })
+    await writePng(join(kit.root, 'input', 'p.png'))
+    await refusedPlainly(kit, edit, 'wired-setting', wiredSettingWords('Model'))
+  })
+
+  it('row 17 (m1, m2): labels are the node’s own (the canvas’s rule); an object where a value belongs isn’t called wired', () => {
+    expect(shownLabel(WHISPER_CLASS, 'model_size')).toBe('Model size')
+    expect(shownLabel('TextClip', 'duration')).toBe('Duration (frames)')
+    expect(shownLabel('RestyleWithLoRANode', 'style_strength')).toBe('Transformation')
+    // The canvas's own rule, read from its source so the two can't drift.
+    const canvas = readFileSync(join(__dirname, '../../app/components/vue-canvas/ComfyNodeWidget.vue'), 'utf8')
+    expect(canvas).toContain("RestyleWithLoRANode: { style_strength: 'Transformation' }")
+    for (const name of FRAME_WIDGET_NAMES) expect(canvas).toContain(`'${name}'`)
+    const obj = vocals({ shifts: { __value__: 2 } })
+    expect(stopGapRefusal(obj, EVERY)).toMatchObject({ code: 'odd-text', message: oddSettingWords('Shifts') })
   })
 
   // ── Row 18: odd text ──
-  it('row 18: colour text, a painter file’s name: refused plainly, naming the field', () => {
+  it('row 18: colour text, a painter file’s name, a Moodboard reading, a bake card’s settings: refused plainly, naming the field', async () => {
     const gm = (dark: unknown): ApiPrompt => ({ l: loadImage(), g: { class_type: 'GradientMap', inputs: { image: ['l', 0], dark_color: dark, light_color: '#ffffff', midpoint: 0.5, contrast: 1, mix: 1 } } })
     expect(stopGapRefusal(gm('#000000'), EVERY)).toBeNull()
     for (const odd of [5, '#\u0661\u0662\u0663\u0664\u0665\u0666']) {
       expect(runnerTakesWorkflow(gm(odd), EVERY), String(odd)).toBe(true)
-      expect(stopGapRefusal(gm(odd), EVERY), String(odd)).toEqual({ nodeId: 'g', classType: 'GradientMap', code: 'odd-text', message: oddTextWords('dark color') })
+      expect(stopGapRefusal(gm(odd), EVERY), String(odd)).toEqual({ nodeId: 'g', classType: 'GradientMap', code: 'odd-text', message: oddSettingWords('Dark color') })
     }
     const painter: ApiPrompt = { p: { class_type: 'Painter', inputs: { mask: '../x.png', width: 64, height: 64, bg_color: '#000000' } }, s: saveImage(['p', 0]) }
     expect(stopGapRefusal(painter, EVERY)).toEqual({ nodeId: 'p', classType: 'Painter', code: 'odd-text', message: oddTextWords('painter file’s name') })
+    const mood: ApiPrompt = {
+      m: { class_type: 'Moodboard', inputs: { reading_json: '{"summary": 5}', moodboard_id: 'mb_1' } }, c: loadImage('c.png'),
+      r: { class_type: 'RestyleFromImageNode', inputs: { model: 'Nano Banana 2', content_image: ['c', 0], style_in: ['m', 0], prompt: 'x' } }, s: saveImage(['r', 0]),
+    }
+    expect(runnerTakesWorkflow(mood, EVERY)).toBe(true)
+    expect(stopGapRefusal(mood, EVERY)).toEqual({ nodeId: 'm', classType: 'Moodboard', code: 'odd-text', message: oddTextWords('moodboard’s reading') })
+    const bake: ApiPrompt = { t: { class_type: 'TextOnPath', inputs: { params: '{"rendered": NaN}' } }, s: saveImage(['t', 0]) }
+    expect(runnerTakesWorkflow(bake, EVERY)).toBe(true)
+    expect(stopGapRefusal(bake, EVERY)).toMatchObject({ nodeId: 't', code: 'odd-text', message: 'This node’s saved settings can’t be read here. Set them again on the node.' })
+    // Through the engine: refused before the hold (no file is read for these).
+    const kit = makeKit({ deps: { families: () => EVERY } })
+    await refusedPlainly(kit, bake, 'odd-text', /saved settings can’t be read here/)
+    await refusedPlainly(kit, mood, 'odd-text', oddTextWords('moodboard’s reading'))
   })
 
   // ── Row 19: letters outside the atlas ──
   it('row 19: U+2800 in Ascii’s ramp is refused plainly before the hold', LONG, async () => {
-    const p: ApiPrompt = { l: loadImage(), a: ascii('⠀ab') }
+    const p: ApiPrompt = { l: loadImage(), a: ascii('\u2800ab') }
     expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
     expect(stopGapRefusal(p, EVERY)).toEqual({ nodeId: 'a', classType: 'Ascii', code: 'letters', message: LETTERS_WORDS })
     expect(stopGapRefusal({ l: loadImage(), a: ascii('#ab') }, EVERY)).toBeNull()
-    const k = makeKit({ deps: { families: () => EVERY } })
-    await writePng(join(k.root, 'input', 'p.png'))
-    await refusedPlainly(k, p, 'letters', LETTERS_WORDS)
-    // The refusal names the node by the title the person gave it.
-    const titled = await k.engine.startRun({ userId: k.userId, takes: [p], ...START, workflow: { nodes: [{ id: 'a', type: 'Ascii', title: 'Ascii art' }] } }).catch(e => e)
+    const kit = makeKit({ deps: { families: () => EVERY } })
+    await writePng(join(kit.root, 'input', 'p.png'))
+    await refusedPlainly(kit, p, 'letters', LETTERS_WORDS)
+    // The node is named by the title the person gave it.
+    const titled = await kit.engine.startRun({ userId: kit.userId, takes: [p], ...START, workflow: { nodes: [{ id: 'a', type: 'Ascii', title: 'Ascii art' }] } }).catch(e => e)
     expect(titled.message).toBe(`“Ascii art”: ${LETTERS_WORDS}`)
     expect(titled.data).toMatchObject({ nodeId: 'a', classType: 'Ascii', code: 'letters' })
   })
 
-  // ── Row 20: video formats; ProRes card export ──
-  it('row 20: a file neither the sniffer nor the build reads is refused, saying what to change', LONG, async () => {
-    await requireMediaTools()
+  // ── Rows 20–22 and the waveform, through the engine kit ──
+  const mediaKit = () => {
     const dir = mkdtempSync(join(scratch, 'runs-'))
-    const k = makeKit({ dir, deps: { families: () => EVERY, kept: createFileKeptBytes(join(dir, 'kept')) } })
-    writeFileSync(join(k.root, 'input', 'odd.rm'), Buffer.from('.RMF not really RealMedia'.repeat(64)))
-    await refusedPlainly(k, { l: loadVideo('odd.rm'), s: saveVideo('l') }, 'video-format', withAdvice(MEDIA_WORDS.unreadable, VIDEO_FORMAT_ADVICE))
-  })
-  it('row 20: ProRes card export: the bundled build has no ProRes encoder (checked 2026-10-02), so it is refused plainly', () => {
-    expect(startStopGap({ message: VIDEO_NOT_MP4 })).toEqual({ code: 'video-format', message: withAdvice(VIDEO_NOT_MP4, CARD_EXPORT_ADVICE) })
-  })
-
-  // ── Row 21: LUTs and the waveform's sound ──
-  it('row 21: a LUT outside the folders or too large, a sound past 384 kHz: refused plainly', () => {
-    expect(startStopGap({ message: MEDIA_EFFECT_WORDS.lutMissing })).toEqual({ code: 'lut', message: LUT_OUTSIDE_WORDS })
-    expect(startStopGap({ message: MEDIA_EFFECT_WORDS.lutTooBig })).toEqual({ code: 'lut', message: withAdvice(MEDIA_EFFECT_WORDS.lutTooBig, 'Use a LUT file under 16 MB.') })
+    const kit = makeKit({ dir, deps: { families: () => EVERY, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    for (const c of ['v_stereo_aac.mp4', 'v_prores.mov']) copyFileSync(clipPath(c), join(kit.root, 'input', c))
+    return kit
+  }
+  const clipThrough = (effect: Record<string, unknown> & { class_type: string }): ApiPrompt => ({ l: loadVideo('v_stereo_aac.mp4'), g: getComp('l'), e: effect, c: createVideo('e'), s: saveVideo('c') })
+  const waveform = (file: string): ApiPrompt => ({
+    e: { class_type: 'AudioWaveform', inputs: { audio_file: file, width: 64, height: 64, fps: 24, frame_count: 4, style: 'bars', bar_count: 8, color: '#ffffff', bg_color: '#000000', sensitivity: 1, smoothing: 0.5 } },
+    c: createVideo('e'), s: saveVideo('c'),
   })
 
-  // ── Row 22: typed captions over the cap ──
-  it('row 22: captions over 200,000 characters: refused plainly (lifting the cap is parked)', () => {
-    const limits = VIDEO_EFFECTS.CaptionTrack!.limits!({ captions: 'x'.repeat(CAPTIONS_MAX_CHARS + 1), font_size: 32, outline_width: 2 }, [], {})
-    const over = limits.find(f => f.value > f.limit)!
-    expect(over.message).toBe(MEDIA_EFFECT_WORDS.textTooLong)
-    expect(startStopGap({ message: over.message, classType: 'CaptionTrack' })).toEqual({ code: 'captions-too-long', message: captionsTooLongWords(CAPTIONS_MAX_CHARS) })
+  it('row 20: a file neither the sniffer nor the build reads, and a ProRes card export (no ProRes encoder in the build, checked 2026-10-02)', LONG, async () => {
+    await requireMediaTools()
+    const kit = mediaKit()
+    writeFileSync(join(kit.root, 'input', 'odd.rm'), Buffer.from('.RMF not really RealMedia'.repeat(64)))
+    await refusedPlainly(kit, { l: loadVideo('odd.rm'), s: saveVideo('l') }, 'video-format', withAdvice(MEDIA_WORDS.unreadable, VIDEO_FORMAT_ADVICE))
+    await refusedPlainly(kit, { c: { class_type: 'Video', inputs: { file: 'v_prores.mov', export: true, filename_prefix: 'video' } } }, 'video-format', withAdvice(VIDEO_NOT_MP4, CARD_EXPORT_ADVICE))
+  })
+
+  it('row 21: a LUT outside the folders; a waveform’s sound outside the folders or past 384 kHz', LONG, async () => {
+    await requireMediaTools()
+    const kit = mediaKit()
+    await refusedPlainly(kit, clipThrough({ class_type: 'LUT', inputs: { frames: ['g', 0], lut_file: '../grade.cube', strength: 1 } }), 'lut', LUT_OUTSIDE_WORDS)
+    await refusedPlainly(kit, waveform('../x.wav'), 'sound-rate', WAVE_SOUND_OUTSIDE_WORDS)
+    const rate = 400_000
+    const data = Buffer.alloc(4 * 64)
+    const fmt = Buffer.alloc(16)
+    fmt.writeUInt16LE(3, 0); fmt.writeUInt16LE(1, 2); fmt.writeUInt32LE(rate, 4); fmt.writeUInt32LE(rate * 4, 8); fmt.writeUInt16LE(4, 12); fmt.writeUInt16LE(32, 14)
+    writeFileSync(join(kit.root, 'input', 'fast.wav'), Buffer.concat([Buffer.from('RIFF'), Buffer.from(Uint32Array.of(4 + 24 + 8 + data.length).buffer), Buffer.from('WAVEfmt '), Buffer.from(Uint32Array.of(16).buffer), fmt, Buffer.from('data'), Buffer.from(Uint32Array.of(data.length).buffer), data]))
+    await refusedPlainly(kit, waveform('fast.wav'), 'sound-rate', withAdvice(MEDIA_EFFECT_WORDS.waveSoundTooBig, SOUND_RATE_ADVICE))
+  })
+
+  it('row 22: captions over 200,000 characters (lifting the cap is parked)', LONG, async () => {
+    await requireMediaTools()
+    const kit = mediaKit()
+    const captions = (n: number) => clipThrough({ class_type: 'CaptionTrack', inputs: { frames: ['g', 0], captions: 'x'.repeat(n), font_size: 32, color: '#ffffff', outline_color: '#000000', outline_width: 2, position: 'bottom', y_inset: 0.05 } })
+    await refusedPlainly(kit, captions(CAPTIONS_MAX_CHARS + 1), 'captions-too-long', captionsTooLongWords(CAPTIONS_MAX_CHARS))
     expect(captionsTooLongWords(CAPTIONS_MAX_CHARS)).toBe('These captions are too long to draw here. Keep them under 200,000 characters.')
   })
 
-  // ── Row 23: hosted work and kept-room caps ──
+  it('no start pass sends a workflow to the engine: RUNNER_NOT_ELIGIBLE is set only at eligibility’s three declines', () => {
+    const files = readdirSync(join(__dirname, '../../server/runner'), { recursive: true }).map(String).filter(f => f.endsWith('.ts'))
+    const uses: string[] = []
+    for (const f of files) {
+      const text = readFileSync(join(__dirname, '../../server/runner', f), 'utf8')
+      for (const line of text.split('\n')) if (/reason: RUNNER_NOT_ELIGIBLE/.test(line)) uses.push(`${f}: ${line.trim()}`)
+    }
+    expect(uses, uses.join('\n')).toHaveLength(3)
+    expect(uses.every(u => u.startsWith('engine.ts: '))).toBe(true)
+    expect(uses.filter(u => u.includes("'not-taken'"))).toHaveLength(2)
+    expect(uses.filter(u => u.includes("'switched-off'"))).toHaveLength(1)
+  })
+
   it('row 23: past a work, memory or kept-room figure: "too much work for one run here"', async () => {
     for (const words of [MEDIA_EFFECT_WORDS.heldTooMuch, MEDIA_EFFECT_WORDS.tooMuchWork, MEDIA_EFFECT_WORDS.keptTooMuch, MEDIA_EFFECT_WORDS.soundTooLong, MEDIA_EFFECT_WORDS.soundKeptTooMuch, MEDIA_WORDS.tooLong, LOCAL_MODEL_WORDS.overCap]) {
       expect(startStopGap({ message: words }), words).toEqual({ code: 'too-much-work', message: withAdvice(words, TOO_MUCH_WORK_WORDS) })
@@ -354,6 +457,43 @@ describe('R11.7 / R11.8 stop-gaps: refused plainly before the hold, never the en
     expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
     const k = makeKit({ hosted: true, deps: { families: () => EVERY } })
     await refusedPlainly(k, p, 'paid-video-sound', /^The sound of a video from .+ can’t be measured before the run, and a sound effect here takes at most 30 minutes of sound\. Save the video, then load it with Load video\.$/)
+  })
+
+  it('fix round 1 (I1): a paid video’s clip is bounded by its own settings: an 8 s Veo clip into a video effect starts hosted; one whose settings truly pass the caps is refused with advice on those settings', async () => {
+    const veo = (options: Record<string, unknown> = {}): ApiPrompt => ({
+      v: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', prompt: 'a boat', aspect_ratio: '16:9', duration: '8', seed: 0, model_options: JSON.stringify(options) } },
+      c: { class_type: 'Video', inputs: { source: ['v', 0], file: '', export: false, filename_prefix: 'video' } },
+      g: { class_type: 'GetVideoComponents', inputs: { video: ['c', 0] } },
+      t: { class_type: 'VideoTrim', inputs: { frames: ['g', 0], start: 0, end: -1 } },
+      cv: { class_type: 'CreateVideo', inputs: { images: ['t', 0], fps: 24 } },
+      s: saveVideo('cv'),
+    })
+    expect(runnerTakesWorkflow(veo(), EVERY)).toBe(true)
+    const kit = makeKit({ hosted: true, deps: { families: () => EVERY } })
+    const quote = await kit.engine.quoteRun({ userId: kit.userId, takes: [veo()], ...START }).catch(e => e)
+    expect(quote instanceof Error ? quote.message : null).toBeNull()
+    const err = await kit.engine.quoteRun({ userId: kit.userId, takes: [veo({ resolution: '4k' })], ...START }).catch(e => e)
+    expect(err.data).toMatchObject({ code: 'too-much-work', nodeId: 't' })
+    expect(err.data.reason).toBeUndefined()
+    expect(err.message.endsWith(paidVideoSettingsAdvice('Generate a video'))).toBe(true)
+    expect(kit.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('fix round 1 (I2): Save image saving every frame is counted against hosted’s kept room before the hold', () => {
+    const p = (scale: number, reader: 'SaveImage' | 'PreviewImage' = 'SaveImage'): ApiPrompt => ({
+      l: { class_type: 'LoadVideoFrames', inputs: { file: 'a.mp4', max_seconds: 10, max_frames: 600, max_size: 1080, start_frame: 0, stride: 1 } },
+      s: reader === 'SaveImage' ? { ...saveImage(['l', 0]), inputs: { ...saveImage(['l', 0]).inputs, scale } } : previewImage(['l', 0]),
+    })
+    const shapes = new Map([['l:0', { count: 600, w: 1920, h: 1080, exact: false }]])
+    const opts = (hosted: boolean) => ({ hosted, clipAtCaps: () => clipAtCaps(hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local) })
+    // 600 frames of 1080p ≈ 3.8 GB at most: within 4 GiB; at scale 4, 16× that: refused.
+    expect(600 * savedFrameBytesBound(1920, 1080)).toBeLessThan(MEDIA_CAPS.hosted.keptBytesPerRun)
+    expect(saveFramesStartProblem(p(1), EVERY, shapes, opts(true))).toBeNull()
+    expect(saveFramesStartProblem(p(4), EVERY, shapes, opts(true))).toMatchObject({ nodeId: 's', classType: 'SaveImage' })
+    expect(startStopGap(saveFramesStartProblem(p(4), EVERY, shapes, opts(true))!).code).toBe('too-much-work')
+    // Locally the machine is the person's own; Preview image saves at scale 1.
+    expect(saveFramesStartProblem(p(4), EVERY, shapes, opts(false))).toBeNull()
+    expect(saveFramesStartProblem(p(4, 'PreviewImage'), EVERY, shapes, opts(true))).toBeNull()
   })
 
   it('several still pictures into Slow motion (AI) are refused plainly; one is handed on', async () => {

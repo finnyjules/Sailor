@@ -15,6 +15,9 @@
  * fixtures/runner-lipsync-engines.json). Nothing reaches a provider.
  */
 import { stopGapRefusal } from '#shared/runner/stopGaps'
+import { LIPSYNC_SILENCE_NEEDS_UPLOAD } from '#shared/runner/soundIn'
+import { LIPSYNC_MAX_SECONDS, remoteVideoCalls } from '#shared/pricing/clipSettings'
+import { lipSyncEngineMediaCheck } from '~~/server/runner/lipSyncMedia'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -35,7 +38,7 @@ import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import {
   FABRIC_LIPSYNC_NEEDS_FACE, FABRIC_LIPSYNC_SLUG, KLING_LIPSYNC_NEEDS_VIDEO, KLING_LIPSYNC_SLUG, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, pythonWavBytesBound,
-  LIPSYNC_ENGINE_TOO_LONG, LIPSYNC_NEEDS_SOUND, LIPSYNC_SILENCE_NEEDS_UPLOAD, LIPSYNC_UPLOAD_FACE, LIPSYNC_UPLOAD_SOUND, LIPSYNC_UPLOAD_VIDEO, fabricLipSyncResolution, lipSyncRunEngine,
+  LIPSYNC_ENGINE_TOO_LONG, LIPSYNC_NEEDS_SOUND, LIPSYNC_UPLOAD_FACE, LIPSYNC_UPLOAD_SOUND, LIPSYNC_UPLOAD_VIDEO, KLING_LIPSYNC_MAX_VIDEO_SECONDS, fabricLipSyncResolution, lipSyncRunEngine,
 } from '#shared/runner/lipSyncEngines'
 import { LIPSYNC_SILENCE_TOO_LONG, RVC_MODELS, RVC_PITCH_ALGORITHMS, RVC_PITCH_CHANGES, RVC_PRESET_VOICES } from '#shared/runner/soundIn'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
@@ -204,24 +207,32 @@ describe('what the runner takes', () => {
     }
   })
 
-  it('what it can\'t read before the run stays with the engine (a stop-gap, named in the report)', () => {
-    // Fabric: a sound at a web address (its length is the price).
-    expect(runnerTakesNode(node(fabricOpts({ audio: 'https://example.com/v.mp3' })), 'n', ON)).toBe(false)
+  it('R11.9a fix round 1 (ruling 5): an https sound (Fabric) or face video (Kling) is held at its cap; a data: link or http is refused plainly', async () => {
+    // Held at the cap (ruling (k)): Fabric's sound at its 60 s, Kling's face video at its schema's 10 s.
+    const fabricHttps = node(fabricOpts({ audio: 'https://example.com/v.mp3' }))
+    const klingHttps = node(klingOpts({ face_video: 'https://example.com/f.mp4' }))
+    for (const p of [fabricHttps, klingHttps]) {
+      expect(runnerTakesNode(p, 'n', ON)).toBe(true)
+      expect(stopGapRefusal(p, ON)).toBeNull()
+    }
+    const fab = await lipSyncEngineMediaCheck(fabricHttps, 'n', {} as never)
+    expect(fab).toEqual({ problem: null, measured: { seconds: { audioUpTo: LIPSYNC_MAX_SECONDS }, sha: {} } })
+    const kl = await lipSyncEngineMediaCheck(klingHttps, 'n', {} as never)
+    expect(kl).toEqual({ problem: null, measured: { seconds: { videoUpTo: KLING_LIPSYNC_MAX_VIDEO_SECONDS }, sha: {} } })
+    expect(KLING_LIPSYNC_MAX_VIDEO_SECONDS).toBe(10)
+    // The price holds them at those caps.
+    expect(remoteVideoCalls('LipSyncNode', fabricHttps.n!.inputs!, { audioUpTo: LIPSYNC_MAX_SECONDS })).toMatchObject([{ endpoint: FABRIC_LIPSYNC_SLUG, seconds: 60 }])
+    expect(remoteVideoCalls('LipSyncNode', klingHttps.n!.inputs!, { videoUpTo: KLING_LIPSYNC_MAX_VIDEO_SECONDS })).toMatchObject([{ endpoint: KLING_LIPSYNC_SLUG, seconds: 10 }])
+    // A data: link or http (not https, not a Sailor file): refused plainly before the hold.
     expect(runnerTakesNode(node(fabricOpts({ face_image: 'data:image/png;base64,AA' })), 'n', ON)).toBe(false)
-    // Kling: a face video at a web address (its length is the price).
-    expect(runnerTakesNode(node(klingOpts({ face_video: 'https://example.com/f.mp4' })), 'n', ON)).toBe(false)
-    expect(runnerTakesNode(node(klingOpts({ audio: 'http://example.com/v.mp3' })), 'n', ON)).toBe(false)
-    // A wired face picture.
+    expect(stopGapRefusal(node(fabricOpts({ face_image: 'data:image/png;base64,AA' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_FACE })
+    expect(stopGapRefusal(node(klingOpts({ audio: 'http://example.com/v.mp3' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_SOUND })
+    expect(stopGapRefusal(node(klingOpts({ face_video: 'http://example.com/f.mp4' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_VIDEO })
+    // A wired face picture still stays with the engine (R11.3's stop-gap 4, a port: not a plain refusal).
     const p = node(fabricOpts())
     p.img = { class_type: 'Image', inputs: { image: 'face.png' } }
     p.n!.inputs!.image = ['img', 0]
     expect(runnerTakesNode(p, 'n', ON)).toBe(false)
-    // R11.9a (R11.3's stop-gaps 1–3): the runner refuses these plainly instead, before the hold.
-    expect(stopGapRefusal(node(fabricOpts({ audio: 'https://example.com/v.mp3' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_SOUND })
-    expect(stopGapRefusal(node(fabricOpts({ face_image: 'data:image/png;base64,AA' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_FACE })
-    expect(stopGapRefusal(node(klingOpts({ face_video: 'https://example.com/f.mp4' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_VIDEO })
-    expect(stopGapRefusal(node(klingOpts({ audio: 'http://example.com/v.mp3' })), ON)).toMatchObject({ code: 'not-a-file', message: LIPSYNC_UPLOAD_SOUND })
-    // A wired face picture still stays with the engine (not a plain refusal: R11.3's stop-gap 4, a port).
     expect(stopGapRefusal(p, ON)).toBeNull()
     // An https face (Fabric) and an https sound (Kling) are sent as typed: taken.
     expect(runnerTakesNode(node(fabricOpts({ face_image: 'https://example.com/f.png' })), 'n', ON)).toBe(true)
@@ -245,16 +256,18 @@ describe('what the runner takes', () => {
     expect(runnerTakesWorkflow(s3, new Set<RunnerFamily>(['cards', 'media-sound', 'sync-3']))).toBe(false)
   })
 
-  it('Sync lips in silence: taken only on an uploaded face video', () => {
+  it('Sync lips in silence: taken only on an uploaded face video (an https one would bill unbounded: refused plainly)', () => {
     const sync = (video_url: string, sync_mode = 'silence'): ApiPrompt => ({
       snd: { class_type: 'LoadAudio', inputs: { audio: 'voice.wav' } },
       n: { class_type: 'LipsyncNode', inputs: { model: 'sync.so 2-pro', audio: ['snd', 0], video_url, sync_mode } },
       v: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'v', source: ['n', 0] } },
     })
     expect(runnerTakesWorkflow(sync('/view?filename=face.mp4&type=input'), ON)).toBe(true)
-    // R11.9a (R11.3's stop-gap 6): sent to the runner, refused plainly before the hold.
+    // R11.9a (R11.3's stop-gap 6): sent to the runner, refused plainly before the hold. Fix round 1: not held at 60 s like
+    // Fabric's and Kling's https media, since nothing caps what the service bills for a longer video.
     expect(runnerTakesWorkflow(sync('https://example.com/face.mp4'), ON)).toBe(true)
     expect(stopGapRefusal(sync('https://example.com/face.mp4'), ON)).toMatchObject({ nodeId: 'n', code: 'not-a-file', message: LIPSYNC_SILENCE_NEEDS_UPLOAD })
+    expect(stopGapRefusal(sync('http://example.com/face.mp4'), ON)).toMatchObject({ nodeId: 'n', code: 'not-a-file', message: LIPSYNC_SILENCE_NEEDS_UPLOAD })
     expect(runnerTakesWorkflow(sync('https://example.com/face.mp4', 'cut_off'), ON)).toBe(true)
     expect(runnerTakesWorkflow(sync('/view?filename=face.mp4&type=input'), new Set<RunnerFamily>(['cards', 'media-sound']))).toBe(false)
   })
@@ -502,6 +515,41 @@ describe('on the engine (fake Replicate and fal)', () => {
     expect(run.takes[0]!.nodes.n!.credits).toBe(held.nodes!.n)
     expect(held.nodes!.n).toBe(creditsForUsd(3 * 8 / 60))
   }, 60_000)
+
+  describe('R11.9a fix round 1 (ruling (k)): an https medium held at its cap is charged on the clip delivered', () => {
+    /** A hosted kit whose every download is `answer` (the delivered clip). */
+    const kitAnswering = (answer: Uint8Array, files: Record<string, Uint8Array | Buffer>) => {
+      const k = makeKit({ hosted: true, available: 50_000, fal: createFakeFal(), replicate: createFakeReplicate(), deps: {
+        families: () => ON, download: async () => ({ bytes: answer, contentType: 'video/mp4' }),
+      } })
+      for (const [name, bytes] of Object.entries(files)) writeFileSync(join(k.root, 'input', name), bytes)
+      return k
+    }
+    const cases: [string, () => ApiPrompt, Record<string, Uint8Array | Buffer>, 'audio' | 'video', number][] = [
+      ['Fabric, its sound at https (held at 60 s)', () => node(fabricOpts({ audio: 'https://example.com/v.wav' })), { 'face.png': rgbPng1x1(9, 9, 9) }, 'audio', LIPSYNC_MAX_SECONDS],
+      ['Kling, its face video at https (held at 10 s)', () => node(klingOpts({ face_video: 'https://example.com/f.mp4' })), { 'voice.wav': wav(2) }, 'video', KLING_LIPSYNC_MAX_VIDEO_SECONDS],
+    ]
+    for (const [name, graph, files, basis, cap] of cases) {
+      it(`${name}: a 4 s clip back is charged on 4 s, never above the hold; an unreadable one charges the hold`, async () => {
+        await requireMediaTools()
+        const heldAt = priceGraph(graph(), { families: ON, inputSeconds: { n: { [`${basis}UpTo`]: cap } } }).nodes!.n!
+        const deliveredAt = priceGraph(graph(), { families: ON, inputSeconds: { n: basis === 'audio' ? { audio: 4 } : { audio: 2, video: 4 } } }).nodes!.n!
+        expect(deliveredAt).toBeLessThan(heldAt)
+        const k = kitAnswering(new Uint8Array(await mp4(4)), files)
+        const { run } = await runOf(k, graph())
+        expect(run.status, JSON.stringify(run.takes[0]?.nodes)).toBe('done')
+        const holdCredits = k.ledger.hold.mock.calls[0]![1] as number
+        expect(holdCredits).toBeGreaterThanOrEqual(heldAt)
+        expect(run.takes[0]!.nodes.n!.credits).toBe(deliveredAt)
+        expect(k.ledger.settle.mock.calls[0]![1]).toBe(holdCredits - heldAt + deliveredAt)
+        // A clip whose length can't be read: the hold is charged.
+        const u = kitAnswering(new TextEncoder().encode('not a video'), files)
+        const unread = await runOf(u, graph())
+        expect(unread.run.status, JSON.stringify(unread.run.takes[0]?.nodes)).toBe('done')
+        expect(unread.run.takes[0]!.nodes.n!.credits).toBe(heldAt)
+      }, 60_000)
+    }
+  })
 
   describe('Sync lips in silence', () => {
     const sync = (): ApiPrompt => ({

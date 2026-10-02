@@ -560,7 +560,7 @@ export const OBJECT_REMOVE_WORDS = {
 export const SAM_MASK_WORDS = {
   noPicture: 'There is no picture to make a mask from.',
   pointsFail: 'These click points can’t be read. Each needs an x and a y between 0 and 1.',
-  pointsLabel: 'Each click point must add to the mask (1) or take away from it (0).',
+  pointsLabel: 'Each click point must add to the mask (1), take away from it (0), or mark a box’s two corners (2 and 3, in pairs).',
   pointsUnreadable: 'These click points can’t be read.',
 } as const
 

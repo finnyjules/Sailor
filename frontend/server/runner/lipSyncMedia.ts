@@ -15,9 +15,10 @@
  * refused in hosted (`strict`, the media rule's words).
  */
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
-import { LIPSYNC_MAX_SECONDS } from '#shared/pricing/clipSettings'
+import { LIPSYNC_MAX_SECONDS, type InputSeconds } from '#shared/pricing/clipSettings'
+import { mediaInfoOfBytes } from '../utils/graphInputSeconds'
 import {
-  KLING_LIPSYNC_MAX_SOUND_BYTES, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, LIPSYNC_ENGINE_FILE_MISSING, LIPSYNC_ENGINE_TOO_LONG,
+  KLING_LIPSYNC_MAX_SOUND_BYTES, KLING_LIPSYNC_MAX_VIDEO_SECONDS, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, LIPSYNC_ENGINE_FILE_MISSING, LIPSYNC_ENGINE_TOO_LONG,
   lipSyncEngineMedia, lipSyncEngineProblem, lipSyncRunEngine, pythonWavBytesBound, type LipSyncMediaRef,
 } from '#shared/runner/lipSyncEngines'
 import { measureMediaFile, type MediaRule } from './mediaInputs'
@@ -66,6 +67,9 @@ export async function lipSyncEngineMediaCheck(prompt: ApiPrompt, nodeId: string,
   const m = lipSyncEngineMedia(inputs)
   if (engine === 'fabric') {
     if ('wired' in m.audio) return wiredSoundCheck(prompt, m.audio.wired as ApiLink, node.class_type, reads)
+    // R11.9a fix round 1 (ruling 5, ruling (k)): a sound at an https address can't be measured before the run: held at
+    // Fabric's 60 s cap (the price's own "not measured", billedSeconds).
+    if ('https' in m.audio) return { problem: null, measured: { seconds: { audioUpTo: LIPSYNC_MAX_SECONDS }, sha: {} } }
     if (!('upload' in m.audio)) return null
     const a = await measureMediaFile(inputFile(m.audio.upload), LIPSYNC_ENGINE_SOUND_RULE, reads, LIPSYNC_ENGINE_FILE_MISSING)
     if (a.problem !== null) return { problem: a.problem }
@@ -98,6 +102,8 @@ export async function lipSyncEngineMediaCheck(prompt: ApiPrompt, nodeId: string,
     const bytes = await reads.size(inputFile(m.audio.upload)).catch(() => null)
     if (bytes != null && bytes > KLING_LIPSYNC_MAX_SOUND_BYTES) return { problem: KLING_LIPSYNC_SOUND_TOO_LARGE }
   }
+  // R11.9a fix round 1 (ruling 5, ruling (k)): a face video at an https address is held at Kling's 10 s (its schema's longest).
+  if ('https' in m.video) return { problem: null, measured: { seconds: { videoUpTo: KLING_LIPSYNC_MAX_VIDEO_SECONDS }, sha: {} } }
   if (!('upload' in m.video)) return null
   const v = await measureMediaFile(inputFile(m.video.upload), KLING_LIPSYNC_VIDEO_RULE, reads, LIPSYNC_ENGINE_FILE_MISSING)
   if (v.problem !== null) return { problem: v.problem }
@@ -119,4 +125,27 @@ export function lipSyncEngineInputFiles(prompt: ApiPrompt, nodeId: string): Outp
     if (f) out.push(f)
   }
   return out
+}
+
+/**
+ * R11.9a fix round 1 (ruling (k)): a lip-sync held at its cap because its
+ * medium is at an https address (never measured before the run) is charged on
+ * the clip it delivers, never above the hold. The figure the delivered clip's
+ * length stands for: Fabric's sound (its video runs the sound's length) or
+ * Kling's face video (its answer is that video, lip-synced); null for
+ * anything else (charged as held).
+ */
+export function httpsHeldBasis(classType: string, inputs: Record<string, unknown>, seconds: InputSeconds | undefined): 'audio' | 'video' | null {
+  if (!seconds || classType !== 'LipSyncNode') return null
+  const engine = lipSyncRunEngine(inputs)
+  const m = lipSyncEngineMedia(inputs)
+  if (engine === 'fabric' && 'https' in m.audio && seconds.audio == null && seconds.audioUpTo != null) return 'audio'
+  if (engine === 'kling' && 'https' in m.video && seconds.video == null && seconds.videoUpTo != null) return 'video'
+  return null
+}
+
+/** The seconds a delivered clip runs (its video track, read from its bytes), or null when it can't be read. */
+export async function deliveredClipSeconds(bytes: Uint8Array): Promise<number | null> {
+  const info = await mediaInfoOfBytes(bytes, 'video').catch(() => null)
+  return info && Number.isFinite(info.seconds) && info.seconds > 0 ? info.seconds : null
 }

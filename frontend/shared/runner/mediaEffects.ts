@@ -227,7 +227,7 @@ export function mediaEffectSwitchedClasses(): Record<string, RunnerFamily> {
  * engine), and why one fails at its turn where the start pass could only bound it.
  */
 export const MEDIA_EFFECT_WORDS = {
-  unknownLength: 'The runner can’t tell before the run how long this video is',
+  unknownLength: 'Sailor can’t tell before the run how long this video is',
   heldTooMuch: 'This video effect would hold too many frames at once to work on here',
   tooMuchWork: 'This video effect would take too long on a clip this long to work on here',
   keptTooMuch: 'This workflow makes more video than the server can keep for one run',
@@ -241,7 +241,7 @@ export const MEDIA_EFFECT_WORDS = {
   waveSoundTooBig: 'This sound file can’t be drawn as a waveform here',
   textFontMissing: 'The font for text on video isn’t there',
   textTooLong: 'This text is too long to draw on video here',
-  soundUnknown: 'The runner can’t tell before the run how long this sound is',
+  soundUnknown: 'Sailor can’t tell before the run how long this sound is',
   soundTooLong: 'This sound effect would hold too much sound at once to work on here',
   soundKeptTooMuch: 'This workflow makes more sound and video than the server can keep for one run',
   trimEmpty: 'The trim’s start must be before its end, inside the sound',

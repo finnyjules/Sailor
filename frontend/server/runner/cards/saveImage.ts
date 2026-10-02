@@ -53,7 +53,11 @@ import type { OutputFile } from '../types'
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import type { PictureSource } from '../compositor/decode'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
-import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
+import { CARD_MAX_PIXELS, outputKindsFor } from '#shared/runner/eligibility'
+import { outputKind } from '#shared/runner/values'
+import { MEDIA_CAPS } from '#shared/runner/media'
+import type { RunnerFamily } from '#shared/runner/families'
+import type { FrameShape } from '../video/table'
 import { pictureSourceOf } from '../compositor/plan'
 import { pixelsInWorker } from '../compositor/worker'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta } from '../pictures/pythonView'
@@ -366,6 +370,42 @@ function framesWiredIn(ctx: PlanContext): FramesValue | null {
   if (!isLink(v)) return null
   const value = ctx.valueFrom?.(v)
   return value?.kind === 'frames' ? value : null
+}
+
+/** Fix round 1 (I2): saving every frame of a clip would write more than one run keeps here. */
+export const SAVE_FRAMES_TOO_MUCH = 'Saving every frame of this clip would write more than one run can keep here'
+
+/** The most bytes one saved frame of `ow` × `oh` can take: an 8-bit RGB PNG at most its raw bytes, a filter byte a row, and a margin. */
+export const savedFrameBytesBound = (ow: number, oh: number) => Math.ceil(ow * oh * 3 * 1.01) + oh + 64 * 1024
+
+/**
+ * Fix round 1 (I2, ruling (q)): before the hold, what Save image and Preview
+ * image would write saving every frame of a clip, against the run's kept room
+ * (hosted: MEDIA_CAPS.hosted.keptBytesPerRun): frames × the frame size × the
+ * scale (a wired scale at its most, 4; a wired largest side as none). `shapes`:
+ * the clips' frame shapes (./video/shapes.ts frameShapes); one not known is
+ * held at the place's caps. The first saver past it, or null.
+ */
+export function saveFramesStartProblem(
+  prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes: ReadonlyMap<string, FrameShape>, o: { hosted: boolean; clipAtCaps: () => FrameShape },
+): { message: string; nodeId: string; classType: string } | null {
+  const room = (o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
+  if (!Number.isFinite(room)) return null
+  const kinds = outputKindsFor(families)
+  let total = 0
+  for (const [nodeId, n] of Object.entries(prompt)) {
+    if (n.class_type !== 'SaveImage' && n.class_type !== 'PreviewImage') continue
+    const link = n.inputs?.images
+    if (!isLink(link) || outputKind(prompt, link, kinds) !== 'frames') continue
+    const s = shapes.get(`${link[0]}:${link[1]}`) ?? o.clipAtCaps()
+    const inputs = n.inputs ?? {}
+    const scale = n.class_type === 'PreviewImage' ? 1 : isLink(inputs.scale) ? 4 : floatOf(inputs.scale ?? 1)
+    const maxDimension = n.class_type === 'PreviewImage' || isLink(inputs.max_dimension) ? 0 : intOf(inputs.max_dimension ?? 0, 'largest side')
+    const out = saveSize(s.w, s.h, scale, maxDimension)
+    total += s.count * savedFrameBytesBound(out.w, out.h)
+    if (total > room) return { message: SAVE_FRAMES_TOO_MUCH, nodeId, classType: n.class_type }
+  }
+  return null
 }
 
 /** save_images over a clip's frames: one file per frame, decoded one at a time, sized from the first (they are all one size). */

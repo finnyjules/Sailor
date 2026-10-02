@@ -526,7 +526,8 @@ describe('the LUT’s file (rule 8, ruling (p), the matching rule)', () => {
     for (const pid of PROCS.pids.slice(before)) expect(() => process.kill(pid, 0), `pid ${pid}`).toThrow()
     // Locally, a name outside the folders is refused plainly (R11.9a, row 21), saying what to change; never the engine.
     const outside = await k.engine.startRun({ userId: null, takes: [lutTake('../grade.cube')], ...START }).catch(e => e)
-    expect(outside).toMatchObject({ message: LUT_OUTSIDE_WORDS, data: { code: 'lut' } })
+    // Fix round 1 (m5): an untitled node is named by its display name.
+    expect(outside).toMatchObject({ message: `“LUT”: ${LUT_OUTSIDE_WORDS}`, data: { code: 'lut' } })
     expect(outside.data.reason).toBeUndefined()
     const { runId } = await k.engine.startRun({ userId: null, takes: [lutTake('warm.cube')], ...START })
     await k.engine.settled(runId)

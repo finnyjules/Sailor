@@ -40,7 +40,7 @@ import { SPEECH_MAX_CHARS } from '#shared/runner/audioGen'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { graphInputSizes, linkPictureSize, pictureSize } from '~~/server/utils/graphInputPixels'
 import { localModelStartProblems, soundBoundOf } from '~~/server/runner/localModelStart'
-import { frameShapes, videoSourceShapeOf } from '~~/server/runner/video/shapes'
+import { PAID_VIDEO_FPS_CEILING, frameShapes, paidVideoClipBound, videoSourceShapeOf } from '~~/server/runner/video/shapes'
 import { soundEffectRaises, soundEffectStartProblems, soundShapes, soundSourceShapeOf } from '~~/server/runner/video/soundShapes'
 import { pythonWavBytesBound, KLING_LIPSYNC_MAX_SOUND_BYTES } from '#shared/runner/lipSyncEngines'
 import { makeKit } from './__runner__/kit'
@@ -175,7 +175,7 @@ describe('what can\'t be known before the run is held at the cap, never left to 
     expect(got).toMatchObject({ problem: null, counts: { n: 1 }, pictures: { n: UPSCALE_2X_TILED_MAX_PIXELS }, tiles: { n: UPSCALE_2X_TILED_MAX_TILES } })
   })
 
-  it('a paid video model\'s clip (through its Video card) is held at the place\'s caps; Slow motion (AI) on it at the canvas\'s ceiling', async () => {
+  it('a paid video model\'s clip (through its Video card) is bounded by its own settings (R11.9a fix round 1, I1); Slow motion (AI) on it within its cap', async () => {
     const p: ApiPrompt = {
       v: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', prompt: 'a boat', aspect_ratio: '16:9', duration: '8', seed: 0 } },
       c: { class_type: 'Video', inputs: { source: ['v', 0], file: 'stale.mp4', export: false } },
@@ -187,17 +187,26 @@ describe('what can\'t be known before the run is held at the cap, never left to 
     for (const hosted of [true, false]) {
       const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
       const shapes = await frameShapes(p, EVERY, videoSourceShapeOf({ prompt: p, access, userId: null, hosted }))
-      // The card's own (stale) file is never read: a paid video always brings its own.
-      expect(shapes.get('g:0')).toMatchObject({ count: caps.batchFrames, capped: true, exact: false })
+      // The card's own (stale) file is never read: a paid video always brings its own. Veo 3.1 at 8 s, 720p (its
+      // default), 16:9: at most 8 × 60 fps + 1 frames of 1280 × 720, a bound (never a counted fact).
+      const g = shapes.get('g:0')!
+      expect(g).toMatchObject({ count: 8 * PAID_VIDEO_FPS_CEILING + 1, w: 1280, h: 720, exact: false })
+      expect(g.capped).toBeUndefined()
+      expect(g.count).toBeLessThanOrEqual(caps.batchFrames)
       const got = await localModelStartProblems(p, EVERY, { hosted, shapes: async () => shapes })
       expect(got.problem).toBeNull()
-      expect(got.counts).toMatchObject({ b: LOCAL_MODEL_MAX_FRAMES[hosted ? 'hosted' : 'local'] })
+      expect(got.counts).toMatchObject({ b: Math.min(g.count, LOCAL_MODEL_MAX_FRAMES[hosted ? 'hosted' : 'local']) })
       expect(got.counts.n).toBeLessThanOrEqual(SLOW_MOTION_AI_MAX_FRAMES[hosted ? 'hosted' : 'local'])
-      expect(got.sizes?.n).toMatchObject({ upTo: true })
+      expect(got.sizes?.n).toMatchObject({ w: 1280, h: 720 })
       // Its sound stays unknown (fix round 1): its readers keep their pre-task routes.
       const sounds = await soundShapes(p, EVERY, soundSourceShapeOf({ prompt: p, access, userId: null, hosted }))
       expect(sounds.has('g:1')).toBe(false)
     }
+    // A wired length takes the model's longest (8 s); a wired model, or a model the settings table doesn't bound,
+    // is held at the place's caps, as before.
+    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, duration: ['x', 0] } } }, ['c', 0])).toMatchObject({ count: 8 * PAID_VIDEO_FPS_CEILING + 1 })
+    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, model: ['x', 0] } } }, ['c', 0])).toBeNull()
+    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, aspect_ratio: ['x', 0] } } }, ['c', 0])).toMatchObject({ w: 1680, h: 720 })
   })
 })
 
@@ -439,7 +448,7 @@ describe('fix round 1 (I2), R11.9a: a maker\'s bound past a length-capped reader
       expect(err?.data?.reason, `${name}: ${err?.message}`).toBeUndefined()
       expect(err?.data?.code, `${name}: ${err?.message}`).toBe('made-sound-too-long')
       expect(err?.data?.nodeId, `${name}: ${err?.message}`).toBe(at[name])
-      expect(err?.message).toMatch(/^This speech could run past .+, which is the most .+ takes here\. Shorten the text to under [\d,]+ characters\.$/)
+      expect(err?.message).toMatch(/^(“[^”]+”: )?This speech could run past .+, which is the most .+ takes here\. Shorten the text to under [\d,]+ characters\.$/)
       expect(k.ledger.hold).not.toHaveBeenCalled()
       expect(k.replicate.submitted()).toEqual([])
       // The figure is true: the text shortened to it is no longer refused for its length.

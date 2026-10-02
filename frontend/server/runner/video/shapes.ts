@@ -26,7 +26,8 @@ import { probeVideoFile } from '../../media/values'
 import { pyFrameBound, type MediaProbe } from '../../media/probe'
 import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape } from './table'
 import { BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, localModelOn, localModelPictureSlot, slowMotionAiCount } from '#shared/runner/localModels'
-import { PAID_VIDEO_OUTPUTS } from '#shared/runner/eligibility'
+import { PAID_VIDEO_OUTPUTS, resolveVideoModelId } from '#shared/runner/eligibility'
+import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 import { MEDIA_CAPS } from '#shared/runner/media'
 
 /**
@@ -38,6 +39,68 @@ import { MEDIA_CAPS } from '#shared/runner/media'
 export function clipAtCaps(caps: { batchFrames: number; framePixels: number }): FrameShape {
   const side = Math.floor(Math.sqrt(caps.framePixels))
   return { count: caps.batchFrames, w: side, h: side, exact: false, capped: true }
+}
+
+/**
+ * R11.9a fix round 1 (I1): the most frames a second any paid video model
+ * Sailor offers makes. None renders above 60 fps (they render 24–30, LTX up
+ * to 50), so a clip's frames are at most its seconds × this, plus one.
+ */
+export const PAID_VIDEO_FPS_CEILING = 60
+
+/** A resolution setting's shorter side in pixels (the services' own names), or null for one not known. */
+const SHORT_SIDE: Readonly<Record<string, number>> = {
+  '360p': 360, '480p': 480, '540p': 540, '580p': 580, '720p': 720, '768p': 768, '1080p': 1080, '1440p': 1440, '2k': 1440, '4k': 2160,
+}
+
+/** The widest aspect a video service takes (21:9), for an aspect ratio that is wired or not readable. */
+const WIDEST_ASPECT = 21 / 9
+
+/** An aspect ratio setting ("16:9") as width / height, or null. */
+function aspectOf(v: unknown): number | null {
+  if (typeof v !== 'string') return null
+  const m = /^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/.exec(v)
+  if (!m) return null
+  const w = Number(m[1])
+  const h = Number(m[2])
+  return w > 0 && h > 0 ? w / h : null
+}
+
+/** The paid video maker a VIDEO wire comes from (through Gates and Video cards' sources), or null. */
+export function paidVideoMakerOf(prompt: ApiPrompt, link: ApiLink, depth = 0): string | null {
+  const from = prompt[link[0]]
+  if (!from || depth > 64) return null
+  if (PAID_VIDEO_OUTPUTS.some(([cls, slot]) => cls === from.class_type && slot === link[1])) return link[0]
+  if (from.class_type === GATE_CLASS) return isLink(from.inputs?.data_in) ? paidVideoMakerOf(prompt, from.inputs.data_in as ApiLink, depth + 1) : null
+  if (from.class_type === 'Video') return isLink(from.inputs?.source) ? paidVideoMakerOf(prompt, from.inputs.source as ApiLink, depth + 1) : null
+  return null
+}
+
+/**
+ * R11.9a fix round 1 (I1): a paid video's clip bounded from its maker's own
+ * settings (Generate a video): the length its model renders (a wired length:
+ * the model's longest) × PAID_VIDEO_FPS_CEILING, at the resolution it asks for
+ * (its shorter side), at its aspect ratio (wired or unreadable: the widest).
+ * A true upper bound, never a fact a refusal on the count rests on alone
+ * (`exact: false`). Null where the settings can't bound it (another maker, a
+ * wired model or options, a resolution not known): held at the caps as before.
+ */
+export function paidVideoClipBound(prompt: ApiPrompt, link: ApiLink): (FrameShape & { seconds: number }) | null {
+  const id = paidVideoMakerOf(prompt, link)
+  const n = id ? prompt[id] : undefined
+  if (!n || n.class_type !== 'GenerateVideoNode') return null
+  const inputs = n.inputs ?? {}
+  if (isLink(inputs.model) || isLink(inputs.model_options)) return null
+  const model = resolveVideoModelId(inputs.model)
+  const s = effectiveVideoSettings(model, isLink(inputs.duration) ? Number.MAX_SAFE_INTEGER : inputs.duration, inputs.aspect_ratio, inputs.model_options, inputs.image)
+  if (!s || !(s.seconds > 0)) return null
+  const short = s.resolution ? SHORT_SIDE[s.resolution.toLowerCase()] : undefined
+  if (!short) return null
+  const ratio = (isLink(inputs.aspect_ratio) ? null : aspectOf(inputs.aspect_ratio)) ?? WIDEST_ASPECT
+  const even = (x: number) => 2 * Math.ceil(x / 2)
+  const w = ratio >= 1 ? even(short * ratio) : short
+  const h = ratio >= 1 ? short : even(short / ratio)
+  return { count: Math.ceil(s.seconds * PAID_VIDEO_FPS_CEILING) + 1, w, h, exact: false, seconds: s.seconds }
 }
 
 /** Whether a VIDEO wire brings a paid video model's video (through Gates and Video cards' sources): sized only after it runs. */
@@ -284,6 +347,13 @@ export function videoSourceShapeOf(o: { prompt: ApiPrompt; access: FileAccess; u
         // Save video re-encoding one keeps its frames on the way, held the same way.
         if (isLink(inputs.video) && paidVideoLink(o.prompt, inputs.video)) {
           const caps = o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+          // R11.9a fix round 1 (I1): bounded from its maker's own settings where they bound it.
+          const bound = paidVideoClipBound(o.prompt, inputs.video)
+          if (bound) {
+            const { seconds, ...shape } = bound
+            const sound = Math.min(Math.ceil((seconds + 1) * 48000) * 2, caps.soundSamples) * 4 + 4096
+            return classType === 'GetVideoComponents' ? { ...shape, soundBytes: sound } : shape
+          }
           return classType === 'GetVideoComponents' ? { ...clipAtCaps(caps), soundBytes: caps.soundSamples * 4 + 4096 } : clipAtCaps(caps)
         }
         const file = isLink(inputs.video) ? videoFileOf(o.prompt, inputs.video) : null

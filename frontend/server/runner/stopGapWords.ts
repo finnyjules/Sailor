@@ -138,6 +138,28 @@ export function madeSoundWords(prompt: ApiPrompt, link: ApiLink, o: { reader: st
   return madeSoundTooLongWords({ ...common, maker: 'speech', under: Math.max(1, room * perSecond) })
 }
 
+/**
+ * Fix round 1 (I1): the Generate a video node a node's frames come from (any
+ * ancestor), whose own settings bound the clip, or null.
+ */
+export function paidVideoAncestor(prompt: ApiPrompt, nodeId: string): string | null {
+  const seen = new Set<string>()
+  const walk = (id: string): string | null => {
+    if (seen.has(id) || seen.size > 512) return null
+    seen.add(id)
+    const n = prompt[id]
+    if (!n) return null
+    if (n.class_type === 'GenerateVideoNode' && id !== nodeId) return id
+    for (const v of Object.values(n.inputs ?? {})) {
+      if (!isLink(v)) continue
+      const got = walk(v[0])
+      if (got) return got
+    }
+    return null
+  }
+  return walk(nodeId)
+}
+
 /** The paid video model a GetVideoComponents' video comes from (through Gates and Video cards), named plainly, or null. */
 export function paidVideoModelOf(prompt: ApiPrompt, link: ApiLink): string | null {
   let at: ApiLink = link

@@ -734,6 +734,20 @@ function readBaseline(): Catalog | null {
 }
 
 /**
+ * R11.9a fix round 1 (m5): a node class's display name, as the canvas shows it
+ * (the saved copy of object_info, else the committed baseline), for naming a
+ * node in a refusal when the person gave it no title. Null when unknown.
+ */
+export function objectInfoDisplayName(classType: string): string | null {
+  for (const catalog of [readSaved(), readBaseline()]) {
+    const entry = catalog && Object.prototype.hasOwnProperty.call(catalog, classType) ? (catalog as Record<string, { display_name?: unknown }>)[classType] : undefined
+    const name = typeof entry?.display_name === 'string' ? entry.display_name.trim() : ''
+    if (name) return name
+  }
+  return null
+}
+
+/**
  * Keep the engine's full catalog, lists blanked, for the next time it is down
  * (atomic; skipped when unchanged). Runs after the response, never before it.
  */
