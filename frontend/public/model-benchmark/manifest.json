@@ -93,6 +93,14 @@
       "grok-imagine-2": {
         "file": "redhead/grok-imagine-2.webp",
         "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "redhead/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "flux-3-image": {
+        "file": "redhead/flux-3-image.webp",
+        "made": "2026-10-02"
       }
     },
     "neon-sign": {
@@ -186,6 +194,524 @@
       },
       "grok-imagine-2": {
         "file": "neon-sign/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "neon-sign/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "flux-3-image": {
+        "file": "neon-sign/flux-3-image.webp",
+        "made": "2026-10-02"
+      }
+    },
+    "perfume": {
+      "flux-dev": {
+        "file": "perfume/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-schnell": {
+        "file": "perfume/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "perfume/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-3-image": {
+        "file": "perfume/flux-3-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "perfume/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "perfume/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "perfume/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "perfume/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "perfume/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "perfume/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "perfume/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "perfume/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "perfume/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "perfume/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "perfume/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "perfume/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "perfume/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "perfume/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "perfume/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "perfume/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "perfume/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "perfume/qwen-image-3.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "perfume/p-image.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "perfume/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "perfume/flux-fast.webp",
+        "made": "2026-10-02"
+      }
+    },
+    "rainy-market": {
+      "flux-dev": {
+        "file": "rainy-market/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-schnell": {
+        "file": "rainy-market/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "rainy-market/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "rainy-market/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-3-image": {
+        "file": "rainy-market/flux-3-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "rainy-market/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "rainy-market/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "rainy-market/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "rainy-market/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "rainy-market/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "rainy-market/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "rainy-market/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "rainy-market/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "rainy-market/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "rainy-market/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "rainy-market/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "rainy-market/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "rainy-market/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "rainy-market/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "rainy-market/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "rainy-market/qwen-image-3.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "rainy-market/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "rainy-market/p-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "rainy-market/flux-fast.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "rainy-market/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      }
+    },
+    "laughing-man": {
+      "flux-dev": {
+        "file": "laughing-man/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-schnell": {
+        "file": "laughing-man/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "laughing-man/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "flux-3-image": {
+        "file": "laughing-man/flux-3-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "laughing-man/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "laughing-man/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "laughing-man/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "laughing-man/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "laughing-man/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "laughing-man/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "laughing-man/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "laughing-man/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "laughing-man/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "laughing-man/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "laughing-man/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "laughing-man/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "laughing-man/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "laughing-man/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "laughing-man/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "laughing-man/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "laughing-man/flux-fast.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "laughing-man/p-image.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "laughing-man/qwen-image-3.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "laughing-man/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "laughing-man/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      }
+    },
+    "fox": {
+      "flux-3-image": {
+        "file": "fox/flux-3-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-schnell": {
+        "file": "fox/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "fox/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "fox/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "fox/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "fox/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "fox/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "fox/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "fox/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "fox/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "fox/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "fox/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "fox/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "fox/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "fox/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "fox/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "fox/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "fox/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "fox/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "fox/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-dev": {
+        "file": "fox/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "fox/qwen-image-3.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "fox/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "fox/flux-fast.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "fox/p-image.webp",
+        "made": "2026-10-02"
+      }
+    },
+    "anime": {
+      "flux-3-image": {
+        "file": "anime/flux-3-image.webp",
+        "made": "2026-10-02"
+      },
+      "flux-dev": {
+        "file": "anime/flux-dev.webp",
+        "made": "2026-10-02"
+      },
+      "flux-schnell": {
+        "file": "anime/flux-schnell.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-max": {
+        "file": "anime/flux-2-max.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-pro": {
+        "file": "anime/flux-2-pro.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-flex": {
+        "file": "anime/flux-2-flex.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-klein-4b": {
+        "file": "anime/flux-2-klein-4b.webp",
+        "made": "2026-10-02"
+      },
+      "flux-2-dev": {
+        "file": "anime/flux-2-dev.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-medium": {
+        "file": "anime/krea-2-medium.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2": {
+        "file": "anime/nano-banana-2.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-2-lite": {
+        "file": "anime/nano-banana-2-lite.webp",
+        "made": "2026-10-02"
+      },
+      "krea-2-large": {
+        "file": "anime/krea-2-large.webp",
+        "made": "2026-10-02"
+      },
+      "nano-banana-pro": {
+        "file": "anime/nano-banana-pro.webp",
+        "made": "2026-10-02"
+      },
+      "imagen-4-ultra": {
+        "file": "anime/imagen-4-ultra.webp",
+        "made": "2026-10-02"
+      },
+      "ideogram-4.5": {
+        "file": "anime/ideogram-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-4.5": {
+        "file": "anime/seedream-4.5.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image": {
+        "file": "anime/qwen-image.webp",
+        "made": "2026-10-02"
+      },
+      "recraft-v4.1": {
+        "file": "anime/recraft-v4.1.webp",
+        "made": "2026-10-02"
+      },
+      "gpt-image-2.5": {
+        "file": "anime/gpt-image-2.5.webp",
+        "made": "2026-10-02"
+      },
+      "seedream-5-lite": {
+        "file": "anime/seedream-5-lite.webp",
+        "made": "2026-10-02"
+      },
+      "flux-fast": {
+        "file": "anime/flux-fast.webp",
+        "made": "2026-10-02"
+      },
+      "p-image": {
+        "file": "anime/p-image.webp",
+        "made": "2026-10-02"
+      },
+      "muse-image": {
+        "file": "anime/muse-image.webp",
+        "made": "2026-10-02"
+      },
+      "grok-imagine-2": {
+        "file": "anime/grok-imagine-2.webp",
+        "made": "2026-10-02"
+      },
+      "qwen-image-3": {
+        "file": "anime/qwen-image-3.webp",
         "made": "2026-10-02"
       }
     }

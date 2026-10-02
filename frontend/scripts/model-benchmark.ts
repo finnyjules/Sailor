@@ -64,35 +64,41 @@ type Picture = { filename: string, subfolder?: string, type?: string }
 type Waiter = { resolve: (p: Picture) => void, reject: (e: Error) => void, picture?: Picture }
 
 // The runner reports through one server-sent event stream (GET /api/runs/events),
-// shaped like ComfyUI's WebSocket events. One reader serves every job.
+// shaped like ComfyUI's WebSocket events. One reader serves every job, and
+// reconnects if the stream drops. It is only the fast path: each job also
+// looks for its own saved file (onRunner), so a dropped stream can't lose one.
 const waiters = new Map<string, Waiter>()
 let events: AbortController | null = null
 
 async function openEvents(): Promise<void> {
   events = new AbortController()
-  const res = await fetch(`${SERVER}/api/runs/events`, { signal: events.signal })
-  if (!res.ok || !res.body) throw new Error(`runner events: ${res.status}`)
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
+  const signal = events.signal
   let ready!: () => void
   const opened = new Promise<void>(r => (ready = r))
   void (async () => {
-    let buf = ''
-    try {
-      for (;;) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        let cut: number
-        while ((cut = buf.indexOf('\n\n')) >= 0) {
-          const block = buf.slice(0, cut)
-          buf = buf.slice(cut + 2)
-          if (block.includes('event: ready')) ready()
-          for (const line of block.split('\n')) if (line.startsWith('data: ')) onEvent(line.slice(6))
+    while (!signal.aborted) {
+      try {
+        const res = await fetch(`${SERVER}/api/runs/events`, { signal })
+        if (!res.ok || !res.body) throw new Error(`runner events: ${res.status}`)
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          let cut: number
+          while ((cut = buf.indexOf('\n\n')) >= 0) {
+            const block = buf.slice(0, cut)
+            buf = buf.slice(cut + 2)
+            if (block.includes('event: ready')) ready()
+            for (const line of block.split('\n')) if (line.startsWith('data: ')) onEvent(line.slice(6))
+          }
         }
       }
+      catch { /* dropped, or closed at the end of the run */ }
+      if (!signal.aborted) await sleep(1000)
     }
-    catch { /* closed at the end of the run */ }
   })()
   await Promise.race([opened, sleep(3000)])
 }
@@ -111,7 +117,7 @@ function onEvent(raw: string) {
   else if (msg.type === 'execution_success') w.picture ? w.resolve(w.picture) : w.reject(new Error('finished with no picture'))
 }
 
-function workflowFor(job: BenchmarkJob) {
+function workflowFor(job: BenchmarkJob, prefix: string) {
   return {
     1: {
       class_type: 'GenerateImageNode',
@@ -127,7 +133,7 @@ function workflowFor(job: BenchmarkJob) {
     2: {
       class_type: 'SaveImage',
       inputs: {
-        images: ['1', 0], filename_prefix: 'model_benchmark', format: 'png', quality: 90, lossless_webp: false,
+        images: ['1', 0], filename_prefix: prefix, format: 'png', quality: 90, lossless_webp: false,
         png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: false,
       },
     },
@@ -137,7 +143,7 @@ function workflowFor(job: BenchmarkJob) {
 const NOT_TAKEN = /not-taken|switched-off/
 
 /** On the runner, as the app sends it. Null when the runner doesn't take this workflow (it then goes to the engine). */
-async function onRunner(prompt: ReturnType<typeof workflowFor>): Promise<Picture | null> {
+async function onRunner(prompt: ReturnType<typeof workflowFor>, prefix: string): Promise<Picture | null> {
   const res = await fetch(`${SERVER}/api/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ takes: [prompt], workflow: null }) })
   const text = await res.text()
   if (!res.ok) {
@@ -148,9 +154,18 @@ async function onRunner(prompt: ReturnType<typeof workflowFor>): Promise<Picture
   }
   const id = (JSON.parse(text) as { promptIds?: string[] }).promptIds?.[0]
   if (!id) throw new Error('the runner gave no run id')
+  // Each job saves under its own prefix, so its file is always `<prefix>_00001_.png`:
+  // poll for it as well as listening, in case the event stream dropped.
+  const file: Picture = { filename: `${prefix}_00001_.png`, subfolder: '', type: 'output' }
   return await new Promise<Picture>((resolve, reject) => {
+    let settled = false
     const timer = setTimeout(() => done(() => reject(new Error(`no result after ${TIMEOUT_MS / 60_000} min`))), TIMEOUT_MS)
-    const done = (f: () => void) => { clearTimeout(timer); waiters.delete(id); f() }
+    const done = (f: () => void) => { if (settled) return; settled = true; clearTimeout(timer); clearInterval(poll); waiters.delete(id); f() }
+    const poll = setInterval(async () => {
+      const q = new URLSearchParams({ filename: file.filename, subfolder: '', type: 'output' })
+      const ok = await fetch(`${SERVER}/view?${q}`, { method: 'HEAD' }).then(r => r.ok).catch(() => false)
+      if (ok) done(() => resolve(file))
+    }, 5000)
     waiters.set(id, { resolve: p => done(() => resolve(p)), reject: e => done(() => reject(e)) })
   })
 }
@@ -181,9 +196,10 @@ async function onEngine(prompt: ReturnType<typeof workflowFor>): Promise<Picture
 
 /** Runs one job; resolves to the output picture's bytes and where it ran, or throws with the reason. */
 async function run(job: BenchmarkJob): Promise<{ bytes: Buffer, where: string }> {
-  const prompt = workflowFor(job)
+  const prefix = `model_benchmark_${job.prompt.id}_${job.model.id}_${Date.now().toString(36)}`.replace(/[^\w-]/g, '_')
+  const prompt = workflowFor(job, prefix)
   let where = 'runner'
-  let img = await onRunner(prompt)
+  let img = await onRunner(prompt, prefix)
   if (!img) { where = 'engine'; img = await onEngine(prompt) }
   const q = new URLSearchParams({ filename: img.filename, subfolder: img.subfolder ?? '', type: img.type ?? 'output' })
   const pic = await fetch(`${SERVER}/view?${q}`)
