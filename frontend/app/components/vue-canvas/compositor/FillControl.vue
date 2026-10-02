@@ -56,8 +56,10 @@ const props = withDefaults(defineProps<{
   /** The Frame's one light, shown by the Foil panel's light control. Changes go back out
    *  as `update:light`; the host owns the light. */
   light?: FrameLight
+  /** The Frame has light layers: the Light row says so instead of offering presets. */
+  framelit?: boolean
 }>(), { allowNone: false, nested: false, allowImage: false, allowReadsBackdrop: false, otherLayers: () => [], allowFoil: false })
-const emit = defineEmits<{ 'update:modelValue': [Paint]; 'update:light': [FrameLight] }>()
+const emit = defineEmits<{ 'update:modelValue': [Paint]; 'update:light': [FrameLight]; 'select-light': [] }>()
 
 /** The type list this instance offers. `nested` is set on the fill editor that
  *  ShaderFillEditor mounts for `spec.input` — excluding 'shader' there is the
@@ -405,7 +407,7 @@ watch(foil, drawPreview, { deep: true })
             @update:model-value="(v: number) => pushFoil({ pressed: v })" />
           <StudioSlider data-testid="foil-grain" label="Grain" :model-value="foil.grain" :min="0" :max="1" :step="0.01" :default="DEFAULT_FOIL_FILL.grain"
             @update:model-value="(v: number) => pushFoil({ grain: v })" />
-          <FinishLightControl v-if="light && !foilUnavailable" :light="light" @update="(l: FrameLight) => emit('update:light', l)" />
+          <FinishLightControl v-if="light && !foilUnavailable" :light="light" :framelit="framelit" @update="(l: FrameLight) => emit('update:light', l)" @select-light="emit('select-light')" />
         </div>
       </template>
 

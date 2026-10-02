@@ -78,6 +78,14 @@ describe('FillControl — Foil', () => {
     expect(w.emitted('update:light')![0]).toEqual([LIGHT_PRESETS.raking])
   })
 
+  it('passes framelit through: the Light row says lit by the Frame and select-light bubbles up', async () => {
+    const w = mount(FillControl, { props: { modelValue: { ...DEFAULT_FOIL_FILL }, allowFoil: true, light: DEFAULT_FRAME_LIGHT, framelit: true } })
+    await openPanel(w)
+    expect(w.find('[data-testid="finish-light-preset"]').exists()).toBe(false)
+    await w.find('[data-testid="finish-light-framelit"]').trigger('click')
+    expect(w.emitted('select-light')).toHaveLength(1)
+  })
+
   it('without WebGL 2 it says why and hides the light (nothing it could light)', async () => {
     gpu.ok = false
     const w = mount(FillControl, { props: { modelValue: { ...DEFAULT_FOIL_FILL }, allowFoil: true, light: DEFAULT_FRAME_LIGHT } })
