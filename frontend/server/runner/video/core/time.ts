@@ -403,7 +403,59 @@ export function timeCore(tk: TensorCore, kn: KernelsCore, rng: RngCore) {
     return { out }
   }
 
-  return { select, trail, ramp, slit, displace, slitSources, displaceOffsets, displaceSources, rampSources }
+  /**
+   * Motion blur (time) (nodes_video_effects.py:125-174; R11.9b, USER ruling
+   * (c): a simple working blur, judged by eye). Python's own code raises on
+   * every clip longer than one frame (its replicate pad), so this is the
+   * blur it was written to make, not a port: each output frame is the
+   * weighted mean of the frames within `radius` of it, weighted by
+   * `falloff` as Python's weights are (uniform: the plain mean; linear:
+   * 1 − |d| / r; gaussian: exp(−d² / 2σ²), σ = max(1, r / 2)). At the
+   * clip's ends only the frames there are count (the weights of those
+   * frames, normalised again): no fade to black, no repeated end frame.
+   * `inputs` are the frames the plan hands it, in order; `_first` is the
+   * place in the window (0 … 2r) of the first of them.
+   */
+  function blurWeights(radius: number, falloff: unknown): Float64Array {
+    const r = Math.max(1, Math.trunc(radius))
+    const w = new Float64Array(2 * r + 1)
+    const sigma = Math.max(1, r / 2)
+    for (let i = 0; i < w.length; i++) {
+      const d = i - r
+      w[i] = falloff === 'uniform' ? 1 : falloff === 'linear' ? Math.max(0, 1 - Math.abs(d) / r) : Math.exp(-(d * d) / (2 * sigma * sigma))
+    }
+    return w
+  }
+
+  function blur(inputs: Tensor[], p: Record<string, unknown>): VideoOpResult {
+    const a = inputs[0]
+    if (!a) throw new Error('A video frame is missing')
+    const weights = blurWeights(p.radius as number, p.falloff)
+    const first = Math.trunc(p._first as number)
+    if (!Number.isInteger(first) || first < 0 || first + inputs.length > weights.length) throw new Error('A video frame is missing')
+    const k = new Float64Array(inputs.length)
+    let sum = 0
+    for (let i = 0; i < inputs.length; i++) {
+      const x = inputs[i]
+      if (!x || x.data.length !== a.data.length) throw new Error('A video frame is missing')
+      k[i] = weights[first + i]!
+      sum += k[i]!
+    }
+    for (let i = 0; i < k.length; i++) k[i] = k[i]! / sum
+    const ds = inputs.map(x => x.data)
+    const n = ds.length
+    const out = tk.tensor(a.c, a.h, a.w)
+    const o = out.data
+    for (let e = 0; e < o.length; e++) {
+      let v = 0
+      for (let i = 0; i < n; i++) v += ds[i]![e]! * k[i]!
+      const r = f(v)
+      o[e] = r < 0 ? 0 : r > 1 ? 1 : r
+    }
+    return { out }
+  }
+
+  return { select, trail, ramp, blur, blurWeights, slit, displace, slitSources, displaceOffsets, displaceSources, rampSources }
 }
 
 export type TimeCore = ReturnType<typeof timeCore>

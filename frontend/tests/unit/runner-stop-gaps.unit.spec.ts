@@ -3,7 +3,7 @@
  * 1–28). With every family on, no row leaves to the engine: each either runs
  * in Sailor, or is refused in plain words before the hold (USER ruling (e)),
  * with a reason code. Rows closed by other tasks are asserted where they are
- * true now; the rows that belong to R9/R10 (and R11.9b/c) are listed as
+ * true now; the rows that belong to R9/R10 (and R11.9c) are listed as
  * expected exceptions until those tasks land, so the list must shrink then.
  *
  * Also R11.7's and R11.8's named stop-gaps: a made sound past a reader's cap
@@ -101,18 +101,17 @@ async function writePng(path: string, w = 16, h = 16) {
  */
 const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
   1: 'R10.1: apps’ local /prompt with families off ("This app is switched off right now.")',
-  9: 'R11.9b: Motion blur (time) on clips over one frame (USER ruling (c))',
   11: 'R11.9c: the Animated Shader effect in a workflow (USER ruling (d))',
   27: 'R10.7: local LoRA training removed',
   28: 'R10.2 / R10.6: stock local-diffusion classes and blueprints ("This needs the local engine" locally)',
 }
 
 describe('R11.9: every named stop-gap, one case per row', () => {
-  it('the expected exceptions are exactly rows 1, 9, 11, 27 and 28 (R10, R11.9b, R11.9c)', () => {
-    expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([1, 9, 11, 27, 28])
+  it('the expected exceptions are exactly rows 1, 11, 27 and 28 (R10, R11.9c)', () => {
+    expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([1, 11, 27, 28])
   })
 
-  // Rows 2–8 and 12–14: closed by their own tasks. Each is probed where a probe is cheap (its graph is the runner's
+  // Rows 2–9 and 12–14: closed by their own tasks. Each is probed where a probe is cheap (its graph is the runner's
   // with every family on: it fails if the row went back to the engine), and its own spec is named and must keep
   // the case that proves it.
   const LA = { class_type: 'LoadAudio', inputs: { audio: 'a.wav' } }
@@ -127,6 +126,7 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     6: { l: loadVideo('a.mp4'), g: getComp('l'), b: { class_type: BG_REMOVE_CLASS, inputs: { frames: ['g', 0], output: 'transparent', edge_softness: 0 } }, s: saveImage(['b', 0]) },
     7: { m: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration: 8, model_version: 'stereo-large', temperature: 1, top_p: 0, seed: 0 } }, f: { class_type: 'AudioFade', inputs: { audio: ['m', 0], fade_in: 0.5, fade_out: 0.5, curve: 'linear' } }, a: saveAudio('f') },
     8: { sp: speech(40), w: { class_type: WHISPER_CLASS, inputs: { audio: ['sp', 0], model_size: 'base', language: 'auto', fps: 24 } }, t: { class_type: 'Text', inputs: { source: ['w', 2], text: '' } } },
+    9: { l: loadVideo('a.mp4'), g: getComp('l'), m: { class_type: 'TemporalMotionBlur', inputs: { frames: ['g', 0], radius: 2, falloff: 'gaussian' } }, c: createVideo('m'), s: saveVideo('c') },
   }
   /** Each row's own spec and the case in it that proves the row (fails if the case is removed or renamed). */
   const PROVEN_IN: Record<number, [string, string]> = {
@@ -137,6 +137,7 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     6: ['runner-clip-caps.unit.spec.ts', 'the per-frame classes keep 300 hosted and 900 locally'],
     7: ['runner-source-bounds.unit.spec.ts', 'music: the duration asked, plus a second'],
     8: ['runner-source-bounds.unit.spec.ts', 'speech: every character at one a second'],
+    9: ['runner-media-vfx-time.unit.spec.ts', 'Load video → Get video components → Motion blur → Create video → Save video runs in the engine: the same frame count and rate, blurred'],
     12: ['runner-lipsync-engines.unit.spec.ts', 'with sound-in on; with it off (any other families) the engine keeps Fabric and Kling'],
     13: ['runner-replicate-video.unit.spec.ts', 'takes fabric-1.0 only with a linked picture and a linked runner sound'],
     14: ['runner-relight-wired.unit.spec.ts', 'takes a wired light and wired instructions as text'],
@@ -148,7 +149,7 @@ describe('R11.9: every named stop-gap, one case per row', () => {
       expect(nodesNeedingEngine(p, { runnerOn: true, families: EVERY, titleOf: id => id })).toEqual([])
     })
   }
-  it('rows 2–8, 12–14: each row’s own spec still holds the case that proves it', () => {
+  it('rows 2–9, 12–14: each row’s own spec still holds the case that proves it', () => {
     for (const [row, [file, name]] of Object.entries(PROVEN_IN)) {
       const text = readFileSync(join(__dirname, file), 'utf8')
       expect(text.includes(name), `row ${row}: ${file} — “${name}”`).toBe(true)

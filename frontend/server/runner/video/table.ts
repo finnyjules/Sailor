@@ -9,7 +9,8 @@
  *   stream    — the input's frames one at a time, as they decode; each makes
  *               at most one output frame (`streamOut`), in order; with more
  *               than one input, their frames are read side by side;
- *   window    — a sliding window of 8-bit frames (R6.2's motion blur);
+ *   window    — a sliding window of 8-bit frames (R6.2's Speed ramp, R11.9b's
+ *               Motion blur (time));
  *   held      — every frame held (8-bit, under MEDIA_CAPS.heldFrameBytes),
  *               each output frame reading the one `heldSource` names;
  *   two-pass  — the batch decoded twice (R6.5's Stabilize): pass 1 runs
@@ -243,6 +244,8 @@ const SELECT_STEPS = 0
 const TRAIL_STEPS = 2
 /** A pixel gathered on the worker from the held frames, and its source worked out (Slit scan, Time displacement). */
 const GATHER_STEPS = 2
+/** Motion blur (time) a pixel and a frame read: its float, a product and a sum. */
+const BLUR_STEPS = 1
 /** Speed ramp's blend a pixel: two products, a sum and the clamp. */
 const BLEND_STEPS = 1
 /**
@@ -632,23 +635,31 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     passThrough: (_w, ins) => oneInput(ins).count <= 1,
   },
   /**
-   * Motion blur (time) (nodes_video_effects.py:125-174). Python hands one
-   * frame (or none) on unchanged, and RAISES on every longer clip: its
-   * F.pad(…, mode='replicate') of a 4-D tensor by (r, r) is not supported
-   * (torch 2.10: "Padding size 2 is not supported for 4D input tensor",
-   * recorded by every fixture case with T ≥ 2). The runner says so in plain
-   * words, before any work (rule 14).
+   * Motion blur (time) (nodes_video_effects.py:125-174; R11.9b, USER ruling
+   * (c)). Python's code raises on every clip longer than one frame (its
+   * replicate pad of a 4-D tensor, torch 2.10), so the runner makes the
+   * blur it was written to make (time/core.ts blur): each output frame the
+   * weighted mean of the frames within `radius` of it, by `falloff`; at the
+   * clip's ends, the frames there are. The frames stream through a window of
+   * 2·radius + 1. One frame (Python's one working case) is handed on.
    */
   TemporalMotionBlur: {
-    family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: true,
+    family: 'video-time', op: 'time.blur', inputs: ['frames'], reads: 'window', preview: true,
     shape: (_w, ins) => {
       const x = oneInput(ins)
       return { count: x.count, w: x.w, h: x.h, exact: x.exact }
     },
-    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1 }),
-    work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + SELECT_STEPS),
+    // The window's frames held on this thread, and each handed to the worker for every output frame that reads it.
+    heldBytes: (w, ins) => {
+      const x = oneInput(ins)
+      if (x.count <= 1) return effectHeldBytes(x, { reads: 1 })
+      const n = blurReads(w, x.count)
+      return effectHeldBytes(x, { reads: n, held8: n })
+    },
+    work: (w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL
+      + out.count * out.w * out.h * blurReads(w, oneInput(ins).count) * BLUR_STEPS,
     passThrough: (_w, ins) => oneInput(ins).count <= 1,
-    pythonRaises: (_w, ins) => oneInput(ins).count > 1 ? MEDIA_EFFECT_WORDS.motionBlurFails : null,
+    windowOf: (w, ins) => blurWindow(w, oneInput(ins).count),
   },
   /**
    * Slit scan (:182-229): each column (or row) read from its own frame
@@ -983,6 +994,24 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1 }),
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + SELECT_STEPS),
   },
+}
+
+/** Motion blur (time)'s radius (its widget; Python's int(), at least 1). */
+const blurRadius = (w: Record<string, unknown>) => Math.max(1, int(w.radius, 2))
+/** The most frames one blurred frame reads: the window, or the whole clip when it is shorter. */
+const blurReads = (w: Record<string, unknown>, T: number) => Math.max(1, Math.min(2 * blurRadius(w) + 1, T))
+/** Motion blur (time)'s reads: the frames within the radius that the clip has, and where the first sits in the window. */
+function blurWindow(w: Record<string, unknown>, T: number): WindowPlan {
+  const r = blurRadius(w)
+  const lo = (j: number) => Math.max(0, j - r)
+  return {
+    at: (j) => {
+      const out: number[] = []
+      for (let i = lo(j); i <= Math.min(T - 1, j + r); i++) out.push(i)
+      return out
+    },
+    params: j => ({ _first: lo(j) - (j - r) }),
+  }
 }
 
 /** Speed ramp's reads: the nearest frame, or lo and hi with this frame's frac. */

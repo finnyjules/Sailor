@@ -217,7 +217,8 @@ function raisers(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes:
 const knownCount = (s: FrameShape) => s.exact || !!s.counted
 
 /**
- * Where Python itself raises (Motion blur (time) on more than one frame),
+ * Where Python itself raises (R6.2's Motion blur (time) on more than one
+ * frame, until R11.9b made it work; no ported effect raises now),
  * refused BEFORE the hold, in the node's own plain words (R6.2 fix round 1):
  * a run must never start and fail after paid nodes. Only on counts known
  * exactly (`knownCount`); on a header bound the node's own check at its turn

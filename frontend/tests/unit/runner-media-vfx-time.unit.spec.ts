@@ -2,7 +2,9 @@
  * The time effects, family `video-time` (server/runner/video/): R6.1's
  * pilots Trim (read one frame at a time), Reverse / ping-pong (every frame
  * held) and Frame trail (a state carried from frame to frame), and R6.2's
- * Motion blur (time) (Python raises on every clip longer than one frame),
+ * Motion blur (time) (Python raises on every clip longer than one frame; since
+ * R11.9b, USER ruling (c), the runner blurs: each frame the weighted mean of
+ * its neighbours, judged against a reference written here, not Python),
  * Slit scan and Time displacement (every frame held, each output frame
  * gathered from many) and Speed ramp (a sliding window), against the real
  * Python (scripts/runner_media_fixtures.py --group vfx-time: each case the
@@ -86,7 +88,7 @@ vi.mock('~~/server/media/values', async (importOriginal) => {
 
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ALL_RUNNER_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { MEDIA_EFFECTS_PORTED, MEDIA_EFFECT_FAMILY_OF, MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
+import { MEDIA_EFFECTS_PORTED, MEDIA_EFFECT_FAMILY_OF } from '#shared/runner/mediaEffects'
 import { PICTURE_OUTPUTS } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
@@ -128,13 +130,57 @@ const saveFrames = (from: string) => ({ class_type: 'SaveVideoFrames', inputs: {
 const createVideo = (from: string) => ({ class_type: 'CreateVideo', inputs: { images: [from, 0] as Link, fps: 24 } })
 const saveVideo = (from: string) => ({ class_type: 'SaveVideo', inputs: { video: [from, 0] as Link, filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } })
 
+/**
+ * Motion blur (time)'s reference (R11.9b), written here from the ruling and
+ * not from the core: each frame the weighted mean, in doubles, of the 8-bit
+ * frames within `radius` that the clip has (uniform 1; linear 1 − |d| / r;
+ * gaussian exp(−d² / 2σ²), σ = max(1, r / 2)), as k / 255, rounded to 8 bits.
+ */
+function blurReference(clip: { frames: Uint8Array[]; w: number; h: number }, radius: number, falloff: string): Uint8Array {
+  const T = clip.frames.length
+  const n = clip.w * clip.h * 3
+  const sigma = Math.max(1, radius / 2)
+  const weight = (d: number) => falloff === 'uniform' ? 1 : falloff === 'linear' ? Math.max(0, 1 - Math.abs(d) / radius) : Math.exp(-(d * d) / (2 * sigma * sigma))
+  const out = new Uint8Array(T * n)
+  for (let j = 0; j < T; j++) {
+    let total = 0
+    for (let i = Math.max(0, j - radius); i <= Math.min(T - 1, j + radius); i++) total += weight(i - j)
+    for (let e = 0; e < n; e++) {
+      let v = 0
+      for (let i = Math.max(0, j - radius); i <= Math.min(T - 1, j + radius); i++) v += (clip.frames[i]![e]! / 255) * weight(i - j)
+      out[j * n + e] = Math.round(Math.min(1, Math.max(0, v / total)) * 255)
+    }
+  }
+  return out
+}
+/** The largest difference between two 8-bit batches, in levels. */
+function worstLevel(a: Uint8Array, b: Uint8Array): number {
+  expect(a.length).toBe(b.length)
+  let worst = 0
+  for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i]! - b[i]!))
+  return worst
+}
+/** A white square, 6 × 6, moving 3 pixels a frame across a dark red ground: T frames of 40 × 24. */
+function movingSquare(T: number): { frames: Uint8Array[]; w: number; h: number } {
+  const w = 40
+  const h = 24
+  const frames = Array.from({ length: T }, (_, t) => {
+    const f = new Uint8Array(w * h * 3)
+    for (let p = 0; p < w * h; p++) f[3 * p] = 60
+    for (let y = 9; y < 15; y++) for (let x = 2 + 3 * t; x < 8 + 3 * t && x < w; x++) f.set([255, 255, 255], 3 * (y * w + x))
+    return f
+  })
+  return { frames, w, h }
+}
+
 describe('the fixture', () => {
   it('was made from the real nodes at torch’s own thread count, over rule 13’s case set', () => {
     expect(FX.threads.torch).toBeGreaterThan(1)
     expect(FX.threads.opencv).toBeGreaterThan(0)
     const classes = new Set(FX.runs.map(r => r.class_type))
     expect([...classes].sort()).toEqual([...TIME_PORTED].sort())
-    // Python raises only in Motion blur (time), on every clip longer than one frame (its replicate pad of a 4-D tensor).
+    // Python raises only in Motion blur (time), on every clip longer than one frame (its replicate pad of a 4-D tensor);
+    // the runner blurs there instead (R11.9b), judged against blurReference.
     expect(FX.runs.filter(r => r.error).map(r => r.class_type)).toEqual(expect.arrayContaining(['TemporalMotionBlur']))
     for (const r of FX.runs) {
       const raises = r.class_type === 'TemporalMotionBlur' && FX.clips[r.input]!.frames > 1
@@ -232,7 +278,11 @@ describe('the core on this thread gives Python’s float32, bit for bit (exact)'
   for (const c of FX.runs) {
     it(`${c.class_type}: ${c.name}`, () => {
       if (c.error) {
-        expect(() => coreBatch(c.class_type, c.widgets, clipFrames(FX, c.input))).toThrow(MEDIA_EFFECT_WORDS.motionBlurFails)
+        // Motion blur (time), where Python raises (R11.9b): the blur, against the reference mean, within one level.
+        const clip = clipFrames(FX, c.input)
+        const got = coreBatch(c.class_type, c.widgets, clip)
+        expect({ count: got.count, w: got.w, h: got.h }).toEqual({ count: clip.frames.length, w: clip.w, h: clip.h })
+        expect(worstLevel(got.round8, blurReference(clip, Number(c.widgets.radius), String(c.widgets.falloff)))).toBeLessThanOrEqual(1)
         return
       }
       const got = coreBatch(c.class_type, c.widgets, clipFrames(FX, c.input))
@@ -256,11 +306,15 @@ describe('through the node’s plan: the kept batch, the preview and the ui are 
       const values: Record<string, Record<number, RunnerValue>> = { g: { 0: input } }
       const id = c.node_id
       if (c.error) {
-        // Python's raise, in plain words, before any tool process starts; nothing kept but the input.
-        const before = PROCS.pids.length
-        await expect(runVfxNode(h, { l: loadVideo(), g: getComp(), [id]: effect(c), r: trimOf(id) }, id, values, { runId, families: ON })).rejects.toThrow(MEDIA_EFFECT_WORDS.motionBlurFails)
-        expect(PROCS.pids.length).toBe(before)
-        expect(readdirSync(join(h.root, 'kept', runId))).toEqual([input.file.filename])
+        // Motion blur (time), where Python raises (R11.9b): the kept batch is the core's on this thread, frame count kept.
+        const want = coreBatch(c.class_type, c.widgets, clipFrames(FX, c.input))
+        for (const [quant, reader, bytes] of [['round', trimOf(id), want.round8], ['trunc', saveFrames(id), want.trunc8]] as const) {
+          const made = await runVfxNode(h, { l: loadVideo(), g: getComp(), [id]: effect(c), r: reader }, id, values, { runId, families: ON })
+          const batch = made.values[0] as Extract<RunnerValue, { kind: 'frames' }>
+          expect({ count: batch.count, w: batch.w, h: batch.h }, quant).toEqual({ count: want.count, w: want.w, h: want.h })
+          expect(sha256(await batchBytes(h, runId, batch)), `${quant}-8 frames`).toBe(sha256(bytes))
+          expect(made.ui, 'ui').toEqual({ images: [{ filename: `live_preview_${id}.png`, subfolder: LOCAL_LIVE_PREVIEW_SUBFOLDER, type: 'temp' }], animated: [false] })
+        }
         return
       }
       for (const [quant, reader, want] of [['round', trimOf(id), c.out!.round8_sha256], ['trunc', saveFrames(id), c.out!.trunc8_sha256]] as const) {
@@ -358,60 +412,129 @@ describe('the acceptance: Load video → Get video components → Reverse → Cr
   })
 })
 
-describe('Motion blur (time) on a clip known to be longer than one frame is refused before the hold', () => {
-  const blurFrom = (count: number, o: { counted?: boolean; exact?: boolean }) => {
-    const p: ApiPrompt = { l: loadVideo(), g: getComp(), m: { class_type: 'TemporalMotionBlur', inputs: { frames: ['g', 0], radius: 2, falloff: 'gaussian' } }, c: createVideo('m'), s: saveVideo('c') }
-    const shapes = new Map([['g:0', { count, w: 24, h: 16, exact: !!o.exact, ...(o.counted ? { counted: true as const } : {}) }]])
-    return { p, shapes }
-  }
+describe('Motion blur (time) blurs clips (R11.9b, USER ruling (c))', () => {
+  const blurBatch = (clip: ReturnType<typeof movingSquare>, radius: number, falloff: string) => coreBatch('TemporalMotionBlur', { radius, falloff }, clip)
+  const frameOf = (b: Uint8Array, clip: { w: number; h: number }, j: number) => b.subarray(j * clip.w * clip.h * 3, (j + 1) * clip.w * clip.h * 3)
 
-  it('only on a count known exactly (counted, or exact) above one; on a header bound the node’s own check stays, and the engine counts first', () => {
-    for (const o of [{ counted: true }, { exact: true }]) {
-      const { p, shapes } = blurFrom(2, o)
-      expect(mediaEffectRefusals(p, ON, shapes), JSON.stringify(o)).toEqual({ message: MEDIA_EFFECT_WORDS.motionBlurFails, nodeId: 'm', classType: 'TemporalMotionBlur' })
-      expect(needsExactCount(p, ON, shapes)).toBe(false)
-      expect(mediaEffectRefusals(blurFrom(1, o).p, ON, blurFrom(1, o).shapes)).toBeNull()
+  it('a moving square: each frame is the mean of its neighbours within one level, the count kept', () => {
+    const clip = movingSquare(10)
+    for (const radius of [1, 2, 5]) {
+      const got = blurBatch(clip, radius, 'uniform')
+      expect(got.count).toBe(10)
+      // The plain mean, frame by frame, of the frames within the radius.
+      const n = clip.w * clip.h * 3
+      for (let j = 0; j < 10; j++) {
+        const lo = Math.max(0, j - radius)
+        const hi = Math.min(9, j + radius)
+        const mean = new Uint8Array(n)
+        for (let e = 0; e < n; e++) {
+          let v = 0
+          for (let i = lo; i <= hi; i++) v += clip.frames[i]![e]!
+          mean[e] = Math.round(v / (hi - lo + 1))
+        }
+        expect(worstLevel(frameOf(got.round8, clip, j), mean), `radius ${radius}, frame ${j}`).toBeLessThanOrEqual(1)
+      }
+      // Teeth: it blurred. The square's leading edge in frame 5 is no longer pure white or the ground.
+      const f5 = frameOf(got.round8, clip, 5)
+      const mid = 3 * (12 * clip.w + (2 + 3 * 5))
+      expect(f5[mid]!, `radius ${radius}`).toBeGreaterThan(60)
+      expect(f5[mid]!, `radius ${radius}`).toBeLessThan(255)
     }
-    const bound = blurFrom(48, {})
-    expect(mediaEffectRefusals(bound.p, ON, bound.shapes)).toBeNull()
-    expect(needsExactCount(bound.p, ON, bound.shapes)).toBe(true)
-    const one = blurFrom(1, {})
-    expect(needsExactCount(one.p, ON, one.shapes)).toBe(false)
-    // Its family off: not the runner's, nothing refused.
-    expect(mediaEffectRefusals(bound.p, OFF_VIDEO_TIME, new Map([['g:0', { count: 48, w: 24, h: 16, exact: true }]]))).toBeNull()
   })
 
-  it('in the engine, hosted: refused in plain words; the paid node in the other branch is neither run nor held', LONG, async () => {
-    await requireMediaTools()
-    const dir = mkdtempSync(join(scratch, 'refuse-'))
-    const k = makeKit({ hosted: true, dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
-    const clip = 'v_stereo_aac.mp4'
-    copyFileSync(clipPath(clip), join(k.root, 'input', clip))
-    const paid = {
-      i: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
-      ic: { class_type: 'Image', inputs: { image: '', export: false, images: ['i', 0], batch_index: -1 } },
+  it('every falloff against the reference, within one level', () => {
+    const clip = movingSquare(9)
+    for (const falloff of ['uniform', 'linear', 'gaussian']) {
+      for (const radius of [1, 3, 12]) {
+        expect(worstLevel(blurBatch(clip, radius, falloff).round8, blurReference(clip, radius, falloff)), `${falloff} ${radius}`).toBeLessThanOrEqual(1)
+      }
     }
-    const video = (effect: Record<string, unknown>): ApiPrompt => ({
-      ...paid, l: { class_type: 'LoadVideo', inputs: { file: clip } }, g: getComp(), m: { class_type: String(effect.class_type), inputs: { frames: ['g', 0], ...(effect.inputs as object) } },
-      c: { class_type: 'CreateVideo', inputs: { images: ['m', 0], fps: ['g', 2] } }, s: saveVideo('c'),
-    })
-    const blurred = video({ class_type: 'TemporalMotionBlur', inputs: { radius: 2, falloff: 'gaussian' } })
-    expect(runnerTakesWorkflow(blurred, ON)).toBe(true)
-    const before = PROCS.pids.length
-    const err = await k.engine.startRun({ userId: k.userId, takes: [blurred], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
-    expect(err).toMatchObject({ statusCode: 400, message: MEDIA_EFFECT_WORDS.motionBlurFails, data: { nodeId: 'm', classType: 'TemporalMotionBlur' } })
-    expect(err.data.reason).toBeUndefined()
-    expect(k.fal.client.submit).not.toHaveBeenCalled()
-    expect(k.replicate.client.submit).not.toHaveBeenCalled()
-    expect(k.ledger.hold).not.toHaveBeenCalled()
-    expect(k.ledger.settle).not.toHaveBeenCalled()
-    // Only the header and the packet count were read (ffprobe): no decode or encode.
-    expect(PROCS.pids.length - before).toBeGreaterThan(0)
-    // Teeth: the same workflow with Trim in its place starts, and holds the paid node.
-    const trimmed = video({ class_type: 'VideoTrim', inputs: { start: 0, end: -1 } })
-    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [trimmed], workflow: null, canvasId: null, projectUuid: null, projectName: null })
-    await k.engine.settled(runId)
-    expect(k.ledger.hold).toHaveBeenCalled()
+  })
+
+  it('the ends use the frames there are: no fade to black, no repeated end frame', () => {
+    const clip = movingSquare(6)
+    const got = blurBatch(clip, 3, 'uniform')
+    const n = clip.w * clip.h * 3
+    // Frame 0 is the mean of frames 0–3 (four frames), not seven with frame 0 repeated or black.
+    const want = new Uint8Array(n)
+    for (let e = 0; e < n; e++) want[e] = Math.round((clip.frames[0]![e]! + clip.frames[1]![e]! + clip.frames[2]![e]! + clip.frames[3]![e]!) / 4)
+    expect(worstLevel(frameOf(got.round8, clip, 0), want)).toBeLessThanOrEqual(1)
+    // The ground stays its colour at both ends (a fade to black would darken it).
+    for (const j of [0, 5]) expect(frameOf(got.round8, clip, j)[0], `frame ${j}`).toBe(60)
+    // A clip shorter than the window, uniform: every frame the mean of the whole clip.
+    const two = movingSquare(2)
+    const g2 = blurBatch(two, 5, 'uniform')
+    expect(g2.count).toBe(2)
+    expect(sha256(frameOf(g2.round8, two, 0))).toBe(sha256(frameOf(g2.round8, two, 1)))
+  })
+
+  it('one frame is handed on unchanged (Python’s one working case)', () => {
+    const clip = movingSquare(1)
+    const got = blurBatch(clip, 4, 'gaussian')
+    expect(got.count).toBe(1)
+    expect(sha256(got.round8)).toBe(sha256(clip.frames[0]!))
+    expect(VIDEO_EFFECTS.TemporalMotionBlur!.passThrough!({ radius: 4, falloff: 'gaussian' }, [{ count: 1, w: 40, h: 24, exact: true }])).toBe(true)
+  })
+
+  it('holds at most 2·radius + 1 frames, and the start pass counts them and the work', () => {
+    const spec = VIDEO_EFFECTS.TemporalMotionBlur!
+    for (const radius of [1, 2, 7, 12]) {
+      for (const T of [2, 3, 10, 25, 60]) {
+        const w = { radius, falloff: 'gaussian' }
+        const ins = [{ count: T, w: 64, h: 48, exact: true }]
+        const n = Math.min(2 * radius + 1, T)
+        expect(windowSchedule(spec.windowOf!(w, ins), T, T).maxHeld, `${radius} ${T}`).toBeLessThanOrEqual(n)
+        expect(spec.heldBytes(w, ins)).toBe(effectHeldBytes(ins[0]!, { reads: n, held8: n }))
+        expect(spec.shape(w, ins)).toEqual({ count: T, w: 64, h: 48, exact: true })
+        expect(spec.work(w, ins, spec.shape(w, ins))).toBe(2 * T * 64 * 48 + T * 64 * 48 * n)
+      }
+    }
+    // 1080p: a small radius fits the hosted held-frames limit, the largest does not (refused before the hold).
+    const hd = [{ count: 90, w: 1920, h: 1080, exact: true }]
+    expect(spec.heldBytes({ radius: 2, falloff: 'gaussian' }, hd)).toBeLessThanOrEqual(MEDIA_CAPS.hosted.heldFrameBytes)
+    expect(spec.heldBytes({ radius: 12, falloff: 'gaussian' }, hd)).toBeGreaterThan(MEDIA_CAPS.hosted.heldFrameBytes)
+  })
+
+  it('is not refused, and needs no packet count, on any clip', () => {
+    for (const shape of [{ count: 2, exact: true }, { count: 2, exact: false, counted: true as const }, { count: 48, exact: false }]) {
+      const p: ApiPrompt = { l: loadVideo(), g: getComp(), m: { class_type: 'TemporalMotionBlur', inputs: { frames: ['g', 0], radius: 2, falloff: 'gaussian' } }, c: createVideo('m'), s: saveVideo('c') }
+      const shapes = new Map([['g:0', { w: 24, h: 16, ...shape }]])
+      expect(mediaEffectRefusals(p, ON, shapes), JSON.stringify(shape)).toBeNull()
+      expect(needsExactCount(p, ON, shapes), JSON.stringify(shape)).toBe(false)
+    }
+  })
+
+  it('Load video → Get video components → Motion blur → Create video → Save video runs in the engine: the same frame count and rate, blurred', LONG, async () => {
+    await requireMediaTools()
+    const clip = 'v_stereo_aac.mp4'
+    const save = async (effect: Record<string, unknown>) => {
+      const dir = mkdtempSync(join(scratch, 'blur-'))
+      const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+      copyFileSync(clipPath(clip), join(k.root, 'input', clip))
+      const p: ApiPrompt = {
+        l: { class_type: 'LoadVideo', inputs: { file: clip } }, g: getComp(), m: { class_type: String(effect.class_type), inputs: { frames: ['g', 0], ...(effect.inputs as object) } },
+        c: { class_type: 'CreateVideo', inputs: { images: ['m', 0], fps: ['g', 2] } }, s: saveVideo('c'),
+      }
+      expect(runnerTakesWorkflow(p, ON)).toBe(true)
+      const { runId } = await k.engine.startRun({ userId: null, takes: [p], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+      await k.engine.settled(runId)
+      const t = (await k.store.get(runId))!.takes[0]!
+      for (const id of ['l', 'g', 'm', 'c', 's']) expect(t.nodes[id]!.status, `${id}: ${t.nodes[id]!.error ?? ''}`).toBe('done')
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      const path = join(k.root, 'output', 'video', 'ComfyUI_00001_.mp4')
+      const pr = await probeMedia(path, { userId: null, roots: [join(path, '..')] })
+      const frames: string[] = []
+      await decodeFrames(path, { userId: null, maxFrames: 1e6, roots: [join(path, '..')], onFrame: async (f) => { frames.push(sha256(f)) } })
+      return { count: await pyFrameCount(pr, pr.path, { userId: null }), rate: pyFrameRate(pr), frames }
+    }
+    const blurred = await save({ class_type: 'TemporalMotionBlur', inputs: { radius: 2, falloff: 'gaussian' } })
+    const plain = await save({ class_type: 'VideoTrim', inputs: { start: 0, end: -1 } })
+    expect(blurred.count).toBeGreaterThan(1)
+    expect(blurred.count).toBe(plain.count)
+    expect(blurred.frames).toHaveLength(plain.frames.length)
+    expect(blurred.rate).toEqual(plain.rate)
+    // Teeth: the blur changed the pictures.
+    expect(blurred.frames).not.toEqual(plain.frames)
   })
 })
 
@@ -524,6 +647,7 @@ describe('Stop mid-effect, held and windowed', () => {
     ['SlitScan', { delay: 1, axis: 'horizontal', wrap: false }, 3],
     ['TimeDisplacement', { strength: 4, noise_scale: 120, wrap: true, seed: 0 }, 3],
     ['SpeedRamp', { mode: 'ramp_in_out', speed: 0.5, start_speed: 2, interpolation: 'blend' }, 5],
+    ['TemporalMotionBlur', { radius: 3, falloff: 'gaussian' }, 5],
   ] as const) {
     it(`${cls}: no tool process left, no kept file but its input`, LONG, async () => {
       await requireMediaTools()
@@ -610,6 +734,12 @@ describe('esbuild guard: the video cores survive Nitro’s build', () => {
           const r2 = await reply({ id: 3, op: 'vfx.frame', fn: 'time.ramp', params: rp, index: 0, count: 1, inputs: [{ rgb: clip.frames[2]!.slice(), w: clip.w, h: clip.h }, { rgb: clip.frames[3]!.slice(), w: clip.w, h: clip.h }], quant: 'trunc', preview: false })
           expect(r2.error).toBeUndefined()
           expect([...r2.value.rgb]).toEqual([...want])
+          // Motion blur (time) (R11.9b) in the built worker, at the clip's start (a part window): this thread's frame.
+          const bp = { radius: 2, falloff: 'gaussian', _first: 2 }
+          const bwant = videoCores.vx.toRgb(videoCores.time.blur([0, 1, 2].map(i => videoCores.vx.fromRgb(clip.frames[i]!, clip.w, clip.h)), bp).out, 'round')
+          const rb = await reply({ id: 5, op: 'vfx.frame', fn: 'time.blur', params: bp, index: 0, count: 8, inputs: [0, 1, 2].map(i => ({ rgb: clip.frames[i]!.slice(), w: clip.w, h: clip.h })), quant: 'round', preview: false })
+          expect(rb.error).toBeUndefined()
+          expect([...rb.value.rgb]).toEqual([...bwant])
           // Time displacement in the built worker, reading every frame from one shared buffer: this thread's frame.
           const fb = clip.w * clip.h * 3
           const sab = new SharedArrayBuffer(clip.frames.length * fb)

@@ -2558,7 +2558,7 @@ export function createEngine(deps: EngineDeps) {
       const others = (k: number) => (several ? prompts.reduce((sum, _p, j) => (j === k ? sum : sum + keptOf(j)), 0) : 0)
       const opts = (k: number) => ({ hosted: deps.hosted(), shapes: shapes[k]!, release: !several, keptOthers: others(k) })
       if (prompts.some((p, k) => nearLimit(p, families, opts(k)) || needsExactCount(p, families, shapes[k]!))) shapes = await shapeAll(true)
-      // Where Python itself raises on a count known exactly (Motion blur (time) on more than one frame): refused
+      // Where Python itself raises on a count known exactly (no ported effect does since R11.9b made Motion blur (time) work): refused
       // now, before the hold, in the node's own words (R6.2 fix round 1); never a run that fails after paid nodes.
       for (const [k, p] of prompts.entries()) {
         const raises = mediaEffectRefusals(p, families, shapes[k]!)

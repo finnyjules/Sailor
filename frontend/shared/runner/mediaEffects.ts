@@ -234,7 +234,6 @@ export const MEDIA_EFFECT_WORDS = {
   noFrames: 'There are no video frames wired in',
   needsRun: 'Video effects can only be worked on when the workflow runs',
   timedOut: 'This video effect took longer than 2 minutes on one frame, so it was stopped',
-  motionBlurFails: 'Motion blur (time) only works on a single frame.',
   lutMissing: 'The LUT file this workflow names isn’t there',
   lutTooBig: 'This LUT is too large to use here',
   flowTooBig: 'This clip’s frames are too large for slow motion here',
