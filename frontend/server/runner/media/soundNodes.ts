@@ -56,6 +56,7 @@ import { SAVE_AUDIO_SAMPLE_FMT, encodeAudio, type AudioFormat, type AudioQuality
 import { MediaError, mediaTempDir, removeMediaTempDir } from '../../media/run'
 import { probeMedia } from '../../media/probe'
 import { MEDIA_WORDS } from '#shared/runner/media'
+import { soundReadOnlyByPieces } from '#shared/runner/localModels'
 import { keepSound, readSound, soundNoteOf, type MediaValueIO } from '../../media/values'
 
 /** LoadAudio's validate_inputs ("Invalid audio file: …"), in plain words. */
@@ -174,9 +175,10 @@ function loaderFile(inputs: Record<string, unknown>): OutputFile | null {
  * A file the tools can't read (or over the caps) is refused in the probe's own
  * plain words.
  */
-export async function soundStreamProblem(access: Pick<MediaValueIO['access'], 'pathOf' | 'rootOf'>, file: OutputFile, userId: string | null, signal?: AbortSignal): Promise<string | null> {
+export async function soundStreamProblem(access: Pick<MediaValueIO['access'], 'pathOf' | 'rootOf'>, file: OutputFile, userId: string | null, signal?: AbortSignal, o: { anyLength?: boolean } = {}): Promise<string | null> {
   try {
-    const p = await probeMedia(access.pathOf(file), { userId, signal, roots: [access.rootOf(file)], kind: 'sound' })
+    // R11.5: `anyLength` (a sound read only by nodes that send it in pieces): judged by its size, not R5's length cap.
+    const p = await probeMedia(access.pathOf(file), { userId, signal, roots: [access.rootOf(file)], kind: 'sound', ...(o.anyLength ? { anyLength: true as const } : {}) })
     return p.sound.length ? null : MEDIA_WORDS.noSound
   }
   catch (e) {
@@ -194,7 +196,7 @@ export function planLoadAudio(ctx: PlanContext): NodePlan {
       if (io.media) {
         if (!(await io.media.access.exists(file))) throw new Error(SOUND_FILE_MISSING)
         // Python's `load` fails here, at the loader, on a file with no sound (backstop for the start check).
-        const why = await soundStreamProblem(io.media.access, file, io.media.userId, io.signal)
+        const why = await soundStreamProblem(io.media.access, file, io.media.userId, io.signal, { anyLength: soundReadOnlyByPieces(ctx.prompt, ctx.nodeId) })
         if (why) throw new Error(why)
       }
       return { values: { 0: { kind: 'files', files: [file], sound: { decode: 'load' } } }, ui: null }
@@ -213,7 +215,7 @@ export function planLoadAudio(ctx: PlanContext): NodePlan {
  */
 export async function loadAudioStartProblems(
   prompt: ApiPrompt, exists: (f: OutputFile) => Promise<boolean>,
-  soundOf?: (f: OutputFile) => Promise<string | null>,
+  soundOf?: (f: OutputFile, nodeId: string) => Promise<string | null>,
 ): Promise<{ message: string; nodeId: string; classType: string; file?: string } | null> {
   for (const [nodeId, n] of Object.entries(prompt)) {
     if (n.class_type !== 'LoadAudio' && n.class_type !== 'RecordAudio') continue
@@ -227,7 +229,7 @@ export async function loadAudioStartProblems(
       if (load) return { message: SOUND_FILE_MISSING, nodeId, classType: n.class_type, file: file.filename }
       continue
     }
-    const why = soundOf ? await soundOf(file) : null
+    const why = soundOf ? await soundOf(file, nodeId) : null
     if (why) return { message: why, nodeId, classType: n.class_type, file: file.filename }
   }
   return null

@@ -116,7 +116,8 @@
  * sound's end (a fix), and the SRT blocks are numbered 1, 2, 3 with no gaps
  * (Python's skipped segments left gaps: a fix). A sound Whisper would hear
  * nothing in (no samples, or every one 0) makes no call: three empty texts,
- * free. No ui (Python returns none).
+ * free. No ui (Python returns none). R11.5: a sound longer than one call
+ * takes where it runs goes in pieces (whisperPiecesPlan).
  *
  * Vocal separator (R7.8, family `vocal-split`; comfy_extras/nodes_audio_ml.py
  * :211-295): ONE call to Replicate's demucs in two-stem mode with the whole
@@ -126,6 +127,8 @@
  * the seconds it is charged on). Its `vocals` and `no_vocals` (the sum of the
  * other stems: Python's instrumental) come back as float32 WAVs and are kept
  * as they came. A silent sound makes no call: two silent stems, free. No ui.
+ * R11.5: a song longer than one call takes where it runs goes in pieces, each
+ * stem joined end to end (vocalsPieces).
  */
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -146,7 +149,9 @@ import {
 } from '#shared/runner/localModels'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds, subjectClick } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
-import { vocalsSilentStems, wavIsSilent, type PythonWav, type VocalsSound } from '../soundWav'
+import { isPieced, vocalsSilentStems, vocalsSound, wavIsSilent, type PiecedSound, type PythonWav, type VocalsSound } from '../soundWav'
+import { floatWavJoiner, pieceSilent, pieceSound, pieceSpan, pieceWav } from '../../media/split'
+import { floatWav } from '../../media/encode'
 import { keepSound } from '../../media/values'
 import { wizperInput } from './soundIn'
 import { effectPreviewName } from '#shared/runner/effects'
@@ -1565,6 +1570,8 @@ export async function planWhisper(ctx: PlanContext): Promise<NodePlan> {
     const link = inputs.audio
     if (!isLink(link) || !ctx.soundWav || !ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
     const w = await ctx.soundWav(link as ApiLink)
+    // R11.5: longer than one call takes here: sent in pieces, the texts joined.
+    if (isPieced(w)) return whisperPiecesPlan(ctx, inputs, fps, w)
     // Nothing to hear (Python's VAD finds no speech in silence): three empty texts, no call, free.
     if (wavIsSilent(w)) return { kind: 'derive', derive: async () => ({ values: whisperValues({ captions: '', srt: '', text: '' }), ui: null }) }
     // Held for at most this place's longest sound: a longer one is never sent (the start of the run
@@ -1578,6 +1585,64 @@ export async function planWhisper(ctx: PlanContext): Promise<NodePlan> {
     media: 'value', prefix: 'whisper',
     valuesOf: (result): Record<number, RunnerValue> => whisperValues(whisperOutputs(wizperChunks(result), fps, seconds)),
     uiFor: () => null,
+  }
+}
+
+/**
+ * A piece's segments placed in the whole sound (R11.5): a segment with no
+ * start starts where the one before it in the piece ended (the piece's first
+ * at the piece's start), one with no end ends at the piece's end, and every
+ * time is moved by where the piece starts.
+ */
+export function offsetChunks(chunks: readonly WhisperChunk[], span: { start: number; seconds: number }): WhisperChunk[] {
+  let before = 0
+  return chunks.map((c) => {
+    const start = c.start ?? before
+    const end = c.end ?? span.seconds
+    before = end
+    return { start: start + span.start, end: end + span.start, text: c.text }
+  })
+}
+
+/**
+ * Whisper transcribe in pieces (R11.5, ruling (h)): a sound longer than one
+ * call takes where it runs, cut at the quietest point near each 30 minutes
+ * (../../media/split.ts), one Wizper call a piece, in order. Each piece's
+ * segments are moved by where it starts and the three texts made from them
+ * all, as from one answer. A silent piece makes no call. Stop between pieces
+ * sends nothing more (the call in flight is cancelled by the engine); a
+ * piece that fails fails the node, the pieces before it charged (delivered).
+ * A resumed node sends each piece's written-down request again.
+ */
+function whisperPiecesPlan(ctx: PlanContext, inputs: Record<string, unknown>, fps: number, w: PiecedSound): NodePlan {
+  const p = w.pieces
+  return {
+    kind: 'pipeline', prefix: 'whisper',
+    run: async (io: PipelineIO) => {
+      const chunks: WhisperChunk[] = []
+      for (let i = 0; i < p.starts.length; i++) {
+        if (io.signal.aborted) throw new MediaError('stopped')
+        const span = pieceSpan(p, i)
+        const key = `wizper-${i + 1}`
+        let payload = io.recorded?.(key) ?? null
+        if (!payload) {
+          if (await pieceSilent(p, i)) continue
+          if (!ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
+          payload = whisperInput(inputs, await ctx.bytesToUrl({ filename: 'whisper.wav', subfolder: '', type: 'kept' }, await pieceWav(p, i)))
+        }
+        const usd = paidCallUsd({ endpoint: WHISPER_SLUG, inputSeconds: span.seconds })
+        if (usd == null) throw new Error('Whisper transcribe has no price yet')
+        const got = await io.call({ key, provider: 'fal', endpoint: WHISPER_SLUG, payload, media: 'value', wait: 'video', usd })
+        let part: WhisperChunk[]
+        try { part = wizperChunks(got.result) }
+        catch (e) {
+          await io.undelivered?.(key, 'no-file')
+          throw e
+        }
+        chunks.push(...offsetChunks(part, span))
+      }
+      return { values: whisperValues(whisperOutputs(chunks, fps, w.seconds)), ui: null }
+    },
   }
 }
 
@@ -1685,6 +1750,8 @@ export async function planVocals(ctx: PlanContext): Promise<NodePlan> {
       else {
         if (!ctx.soundWav || !ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
         const w = await ctx.soundWav(link as ApiLink) as PythonWav & Partial<VocalsSound>
+        // R11.5: longer than one call takes here: sent in pieces, each stem joined end to end.
+        if (isPieced(w)) return vocalsPieces(ctx, io, w, model, shifts, work)
         // Silent, but not known before planning (a resumed node whose call was never sent): still no call.
         if (w.silent === true) {
           const media = mediaOf()
@@ -1735,5 +1802,97 @@ export async function planVocals(ctx: PlanContext): Promise<NodePlan> {
       const instrumental = await keep(urls.instrumental)
       return { values: { 0: vocals, 1: instrumental }, ui: null }
     },
+  }
+}
+
+/**
+ * Vocal separator in pieces (R11.5, ruling (h)): a song longer than one call
+ * takes where it runs, cut at the quietest point near each 10 minutes
+ * (../../media/split.ts), one Demucs call a piece, in order, each piece sent
+ * as the FLAC a whole song is (Python's stereo, here at Demucs' 44.1 kHz).
+ * Each piece's two stems are appended to the joined stems as they come (one
+ * piece in memory at a time), and the two joined float WAVs kept for the run.
+ * A silent piece makes no call (silent stems of its length). Stop between
+ * pieces sends nothing more; a piece that fails fails the node, the pieces
+ * before it charged (delivered); joined stems that can't be kept charge
+ * nothing (every piece marked undelivered). The work folder goes on every path.
+ */
+async function vocalsPieces(ctx: PlanContext, io: PipelineIO, w: PiecedSound, model: string, shifts: number, work: number): Promise<{ values: Record<number, RunnerValue>; ui: null }> {
+  const media = io.media
+  if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+  if (!ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
+  const p = w.pieces
+  await media.kept.checkRoom(media.runId)
+  const dir = await media.kept.workDir(media.runId)
+  try {
+    const vocalsPath = join(dir, 'vocals.wav')
+    const instrumentalPath = join(dir, 'instrumental.wav')
+    const vocals = await floatWavJoiner(vocalsPath)
+    const instrumental = await floatWavJoiner(instrumentalPath)
+    const sent: string[] = []
+    try {
+      for (let i = 0; i < p.starts.length; i++) {
+        if (io.signal.aborted) throw new MediaError('stopped')
+        const span = pieceSpan(p, i)
+        const key = `${VOCALS_KEY}-${i + 1}`
+        let payload = io.recorded?.(key) ?? null
+        if (!payload) {
+          const piece = await vocalsSound(await pieceSound(p, i), { userId: media.userId, signal: io.signal })
+          if (piece.silent) {
+            const silence = floatWav(vocalsSilentStems(piece.frames, piece.rate))
+            await vocals.append(silence)
+            await instrumental.append(silence)
+            continue
+          }
+          payload = vocalsInput(await ctx.bytesToUrl({ filename: 'vocal_separator.flac', subfolder: '', type: 'kept' }, piece.wav), model, shifts)
+        }
+        const usd = paidCallUsd({ endpoint: VOCALS_SLUG, inputSeconds: span.seconds * work })
+        if (usd == null) throw new Error('Vocal separator has no price yet')
+        const got = await io.call({ key, provider: 'replicate', endpoint: VOCALS_SLUG, payload, media: 'value', wait: 'video', usd })
+        sent.push(key)
+        const urls = vocalsStemUrls(got.result)
+        if (!urls) {
+          await io.undelivered?.(key, 'no-file')
+          throw new Error(VOCALS_WORDS.noAnswer)
+        }
+        const maxBytes = vocalsStemMaxBytes(span.seconds)
+        for (const [url, joined] of [[urls.vocals, vocals], [urls.instrumental, instrumental]] as const) {
+          const { bytes } = await io.download(url, { kind: 'audio', maxBytes })
+          if (!isWav(bytes)) {
+            await io.undelivered?.(key, 'no-file')
+            throw new Error(VOCALS_WORDS.noAnswer)
+          }
+          try { await joined.append(bytes) }
+          catch (e) {
+            if (!io.signal.aborted) await io.undelivered?.(key, 'not-kept')
+            throw e
+          }
+        }
+      }
+      await vocals.finish()
+      await instrumental.finish()
+    }
+    catch (e) {
+      await vocals.abort()
+      await instrumental.abort()
+      throw e
+    }
+    // Kept by path (the tools read a sound by its path, never whole).
+    try {
+      await media.kept.checkRoom(media.runId)
+      const a = await media.kept.putPath(media.runId, vocalsPath, 'wav')
+      const b = await media.kept.putPath(media.runId, instrumentalPath, 'wav')
+      return {
+        values: { 0: { kind: 'files', files: [a], sound: { decode: 'load' } }, 1: { kind: 'files', files: [b], sound: { decode: 'load' } } },
+        ui: null,
+      }
+    }
+    catch (e) {
+      if (!io.signal.aborted) for (const key of sent) await io.undelivered?.(key, 'not-kept')
+      throw e
+    }
+  }
+  finally {
+    await rm(dir, { recursive: true, force: true })
   }
 }

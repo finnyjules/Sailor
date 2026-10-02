@@ -29,7 +29,7 @@ import { PROVIDER_TYPES, SOUND_OUTPUTS, isRunnerEligible, outputKindsFor, runner
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import {
   LOCAL_MODEL_FAMILY_OF, SERVICE_OF, VOCALS_CLASS, VOCALS_MAX_SECONDS, VOCALS_MODELS, VOCALS_MODEL_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG,
-  VOCALS_WORDS, localModelCalls, serviceTooltip, vocalsCalls, vocalsWork,
+  VOCALS_CEILING_SECONDS, VOCALS_WORDS, localModelCalls, serviceTooltip, vocalsCalls, vocalsStemsReadable, vocalsWork,
 } from '#shared/runner/localModels'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
@@ -427,21 +427,25 @@ describe('through the engine (ComfyUI off): Karaoke\'s chain held, sent, charged
     expect([...k.ledger.holds.values()].map(h => (h.state === 'released' ? 0 : h.actual))).toEqual([0])
   }, 60_000)
 
-  it('hosted, a loaded song longer than 10 minutes: refused plainly before any hold, from its header (never the engine)', async () => {
+  it('R11.5: hosted, a loaded song past what its joined stems can be read at (about 32.6 minutes): refused plainly before any hold, from its header (never the engine); a song past 10 minutes runs in pieces (runner-long-sound)', async () => {
     await requireMediaTools()
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
-    putInput(k.root, 'long.wav', clipBytes('pcm16', 8000, 1, 8000 * (VOCALS_MAX_SECONDS.hosted + 2), 8403))
+    // 1 kHz keeps the file small; only its header is read.
+    putInput(k.root, 'long.wav', clipBytes('pcm16', 1000, 1, 1000 * 33 * 60, 8403))
+    expect(vocalsStemsReadable(33 * 60, 'hosted')).toBe(false)
+    expect(vocalsStemsReadable(32 * 60, 'hosted')).toBe(true)
+    expect(vocalsStemsReadable(VOCALS_CEILING_SECONDS.local, 'local')).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [{ s: loadAudio('long.wav'), n: vocalsNode(), ...saves() }], ...START }).then(() => null, (e: Error) => e)
     expect(err?.message).toBe(VOCALS_WORDS.tooLong)
     expect((err as { data?: { reason?: string } })?.data?.reason ?? (err as { reason?: string })?.reason).not.toBe(RUNNER_NOT_ELIGIBLE)
     expect(k.ledger.hold).not.toHaveBeenCalled()
   }, 120_000)
 
-  it('an exact chain (Empty audio) just past the cap: refused before the hold — no second of header slack where no header source is in the chain', async () => {
+  it('an exact chain (Empty audio) just past what the stems can be read at (hosted): refused before the hold — no second of header slack where no header source is in the chain', async () => {
     const fam = new Set<RunnerFamily>([...ON, 'sound-effects'])
     const k = makeKit({ hosted: true, deps: { families: () => fam } })
     const empty = (duration: number) => ({ class_type: 'EmptyAudio', inputs: { duration, sample_rate: 8000, channels: 1 } })
-    const err = await k.engine.startRun({ userId: k.userId, takes: [{ s: empty(VOCALS_MAX_SECONDS.hosted + 0.5), n: vocalsNode(), ...saves() }], ...START }).then(() => null, (e: Error) => e)
+    const err = await k.engine.startRun({ userId: k.userId, takes: [{ s: empty(1959), n: vocalsNode(), ...saves() }], ...START }).then(() => null, (e: Error) => e)
     expect(err?.message).toBe(VOCALS_WORDS.tooLong)
     expect(k.ledger.hold).not.toHaveBeenCalled()
     // The bound itself: exact, and a loaded file's is not.

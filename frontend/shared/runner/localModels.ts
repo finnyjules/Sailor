@@ -28,6 +28,8 @@ import { PHOTO_FILL_SLUGS } from './layers'
 import { SAM_3_IMAGE_APP, subjectCallKinds } from './samInput'
 import { WIZPER_APP } from './soundIn'
 import { MEDIA_CAPS } from './media'
+import { soundPieceBounds } from './soundPieces'
+import { isLink, type ApiPrompt } from './graph'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 import type { PaidCalls } from '../pricing/paidSettings'
@@ -192,9 +194,9 @@ export const WHISPER_FPS = { default: 30, min: 1, max: 120 } as const
 /** The rate of the sound sent: Python's `_audio_to_mono16k` (16 kHz mono). */
 export const WHISPER_RATE = 16000
 /**
- * The longest sound one Whisper node sends (ruling (h)): hosted 30 minutes,
- * on this computer an hour (R5's own sound length there). The whole sound is
- * sent; a longer one never reaches the call (a stop-gap named in R7.7's report).
+ * The longest sound one Whisper call sends (ruling (h)): hosted 30 minutes,
+ * on this computer an hour (R5's own sound length there). A longer one is sent
+ * in pieces since R11.5 (WHISPER_PIECE_SECONDS), up to WHISPER_CEILING_SECONDS.
  */
 export const WHISPER_MAX_SECONDS = { hosted: 30 * 60, local: 60 * 60 } as const
 /**
@@ -213,6 +215,21 @@ export const WIZPER_LANGUAGES: readonly string[] = [
 /** Where a Whisper node runs, for its sound cap: `place`, else the canvas's "up to" place, else this computer's (the larger). */
 export function whisperMaxSeconds(place: 'hosted' | 'local' | null | undefined): number {
   return place === 'hosted' ? WHISPER_MAX_SECONDS.hosted : WHISPER_MAX_SECONDS.local
+}
+
+/**
+ * R11.5 (ruling (h)): a sound longer than one call takes (WHISPER_MAX_SECONDS)
+ * is sent in pieces of at most 30 minutes, cut at the quietest point near
+ * each limit (server/media/split.ts), the texts joined with each piece's
+ * times moved by where it starts.
+ */
+export const WHISPER_PIECE_SECONDS = 30 * 60
+/** R11.5: the hard ceiling, refused plainly before the hold: three hours of speech, in both places. */
+export const WHISPER_CEILING_SECONDS = { hosted: 3 * 60 * 60, local: 3 * 60 * 60 } as const
+
+/** The longest sound a Whisper node takes at all (in pieces), where it runs. */
+export function whisperCeilingSeconds(place: 'hosted' | 'local' | null | undefined): number {
+  return place === 'hosted' ? WHISPER_CEILING_SECONDS.hosted : WHISPER_CEILING_SECONDS.local
 }
 
 // ── Vocal separator (R7.8, family `vocal-split`) ──
@@ -236,10 +253,11 @@ export const VOCALS_MODEL_SENT: Readonly<Record<string, string>> = { htdemucs: '
 /** `shifts`: IO.Int.Input(default=1, min=0, max=10). The saved schema takes any integer. */
 export const VOCALS_SHIFTS = { default: 1, min: 0, max: 10 } as const
 /**
- * The longest sound one Vocal separator node sends (ruling (i)): hosted 10
+ * The longest sound one Vocal separator call sends (ruling (i)): hosted 10
  * minutes; on this computer 20 minutes, the most whose stems (two float32
  * stereo WAVs at Demucs' 44.1 kHz, 352,800 bytes a second each) stay under
- * the 512 MiB a downloaded sound may be (answerDownload.ts).
+ * the 512 MiB a downloaded sound may be (answerDownload.ts). A longer one is
+ * sent in pieces since R11.5 (VOCALS_PIECE_SECONDS), up to VOCALS_CEILING_SECONDS.
  */
 export const VOCALS_MAX_SECONDS = { hosted: 10 * 60, local: 20 * 60 } as const
 /** The rate Demucs makes its stems at (Python's `sep_model.samplerate` for every model it offers). */
@@ -255,6 +273,55 @@ export const VOCALS_MODEL_WORK: Readonly<Record<string, number>> = { htdemucs: 1
 /** Where a Vocal separator node runs, for its sound cap: `place`, else the canvas's "up to" place, else this computer's (the larger). */
 export function vocalsMaxSeconds(place: 'hosted' | 'local' | null | undefined): number {
   return place === 'hosted' ? VOCALS_MAX_SECONDS.hosted : VOCALS_MAX_SECONDS.local
+}
+
+/**
+ * R11.5 (ruling (h)): a song longer than one call takes (VOCALS_MAX_SECONDS)
+ * is sent in pieces of at most 10 minutes, one Demucs call each, cut at the
+ * quietest point near each limit (server/media/split.ts), each stem joined
+ * end to end.
+ */
+export const VOCALS_PIECE_SECONDS = 10 * 60
+/**
+ * R11.5: the hard ceiling, refused plainly before the hold: an hour of song.
+ * The joined stems must also stay readable by the next node (R5's
+ * soundSamples, `vocalsStemsReadable`): hosted that is about 32 minutes.
+ */
+export const VOCALS_CEILING_SECONDS = { hosted: 60 * 60, local: 60 * 60 } as const
+
+/** The longest song a Vocal separator node takes at all (in pieces), where it runs. */
+export function vocalsCeilingSeconds(place: 'hosted' | 'local' | null | undefined): number {
+  return place === 'hosted' ? VOCALS_CEILING_SECONDS.hosted : VOCALS_CEILING_SECONDS.local
+}
+
+/**
+ * R11.5: whether the sound node `nodeId` hands on (slot 0) is read only by
+ * nodes that send it in pieces (Whisper transcribe's and Vocal separator's
+ * `audio`), through Audio cards' `source`: such a loaded file is judged by
+ * its size and the pieces' ceiling, never R5's length cap (it is never
+ * decoded whole). False when nothing reads it, or anything else does.
+ */
+export function soundReadOnlyByPieces(prompt: ApiPrompt, nodeId: string, depth = 0): boolean {
+  if (depth > 64) return false
+  let readers = 0
+  for (const [id, n] of Object.entries(prompt)) {
+    for (const [name, v] of Object.entries(n.inputs ?? {})) {
+      if (!isLink(v) || v[0] !== nodeId) continue
+      if (v[1] !== 0) return false
+      readers++
+      if ((n.class_type === WHISPER_CLASS || n.class_type === VOCALS_CLASS) && name === 'audio') continue
+      // An Audio card hands its source on as it came (one that exports it reads it whole).
+      if (n.class_type === 'Audio' && name === 'source' && n.inputs?.export !== true && soundReadOnlyByPieces(prompt, id, depth + 1)) continue
+      return false
+    }
+  }
+  return readers > 0
+}
+
+/** Whether stems of this many seconds (stereo at Demucs' 44.1 kHz, a second over) stay within R5's sound cap where they run. */
+export function vocalsStemsReadable(seconds: number, place: 'hosted' | 'local' | null | undefined): boolean {
+  const caps = place === 'hosted' ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  return 2 * Math.ceil((seconds + 1) * VOCALS_RATE) <= caps.soundSamples
 }
 
 /**
@@ -768,17 +835,33 @@ export function slowMotionAiCalls(multiplier: unknown, frames: number | null | u
  * seconds. Bounded before the run (`audioUpTo`, fix round 1: from the sound's
  * maker, server/runner/localModelStart.ts whisperSoundBound): at most that.
  * Neither (a maker that can't be bounded, or the canvas): the longest sound
- * the node may send where it runs (`place`, recorded by the start of the run;
+ * ONE call may send where it runs (`place`, recorded by the start of the run;
  * the canvas's `framesUpTo`; neither: this computer's, the larger), so what is
- * shown and held is never below the charge.
+ * shown and held is never below the charge (the node's turn refuses a longer
+ * one than was held). R11.5: a known sound past one call's cap is priced as
+ * its pieces (#shared/runner/soundPieces soundPieceBounds), at most the ceiling.
  */
 export function whisperCalls(seen?: SlowMotionAiMeasured | null): PaidCalls {
-  const cap = whisperMaxSeconds(seen?.place ?? seen?.framesUpTo)
+  const place = seen?.place ?? seen?.framesUpTo
+  const cap = whisperMaxSeconds(place)
+  const ceiling = whisperCeilingSeconds(place)
   const a = seen?.audio
   const b = seen?.audioUpTo
   const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0
-  const inputSeconds = ok(a) ? Math.min(a, cap) : ok(b) ? Math.min(b, cap) : cap
-  return { steps: [{ call: { endpoint: WHISPER_SLUG, inputSeconds }, times: 1 }] }
+  // R11.5: a known sound past one call's cap runs in pieces (up to the ceiling); an unknown one is held at one call's cap.
+  const seconds = ok(a) ? Math.min(a, ceiling) : ok(b) ? Math.min(b, ceiling) : cap
+  return { steps: pieceSteps(soundPieceBounds(seconds, cap, WHISPER_PIECE_SECONDS), s => ({ endpoint: WHISPER_SLUG, inputSeconds: s })) }
+}
+
+/** Calls of these lengths as price steps: equal neighbours folded into one step `times` over. */
+function pieceSteps(bounds: readonly number[], callOf: (seconds: number) => { endpoint: string; inputSeconds: number }): { call: { endpoint: string; inputSeconds: number }; times: number }[] {
+  const steps: { call: { endpoint: string; inputSeconds: number }; times: number }[] = []
+  for (const s of bounds) {
+    const last = steps.at(-1)
+    if (last && last.call.inputSeconds === callOf(s).inputSeconds) last.times++
+    else steps.push({ call: callOf(s), times: 1 })
+  }
+  return steps
 }
 
 /**
@@ -791,14 +874,20 @@ export function whisperCalls(seen?: SlowMotionAiMeasured | null): PaidCalls {
  * (`audioUpTo`, from the sound's maker), else the longest sound it may send
  * where it runs (`place`; the canvas's `framesUpTo`; neither: this
  * computer's, the larger), so what is shown and held is never below the charge.
+ * R11.5: a known song past one call's cap is priced as its pieces (each call
+ * at least the card's floor), at most the ceiling.
  */
 export function vocalsCalls(inputs: Readonly<Record<string, unknown>> | null | undefined, seen?: SlowMotionAiMeasured | null): PaidCalls {
   const work = vocalsWork(inputs?.model, inputs?.shifts)
   if (work === null) return { refused: 'Vocal separator can’t run this model on its service' }
-  const cap = vocalsMaxSeconds(seen?.place ?? seen?.framesUpTo)
+  const place = seen?.place ?? seen?.framesUpTo
+  const cap = vocalsMaxSeconds(place)
+  const ceiling = vocalsCeilingSeconds(place)
   const a = seen?.audio
   const b = seen?.audioUpTo
   const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0
-  const seconds = ok(a) ? Math.min(a, cap) : ok(b) ? Math.min(b, cap) : cap
-  return { steps: [{ call: { endpoint: VOCALS_SLUG, inputSeconds: seconds * work }, times: 1 }] }
+  // R11.5: a known song past one call's cap runs in pieces (up to the ceiling), each call at least the card's
+  // floor; an unknown one is held at one call's cap.
+  const seconds = ok(a) ? Math.min(a, ceiling) : ok(b) ? Math.min(b, ceiling) : cap
+  return { steps: pieceSteps(soundPieceBounds(seconds, cap, VOCALS_PIECE_SECONDS), s => ({ endpoint: VOCALS_SLUG, inputSeconds: s * work })) }
 }

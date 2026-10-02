@@ -33,7 +33,7 @@ import { GATE_CLASS, isLink } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { MEDIA_EFFECT_WORDS, mediaEffectFamilyOn } from '#shared/runner/mediaEffects'
-import { VOCALS_CLASS, VOCALS_RATE, localModelOn } from '#shared/runner/localModels'
+import { VOCALS_CLASS, VOCALS_RATE, localModelOn, soundReadOnlyByPieces } from '#shared/runner/localModels'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { parseInputFileRef } from '../inputs'
 import type { OutputFile } from '../types'
@@ -229,10 +229,10 @@ function streamBound(p: MediaProbe, which: 'first' | 'last'): SoundShape | null 
  * the workflow to the engine.
  */
 export function soundSourceShapeOf(o: { prompt: ApiPrompt } & SoundReadIO): (nodeId: string, classType: string) => Promise<SoundShape | null> {
-  const probe = async (file: OutputFile, which: 'first' | 'last', kind: 'sound' | 'video') => {
+  const probe = async (file: OutputFile, which: 'first' | 'last', kind: 'sound' | 'video', anyLength = false) => {
     if (!(await o.access.exists(file))) return null
     const path = await o.access.verifiedPath(file)
-    const p = await probeMedia(path, { userId: o.userId, signal: o.signal, roots: [o.access.rootOf(file)], kind })
+    const p = await probeMedia(path, { userId: o.userId, signal: o.signal, roots: [o.access.rootOf(file)], kind, ...(anyLength ? { anyLength: true as const } : {}) })
     return streamBound(p, which)
   }
   return async (nodeId, classType) => {
@@ -242,7 +242,9 @@ export function soundSourceShapeOf(o: { prompt: ApiPrompt } & SoundReadIO): (nod
     try {
       if (classType === 'LoadAudio' || classType === 'RecordAudio' || classType === 'Audio') {
         const file = isLink(inputs.audio) ? null : parseInputFileRef(inputs.audio)
-        return file ? await probe(file, 'first', 'sound') : null
+        // R11.5: a sound read only by nodes that send it in pieces is bounded by its header whatever its length
+        // (its size cap still holds); the pieces' ceiling is judged on that bound.
+        return file ? await probe(file, 'first', 'sound', classType !== 'Audio' && soundReadOnlyByPieces(o.prompt, nodeId)) : null
       }
       if (classType === 'GetVideoComponents') {
         const file = isLink(inputs.video) ? videoFileOf(o.prompt, inputs.video) : null

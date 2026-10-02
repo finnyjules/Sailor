@@ -27,7 +27,7 @@ import { probeVideoFile, type SoundReadIO } from '../media/values'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { sha256Hex } from './handoff'
 import { parseInputFileRef } from './inputs'
-import { silenceWav, silentCardAt, soundFileBeforeRun, vocalsSilence, whisperSilenceWav, type PythonWav } from './soundWav'
+import { isPieced, silenceWav, silentCardAt, soundFileBeforeRun, vocalsSilence, whisperSilenceWav, type PythonWav } from './soundWav'
 import { VOCALS_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
 import { measureMediaFile, type MediaReads, type MediaRule } from './mediaInputs'
 import { LIPSYNC_MAX_SECONDS } from '#shared/pricing/clipSettings'
@@ -60,7 +60,8 @@ const SOUND_IN_WORDS: ReadonlySet<string> = new Set([SOUND_IN_NEEDS_SOUND, SOUND
 
 /** What was measured of a WAV: its seconds and its sha256. */
 export function measuredWav(w: PythonWav): MeasuredMedia {
-  return { seconds: { audio: w.seconds }, sha: { audio: sha256Hex(w.wav) } }
+  // R11.5: a sound in pieces is measured by its converted file (read once as it streamed).
+  return { seconds: { audio: w.seconds }, sha: { audio: isPieced(w) ? w.pieces.sha : sha256Hex(w.wav) } }
 }
 
 /** The Audio card's second of silence as this class sends (and measures) it. */

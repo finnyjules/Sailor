@@ -29,9 +29,10 @@ import { PROVIDER_TYPES, isRunnerEligible, outputKindsFor, runnerTakesNode, valu
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { outputKind } from '#shared/runner/values'
 import {
-  LOCAL_MODEL_FAMILY_OF, SERVICE_OF, WHISPER_CLASS, WHISPER_MAX_SECONDS, WHISPER_MODEL_SIZES, WHISPER_SLUG, WHISPER_WORDS, WIZPER_LANGUAGES,
+  LOCAL_MODEL_FAMILY_OF, SERVICE_OF, WHISPER_CEILING_SECONDS, WHISPER_CLASS, WHISPER_MAX_SECONDS, WHISPER_MODEL_SIZES, WHISPER_SLUG, WHISPER_WORDS, WIZPER_LANGUAGES,
   localModelCalls, serviceTooltip, whisperCalls,
 } from '#shared/runner/localModels'
+import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { WIZPER_APP } from '#shared/runner/soundIn'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
@@ -400,10 +401,11 @@ describe('through the engine (ComfyUI off): held, sent, charged', () => {
     expect([...k.ledger.holds.values()].map(h => (h.state === 'released' ? 0 : h.actual))).toEqual([0])
   }, 60_000)
 
-  it('hosted, a loaded sound longer than 30 minutes: refused plainly before any hold (fix round 1: never the engine), from its header', async () => {
+  it('R11.5: hosted, a loaded sound past the three-hour ceiling: refused plainly before any hold (never the engine), from its header (a longer one than 30 minutes runs in pieces: runner-long-sound)', async () => {
     await requireMediaTools()
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
-    putInput(k.root, 'long.wav', clipBytes('pcm16', 8000, 1, 8000 * (WHISPER_MAX_SECONDS.hosted + 1), 7203))
+    // 500 Hz keeps the file small; only its header is read.
+    putInput(k.root, 'long.wav', clipBytes('pcm16', 500, 1, 500 * (WHISPER_CEILING_SECONDS.hosted + 2), 7203))
     const err = await k.engine.startRun({ userId: k.userId, takes: [{ s: loadAudio('long.wav'), n: whisperNode(), ...readers() }], ...START }).then(() => null, (e: Error & { data?: { reason?: string } }) => e)
     expect(err?.message).toBe(WHISPER_WORDS.tooLong)
     expect((err as { data?: { reason?: string } })?.data?.reason ?? (err as { reason?: string })?.reason).not.toBe(RUNNER_NOT_ELIGIBLE)
@@ -414,7 +416,7 @@ describe('through the engine (ComfyUI off): held, sent, charged', () => {
 describe('fix round 1 · Finding 2: a sound made in the run is bounded before the hold, from its maker', () => {
   const FX_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>([...ON, 'sound-effects'])
 
-  it('an R6 sound-effect chain from a long source into Whisper (hosted): refused plainly before the hold; nothing upstream charged or run', async () => {
+  it('an R6 sound-effect chain from a long source into Whisper (hosted): R11.5, within Whisper\'s ceiling (it would run in pieces), so the effects\' own cap decides; nothing held, charged or run', async () => {
     await requireMediaTools()
     const fal = createFakeFal({ answer: () => ({ text: '', chunks: [] }) })
     const k = makeKit({ hosted: true, fal, deps: { families: () => FX_ON } })
@@ -429,8 +431,8 @@ describe('fix round 1 · Finding 2: a sound made in the run is bounded before th
     }
     expect(isRunnerEligible(p, FX_ON)).toBe(true)
     const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).then(() => null, (e: Error) => e)
-    expect(err?.message).toBe(WHISPER_WORDS.tooLong)
-    expect((err as { data?: { reason?: string } })?.data?.reason ?? (err as { reason?: string })?.reason).not.toBe(RUNNER_NOT_ELIGIBLE)
+    // 40 minutes held at once by the effects is past R6's hosted limit for them (R6.9: that leaves the workflow).
+    expect(err?.message).toBe(MEDIA_EFFECT_WORDS.soundTooLong)
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(fal.submitted()).toEqual([])
   }, 120_000)

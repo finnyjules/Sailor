@@ -12,17 +12,17 @@
  * - Ruling (d): with the app's families off, locally the workflow goes to the
  *   engine's /prompt as before R8 (a named stop-gap, removed by R10.1); in
  *   hosted the app says it is switched off.
- * - A video whose sound is longer than Whisper takes here (an hour locally)
- *   goes to the engine locally, keyed on the refusal's reason code
- *   (RUNNER_SOUND_TOO_LONG); in hosted the 10-minute video cap refuses it
- *   plainly, before any hold.
+ * - R11.5 (ruling (h)): a sound longer than one Whisper call takes runs on
+ *   the runner in pieces of at most 30 minutes; past the hard ceiling (three
+ *   hours, beyond the video caps) it is refused plainly, never sent to the
+ *   engine. In hosted the 10-minute video cap refuses a longer video plainly,
+ *   before any hold.
  * - A price check that failed (not a refusal) shows its words and leaves Run
  *   on: pressing it prices the exact prompt again before anything starts.
  */
 import { computed, ref, type Ref } from 'vue'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { RUNNER_SOUND_TOO_LONG } from '#shared/runner/messages'
-import { AppRunCancelled, AppRunDeclined, AppRunRefused, useAppRun } from '~/composables/useAppRun'
+import { AppRunCancelled, AppRunDeclined, useAppRun } from '~/composables/useAppRun'
 import type { AppTakeInput } from '~/composables/useAppTakes'
 import type { AwaitOutputsOptions, RunnerImage } from '~/lib/runner/awaitRunnerResult'
 
@@ -130,8 +130,8 @@ export function useAutoSubtitleRun(o: {
   /** This run went to the engine (no Stop there). */
   const onEngine = ref(false)
 
-  /** Locally, the workflow the runner won't take (families off, or a sound longer than Whisper takes here) goes to the engine. */
-  const engineStopGap = computed(() => !hosted && (app.declined.value || app.refusedReason.value === RUNNER_SOUND_TOO_LONG))
+  /** Locally, the workflow the runner won't take (families off) goes to the engine. */
+  const engineStopGap = computed(() => !hosted && app.declined.value)
   /** What shows in place of a price: the refusal's or failed check's words, or "switched off" in hosted. */
   const blocked = computed<string | null>(() => {
     if (engineStopGap.value) return null
@@ -178,10 +178,10 @@ export function useAutoSubtitleRun(o: {
       land({ promptId, video })
     }
     catch (e) {
-      // The runner said no at the start, or the sound is longer than Whisper takes here: locally, the
-      // engine as before; hosted, "switched off" or the refusal's words.
-      const tooLong = e instanceof AppRunRefused && e.reason === RUNNER_SOUND_TOO_LONG
-      if ((e instanceof AppRunDeclined || tooLong) && !hosted) {
+      // The runner said no at the start: locally, the engine as before; hosted, "switched off" or the
+      // refusal's words.
+      // R11.5: a long one runs in pieces; past the hard ceiling it is refused plainly, never sent to the engine.
+      if (e instanceof AppRunDeclined && !hosted) {
         try { return await viaEngine(prompt) }
         catch (err) { e = err }
       }

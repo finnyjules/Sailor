@@ -29,7 +29,11 @@ import { MediaError } from '../media/run'
 import { RESAMPLE_MAX_TAPS, resampleTaps } from '../media/resample'
 import { readSound, soundNoteOf, type SoundReadIO } from '../media/values'
 import { resampleInWorker } from './compositor/worker'
-import { VOCALS_RATE, WHISPER_RATE } from '#shared/runner/localModels'
+import {
+  VOCALS_PIECE_SECONDS, VOCALS_RATE, WHISPER_PIECE_SECONDS, WHISPER_RATE, vocalsCeilingSeconds, vocalsMaxSeconds, whisperCeilingSeconds, whisperMaxSeconds,
+} from '#shared/runner/localModels'
+import { probeMedia, soundSeconds } from '../media/probe'
+import { splitSound, type SoundPieces } from '../media/split'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SAVE_AUDIO_SAMPLE_FMT, encodeAudio } from '../media/encode'
@@ -240,13 +244,61 @@ export async function whisperWav(s: DecodedSound, signal?: AbortSignal): Promise
   return whisperWavOfSamples(await whisperMono16k(s, signal))
 }
 
+// ── Long sounds in pieces (R11.5, ruling (h)) ──
+
+/**
+ * A sound longer than one call takes, converted once and cut (../media/split.ts):
+ * `wav` is empty (the pieces are read from `pieces`), `seconds` and `frames`
+ * are the whole converted sound's.
+ */
+export interface PiecedSound extends PythonWav { pieces: SoundPieces }
+
+export function isPieced(w: PythonWav): w is PiecedSound {
+  return (w as Partial<PiecedSound>).pieces !== undefined
+}
+
+/** What a node's turn hands the sound readers so a converted long sound is removed when the turn ends. */
+export interface PieceIO extends SoundReadIO {
+  /** Each converted sound's folder is added here; the node's turn removes them all when it ends (every path). */
+  pieceDirs?: string[]
+}
+
+/**
+ * The value's sound in pieces when its file says it is longer than one call
+ * takes where it runs (`single`), else null (sent whole, exactly as before).
+ * The file is judged by its size and the ceiling only, not R5's lengths: it
+ * is never decoded whole into memory.
+ */
+async function piecesOf(value: RunnerValue & { kind: 'files' }, io: PieceIO, o: { single: number; limit: number; ceiling: number; rate: number; channels: 1 | 2 }): Promise<PiecedSound | null> {
+  const file = value.files[0]!
+  const path = await io.access.verifiedPath(file)
+  const probe = await probeMedia(path, {
+    userId: io.userId, signal: io.signal, roots: [io.access.rootOf(file)], kind: 'sound', anyLength: true,
+    ...(file.type === 'kept' ? { kept: true as const } : {}),
+  })
+  const t = probe.sound[0]
+  if (!t) throw new MediaError('noSound')
+  const secs = soundSeconds(probe, t)
+  // A length the header doesn't state is read whole, under R5's caps, as before.
+  if (secs === null || !(secs > o.single)) return null
+  if (secs > o.ceiling + 1) throw new MediaError('tooLong')
+  const pieces = await splitSound(probe, { stream: 0, rate: o.rate, channels: o.channels, limit: o.limit, ceiling: o.ceiling, userId: io.userId, ...(io.signal ? { signal: io.signal } : {}) })
+  io.pieceDirs?.push(pieces.dir)
+  return { wav: new Uint8Array(0), seconds: pieces.seconds, frames: pieces.frames, rate: pieces.rate, channels: pieces.channels, pieces }
+}
+
 /**
  * Whisper's WAV of the sound a value holds, read as Python's AUDIO holds it
  * (its note, or its maker's), the WHOLE sound (R5's sound caps apply as it
- * streams: nothing past them is ever decoded).
+ * streams: nothing past them is ever decoded). R11.5: a sound longer than one
+ * call takes where it runs comes back in pieces of at most 30 minutes
+ * (16 kHz mono, ../media/split.ts), up to the ceiling.
  */
-export async function whisperWavOf(value: RunnerValue | undefined, makerClass: string, io: SoundReadIO): Promise<PythonWav> {
+export async function whisperWavOf(value: RunnerValue | undefined, makerClass: string, io: PieceIO): Promise<PythonWav> {
   if (!value || value.kind !== 'files' || !value.files.length) throw new Error(SOUND_IN_NEEDS_SOUND)
+  const place = io.hosted ? 'hosted' : 'local'
+  const pieced = await piecesOf(value, io, { single: whisperMaxSeconds(place), limit: WHISPER_PIECE_SECONDS, ceiling: whisperCeilingSeconds(place), rate: WHISPER_RATE, channels: 1 })
+  if (pieced) return pieced
   const sound = await readSound({ ...value, sound: soundNoteOf(value, makerClass) }, makerClass, io)
   return whisperWav(sound, io.signal)
 }
@@ -324,8 +376,13 @@ export async function vocalsSound(s: DecodedSound, o: { userId: string | null; s
  * holds it (its note, or its maker's), the WHOLE sound (R5's sound caps apply
  * as it streams).
  */
-export async function vocalsSoundOf(value: RunnerValue | undefined, makerClass: string, io: SoundReadIO): Promise<VocalsSound> {
+export async function vocalsSoundOf(value: RunnerValue | undefined, makerClass: string, io: PieceIO): Promise<VocalsSound | PiecedSound> {
   if (!value || value.kind !== 'files' || !value.files.length) throw new Error(SOUND_IN_NEEDS_SOUND)
+  // R11.5: a song longer than one call takes where it runs comes back in pieces of at most 10 minutes (Demucs'
+  // 44.1 kHz, its own one or two channels), up to the ceiling.
+  const place = io.hosted ? 'hosted' : 'local'
+  const pieced = await piecesOf(value, io, { single: vocalsMaxSeconds(place), limit: VOCALS_PIECE_SECONDS, ceiling: vocalsCeilingSeconds(place), rate: VOCALS_RATE, channels: 2 })
+  if (pieced) return pieced
   const sound = await readSound({ ...value, sound: soundNoteOf(value, makerClass) }, makerClass, io)
   return vocalsSound(sound, { userId: io.userId, ...(io.signal ? { signal: io.signal } : {}) })
 }

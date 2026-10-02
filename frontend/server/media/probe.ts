@@ -494,7 +494,7 @@ export function pyFrameRate(p: MediaProbe): Rational {
 }
 
 /** A sound stream's length in seconds: its own duration, else the container's, else its packets'. */
-function soundSeconds(p: MediaProbe, s: SoundStreamProbe): number | null {
+export function soundSeconds(p: MediaProbe, s: SoundStreamProbe): number | null {
   if (s.duration !== null) return (s.duration * s.timeBase.num) / s.timeBase.den
   if (p.containerDuration !== null) return p.containerDuration / 1e6
   return s.measuredSeconds

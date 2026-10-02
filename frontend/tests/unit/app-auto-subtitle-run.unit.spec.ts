@@ -6,8 +6,8 @@
  *   as before with any of them off.
  * - Fake runner events: the captioned video lands in a take, by node id; the
  *   price shows before the run; Stop; a refusal; a decline (hosted: switched
- *   off; this computer: the engine as before, ruling (d)); a sound longer
- *   than Whisper takes here goes to the engine locally.
+ *   off; this computer: the engine as before, ruling (d)); R11.5: a long
+ *   sound runs in pieces, and a refusal for length is never sent to the engine.
  * - Through the kit (fake fal answering Whisper's captions, ComfyUI off):
  *   the app's exact prompt makes the captioned video with its sound, the
  *   quote equals the hold, and Stop mid-call releases the hold.
@@ -210,14 +210,15 @@ describe('the app, fed fake runner events', () => {
     expect(takes[0]!.videos![0]).toContain('filename=engine.mp4')
   })
 
-  it('a sound longer than Whisper takes here: the engine on this computer, a plain refusal in hosted', async () => {
+  it('R11.5: a long sound runs in pieces, so a refusal for length is the ceiling\'s: a plain refusal in both places, never the engine', async () => {
     const tooLong = vi.fn(async (): Promise<AppQuote> => ({ refused: 'This sound is too long to transcribe here.', reason: RUNNER_SOUND_TOO_LONG }))
     const local = setup({ deps: { postQuote: tooLong } })
     local.video.value = { filename: 'clip.mp4' }
     await local.a.quote()
-    expect(local.a.blocked.value).toBeNull()
+    expect(local.a.blocked.value).toBe('This sound is too long to transcribe here.')
+    expect(local.a.canRun.value).toBe(false)
     await local.a.run()
-    expect(local.engine).toHaveBeenCalled()
+    expect(local.engine).not.toHaveBeenCalled()
     const hosted = setup({ hosted: true, deps: { postQuote: tooLong } })
     hosted.video.value = { filename: 'clip.mp4' }
     await hosted.a.quote()

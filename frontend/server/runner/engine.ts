@@ -65,7 +65,8 @@ import { lensStartRefusal } from './cards/lensBlur'
 import { keepStartRefusal } from './compositor/keep'
 import { vocalsStemMaxBytes } from './generators/localModels'
 import {
-  LOCAL_MODEL_WORDS, VOCALS_CLASS, VOCALS_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, vocalsMaxSeconds, whisperMaxSeconds,
+  LOCAL_MODEL_WORDS, VOCALS_CLASS, VOCALS_RATE, VOCALS_WORDS, WHISPER_CLASS, WHISPER_RATE, WHISPER_WORDS, isLocalModelClass, vocalsCeilingSeconds, vocalsMaxSeconds,
+  soundReadOnlyByPieces, vocalsStemsReadable, whisperCeilingSeconds, whisperMaxSeconds,
 } from '#shared/runner/localModels'
 import { perFrameCredits } from '#shared/pricing/nodePrice'
 import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
@@ -74,6 +75,7 @@ import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { pythonWavOf, silentCardAt, soundMakerOf, vocalsSoundOf, whisperWavOf, type PythonWav } from './soundWav'
+import { removeSoundPieces } from '../media/split'
 import { cardSilenceFor } from './soundInMedia'
 import { lipsyncUploadProblem } from './soundInMedia'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
@@ -1197,6 +1199,8 @@ export function createEngine(deps: EngineDeps) {
     // This node turn's own held bytes (heldBytes.ts), let go when it finishes.
     const holder = `t${take.index}_${id.replace(/[^A-Za-z0-9_-]/g, '_')}`
     let heldUsed = false
+    // R11.5: the folders of long sounds converted for this turn (Whisper's, Vocal separator's pieces), removed when it ends.
+    const pieceDirs: string[] = []
     // Each job is cancelled once in this turn, however many paths reach it.
     const cancelledHere = new Set<string>()
     const cancelOnce = async (req: PendingRequest) => {
@@ -1253,7 +1257,7 @@ export function createEngine(deps: EngineDeps) {
           if (silentCardAt(take.prompt, link)) p = Promise.resolve(cardSilenceFor(nodeClass))
           else {
             const value = valueAt(take)(link) ?? { kind: 'files' as const, files: filesAt(take)(link) }
-            const io = { access: files, userId: run.userId, hosted: deps.hosted(), signal }
+            const io = { access: files, userId: run.userId, hosted: deps.hosted(), signal, pieceDirs }
             p = soundOf(value, soundMakerOf(take.prompt, link), io)
           }
           wavs.set(key, p)
@@ -1363,17 +1367,20 @@ export function createEngine(deps: EngineDeps) {
         // Vocal separator's the same.
         const heard = media.measured.seconds.audio
         const longest = wholeSoundCap(take.prompt[id]!.class_type, deps.hosted() ? 'hosted' : 'local')
-        if (longest && typeof heard === 'number' && heard > longest.seconds) throw new Error(longest.words)
+        // R11.5: past one call's cap it runs in pieces; past the ceiling it stops here.
+        if (longest && typeof heard === 'number' && heard > longest.ceiling) throw new Error(longest.words)
+        // R11.5: where it runs decides whether its sound is one call or pieces, so it is priced with its place, as held.
+        const seconds = longest ? { ...media.measured.seconds, place: deps.hosted() ? 'hosted' as const : 'local' as const } : media.measured.seconds
         // The tight hold (F22 fix round 1): the files must be the ones the start
         // of the run measured and held for, and cost no more.
         const recorded = take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id] : undefined
         // R7.7: a record with nothing measured (Whisper's sound made in the run: only its place) is held at its
         // ceiling; only its price is compared.
         if (recorded && ((mediaWasMeasured(recorded) && measuredMediaChanged(recorded, media.measured))
-          || nodeCredits(take.prompt[id]!, undefined, families, media.measured.seconds) > nodeCredits(take.prompt[id]!, undefined, families, recorded.seconds))) {
+          || nodeCredits(take.prompt[id]!, undefined, families, seconds) > nodeCredits(take.prompt[id]!, undefined, families, recorded.seconds))) {
           throw new Error(nodeMediaChangedWords(take.prompt[id]))
         }
-        inputSeconds = media.measured.seconds
+        inputSeconds = seconds
       }
       // R7 (ruling (f)): a local-model node is priced (and planned) on the pictures the start of the run
       // counted and held for; its plan refuses more (./generators/localModels.ts).
@@ -1894,6 +1901,8 @@ export function createEngine(deps: EngineDeps) {
       await persist(run).catch(() => {})
     }
     finally {
+      // R11.5: a long sound converted for this turn goes with it (done, failed or stopped).
+      for (const dir of pieceDirs) await removeSoundPieces({ dir })
       // A finished node lets its held bytes go; one still waiting (a restart
       // mid-wait never gets here) keeps them for its resume.
       if ((heldUsed || rec.keepHeld) && (rec.status === 'done' || rec.status === 'error' || rec.status === 'stopped')) {
@@ -2322,11 +2331,14 @@ export function createEngine(deps: EngineDeps) {
         if (startSignal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400, { nodeId, classType: n.class_type })
         if (longest) {
           const cap = longest.seconds
+          // R11.5: past one call's cap the sound runs in pieces; past the ceiling it is refused.
+          const ceiling = longest.ceiling
           if (media && media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
           // The empty Audio card's second of silence is measured exactly (its WAV, as at the turn).
           if (media) {
             measured[index]![nodeId] = { ...media.measured, seconds: { ...media.measured.seconds, place } }
-            if (n.class_type === VOCALS_CLASS) keptUpTo[index]![nodeId] = 2 * vocalsStemMaxBytes(Math.min(media.measured.seconds.audio ?? cap, cap))
+            const kept = wholeSoundKeptBytes(n.class_type, Math.min(media.measured.seconds.audio ?? cap, ceiling), cap)
+            if (kept) keptUpTo[index]![nodeId] = kept
             continue
           }
           const link = n.inputs?.audio
@@ -2346,12 +2358,19 @@ export function createEngine(deps: EngineDeps) {
           // re-review): Vocal separator adds that second only where a header source (or a music node's
           // duration) is in the chain, so an exact chain past the cap is refused here too.
           const slack = n.class_type === VOCALS_CLASS && found?.exact ? 0 : 1
-          if (bound !== null && bound > cap + slack + 1e-3) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_SOUND_TOO_LONG })
-          // Held on the bound (or, where the maker can't be bounded, on the place's longest sound); the
-          // node's turn measures the WAV it sends and is charged on that, never above the hold.
-          measured[index]![nodeId] = { seconds: { place, ...(bound !== null ? { audioUpTo: Math.min(bound, cap) } : {}) }, sha: {} }
-          // Its two stems are kept for the run: counted against the kept room before the hold.
-          if (n.class_type === VOCALS_CLASS) keptUpTo[index]![nodeId] = 2 * vocalsStemMaxBytes(bound !== null ? Math.min(bound, cap) : cap)
+          // R11.5: past one call's cap the sound runs in pieces; only past the hard ceiling is it refused. A
+          // Vocal separator's joined stems must also stay readable by the node after it (R5's sound cap).
+          const overCeiling = bound !== null && bound > ceiling + slack + 1e-3
+          const unreadable = bound !== null && n.class_type === VOCALS_CLASS && !vocalsStemsReadable(Math.min(bound, ceiling), place)
+          if (overCeiling || unreadable) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_SOUND_TOO_LONG })
+          // Held on the bound (or, where the maker can't be bounded, on one call's longest sound); the node's
+          // turn measures the WAV it sends and is charged on that, never above the hold (a longer one is refused
+          // there, before anything is sent).
+          measured[index]![nodeId] = { seconds: { place, ...(bound !== null ? { audioUpTo: Math.min(bound, ceiling) } : {}) }, sha: {} }
+          // Its two stems (and, in pieces, the converted sound) are kept for the run: counted against the kept
+          // room before the hold.
+          const kept = wholeSoundKeptBytes(n.class_type, bound !== null ? Math.min(bound, ceiling) : cap, cap)
+          if (kept) keptUpTo[index]![nodeId] = kept
           continue
         }
         if (!media) continue
@@ -2368,7 +2387,7 @@ export function createEngine(deps: EngineDeps) {
     // Load audio's validate_inputs (R5.3): a sound file that isn't there is refused now, as
     // ComfyUI refuses the prompt ("Invalid audio file"), before anything runs or is held.
     for (const p of prompts) {
-      const missing = await loadAudioStartProblems(p, f => files.exists(f), f => soundStreamProblem(files, f, i.userId))
+      const missing = await loadAudioStartProblems(p, f => files.exists(f), (f, nodeId) => soundStreamProblem(files, f, i.userId, undefined, { anyLength: soundReadOnlyByPieces(p, nodeId) }))
       if (missing) throw refuse(missing.message, 400, { nodeId: missing.nodeId, classType: missing.classType, ...(missing.file ? { file: missing.file } : {}) })
     }
     // Load video's validate_inputs (R5.4): a video file that isn't there is refused now ("Invalid
@@ -2834,8 +2853,22 @@ export type Engine = ReturnType<typeof createEngine>
  * and its words past it (R7.7 Whisper transcribe, R7.8 Vocal separator), or
  * null for any other class.
  */
-function wholeSoundCap(classType: string, place: 'hosted' | 'local'): { seconds: number; words: string } | null {
-  if (classType === WHISPER_CLASS) return { seconds: whisperMaxSeconds(place), words: WHISPER_WORDS.tooLong }
-  if (classType === VOCALS_CLASS) return { seconds: vocalsMaxSeconds(place), words: VOCALS_WORDS.tooLong }
+function wholeSoundCap(classType: string, place: 'hosted' | 'local'): { seconds: number; ceiling: number; words: string } | null {
+  // R11.5: `seconds` is what one call takes; past it the sound runs in pieces, up to `ceiling`.
+  if (classType === WHISPER_CLASS) return { seconds: whisperMaxSeconds(place), ceiling: whisperCeilingSeconds(place), words: WHISPER_WORDS.tooLong }
+  if (classType === VOCALS_CLASS) return { seconds: vocalsMaxSeconds(place), ceiling: vocalsCeilingSeconds(place), words: VOCALS_WORDS.tooLong }
   return null
+}
+
+/**
+ * R11.5: the bytes a whole-sound node keeps for the run at most, for a sound
+ * of at most `seconds` (counted against the kept room before the hold):
+ * Vocal separator's two stems; past one call, also the converted sound its
+ * pieces are cut from (16-bit, Demucs' 44.1 kHz stereo; Whisper's 16 kHz mono),
+ * a temporary file for the node's turn, counted too so a long sound's disk use
+ * is judged before anything is held.
+ */
+function wholeSoundKeptBytes(classType: string, seconds: number, single: number): number {
+  const converted = seconds > single ? Math.ceil(seconds + 1) * (classType === VOCALS_CLASS ? VOCALS_RATE * 2 * 2 : WHISPER_RATE * 2) + 4096 : 0
+  return (classType === VOCALS_CLASS ? 2 * vocalsStemMaxBytes(seconds) : 0) + converted
 }

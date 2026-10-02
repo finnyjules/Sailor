@@ -4,8 +4,9 @@
  *
  * - Fake runner events: both stems land in one take, by node id; the price
  *   shows before the run; Stop; a refusal; a decline (hosted: switched off;
- *   this computer: the engine as before, ruling (d)); a song over the
- *   runner's longest here goes to the engine (ruling (i)).
+ *   this computer: the engine as before, ruling (d)); R11.5: a long song
+ *   runs in pieces, and one past the ceiling is refused plainly, never sent
+ *   to the engine.
  * - Through the kit (fake Replicate answering two WAVs, ComfyUI off): the
  *   app's exact prompt makes two MP3 files, the quote equals the hold, and
  *   Stop mid-call releases the hold.
@@ -17,8 +18,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
-import { VOCALS_RATE, VOCALS_WORDS } from '#shared/runner/localModels'
+import { VOCALS_RATE, VOCALS_WORDS, vocalsCalls } from '#shared/runner/localModels'
 import { RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG } from '#shared/runner/messages'
+import { localModelPrice } from '#shared/pricing/nodePrice'
 import { MeterRefusalError } from '~~/server/utils/requestMeter'
 import { quoteAnswerOf } from '~~/server/api/runs/quote.post'
 import { floatWav } from '~~/server/media/encode'
@@ -212,74 +214,86 @@ describe('the app, fed fake runner events', () => {
     expect(takes).toHaveLength(1)
   })
 
-  it('a song over the runner\'s longest on this computer goes to the engine (ruling (i)); in hosted it is refused', async () => {
-    const refuse = { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: VOCALS_WORDS.tooLong, reason: RUNNER_SOUND_TOO_LONG })) }
-    const local = setup({ deps: refuse })
-    local.song.value = { filename: 'long.wav' }
-    await local.k.quote()
-    expect(local.k.canRun.value).toBe(true)
-    await local.k.run()
-    expect(local.engine).toHaveBeenCalledTimes(1)
-    expect(local.deps.start).not.toHaveBeenCalled()
-    // Any other refusal stays a refusal here.
-    const other = setup({ deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: 'Sign in to run workflows.' })) } })
-    other.song.value = { filename: 'song.wav' }
-    await other.k.quote()
-    expect(other.k.canRun.value).toBe(false)
+  it('R11.5: a song past the ceiling (the refusal\'s code) is refused plainly in both places, never the engine', async () => {
+    for (const hosted of [false, true]) {
+      const refuse = { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: VOCALS_WORDS.tooLong, reason: RUNNER_SOUND_TOO_LONG })) }
+      const s = setup({ hosted, deps: refuse })
+      s.song.value = { filename: 'long.wav' }
+      await s.k.quote()
+      expect(s.k.blocked.value).toBe(VOCALS_WORDS.tooLong)
+      expect(s.k.canRun.value).toBe(false)
+      await s.k.run()
+      expect(s.engine).not.toHaveBeenCalled()
+      expect(s.deps.start).not.toHaveBeenCalled()
+    }
   })
 })
 
 describe('fix round 1', () => {
-  it('the local fallback keys on the reason code, never the words: the same words without the code stay a refusal', async () => {
+  it('R11.5: the code no longer sends anything to the engine: words with or without it stay a refusal', async () => {
     const words = setup({ deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: VOCALS_WORDS.tooLong })) } })
     words.song.value = { filename: 'long.wav' }
     await words.k.quote()
     expect(words.k.blocked.value).toBe(VOCALS_WORDS.tooLong)
     expect(words.k.canRun.value).toBe(false)
-    // Other words, the code: the engine.
     const code = setup({ deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: 'Too long.', reason: RUNNER_SOUND_TOO_LONG })) } })
     code.song.value = { filename: 'long.wav' }
     await code.k.quote()
-    expect(code.k.canRun.value).toBe(true)
+    expect(code.k.blocked.value).toBe('Too long.')
+    expect(code.k.canRun.value).toBe(false)
     await code.k.run()
-    expect(code.engine).toHaveBeenCalledTimes(1)
-    // In hosted the code is a plain refusal.
-    const hosted = setup({ hosted: true, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: 'Too long.', reason: RUNNER_SOUND_TOO_LONG })) } })
-    hosted.song.value = { filename: 'long.wav' }
-    await hosted.k.quote()
-    expect(hosted.k.blocked.value).toBe('Too long.')
-    expect(hosted.k.canRun.value).toBe(false)
+    expect(code.engine).not.toHaveBeenCalled()
   })
 
-  it('the run\'s own refusal carrying the code, on this computer, goes to the engine too', async () => {
+  it('R11.5: the run\'s own refusal carrying the code shows its words on this computer, never the engine', async () => {
     const tooLong = Object.assign(new Error('x'), { statusCode: 400, data: { message: 'Too long.', data: { reason: RUNNER_SOUND_TOO_LONG } } })
     const { song, k, engine, takes } = setup({ deps: { start: vi.fn(async () => { throw tooLong }) } })
     song.value = { filename: 'song.wav' }
     await k.quote()
     await k.run()
-    expect(engine).toHaveBeenCalledTimes(1)
-    expect(takes).toHaveLength(1)
+    expect(engine).not.toHaveBeenCalled()
+    expect(takes).toHaveLength(0)
+    expect(k.status.value).toBe('error')
+    expect(k.errorMessage.value).toBe('Too long.')
   })
 
-  it('the start\'s refusal carries the code next to its words, and the quote route passes it on', async () => {
+  it('R11.5: hosted, a song past one call (10 minutes 2 s) is quoted in pieces; one past what its stems can be read at refuses with the code, before any hold', async () => {
     await requireMediaTools()
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
-    // 10 minutes and 2 s of 8 kHz mono: past hosted's longest.
-    const n = 8000 * (10 * 60 + 2)
-    const data = Buffer.alloc(n * 2)
-    const h = Buffer.alloc(44)
-    h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8); h.write('fmt ', 12)
-    h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(8000, 24)
-    h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(data.length, 40)
-    mkdirSync(join(k.root, 'input', 'user_1'), { recursive: true })
-    writeFileSync(join(k.root, 'input', 'user_1', 'long.wav'), Buffer.concat([h, data]))
-    writeFileSync(join(k.root, 'input', 'long.wav'), Buffer.concat([h, data]))
-    const err = await k.engine.quoteRun({ userId: k.userId, takes: [buildKaraokePrompt('long.wav')], ...START }).then(() => null, (e: unknown) => e)
+    const put = (name: string, seconds: number) => {
+      const n = 8000 * seconds
+      const data = Buffer.alloc(n * 2)
+      const h = Buffer.alloc(44)
+      h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8); h.write('fmt ', 12)
+      h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(8000, 24)
+      h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(data.length, 40)
+      mkdirSync(join(k.root, 'input', 'user_1'), { recursive: true })
+      writeFileSync(join(k.root, 'input', 'user_1', name), Buffer.concat([h, data]))
+      writeFileSync(join(k.root, 'input', name), Buffer.concat([h, data]))
+    }
+    const creditsOf = (upTo: number) => {
+      const p = localModelPrice(vocalsCalls({ model: 'htdemucs', shifts: 1 }, { place: 'hosted', audioUpTo: upTo }))
+      if ('refused' in p) throw new Error(p.refused)
+      return p.credits
+    }
+    // What the rest of the workflow adds (the saves), from a short song held as one call on its bound.
+    put('short.wav', 2)
+    const base = (await k.engine.quoteRun({ userId: k.userId, takes: [buildKaraokePrompt('short.wav')], ...START })).credits - creditsOf(3.001)
+    put('long.wav', 10 * 60 + 2)
+    const quoted = await k.engine.quoteRun({ userId: k.userId, takes: [buildKaraokePrompt('long.wav')], ...START })
+    // Held on the header's bound (plus a second): two pieces, the second at most what is left.
+    const pieces = vocalsCalls({ model: 'htdemucs', shifts: 1 }, { place: 'hosted', audioUpTo: 603.001 })
+    expect('steps' in pieces && pieces.steps.reduce((n, s) => n + s.times, 0)).toBe(2)
+    expect(quoted.credits - base).toBe(creditsOf(603.001))
+    expect(creditsOf(603.001)).toBeGreaterThan(creditsOf(600))
+    // Past what the joined stems can be read at in hosted (R5's sound cap, about 32.6 minutes): refused with the code.
+    put('huge.wav', 33 * 60)
+    const err = await k.engine.quoteRun({ userId: k.userId, takes: [buildKaraokePrompt('huge.wav')], ...START }).then(() => null, (e: unknown) => e)
     expect(err).toBeInstanceOf(MeterRefusalError)
     expect((err as MeterRefusalError).data).toMatchObject({ reason: RUNNER_SOUND_TOO_LONG })
     expect(quoteAnswerOf(err)).toEqual({ refused: VOCALS_WORDS.tooLong, reason: RUNNER_SOUND_TOO_LONG })
     // The run's start refuses the same way, before any hold.
-    const err2 = await k.engine.startRun({ userId: k.userId, takes: [buildKaraokePrompt('long.wav')], ...START }).then(() => null, (e: unknown) => e)
+    const err2 = await k.engine.startRun({ userId: k.userId, takes: [buildKaraokePrompt('huge.wav')], ...START }).then(() => null, (e: unknown) => e)
     expect((err2 as MeterRefusalError).data).toMatchObject({ reason: RUNNER_SOUND_TOO_LONG })
     expect(k.ledger.hold).not.toHaveBeenCalled()
     // A refusal with no code answers as before.
