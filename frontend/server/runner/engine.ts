@@ -829,7 +829,8 @@ export function createEngine(deps: EngineDeps) {
       // Each call's credits from the one per-call calculation (the hold's), summed: never a marked-up sum of dollars.
       // A per-frame node (R7, USER ruling, fix round 1): its delivered frames' dollars added up, marked up once.
       const delivered = rec.calls.filter(c => c.status === 'done' && !c.lost)
-      const credits = isLocalModelClass(rec.classType) ? perFrameCredits(delivered) : callsCredits(delivered)
+      // R11.6 fix round 3: Upscale on Real-ESRGAN in tiles the same (its hold is the tiles' dollars marked up once).
+      const credits = isLocalModelClass(rec.classType) || rec.classType === 'UpscaleImageNode' ? perFrameCredits(delivered) : callsCredits(delivered)
       if (credits > rec.credits) {
         deps.reportError(new Error(`A charge of ${credits} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
           site: 'runner.charge.above-hold', stageKey, node: nodeId, charge: credits, hold: rec.credits,

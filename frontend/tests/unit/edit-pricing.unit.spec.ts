@@ -437,8 +437,10 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['UpscaleImageNode', { model: 'Crystal', scale_factor: 10 }, 3.20, 480],
   // R7.11: Real-ESRGAN by the picture sent in, $0.003 a megapixel (at least $0.003), at most 2 096 704 px (1448², the
   // GPU limit Replicate stated on 2026-10-01, R11.6 fix round 2; the page's 1440p was too high):
-  // unmeasured, the limit's 2.0967 MP; the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
-  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.006290112, 2],
+  // unmeasured, the largest picture (12288 × 1536) in tiles (R11.6 fix round 3: the controller's ruling), twelve at
+  // the limit's 2.0967 MP each; 3840 × 2160 measured, five; the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.07548132, 16],
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.03145055, 7, 3840 * 2160],
   ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.003981312, 1, 1152 * 1152],
   ['UpscaleImageNode', { model: 'Real-ESRGAN' }, 0.003, 1, MP1],
   ['UpscaleImageNode', { model: 'Recraft Crisp' }, 0.006, 2],

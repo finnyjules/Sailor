@@ -388,27 +388,28 @@ describe('prices (R7 rule 4)', () => {
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, UPSCALE_2X_CLASS)).toBe(false)
   })
 
-  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: ten tiles at the service\'s limit), marked up once; one picture when nothing was counted', () => {
+  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: twelve tiles at the service\'s limit), marked up once; one picture when nothing was counted', () => {
     const inputs = { frames: ['l', 0], tile_size: 512 }
     // R11.6 fix round 2: 2 096 704 px (the GPU limit Replicate stated on 2026-10-01) × $0.003 a megapixel; sums rounded to 1e-8.
     const CAP_USD = 0.006290112
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs, { families: new Set(['upscale-2x']) })).toBe(true)
-    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to ten tiles at the limit each (the largest tiled picture's).
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 0.0629011, credits: creditsForUsd(0.0629011) })
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 18.87033, credits: creditsForUsd(18.87033) })
+    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to twelve tiles at the limit each (the largest
+    // tiled picture's, with fix round 3's 128-pixel overlaps).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 0.07548132, credits: creditsForUsd(0.07548132) })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 22.644396, credits: creditsForUsd(22.644396) })
     // Measured at the start of the run (R7.11): the live check's 1152² picture, three of them.
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 3, picturePixels: 1152 * 1152 } })).toEqual({ usd: 0.01194393, credits: 3 })
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 500 * 375 } })).toEqual({ usd: 0.003, credits: 1 })
     // Each call never above the service's largest picture; R11.6: a larger one in tiles, each held at that largest
-    // (4096 × 4096 with no shape known: the pixel bound's nine tiles; runner-upscale-tiles.unit.spec.ts has the rest).
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 0.05661099, credits: creditsForUsd(0.05661099) })
-    // Nine tiles of $0.00629011 (each call's price rounded to 1e-8 dollars).
-    expect(9 * CAP_USD).toBeCloseTo(0.05661099, 6)
+    // (4096 × 4096 with no shape known: the pixel bound's ten tiles; runner-upscale-tiles.unit.spec.ts has the rest).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 0.0629011, credits: creditsForUsd(0.0629011) })
+    // Ten tiles of $0.00629011 (each call's price rounded to 1e-8 dollars).
+    expect(10 * CAP_USD).toBeCloseTo(0.0629011, 6)
     expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.003 })))).toBe(creditsForUsd(0.009))
-    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 30 }] })
+    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 36 }] })
     expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }).nodes['1']).toBeUndefined()
-    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(0.0629011))
+    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(0.07548132))
   })
 
   it('sends no text; the tooltip names the service while the family is on; its route has no backup', () => {

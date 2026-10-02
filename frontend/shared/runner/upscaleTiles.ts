@@ -8,7 +8,8 @@
  * 2 096 704 pixels Replicate's GPU takes, measured 2026-10-01) is cut
  * into a grid of `cols` × `rows` overlapping tiles, every tile the same size
  * and at most `cap` pixels, neighbours overlapping by at least `overlap`
- * pixels (Python's `_tiled_forward` overlaps by 32). Each column count c
+ * pixels (UPSCALE_TILE_OVERLAP: 128 since fix round 3; Python's
+ * `_tiled_forward` overlaps by 32). Each column count c
  * gives the narrowest tile that covers the width with that overlap,
  * `tw = min(W, ceil((W + (c − 1)·overlap) / c))`, and the fewest rows whose
  * tile height keeps `tw × th` under the cap; the grid kept is the one with
@@ -26,18 +27,23 @@
  * Pure: no imports, so the price module and the server read the same rule.
  */
 
-/** Neighbouring tiles overlap by at least this many pixels of the picture sent (Python's `overlap=32`). */
-export const UPSCALE_TILE_OVERLAP = 32
+/**
+ * Neighbouring tiles overlap by at least this many pixels of the picture
+ * sent. Python's `_tiled_forward` overlaps by 32; fix round 3 (USER ruling,
+ * "wider blend", after the live check showed faint bands on a flat sky)
+ * overlaps by 128, inside each tile's pixel limit.
+ */
+export const UPSCALE_TILE_OVERLAP = 128
 
 /**
  * R11.6 fix round 1 (L2): the narrowest side a tile may have. A picture
- * over the cap whose tiles would be thinner (its shorter side under 64
- * pixels: a strip such as 65 536 × 60) is refused plainly before the hold
+ * over the cap whose tiles would be thinner (its shorter side under this: a
+ * strip such as 65 536 × 60) is refused plainly before the hold
  * (`tooThinToTile`), not sent: the model's own padding is untested on such
- * slivers. 64 is twice the overlap, so a tile keeps as much of its own
- * picture as it shares.
+ * slivers. Twice the overlap (fix round 3: 256, was 64 with the 32-pixel
+ * overlap), so a tile keeps as much of its own picture as it shares.
  */
-export const UPSCALE_TILE_MIN_SIDE = 64
+export const UPSCALE_TILE_MIN_SIDE = 2 * UPSCALE_TILE_OVERLAP
 
 /** One picture's tiles: the grid, each tile's size, and where each column and row starts. */
 export interface TileGrid {
@@ -93,7 +99,7 @@ function fewest(w: number, h: number, cap: number, overlap: number): { cols: num
     if (!best || n < best.cols * best.rows || (n === best.cols * best.rows && skew(tw, r.th) < skew(best.tw, best.th))) best = { cols: c, rows: r.rows, tw, th: r.th }
   }
   // c = W makes tiles at most overlap + 1 wide, which fit some rows whenever the cap is well above the overlap
-  // (the real one: 2 096 704 pixels, 1448², against 32).
+  // (the real one: 2 096 704 pixels, 1448², against 128).
   if (!best) throw new Error('This picture can’t be cut into tiles')
   return best
 }

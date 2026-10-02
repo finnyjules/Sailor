@@ -83,6 +83,12 @@ export interface EditCall {
    * whichever one runs.
    */
   fallbacks?: EditCall[]
+  /**
+   * R11.6 fix round 3: how many times the node makes this call in one run
+   * (Upscale on Real-ESRGAN over the service's largest picture, in tiles:
+   * the most tiles the picture can make, each held at the largest). Absent: once.
+   */
+  times?: number
 }
 
 const READ = '2026-09-24'

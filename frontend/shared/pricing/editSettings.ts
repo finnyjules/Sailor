@@ -48,7 +48,8 @@ import { pyFloatOf } from '../runner/pyText'
 import { NO_FAMILIES, type RunnerFamily } from '../runner/families'
 import { classUpgradeOn } from '../runner/eligibility'
 import { FAL_FACE_SWAP_APP } from '../runner/faceSwap'
-import type { EditCall, EditStep } from './editRates'
+import { EDIT_RATES, type EditCall, type EditStep } from './editRates'
+import { tileCountBound } from '../runner/upscaleTiles'
 import { effectiveImageSettings } from './imageSettings'
 
 export type NodeInputs = Record<string, unknown>
@@ -361,8 +362,33 @@ function upscaleCall(engine: string, inputs: NodeInputs, px: number): EditCall |
   // Recraft Crisp costs the same at any size; Real-ESRGAN by the picture sent
   // in (R7.11: GPU time, editRates.ts).
   const factor = upscaleSideFactor(engine, inputs) ?? scaleFactor(inputs.scale_factor)
+  // R11.6 fix round 3 (the controller's ruling): Real-ESRGAN over the service's largest picture goes in
+  // tiles (server/runner/generators/repairTiles.ts), each at most that largest: the most tiles a picture of
+  // `px` makes (whatever its shape), each held at the largest.
+  if (engine === 'Real-ESRGAN') {
+    const tiles = realEsrganTiles(px)
+    if (tiles > 1) return { ...call(slug, null, { input: realEsrganMaxPixels(), output: px * factor * factor }), times: tiles }
+  }
   // The input enlarged `factor` times on each side.
   return call(slug, null, { input: px, output: px * factor * factor })
+}
+
+/** The most pixels Real-ESRGAN takes in one call: its card's (2 096 704, the GPU limit measured on 2026-10-01). */
+export function realEsrganMaxPixels(): number {
+  const r = EDIT_RATES['nightmareai/real-esrgan']
+  if (!r || r.unit !== 'per_input_megapixel') throw new Error('Real-ESRGAN has no listed price')
+  return r.maxInputPixels
+}
+
+/**
+ * R11.6 fix round 3: the calls Upscale on Real-ESRGAN makes for a picture of
+ * `px` pixels: one at or under the service's largest, else the most tiles
+ * any picture of `px` pixels is cut into (shared/runner/upscaleTiles.ts
+ * tileCountBound, a true upper bound whatever the shape).
+ */
+export function realEsrganTiles(px: number): number {
+  const cap = realEsrganMaxPixels()
+  return px <= cap ? 1 : tileCountBound(px, cap)
 }
 
 function enhanceCall(engine: string, px: number): EditCall | null {

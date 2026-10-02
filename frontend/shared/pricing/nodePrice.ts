@@ -204,7 +204,8 @@ function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions):
   for (const one of c.calls) {
     const price = editMaxUsd(one)
     if (price == null) return { refused: `${one.endpoint} has no listed price` }
-    usd = Math.max(usd, price)
+    // R11.6 fix round 3: a call made several times (Real-ESRGAN in tiles), each at its price, summed.
+    usd = Math.max(usd, Math.round(price * (one.times ?? 1) * 1e8) / 1e8)
   }
   return usd
 }

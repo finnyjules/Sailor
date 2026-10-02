@@ -27,7 +27,8 @@ import { priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { LARGEST_INPUT_PIXELS } from '#shared/pricing/editSettings'
 import { planNode, type NodePlan, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
-import { cropRgb, tiledBandBytes, tiledCanvas } from '~~/server/runner/generators/tiles'
+import { cropRgb, matchTone, tiledBandBytes, tiledCanvas, upscaleInTiles } from '~~/server/runner/generators/tiles'
+import { REAL_ESRGAN_TILE_WORDS } from '~~/server/runner/generators/repairTiles'
 import { localModelStartProblems, tiledPictureBytesBound } from '~~/server/runner/localModelStart'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -120,15 +121,15 @@ describe('the tiles (shared/runner/upscaleTiles.ts)', () => {
     return g
   }
 
-  it('at or under the service\'s largest (2 096 704 px, fix round 2): one tile, the whole picture (R7.2\'s one call); 1440p now two; a 4K picture: five tiles of 794 × 2160', () => {
+  it('at or under the service\'s largest (2 096 704 px, fix round 2): one tile, the whole picture (R7.2\'s one call); 1440p now two; a 4K picture: five tiles of 871 × 2160 (fix round 3: 128-pixel overlaps)', () => {
     expect(CAP).toBe(2_096_704)
     expect(tileGrid(1448, 1448, CAP)).toEqual({ cols: 1, rows: 1, tw: 1448, th: 1448, xs: [0], ys: [0] })
     expect(tileGrid(1920, 1080, CAP).cols * tileGrid(1920, 1080, CAP).rows).toBe(1)
     // Over the measured limit but under R7.2's old 1440p cap: tiled now (Replicate refused such a picture whole).
     expect(tileCount(2560, 1440, CAP)).toBe(2)
     expect(tileCount(1302, 2160, CAP)).toBe(2)
-    expect(tileGrid(3840, 2160, CAP)).toEqual({ cols: 5, rows: 1, tw: 794, th: 2160, xs: [0, 761, 1523, 2284, 3046], ys: [0] })
-    expect(UPSCALE_TILE_OVERLAP).toBe(32)
+    expect(tileGrid(3840, 2160, CAP)).toEqual({ cols: 5, rows: 1, tw: 871, th: 2160, xs: [0, 742, 1484, 2226, 2969], ys: [0] })
+    expect(UPSCALE_TILE_OVERLAP).toBe(128)
     for (const [w, h] of [[2561, 1440], [2600, 1500], [3840, 2160], [2160, 3840], [4096, 4096], [12288, 1536], [1, 16_000_000], [5000, 700]] as const) checkGrid(w, h)
   })
 
@@ -141,8 +142,8 @@ describe('the tiles (shared/runner/upscaleTiles.ts)', () => {
     // The real cap: shapes up to the largest tiled.
     const P = UPSCALE_2X_TILED_MAX_PIXELS
     const bound = tileCountBound(P, CAP)
-    expect(bound).toBe(10)
-    expect(tileCountBound(4096 * 4096, CAP)).toBe(9)
+    expect(bound).toBe(12)
+    expect(tileCountBound(4096 * 4096, CAP)).toBe(10)
     for (let w = 1; w <= P; w = Math.ceil(w * 1.07) + 1) expect(tileCount(w, Math.floor(P / w), CAP)).toBeLessThanOrEqual(bound)
     expect(tileCountBound(3840 * 2160, CAP)).toBe(5)
     expect(tileCountBound(CAP, CAP)).toBe(1)
@@ -169,11 +170,11 @@ describe('the tiles (shared/runner/upscaleTiles.ts)', () => {
 
   it('the hold\'s count: the start\'s count from the shapes, never above the pixel bound; one at or under 1440p', () => {
     // Fix round 1 (H1): not measured (the canvas): the most the largest tiled picture makes.
-    expect(upscale2xTiles(null)).toBe(10)
-    expect(UPSCALE_2X_TILED_MAX_TILES).toBe(10)
+    expect(upscale2xTiles(null)).toBe(12)
+    expect(UPSCALE_2X_TILED_MAX_TILES).toBe(12)
     expect(upscale2xTiles(CAP)).toBe(1)
     expect(upscale2xTiles(3840 * 2160)).toBe(5)
-    expect(upscale2xTiles(4096 * 4096)).toBe(9)
+    expect(upscale2xTiles(4096 * 4096)).toBe(10)
     expect(upscale2xTiles(4096 * 4096, 4)).toBe(4)
     expect(upscale2xTiles(3840 * 2160, 9)).toBe(5)
   })
@@ -183,8 +184,9 @@ describe('the tiles (shared/runner/upscaleTiles.ts)', () => {
 
 describe('the blend (server/runner/generators/tiles.ts)', () => {
   /** A picture through the tiles, each tile "upscaled" by `up`, faded back. */
+  // Small pictures with small tiles: the 32-pixel overlap (the blend doesn't depend on its width).
   const through = (rgb: Uint8Array, w: number, h: number, cap: number, up: (tile: Uint8Array, tw: number, th: number, k: number) => Uint8Array) => {
-    const g = tileGrid(w, h, cap)
+    const g = tileGrid(w, h, cap, 32)
     const canvas = tiledCanvas(g, w, h, 2)
     let k = 0
     for (const [row, y] of g.ys.entries()) for (const [col, x] of g.xs.entries()) canvas.put(row, col, up(cropRgb(rgb, w, x, y, g.tw, g.th), g.tw, g.th, k++))
@@ -240,7 +242,7 @@ describe('the hold: tiles × the per-tile price, counted before it', () => {
     // Two pictures, each held at the most tiles any of them makes.
     expect(localModelCalls(UPSCALE_2X_CLASS, 2, inputs, { picturePixels: 3840 * 2160, pictureTiles: 5 })).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: CAP }, times: 10 }] })
     // The pixel bound alone (a generator's stated largest): its worst shape's tiles.
-    expect(localModelCalls(UPSCALE_2X_CLASS, 1, inputs, { picturePixels: 4096 * 4096 })).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: CAP }, times: 9 }] })
+    expect(localModelCalls(UPSCALE_2X_CLASS, 1, inputs, { picturePixels: 4096 * 4096 })).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: CAP }, times: 10 }] })
     expect(localModelCalls(UPSCALE_2X_CLASS, 1, inputs, { picturePixels: 1000 * 1000 })).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: 1_000_000 }, times: 1 }] })
     // Every tile's own price is never above the held one.
     const g = tileGrid(3840, 2160, CAP)
@@ -333,6 +335,12 @@ function handIo(pic: Uint8Array | Uint8Array[], o: { fail?: (k: number) => boole
     },
     ...(o.media ? { media: o.media } : {}),
     savePreview: async () => ({ filename: 'live_preview_n_00001.png', subfolder: '', type: 'temp' } as OutputFile),
+    // R3.5's Upscale saves its picture as an output (fix round 3).
+    saveAsset: async (bytes: Uint8Array, a: { prefix: string; ext: string }) => {
+      const f: OutputFile = { filename: `${a.prefix}_${kept.size}.${a.ext}`, subfolder: '', type: 'output' }
+      kept.set(f.filename, bytes)
+      return f
+    },
     undelivered: async (key: string, why: string) => { undelivered.push([key, why]) },
   } as unknown as PipelineIO
   return { io, calls, undelivered, kept, saved, most: () => most }
@@ -462,7 +470,7 @@ describe('the acceptance: a 3840 × 2160 picture upscales with ComfyUI off', () 
       }
       return (realSubmit as (...a: unknown[]) => Promise<unknown>)(slug, payload, ...rest)
     }) as typeof realSubmit
-    const tileUsd = paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: 794 * 2160 })!
+    const tileUsd = paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: 871 * 2160 })!
     const quoted = await k.engine.quoteRun({ userId: k.userId, takes: [prompt], ...START })
     // Fix round 2: the quote for a 3840 × 2160 picture — five tiles at the measured limit's price.
     expect(quoted.credits).toBe(creditsForUsd(5 * CAP_USD) + 1)
@@ -542,17 +550,17 @@ describe('fix round 1', () => {
   it('H1: priced without the picture\'s size (the canvas), Upscale is held up to the largest tiled picture\'s tiles, marked "up to": never below the hold', () => {
     const inputs = { frames: ['l', 0], tile_size: 512 }
     const unmeasured = priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 1 } })
-    expect(unmeasured).toEqual({ usd: 0.0629011, credits: creditsForUsd(0.0629011) })
+    expect(unmeasured).toEqual({ usd: 0.07548132, credits: creditsForUsd(0.07548132) })
     // At least the hold of any picture the run can take: the largest tiled, 4096², a 4K picture.
     for (const s of [{ picturePixels: UPSCALE_2X_TILED_MAX_PIXELS }, { picturePixels: 4096 * 4096 }, { picturePixels: 3840 * 2160, pictureTiles: 5 }, { picturePixels: CAP }]) {
       const held = priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 1, ...s } })
       expect('usd' in unmeasured && 'usd' in held && unmeasured.usd >= held.usd).toBe(true)
     }
-    // The canvas's estimate (the run-confirm gate): ten tiles, "(up to)".
+    // The canvas's estimate (the run-confirm gate): twelve tiles, "(up to)".
     const node = { id: 'n', type: UPSCALE_2X_CLASS, title: 'Upscale (2×)', widgetDefs: [{ name: 'tile_size' }], widgetsValues: [512], linkedInputs: ['frames'], pictures: 1 }
     const est = estimateUsdForNodes([node], { hosted: true, families: ON })!
-    expect(est.breakdown).toEqual([{ id: 'n', label: 'Upscale (2×) (up to)', usd: 0.0629011, upTo: true }])
-    expect(est.hostedCredits).toBe(creditsForUsd(0.0629011) + 1)
+    expect(est.breakdown).toEqual([{ id: 'n', label: 'Upscale (2×) (up to)', usd: 0.07548132, upTo: true }])
+    expect(est.hostedCredits).toBe(creditsForUsd(0.07548132) + 1)
     // A 4K clip "up to" 300 frames: the gate shows at least what the server holds for it (300 × 5 tiles).
     const clip = estimateUsdForNodes([{ ...node, pictures: null }], { hosted: true, families: ON })!
     expect(clip.usd).toBeGreaterThanOrEqual(300 * 5 * CAP_USD)
@@ -561,16 +569,17 @@ describe('fix round 1', () => {
   it('M1: the blend keeps only the overlap rows besides the picture (a few MB), and still gives the whole picture back across rows of tiles', () => {
     // Column strips (one row of tiles): no band at all.
     expect(tiledBandBytes(tileGrid(3840, 2160, CAP), 3840, 2)).toBe(0)
-    // The largest grids by rows: the band is the 2× width × about 64 overlap rows.
+    // The largest grids by rows: the band is the 2× width × the overlap's rows (about 2 × 128 at 2×, fix round 3).
     for (const [w, h] of [[4096, 4096], [1536, 12288], [2160, 3840]] as const) {
       const g = tileGrid(w, h, CAP)
-      expect(tiledBandBytes(g, w, 2)).toBeLessThanOrEqual(2 * w * 70 * 3)
+      expect(g.rows).toBeGreaterThan(1)
+      expect(tiledBandBytes(g, w, 2)).toBeLessThanOrEqual(2 * w * 2 * (UPSCALE_TILE_OVERLAP + 4) * 3)
     }
     // Several rows and columns, exact.
     const w = 300
     const h = 260
     const rgb = testRgb(w, h)
-    const g = tileGrid(w, h, 110 * 100)
+    const g = tileGrid(w, h, 110 * 100, 32)
     expect(g.rows).toBeGreaterThan(2)
     expect(g.cols).toBeGreaterThan(2)
     const canvas = tiledCanvas(g, w, h, 2)
@@ -579,10 +588,12 @@ describe('fix round 1', () => {
   })
 
   it(`L2: tiles are never thinner than ${UPSCALE_TILE_MIN_SIDE} pixels: such a picture is refused plainly before the hold (and before any call); under 1440p any shape is one call`, LONG, async () => {
-    expect(UPSCALE_TILE_MIN_SIDE).toBe(64)
+    // Fix round 3: twice the 128-pixel overlap.
+    expect(UPSCALE_TILE_MIN_SIDE).toBe(256)
+    expect(tooThinToTile(65_000, 255, CAP)).toBe(true)
     expect(tooThinToTile(65_000, 63, CAP)).toBe(true)
     expect(tooThinToTile(1, 16_000_000, CAP)).toBe(true)
-    expect(tooThinToTile(65_000, 64, CAP)).toBe(false)
+    expect(tooThinToTile(65_000, 256, CAP)).toBe(false)
     expect(tooThinToTile(10_000, 30, CAP)).toBe(false)
     expect(tooThinToTile(3840, 2160, CAP)).toBe(false)
     // The start of the run: a shape known, refused (not left to the engine), in both places.
@@ -592,7 +603,7 @@ describe('fix round 1', () => {
       expect(got.problem).toBeNull()
       expect(got.refused?.message).toBe(UPSCALE_2X_WORDS.tooThin)
     }
-    expect(UPSCALE_2X_WORDS.tooThin).toBe('This picture is too long and thin to upscale here. Make its shorter side at least 64 pixels.')
+    expect(UPSCALE_2X_WORDS.tooThin).toBe('This picture is too long and thin to upscale here. Make its shorter side at least 256 pixels.')
     // The turn, a backstop: refused before any call.
     const pic = new Uint8Array(await sharp({ create: { width: 65_000, height: 60, channels: 3, background: '#123456' } }).png().toBuffer())
     const r = handIo(pic)
@@ -670,14 +681,14 @@ describe('fix round 1', () => {
     expect(got.tiles?.n).toBe(3)
     // A 4K Nano Banana (its widest, 12288 × 1536's pixels) is tiled too: the largest tiled picture.
     const fourK: ApiPrompt = { ...p, g: { class_type: 'DevelopImageNode', inputs: { resolution: '4K', image: ['z', 0] } } }
-    expect(await localModelStartProblems(fourK, ON, { hosted: true, shapes: async () => new Map() })).toMatchObject({ tiles: { n: 10 }, problem: null })
+    expect(await localModelStartProblems(fourK, ON, { hosted: true, shapes: async () => new Map() })).toMatchObject({ tiles: { n: 12 }, problem: null })
   })
 })
 
 describe('L3: a count from the picture\'s shape below the pixel bound, through the engine', () => {
-  it('Empty image 2850 × 1450 → Upscale (2×) → Save image: held at two tiles (its shape\'s), not the pixels\' three; two calls', LONG, async () => {
-    const w = 2850
-    const h = 1450
+  it('Empty image 2550 × 1550 → Upscale (2×) → Save image: held at two tiles (its shape\'s), not the pixels\' three; two calls', LONG, async () => {
+    const w = 2550
+    const h = 1550
     expect([tileCount(w, h, CAP), tileCountBound(w * h, CAP)]).toEqual([2, 3])
     const prompt: ApiPrompt = {
       e: { class_type: 'EmptyImage', inputs: { width: w, height: h, batch_size: 1, color: 0 } },
@@ -698,5 +709,166 @@ describe('L3: a count from the picture\'s shape below the pixel bound, through t
     const tileUsd = paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: g.tw * g.th })!
     expect(charged(k)).toEqual([[creditsForUsd(2 * CAP_USD) + 1, creditsForUsd(2 * tileUsd) + 1]])
     rmSync(k.root, { recursive: true, force: true })
+  })
+})
+
+// ── Fix round 3 ─────────────────────────────────────────────────────────────
+
+/** A smooth gradient (a sky): no step between neighbours above one level. */
+function gradientRgb(w: number, h: number): Uint8Array {
+  const px = new Uint8Array(w * h * 3)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 3
+      px[i] = Math.round(70 + 0.04 * x + 0.02 * y)
+      px[i + 1] = Math.round(110 + 0.03 * x)
+      px[i + 2] = Math.round(180 - 0.02 * y)
+    }
+  }
+  return px
+}
+
+/** The largest step between neighbouring pixels (both ways, every channel) of an RGB8 picture. */
+function largestStep(rgb: Uint8Array, w: number, h: number): number {
+  let most = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 3
+      for (let c = 0; c < 3; c++) {
+        if (x > 0) most = Math.max(most, Math.abs(rgb[i + c]! - rgb[i - 3 + c]!))
+        if (y > 0) most = Math.max(most, Math.abs(rgb[i + c]! - rgb[i - w * 3 + c]!))
+      }
+    }
+  }
+  return most
+}
+
+describe('fix round 3: a wider blend, each tile\'s tone matched to the source', () => {
+  it('a smooth gradient through tiles whose answers carry different tone offsets and gains: no step at the joins above 2 levels, the tone the source\'s', async () => {
+    const w = 1200
+    const h = 800
+    const src = gradientRgb(w, h)
+    expect(largestStep(src, w, h)).toBeLessThanOrEqual(1)
+    // Each fake tile brighter, darker or contrastier than its neighbour (what the model did on the live check's sky, exaggerated).
+    const looks = [[+9, 1], [-7, 1], [0, 1.06], [+5, 0.95], [-10, 1.03], [+8, 0.97], [0, 1], [-6, 1.05], [+7, 1], [-4, 0.96]] as const
+    const cap = 420 * 420
+    const g = tileGrid(w, h, cap)
+    expect(g.cols * g.rows).toBeGreaterThan(4)
+    expect(g.rows).toBeGreaterThan(1)
+    const fake = (tile: Uint8Array, tw: number, th: number, k: number) => {
+      const [off, gain] = looks[k % looks.length]!
+      return nearest2x(tile, tw, th).map(v => Math.min(255, Math.max(0, Math.round(128 + (v - 128) * gain + off))))
+    }
+    const { rgb, tiles } = await upscaleInTiles({
+      rgb: src, w, h, scale: 2, cap, signal: new AbortController().signal, stopped: () => new Error('stopped'),
+      send: async (k, tile, tw, th) => fake(tile, tw, th, k),
+    })
+    expect(tiles).toBe(g.cols * g.rows)
+    expect(largestStep(rgb, 2 * w, 2 * h)).toBeLessThanOrEqual(2)
+    // Anchored to the source, never drifting: everywhere within 2 levels of the gradient doubled.
+    const want = nearest2x(src, w, h)
+    let most = 0
+    for (let i = 0; i < want.length; i++) most = Math.max(most, Math.abs(rgb[i]! - want[i]!))
+    expect(most).toBeLessThanOrEqual(2)
+    // Without the tone match the same tiles step at the joins (the bands the live check showed).
+    const plain = tiledCanvas(g, w, h, 2)
+    let k = 0
+    for (const [row, y] of g.ys.entries()) for (const [col, x] of g.xs.entries()) plain.put(row, col, fake(cropRgb(src, w, x, y, g.tw, g.th), g.tw, g.th, k++))
+    let off = 0
+    const unmatched = plain.done()
+    for (let i = 0; i < want.length; i++) off = Math.max(off, Math.abs(unmatched[i]! - want[i]!))
+    expect(off).toBeGreaterThan(5)
+  })
+
+  it('an answer that keeps the source\'s tone (a picture doubled pixel for pixel) is left exactly as it is; detail the model adds is kept', () => {
+    const src = testRgb(200, 150)
+    const ans = nearest2x(src, 200, 150)
+    expect(matchTone(src, 200, 150, ans, 2)).toBe(ans)
+    // High-frequency detail added (a fine checker of ±20) survives; only the block means move.
+    const flat = new Uint8Array(64 * 64 * 3).fill(100)
+    const detailed = nearest2x(flat, 64, 64).map((v, i) => v + ((Math.floor(i / 3) % 2) ? 20 : -20) + 6)
+    const out = matchTone(flat, 64, 64, detailed, 2)
+    expect([out[0], out[3]]).toEqual([80, 120])
+  })
+
+  it('the 128-pixel overlap fits inside the per-tile limit: every 4K tile is 871 × 2160 = 1 881 360 px ≤ 2 096 704, overlapping by at least 128', () => {
+    const g = tileGrid(3840, 2160, CAP)
+    expect(g.tw * g.th).toBe(1_881_360)
+    for (let i = 1; i < g.cols; i++) expect(g.xs[i - 1]! + g.tw - g.xs[i]!).toBeGreaterThanOrEqual(128)
+  })
+})
+
+describe('fix round 3: Upscale (R3.5) on Real-ESRGAN goes in the same tiles', () => {
+  const REPAIR_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'image-repair'])
+  const repairNode = (scale = 2, model = 'Real-ESRGAN') => ({ class_type: 'UpscaleImageNode', inputs: { image: ['l', 0], model, scale_factor: scale, face_enhance: false } })
+  const planRepairFor = async (pic: Uint8Array, o: { scale?: number; inputPixels?: number; model?: string } = {}) => planNode({
+    prompt: { l: LOAD, n: repairNode(o.scale, o.model) }, nodeId: 'n', gateOpen: false, families: REPAIR_ON,
+    filesFrom: link => (link[0] === 'l' ? [{ filename: 'p0.png', subfolder: '', type: 'input' } as OutputFile] : []),
+    toUrl: async f => `https://fal.storage/${f.filename}`,
+    readFile: async () => pic,
+    ...(o.inputPixels ? { inputPixels: o.inputPixels } : {}),
+  })
+
+  it('priced as it runs: one call at or under the limit; over it, the most tiles a picture of that size makes, each at the limit (the hold a true bound)', () => {
+    const inputs = { image: ['l', 0], model: 'Real-ESRGAN', scale_factor: 2 }
+    expect(priceNode('UpscaleImageNode', inputs, { inputPixels: 1000 * 1000 })).toEqual({ usd: 0.003, credits: creditsForUsd(0.003) })
+    expect(priceNode('UpscaleImageNode', inputs, { inputPixels: 3840 * 2160 })).toEqual({ usd: 0.03145055, credits: creditsForUsd(0.03145055) })
+    // Not measured: Sailor's largest picture, twelve tiles.
+    expect(priceNode('UpscaleImageNode', inputs)).toEqual({ usd: 0.07548132, credits: creditsForUsd(0.07548132) })
+    // Every tile's own price under the held one.
+    const g = tileGrid(3840, 2160, CAP)
+    expect(paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: g.tw * g.th })!).toBeLessThanOrEqual(CAP_USD)
+  })
+
+  it('a picture at or under the limit keeps R3.5\'s one call; another engine never tiles', async () => {
+    const small = await png(testRgb(800, 600), 800, 600)
+    expect((await planRepairFor(small)).kind).toBe('provider')
+    const big = await png(testRgb(2600, 1500), 2600, 1500)
+    expect((await planRepairFor(big, { model: 'Clarity' })).kind).toBe('provider')
+  })
+
+  it('2600 × 1500 at scale 2: two tiles, one call at a time, never over the limit; the 2× picture saved as an output, no seam', LONG, async () => {
+    const w = 2600
+    const h = 1500
+    const rgb = testRgb(w, h)
+    const pic = await png(rgb, w, h)
+    const plan = await planRepairFor(pic, { inputPixels: w * h })
+    expect(plan.kind).toBe('pipeline')
+    const r = handIo(pic)
+    const made = await (plan as Extract<NodePlan, { kind: 'pipeline' }>).run(r.io)
+    expect(r.calls.map(c => c.key)).toEqual(['esrgan-tile-0', 'esrgan-tile-1'])
+    expect(r.most()).toBe(1)
+    for (const c of r.calls) {
+      expect(c.endpoint).toBe(UPSCALE_2X_SLUG)
+      expect(c.payload).toMatchObject({ scale: 2, face_enhance: false })
+    }
+    expect(r.saved).toEqual([['esrgan-tile-1', 'tiled']])
+    const out = (made.values[0] as Extract<RunnerValue, { kind: 'files' }>).files[0]!
+    expect(out.type).toBe('output')
+    const px = await rawOf(r.kept.get(out.filename)!)
+    expect([px.w, px.h]).toEqual([2 * w, 2 * h])
+    expect(Buffer.from(px.data).equals(Buffer.from(nearest2x(rgb, w, h)))).toBe(true)
+    expect(made.ui).toBeNull()
+  })
+
+  it('scale 1.5: tiles sent at scale 2, the picture resized to Real-ESRGAN\'s own size (int(side × scale)); too large an upscale, a tile that fails, or more tiles than held: refused or charged nothing', LONG, async () => {
+    const w = 2600
+    const h = 1500
+    const pic = await png(gradientRgb(w, h), w, h)
+    const r = handIo(pic)
+    const made = await (await planRepairFor(pic, { scale: 1.5, inputPixels: w * h }) as Extract<NodePlan, { kind: 'pipeline' }>).run(r.io)
+    expect(r.calls.every(c => (c.payload as { scale: number }).scale === 2)).toBe(true)
+    const out = (made.values[0] as Extract<RunnerValue, { kind: 'files' }>).files[0]!
+    const px = await rawOf(r.kept.get(out.filename)!)
+    expect([px.w, px.h]).toEqual([3900, 2250])
+    // Scale 10 on 2600 × 1500: 390 MP — past the largest upscaled picture made in tiles.
+    await expect(planRepairFor(pic, { scale: 10, inputPixels: w * h })).rejects.toThrow(REAL_ESRGAN_TILE_WORDS.tooBig)
+    // Measured smaller than it is (one tile held): refused before any call.
+    await expect(planRepairFor(pic, { inputPixels: 1_000_000 })).rejects.toThrow(REAL_ESRGAN_TILE_WORDS.moreThanHeld)
+    const failing = handIo(pic, { fail: k => k === 1 })
+    await expect((await planRepairFor(pic, { inputPixels: w * h }) as Extract<NodePlan, { kind: 'pipeline' }>).run(failing.io)).rejects.toThrow('The service failed')
+    expect(failing.undelivered).toEqual([['esrgan-tile-0', 'sailor-fault']])
+    expect(failing.kept.size).toBe(0)
+    for (const t of Object.values(REAL_ESRGAN_TILE_WORDS)) expect(t).not.toMatch(/Node|_|Replicate|ESRGAN|tile/i)
   })
 })

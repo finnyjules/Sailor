@@ -640,8 +640,9 @@ describe('restore and remove background on the ComfyUI path (R3.5)', () => {
     expect(at('RemoveBackgroundRemoteNode', { image: ['2', 0] })).toBe(1)
   })
   it('Upscale and Enhance detail are unchanged: by the output of the largest input, unmeasured', () => {
-    // R7.11: Real-ESRGAN by the picture sent in, unmeasured at its limit, 2 096 704 px ($0.00629; R11.6 fix round 2).
-    expect(at('UpscaleImageNode', { model: 'Real-ESRGAN', image: ['2', 0], scale_factor: 2 })).toBe(2)
+    // R7.11: Real-ESRGAN by the picture sent in; unmeasured, the 18.9 MP cap in twelve tiles at the 2 096 704-px limit
+    // ($0.0755; R11.6 fix rounds 2 and 3).
+    expect(at('UpscaleImageNode', { model: 'Real-ESRGAN', image: ['2', 0], scale_factor: 2 })).toBe(16)
     expect(at('UpscaleImageNode', { model: 'Topaz', image: ['2', 0], topaz_upscale_factor: '2x' })).toBe(48)
     expect(at('EnhanceDetailNode', { model: 'Diffusion Refine', image: ['2', 0] })).toBe(89)
   })

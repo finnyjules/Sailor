@@ -166,8 +166,8 @@ import type { Derived, NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { pixelsInWorker } from '../compositor/worker'
 import { pictureMeta, pilRgba, pngColourType, rgbTurnedPng } from '../pictures/pythonView'
-import { tileCount, tileGrid, tooThinToTile } from '#shared/runner/upscaleTiles'
-import { cropRgb, tiledCanvas } from './tiles'
+import { tileCount, tooThinToTile } from '#shared/runner/upscaleTiles'
+import { upscaleInTiles } from './tiles'
 import { pixels as pixelOps } from '../pixels/core'
 import { loaderSourceOf, madeSourceOf } from '../pictureHandoff'
 import { decodeMask, encodeMask, type Mask } from '../pictures/mask'
@@ -478,7 +478,7 @@ function isRgb8Png(b: Uint8Array): boolean {
 }
 
 /** An answer's pixels as Python's tensor takes them (PIL's RGBA, the first three channels): RGB8 and its size. */
-async function answerRgb(bytes: Uint8Array): Promise<{ rgb: Uint8Array; w: number; h: number }> {
+export async function answerRgb(bytes: Uint8Array): Promise<{ rgb: Uint8Array; w: number; h: number }> {
   const { data, info: { width: w, height: h } } = await pilRgba(bytes)
   const rgb = new Uint8Array(w * h * 3)
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
@@ -612,27 +612,22 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
   }
 
   /**
-   * R11.6: a picture over the service's largest, in tiles (tileGrid), one
-   * call each in grid order, each answer faded into the 2× picture
-   * (./tiles.ts). A picture's result is kept for the run; a frame's is not.
+   * R11.6: a picture over the service's largest, in tiles (./tiles.ts
+   * upscaleInTiles: tileGrid's tiles, one call each in grid order, each
+   * answer's tone matched to the source, fix round 3, then faded into the 2×
+   * picture). A picture's result is kept for the run; a frame's is not.
    */
   const upTiled = async (io: PipelineIO, p: UpPicture): Promise<UpAnswer> => {
-    const grid = tileGrid(p.w, p.h, UPSCALE_2X_MAX_PIXELS)
-    const src = await p.rgb()
-    const canvas = tiledCanvas(grid, p.w, p.h, 2)
-    let k = 0
     let last = ''
-    for (const [row, y] of grid.ys.entries()) {
-      for (const [col, x] of grid.xs.entries()) {
-        if (io.signal.aborted) throw new MediaError('stopped')
-        const png = await framePng(cropRgb(src, p.w, x, y, grid.tw, grid.th), grid.tw, grid.th)
+    const { rgb } = await upscaleInTiles({
+      rgb: await p.rgb(), w: p.w, h: p.h, scale: 2, cap: UPSCALE_2X_MAX_PIXELS, signal: io.signal,
+      stopped: () => new MediaError('stopped'),
+      send: async (k, tile, tw, th) => {
         last = `up-${p.index}-tile-${k}`
-        const url = await send(io, last, await tileUrl(io, png, p.index, k), grid.tw, grid.th)
-        canvas.put(row, col, await answerAt(io, url, 2 * grid.tw, 2 * grid.th))
-        k++
-      }
-    }
-    const rgb = canvas.done()
+        const url = await send(io, last, await tileUrl(io, await framePng(tile, tw, th), p.index, k), tw, th)
+        return answerAt(io, url, 2 * tw, 2 * th)
+      },
+    })
     const dw = 2 * p.w
     const dh = 2 * p.h
     if (clip) return { rgb, w: dw, h: dh }

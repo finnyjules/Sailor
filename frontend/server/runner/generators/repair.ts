@@ -266,6 +266,13 @@ export async function planRepair(ctx: PlanContext): Promise<NodePlan> {
   const link = inputs.image
   const file = isLink(link) ? ctx.filesFrom(link)[0] : undefined
   if (!file) throw new Error('There is no picture to work on')
+  // R11.6 fix round 3 (the controller's ruling): Upscale on Real-ESRGAN over the service's limit
+  // (2 096 704 px, measured 2026-10-01) goes in tiles (./repairTiles.ts); at or under it, one call as before.
+  if (classType === 'UpscaleImageNode' && combo(inputs, 'model', 'Clarity') === 'Real-ESRGAN') {
+    const { realEsrganTiledPlan } = await import('./repairTiles')
+    const tiled = await realEsrganTiledPlan(ctx, inputs, file, float(inputs, 'scale_factor', 2.0), bool(inputs, 'face_enhance', false))
+    if (tiled) return tiled
+  }
   const image = await imageUrlOf(ctx, file, link)
   let call: RepairCall
   switch (classType) {
