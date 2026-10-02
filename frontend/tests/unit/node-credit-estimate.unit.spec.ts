@@ -106,8 +106,8 @@ describe('modelPricedUsd — video models', () => {
 
 describe('modelPricedUsd — engine pickers', () => {
   it('prices each engine at the input cap (12288 × 1536 since P5 fix round 1) × the default scale', () => {
-    // Clarity at 2× makes 75.5 M px, × 18 steps × $0.0035 (LC4). Real-ESRGAN (R7.11): $0.003 a megapixel sent, at most 1 572 864 px a call (LC4: under the 2 096 704 Replicate states), the 18.9 MP cap in fifteen tiles (R11.6 fix round 3). Topaz in place, 18.9 MP: one $0.08 unit.
-    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(4.75634074)
+    // Clarity at 2× makes 75.5 M px: $0.005 + 75.5 MP × 18 steps × $0.00051 (LC4 fix round 1). Real-ESRGAN (R7.11): $0.003 a megapixel sent, at most 1 572 864 px a call (LC4: under the 2 096 704 Replicate states), the 18.9 MP cap in fifteen tiles (R11.6 fix round 3). Topaz in place, 18.9 MP: one $0.08 unit.
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(0.69806679)
     expect(modelPricedUsd('UpscaleImageNode', { model: 'Real-ESRGAN' })).toBe(0.07077885)
     expect(modelPricedUsd('EnhanceDetailNode', { model: 'Faithful' })).toBe(0.08)
   })
@@ -139,7 +139,7 @@ describe('nodeCreditEstimate', () => {
     const cheap = nodeCreditEstimate('UpscaleImageNode', { model: 'Real-ESRGAN' })!
     const dear = nodeCreditEstimate('UpscaleImageNode', { model: 'Clarity' })!
     expect(cheap).toBe(creditsForUsd(0.07077885) + BASE_RENDER)
-    expect(dear).toBe(creditsForUsd(4.75634074) + BASE_RENDER)
+    expect(dear).toBe(creditsForUsd(0.69806679) + BASE_RENDER)
     expect(dear).toBeGreaterThan(cheap)
   })
 

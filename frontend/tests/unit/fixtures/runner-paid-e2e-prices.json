@@ -40,14 +40,14 @@
   {
    "class": "EnhanceDetailNode",
    "old": 36,
-   "new": 179,
+   "new": 27,
    "source": "defaults",
    "nodes": 1
   },
   {
    "class": "EnhanceDetailNode",
    "old": 36,
-   "new": 179,
+   "new": 27,
    "source": "saved projects",
    "nodes": 2
   },
@@ -278,14 +278,14 @@
   {
    "class": "UpscaleImageNode",
    "old": 143,
-   "new": 714,
+   "new": 105,
    "source": "defaults",
    "nodes": 1
   },
   {
    "class": "UpscaleImageNode",
    "old": 143,
-   "new": 714,
+   "new": 105,
    "source": "saved projects",
    "nodes": 9
   },

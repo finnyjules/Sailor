@@ -19,12 +19,10 @@
  *    carried on (`beyondPerPixel`);
  *  - `per_megapixel_step`: a diffusion model billed by GPU time (LC4: Clarity
  *    and the Magic Image Refiner), a ceiling per megapixel of the picture
- *    made per denoising step sent: `perMegapixelStep` × steps × MP, the MP
- *    its pixels / 1,000,000 (not rounded: the rate carries the margin), never
- *    below `minMegapixels` (the measured picture: its start-up is covered),
- *    and above `superlinearAboveMegapixels` (a picture diffused whole, whose
- *    attention grows with the square of its size) multiplied by MP over it.
- *    Steps not sent (null) are priced at `maxSteps`;
+ *    made per denoising step sent, plus a start cost: `startUsd` +
+ *    `perMegapixelStep` × steps × MP, the MP its pixels / 1,000,000 (not
+ *    rounded: the rate carries the margin). Steps not sent (null) are priced
+ *    at `maxSteps`;
  *  - `per_run_megapixels`: Replicate's FLUX.2 — a price per run, plus one per
  *    megapixel of the picture sent in and one per megapixel of the picture
  *    that comes back (each rounded up, see below);
@@ -63,7 +61,7 @@ export type EditRate =
   | (RateMeta & { unit: 'by_resolution' | 'by_quality', byTier: Record<string, number> })
   | (RateMeta & { unit: 'flux2_megapixels', firstMegapixel: number, extraMegapixel: number, megapixelPixels: number })
   | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[], beyondPerPixel?: number })
-  | (RateMeta & { unit: 'per_megapixel_step', perMegapixelStep: number, minMegapixels: number, maxSteps: number, superlinearAboveMegapixels?: number, note: string })
+  | (RateMeta & { unit: 'per_megapixel_step', startUsd: number, perMegapixelStep: number, maxSteps: number, note: string })
   | (RateMeta & { unit: 'per_run_megapixels', perRun: number, perInputMegapixel: number, perOutputMegapixel: number })
   | (RateMeta & { unit: 'per_megapixel', perMegapixel: number })
   | (RateMeta & { unit: 'per_input_megapixel', perMegapixel: number, minUsd: number, maxInputPixels: number, note: string })
@@ -203,21 +201,24 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // ── Upscale and Enhance detail (Replicate) ──────────────────────────────
   // Billed by GPU time (A100 40GB, $0.00115/s; page re-read 2026-10-02: "approximately $0.013 to run",
   // "typically complete within 12 seconds"). LC4 (USER go 2026-10-02): the $0.20 floor (the pre-R3 price
-  // policy, 68× the measured bill) is gone; a GPU-time ceiling from the settings sent instead.
-  // MEASURED 2026-10-01 (owed live check upscale-clarity-1x): 2.5 s ($0.0029) for a 512 × 512 picture at
-  // scale 1 (0.262 MP made), 18 steps, creativity 0.35. Clarity is A1111 img2img with tiled diffusion: it
-  // denoises steps × creativity of the steps (6.3), tile by tile (about 1 MP a tile), so its time grows with
-  // the megapixels made times the steps. The slope is taken with the whole run in it (start-up as work, so
-  // never under): 2.5 s / (0.262 MP × 6.3) = 1.51 s a megapixel a denoised step; priced at 2× that
-  // (3.03 s × $0.00115 = $0.0035), on EVERY step sent (creativity 1, the dearest; the node takes 0–1), so
-  // the measured run is held at about 5.7× its bill and creativity 1 at 2×. 2× also covers a tile's own
-  // attention growing from the measured 0.26 MP to a full ~1 MP tile (≤ 2× while attention is ≤ 35% of the
-  // work at 512²). Never below the measured picture's 0.262 MP (its start-up). Steps 10–50 on the node
-  // (validated); a wired one the service's own most, 100. An estimate: one small measurement.
+  // policy, 68× the measured bill) is gone; a GPU-time ceiling from the settings sent instead. Clarity is
+  // A1111 img2img with tiled diffusion (about 1 MP a tile), so its time is a start cost plus the megapixels
+  // made times the steps. MEASURED twice (predict_time):
+  //  - 2026-10-01 (upscale-clarity-1x): 512² at scale 1 (0.262 MP made), 18 steps, creativity 0.35: 2.5 s
+  //    ($0.0029);
+  //  - 2026-10-02 (LC4 calibration, prediction kpz3kxjxg5rn80d0zqz9dhezjw): 1024² at scale 2 (4.19 MP made),
+  //    50 steps, creativity 1 (the dearest): 47.92 s ($0.0551).
+  // Fitted through both (start + slope × MP × steps), steps counted as sent (creativity ignored) and as
+  // denoised (× creativity): the worse slope 0.2216 s / MP / step (as sent: start 1.45 s), the worse start
+  // 2.14 s (as denoised: 0.2183 s). Priced at 2× each: 4.28 s × $0.00115 = $0.0050 a call, plus 0.4432 s ×
+  // $0.00115 = $0.00051 a megapixel a step, on every step sent. Held at 2.5× the first run's bill and 2.03×
+  // the second's. Tiles keep it linear in the area made (the 4.19 MP run is several full tiles). Steps 10–50
+  // on the node (validated); a wired one the service's own most, 100. Verified: the second run is at the
+  // dearest settings the node sends (50 steps, creativity 1).
   'philz1337x/clarity-upscaler': {
-    unit: 'per_megapixel_step', perMegapixelStep: 0.0035, minMegapixels: 0.262144, maxSteps: 100,
-    note: 'A100-40 at $0.00115/s; live check 2026-10-01: 2.5 s for 512² made, 18 steps × creativity 0.35 = 1.51 s/MP/denoised step; ceiling 2× that on every step sent, at least 0.262 MP',
-    ...estimate(rep('philz1337x/clarity-upscaler')), read: '2026-10-02',
+    unit: 'per_megapixel_step', startUsd: 0.005, perMegapixelStep: 0.00051, maxSteps: 100,
+    note: 'A100-40 at $0.00115/s; measured 2.5 s (512² made, 18 steps, creativity 0.35, 2026-10-01) and 47.92 s (2048² made, 50 steps, creativity 1, 2026-10-02, kpz3kxjxg5rn80d0zqz9dhezjw); fit ≤ 2.14 s + 0.2216 s/MP/step; ceiling 2× both',
+    ...verified('replicate', rep('philz1337x/clarity-upscaler')), read: '2026-10-02',
   },
   // By output image pixels: ≤ 4.4M $0.05, ≤ 8.8M $0.10, ≤ 17.6M $0.20,
   // ≤ 27.5M $0.40, ≤ 55M $0.80, ≤ 110M $1.60, above $3.20.
@@ -289,18 +290,23 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // Billed by GPU time (L40S, $0.000975/s; page re-read 2026-10-02: "approximately $0.021 to run",
   // "typically complete within 22 seconds", "varies significantly based on the inputs"). LC4 (USER go
   // 2026-10-02): the $0.10 floor (42× the measured bill) is gone; a GPU-time ceiling from the settings sent.
-  // MEASURED 2026-10-02 (owed rerun enhance-refine): 2.46 s ($0.0024) for a 512 × 512 picture (0.262 MP) at
-  // "original", 20 steps, creativity 0.15 + 0.4 × 0.45 = 0.33. A diffusers img2img: it denoises steps ×
-  // creativity of the steps (6.6). The slope with the whole run in it: 2.46 s / (0.262 MP × 6.6) = 1.42 s a
-  // megapixel a denoised step; priced at 2× that (2.84 s × $0.000975 = $0.0028), on EVERY step sent
-  // (Enhance sends creativity at most 0.6, so 3.3× at the dearest strength). The picture is diffused whole
-  // at its own size ("original"), so its attention grows with the square of the picture: up to 1 MP the
-  // 3.3× covers attention up to ~70% of the work; above 1 MP the price grows with MP² (superlinear). Never
-  // below the measured 0.262 MP. Steps 10–50 on the node (validated); a wired one 100. An estimate.
+  // A diffusers img2img at the picture's own size ("original"). MEASURED twice (predict_time):
+  //  - 2026-10-02 (owed rerun enhance-refine): 512² (0.262 MP), 20 steps, creativity 0.15 + 0.4 × 0.45 = 0.33:
+  //    2.46 s ($0.0024);
+  //  - 2026-10-02 (LC4 calibration, prediction cxenmsh6rdrmw0d0zqzrq26wbc): 1024² (1.05 MP), 50 steps,
+  //    detail strength 1 (creativity 0.6, the most Enhance sends): 4.70 s ($0.0046; total 155.6 s was
+  //    queue / cold start, not billed).
+  // Fitted through both (start + slope × MP × steps), steps as denoised (× creativity): start 2.33 s,
+  // 0.0754 s / MP / step (as sent: 2.21 s, 0.0475 s); the worse of each. Priced at 2× each on every step
+  // sent: 4.66 s × $0.000975 = $0.0046 a call, plus 0.1507 s × $0.000975 = $0.000147 a megapixel a step.
+  // Held at 2.2× the first run's bill and 2.7× the second's (and 3.3× on the slope at creativity 0.6).
+  // Linear in the area: the R1 superlinear term (× MP above 1 MP) is dropped, since neither run is above
+  // 1.05 MP and so neither supports it (the controller's ruling). A picture above about 1 MP is not measured
+  // (see LC4's report). Steps 10–50 on the node (validated); a wired one 100. Verified at 1 MP.
   'fermatresearch/magic-image-refiner': {
-    unit: 'per_megapixel_step', perMegapixelStep: 0.0028, minMegapixels: 0.262144, maxSteps: 100, superlinearAboveMegapixels: 1,
-    note: 'L40S at $0.000975/s; live check 2026-10-02: 2.46 s for 512² at original, 20 steps × creativity 0.33 = 1.42 s/MP/denoised step; ceiling 2× that on every step sent, at least 0.262 MP, × MP above 1 MP (whole-picture attention)',
-    ...estimate(rep('fermatresearch/magic-image-refiner')), read: '2026-10-02',
+    unit: 'per_megapixel_step', startUsd: 0.0046, perMegapixelStep: 0.000147, maxSteps: 100,
+    note: 'L40S at $0.000975/s; measured 2.46 s (512², 20 steps, creativity 0.33, 2026-10-02) and 4.70 s (1024², 50 steps, creativity 0.6, 2026-10-02, cxenmsh6rdrmw0d0zqzrq26wbc); fit ≤ 2.33 s + 0.0754 s/MP/denoised step; ceiling 2× both on every step sent',
+    ...verified('replicate', rep('fermatresearch/magic-image-refiner')), read: '2026-10-02',
   },
 }
 
@@ -350,10 +356,7 @@ export function editUsd(call: EditCall): number | null {
       if (typeof px !== 'number' || !Number.isFinite(px) || px <= 0) return null
       const sent = call.steps
       const steps = typeof sent === 'number' && Number.isFinite(sent) && sent > 0 ? Math.min(sent, rate.maxSteps) : rate.maxSteps
-      const mp = Math.max(px / 1e6, rate.minMegapixels)
-      const above = rate.superlinearAboveMegapixels
-      const grow = above != null && mp > above ? mp / above : 1
-      return tidy(rate.perMegapixelStep * steps * mp * grow)
+      return tidy(rate.startUsd + rate.perMegapixelStep * steps * (px / 1e6))
     }
     case 'per_run_megapixels':
       return tidy(rate.perRun + rate.perInputMegapixel * megapixelsOf(call.inputPixels ?? 0) + rate.perOutputMegapixel * megapixelsOf(call.outputPixels ?? 0))
