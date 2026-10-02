@@ -1,0 +1,230 @@
+{
+  "endpoint": "blackforestlabs/flux-3/text-to-image",
+  "fetchedAt": "2026-10-02",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=blackforestlabs/flux-3/text-to-image",
+    "pricing": "https://fal.ai/models/blackforestlabs/flux-3/text-to-image/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/Flux3TextToImageInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Flux3TextToImageOutput"
+  },
+  "components": {
+    "schemas": {
+      "Flux3TextToImageInput": {
+        "x-fal-order-properties": [
+          "prompt",
+          "aspect_ratio",
+          "resolution",
+          "enable_prompt_expansion",
+          "safety_tolerance",
+          "output_format",
+          "sync_mode",
+          "version"
+        ],
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "sync_mode": {
+            "title": "Sync Mode",
+            "type": "boolean",
+            "default": false,
+            "description": "Return the image as a data URI instead of storing it in request history."
+          },
+          "aspect_ratio": {
+            "title": "Aspect Ratio",
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "21:9",
+              "2:1",
+              "16:9",
+              "3:2",
+              "7:5",
+              "4:3",
+              "5:4",
+              "1:1",
+              "4:5",
+              "3:4",
+              "5:7",
+              "2:3",
+              "9:16",
+              "1:2"
+            ],
+            "description": "Output aspect ratio. Auto uses the first reference image when editing."
+          },
+          "enable_prompt_expansion": {
+            "title": "Enable Prompt Expansion",
+            "type": "boolean",
+            "default": false,
+            "description": "Expand the prompt while preserving its intent and reference roles."
+          },
+          "output_format": {
+            "title": "Output Format",
+            "type": "string",
+            "default": "jpeg",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "description": "The format of the generated image."
+          },
+          "safety_tolerance": {
+            "maximum": 4,
+            "title": "Safety Tolerance",
+            "type": "integer",
+            "minimum": 0,
+            "default": 2,
+            "description": "Safety tolerance, from 0 (strictest) to 4."
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string",
+            "default": "1k",
+            "enum": [
+              "512sq",
+              "768sq",
+              "1k",
+              "2k",
+              "4k"
+            ],
+            "description": "Output resolution tier. 4k can take several minutes."
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string",
+            "examples": [
+              "A red fox leaping over a stream in a pine forest, low-angle wildlife photograph."
+            ],
+            "description": "The prompt to generate an image from."
+          },
+          "version": {
+            "const": "latest",
+            "title": "Version",
+            "type": "string",
+            "default": "latest",
+            "description": "The model version."
+          }
+        },
+        "title": "Flux3ImageInput"
+      },
+      "Flux3TextToImageOutput": {
+        "x-fal-order-properties": [
+          "images"
+        ],
+        "type": "object",
+        "required": [
+          "images"
+        ],
+        "properties": {
+          "images": {
+            "title": "Images",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageFile"
+            },
+            "description": "The generated image."
+          }
+        },
+        "title": "Flux3ImageOutput"
+      },
+      "ImageFile": {
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ],
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "width": {
+            "title": "Width",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The width of the image"
+          },
+          "height": {
+            "title": "Height",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The height of the image"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "examples": [
+              "image/png"
+            ],
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mime type of the file."
+          },
+          "url": {
+            "title": "Url",
+            "type": "string",
+            "description": "The URL where the file can be downloaded from."
+          },
+          "file_size": {
+            "title": "File Size",
+            "examples": [
+              4404019
+            ],
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The size of the file in bytes."
+          },
+          "file_name": {
+            "title": "File Name",
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          }
+        },
+        "title": "ImageFile"
+      }
+    }
+  },
+  "pricingText": "Image pricing varies by resolution, starting at $0.0205 per image. A 1K (1 MP) image costs $0.024.\n\n\nNote: these promotional launch rates are 50% off for a limited time. The discount ends October 8, after which a 1K (1 MP) image will cost $0.048\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

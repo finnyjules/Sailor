@@ -27,6 +27,7 @@
  * Grok Imagine 2 in GenerateImageNode, family grok-imagine-2;
  * Ideogram 4 in GenerateImageNode, family ideogram-4;
  * Ideogram 4.5 in GenerateImageNode, family ideogram-4.5;
+ * FLUX 3 Image in GenerateImageNode, family flux-3-image;
  * Muse Image in GenerateImageNode, family muse-image;
  * Nano Banana 2 Lite in GenerateImageNode, family nano-banana-2-lite;
  * Reve 2.1 in GenerateImageNode, family reve-2.1;
@@ -104,6 +105,7 @@ import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
 import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImagine2'
 import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './generators/ideogram4'
 import { ideogram45Generate, isIdeogram45Model } from './generators/ideogram45'
+import { flux3ImageGenerate, isFlux3ImageModel } from './generators/flux3Image'
 import { isMuseImageModel, museImageGenerate } from './generators/museImage'
 import { isNanoBanana2LiteModel, nanoBanana2LiteGenerate } from './generators/nanoBanana2Lite'
 import { isReve21Model, reve21Generate } from './generators/reve21'
@@ -769,6 +771,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           seed: asInt(inputs.seed, 0),
+          adv: parseJsonObject(inputs.model_options),
+        }), 'generate_image')
+      }
+      // FLUX 3 Image (family flux-3-image): fal, no backup (flux3Image.ts). No moodboard pictures, no seed.
+      if (isFlux3ImageModel(inputs.model)) {
+        return stillCall(flux3ImageGenerate({
+          prompt: nodeImagePrompt(inputs),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           adv: parseJsonObject(inputs.model_options),
         }), 'generate_image')
       }

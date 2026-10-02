@@ -242,6 +242,30 @@ export function ideogram4Size(resolution: Ideogram4Resolution, aspectRatio: stri
 /** Billed megapixels of the largest Ideogram 4 picture (2K 1:1, 2048 × 2048): 5. */
 export const IDEOGRAM_4_MAX_MEGAPIXELS = billedMegapixels(Math.max(...Object.values(IDEOGRAM_4_SIZES['2K']).map(([w, h]) => w * h)))
 
+/**
+ * FLUX 3 Image (runner-only, server/runner/generators/flux3Image.ts): the
+ * size choice is sent as fal's `resolution` tier, "1k" or "2k". BFL calls
+ * each "an equal-pixel-area tier … Exact dimensions vary with the aspect
+ * ratio": 1k "about 1 megapixel", 2k "about 4" (docs.bfl.ai, read
+ * 2026-10-02; BFL's megapixel is 1024 × 1024). Neither fal nor BFL lists the
+ * exact sizes (fal's own 2k 4:3 example is 2368 × 1776, 4,205,568 pixels), so
+ * the price reads the most a tier can bill under the ruling (pixels /
+ * 1,000,000, rounded up): a 1K picture is over 1,000,000 pixels and under
+ * 2,000,000, so 2 MP; a 2K one over 4,000,000 and under 5,000,000, so 5 MP.
+ * The same at every ratio.
+ */
+export const FLUX_3_IMAGE_RESOLUTIONS = ['1K', '2K'] as const
+export type Flux3ImageResolution = typeof FLUX_3_IMAGE_RESOLUTIONS[number]
+export const FLUX_3_IMAGE_DEFAULT_RESOLUTION: Flux3ImageResolution = '1K'
+export const FLUX_3_IMAGE_BILLED_MEGAPIXELS: Readonly<Record<Flux3ImageResolution, number>> = { '1K': 2, '2K': 5 }
+/** Billed megapixels of the largest FLUX 3 picture the builder asks for (2K): 5. */
+export const FLUX_3_IMAGE_MAX_MEGAPIXELS = FLUX_3_IMAGE_BILLED_MEGAPIXELS['2K']
+/** The size the options pick (`resolution`), anything else 1K. */
+export function flux3ImageResolution(adv: Adv): Flux3ImageResolution {
+  const v = optStr(adv, 'resolution', FLUX_3_IMAGE_DEFAULT_RESOLUTION)
+  return (FLUX_3_IMAGE_RESOLUTIONS as readonly string[]).includes(v) ? v as Flux3ImageResolution : FLUX_3_IMAGE_DEFAULT_RESOLUTION
+}
+
 type Rule = (adv: Adv, aspectRatio: string) => ImageSettings
 
 const GPT_QUALITIES = ['low', 'medium', 'high', 'auto']
@@ -363,6 +387,8 @@ const RULES: Record<string, Rule> = {
   // recraftV41Generate (runner-only, fal first, Replicate the backup): one
   // picture at Recraft's own size for the ratio, one price on each service.
   'recraft-v4.1': flat,
+  // flux3ImageGenerate (runner-only, fal): the size's billed megapixels (the most it can be, at every ratio); one picture.
+  'flux-3-image': adv => ({ ...one(), megapixels: FLUX_3_IMAGE_BILLED_MEGAPIXELS[flux3ImageResolution(adv)] }),
   // ideogram45Generate (runner-only, fal): the quality is the tier; one picture, the same price at every size.
   'ideogram-4.5': adv => one(ideogram45Quality(adv)),
   // ideogram4Generate (runner-only, fal first): the speed is the tier, the

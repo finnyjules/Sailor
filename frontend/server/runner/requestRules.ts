@@ -74,7 +74,8 @@
  *    ruling after F6: their Replicate schemas require a prompt but set no
  *    minimum). Two more ruled rows of the prompt table;
  *  - Ideogram 4 with an empty prompt, as sent (F8: fal's ideogram/v4 schema
- *    requires a prompt but sets no minimum, as Qwen's and Grok's). Ruled too.
+ *    requires a prompt but sets no minimum, as Qwen's and Grok's). Ruled too,
+ *    as FLUX 3 Image's (fal's blackforestlabs/flux-3/text-to-image, the same).
  *    Every ruled row judges the prompt with its surrounding whitespace
  *    trimmed (controller ruling after F7), so a prompt of spaces is refused;
  *    the rows from a schema's `minLength` count exactly what is sent, as the
@@ -167,6 +168,7 @@ import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from '.
 import {
   IDEOGRAM_45_FAL_APP, IDEOGRAM_45_LONG_PROMPT, IDEOGRAM_45_NEEDS_PROMPT, IDEOGRAM_45_PROMPT_MAX, isIdeogram45Model,
 } from './generators/ideogram45'
+import { FLUX_3_IMAGE_FAL_APP, FLUX_3_IMAGE_NEEDS_PROMPT, isFlux3ImageModel } from './generators/flux3Image'
 import { MUSE_IMAGE_FAL_APP, MUSE_IMAGE_NEEDS_PROMPT, isMuseImageModel } from './generators/museImage'
 import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG, isNanoBanana2LiteModel } from './generators/nanoBanana2Lite'
 import { REVE_21_FAL_APP, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PROMPT_MAX, isReve21Model } from './generators/reve21'
@@ -228,6 +230,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   [`fal ${IDEOGRAM_4_FAL_APP}`]: { min: 1, message: IDEOGRAM_4_NEEDS_PROMPT },
   // Ideogram 4.5 on fal (ideogram45.ts): the schema's own minLength 1.
   [`fal ${IDEOGRAM_45_FAL_APP}`]: { min: 1, message: IDEOGRAM_45_NEEDS_PROMPT },
+  // FLUX 3 Image on fal (flux3Image.ts): a ruling, not the schema (the prompt required, no minimum).
+  [`fal ${FLUX_3_IMAGE_FAL_APP}`]: { min: 1, message: FLUX_3_IMAGE_NEEDS_PROMPT },
   // Muse Image on fal (museImage.ts): the schema's own minLength 1.
   [`fal ${MUSE_IMAGE_FAL_APP}`]: { min: 1, message: MUSE_IMAGE_NEEDS_PROMPT },
   // Nano Banana 2 Lite on Replicate (nanoBanana2Lite.ts): a ruling, not the schema
@@ -304,6 +308,7 @@ export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
   ...GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => `fal ${e}`),
   `replicate ${LTX_25_FAST_REPLICATE_SLUG}`,
   `replicate ${LUMA_RAY_32_REPLICATE_SLUG}`,
+  `fal ${FLUX_3_IMAGE_FAL_APP}`,
 ]
 
 /** JSON Schema counts characters as code points. */
@@ -863,14 +868,15 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const slug = isQwenImage3Model(inputs.model) ? QWEN_IMAGE_3_SLUG : isGrokImagine2Model(inputs.model) ? GROK_IMAGINE_2_SLUG : NANO_BANANA_2_LITE_SLUG
       judge(slug, nodeImagePrompt(inputs), 'replicate')
     }
-    // Ideogram 4, Ideogram 4.5, Muse Image, Reve 2.1 and Recraft V4.1 (fal, text-to-image): the prompt as
-    // sent must not be empty (and, for Ideogram 4.5, Reve 2.1 and Recraft V4.1, not over its schema's maxLength).
-    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isIdeogram45Model(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model) || isRecraftV41Model(inputs.model))) {
+    // Ideogram 4, Ideogram 4.5, FLUX 3 Image, Muse Image, Reve 2.1 and Recraft V4.1 (fal, text-to-image): the
+    // prompt as sent must not be empty (and, for Ideogram 4.5, Reve 2.1 and Recraft V4.1, not over its schema's maxLength).
+    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isIdeogram45Model(inputs.model) || isFlux3ImageModel(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model) || isRecraftV41Model(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
       const app = isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP
         : isIdeogram45Model(inputs.model) ? IDEOGRAM_45_FAL_APP
-          : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
-            : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
+          : isFlux3ImageModel(inputs.model) ? FLUX_3_IMAGE_FAL_APP
+            : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
+              : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
       judge(app, nodeImagePrompt(inputs))
     }
     // Krea 2 Large and Medium (fal, text-to-image, F17), on a runner run only: the

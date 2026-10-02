@@ -52,6 +52,8 @@ export type RunnerFamily =
   | 'bria-product-shot'
   /** Ideogram 4.5 on fal, no backup: a runner-only image model (text-to-image only). */
   | 'ideogram-4.5'
+  /** FLUX 3 Image (Black Forest Labs) on fal, no backup: a runner-only image model (text-to-image only). */
+  | 'flux-3-image'
   /** Muse Image (Meta) on fal, no backup (model line-up F13): a runner-only image model. */
   | 'muse-image'
   /** Nano Banana 2 Lite (Google) on Replicate, no backup (model line-up F14): a runner-only image model. */
@@ -357,7 +359,7 @@ export const LOCAL_MODEL_TOOL_FAMILIES: readonly RunnerFamily[] = ['slow-motion-
  * but kept apart from every pinned list, as R7's are. Their requirements are
  * LATE_FAMILY_REQUIRES.
  */
-export const LATE_FAMILIES: readonly RunnerFamily[] = ['recraft-svg', 'ideogram-4.5']
+export const LATE_FAMILIES: readonly RunnerFamily[] = ['recraft-svg', 'ideogram-4.5', 'flux-3-image']
 
 /**
  * Every family before R7: RUNNER_FAMILIES, the media families and R6's (the

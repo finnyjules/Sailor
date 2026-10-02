@@ -148,6 +148,30 @@ const KREA_AR         = ['1:1', '4:3', '3:2', '16:9', '2.35:1', '4:5', '2:3', '9
 export const IMAGE_MODELS: ImageModel[] = [
   // ===== BFL ================================================================
   {
+    // Runner-only: fal, no backup (server/runner/generators/flux3Image.ts).
+    // No Python builder. Not `flux-3`: that id is FLUX 3's video model. The
+    // ratios are that file's FLUX_3_IMAGE_RATIOS; the sizes are
+    // #shared/pricing/imageSettings FLUX_3_IMAGE_RESOLUTIONS.
+    id: 'flux-3-image',
+    runnerOnly: true,
+    family: 'flux-3-image',
+    label: 'FLUX 3',
+    brand: 'BFL',
+    // Cover art only. The runner sends fal.
+    replicateSlug: 'black-forest-labs/flux-3-image',
+    pitch: 'Detailed, well-composed pictures with clean lettering.',
+    description: 'Black Forest Labs\' newest image model. Follows the layout a prompt describes, renders text cleanly and makes rich, detailed photos and illustrations. It takes about a minute a picture. Pick 2K for a sharper, larger picture; it costs more.',
+    tags: ['flagship', 'typography', 'photoreal'],
+    pricePerImage: 0.096,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '7:5', '5:7', '2:1', '1:2', '21:9'],
+    defaultAspectRatio: '1:1',
+    advanced: [
+      { name: 'resolution', type: 'select', label: 'Size', default: '1K',
+        options: ['1K', '2K'], optionLabels: ['1K', '2K, sharper'],
+        description: '1K is about one million pixels, 2K about four million. 2K costs about two and a half times as much.' },
+    ],
+  },
+  {
     id: 'flux-1.1-pro',
     hidden: true,
     label: 'Flux 1.1 Pro',

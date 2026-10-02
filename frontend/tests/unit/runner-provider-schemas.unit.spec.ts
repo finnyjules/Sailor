@@ -48,6 +48,7 @@ import { MUSE_IMAGE_FAL_APP } from '~~/server/runner/generators/museImage'
 import { NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
 import { REVE_21_FAL_APP } from '~~/server/runner/generators/reve21'
 import { IDEOGRAM_45_FAL_APP } from '~~/server/runner/generators/ideogram45'
+import { FLUX_3_IMAGE_FAL_APP } from '~~/server/runner/generators/flux3Image'
 import { RECRAFT_V41_FAL_APP, RECRAFT_V41_REPLICATE_SLUG } from '~~/server/runner/generators/recraftV41'
 import { KREA_2_FAL_APPS, KREA_2_REPLICATE_SLUGS } from '~~/server/runner/generators/krea2'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
@@ -317,6 +318,8 @@ function runnerEndpoints(): string[] {
   out.add(`fal ${REVE_21_FAL_APP}`)
   // Ideogram 4.5 on fal, no backup (ideogram45.ts; its grid is runner-ideogram-4-5.unit.spec.ts).
   out.add(`fal ${IDEOGRAM_45_FAL_APP}`)
+  // FLUX 3 Image on fal, no backup (flux3Image.ts; its grid is runner-flux-3-image.unit.spec.ts).
+  out.add(`fal ${FLUX_3_IMAGE_FAL_APP}`)
   // Task F16: Recraft V4.1 on fal, Replicate the backup (recraftV41.ts; its grid is runner-recraft-v4-1.unit.spec.ts).
   out.add(`fal ${RECRAFT_V41_FAL_APP}`)
   out.add(`replicate ${RECRAFT_V41_REPLICATE_SLUG}`)
@@ -427,11 +430,11 @@ describe('refusals', () => {
     // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller rulings
     // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7; Ideogram 4 on fal in F8;
     // Nano Banana 2 Lite on Replicate in F14; Grok Imagine Video 1.5's two fal endpoints in F19; LTX-2.5 Fast on
-    // Replicate in F20; Luma Ray 3.2 on Replicate in F21).
+    // Replicate in F20; Luma Ray 3.2 on Replicate in F21; FLUX 3 Image on fal).
     expect(PROMPT_MIN_LENGTH_RULINGS).toEqual([
       'fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2', 'fal ideogram/v4',
       'replicate google/nano-banana-2-lite', 'fal xai/grok-imagine-video/v1.5/text-to-video', 'fal xai/grok-imagine-video/v1.5/image-to-video',
-      'replicate lightricks/ltx-2.5-fast', 'replicate luma/ray-3.2',
+      'replicate lightricks/ltx-2.5-fast', 'replicate luma/ray-3.2', 'fal blackforestlabs/flux-3/text-to-image',
     ])
     const fromSchemas: Record<string, number> = {}
     for (const key of PROMPT_MIN_LENGTH_RULINGS) {

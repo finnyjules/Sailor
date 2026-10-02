@@ -317,7 +317,7 @@ describe('the price', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/meta/muse-image/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [

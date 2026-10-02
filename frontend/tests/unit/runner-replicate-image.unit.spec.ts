@@ -241,10 +241,10 @@ const one = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n })
 const withCard = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n, 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } } })
 
 describe('replicate-image eligibility', () => {
-  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5, Qwen Image 3, Grok Imagine 2, Ideogram 4, Muse Image, Nano Banana 2 Lite, Reve 2.1, Recraft V4.1 and Ideogram 4.5 under their own families, Tasks F2, F6, F7, F8, F13, F14, F15 and F16; Krea 2 under krea-2, F17)', () => {
+  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5, Qwen Image 3, Grok Imagine 2, Ideogram 4, Muse Image, Nano Banana 2 Lite, Reve 2.1, Recraft V4.1, Ideogram 4.5 and FLUX 3 Image under their own families, Tasks F2, F6, F7, F8, F13, F14, F15 and F16; Krea 2 under krea-2, F17)', () => {
     const {
       'gpt-image-2.5': gpt25, 'qwen-image-3': qwen3, 'grok-imagine-2': grok2, 'ideogram-4': ideogram4, 'muse-image': muse, 'nano-banana-2-lite': nb2Lite, 'reve-2.1': reve21, 'recraft-v4.1': recraft41,
-      'ideogram-4.5': ideogram45, 'krea-2-large': krea2Large, 'krea-2-medium': krea2Medium,
+      'ideogram-4.5': ideogram45, 'flux-3-image': flux3Image, 'krea-2-large': krea2Large, 'krea-2-medium': krea2Medium,
       'recraft-v4-pro-svg': svgV4Pro, 'recraft-v4-svg': svgV4, 'recraft-v3-svg': svgV3, ...models
     } = RUNNER_NODE_RULES.GenerateImageNode!.models!
     // R11.4: the three Recraft SVG models under their own family (runner-image-svg.unit.spec.ts).
@@ -258,6 +258,7 @@ describe('replicate-image eligibility', () => {
     expect(reve21).toBe('reve-2.1')
     expect(recraft41).toBe('recraft-v4.1')
     expect(ideogram45).toBe('ideogram-4.5')
+    expect(flux3Image).toBe('flux-3-image')
     expect(krea2Large).toBe('krea-2')
     expect(krea2Medium).toBe('krea-2')
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_IMAGE_MODEL_IDS].sort())

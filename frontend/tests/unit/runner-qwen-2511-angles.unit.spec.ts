@@ -333,7 +333,7 @@ describe('the price', () => {
       unit: 'per_megapixel', perMegapixel: 0.035, service: 'fal', confidence: 'verified', read: '2026-09-24',
       source: 'https://fal.ai/models/fal-ai/qwen-image-edit-2511-multiple-angles/llms.txt',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
     // At least one megapixel; rounded up (the ruling).
     const at = (px: number | null) => editUsd({ endpoint: QWEN_2511_ANGLES_APP, tier: null, inputPixels: px, outputPixels: px })
     expect(at(null)).toBe(0.035)

@@ -628,7 +628,7 @@ describe('prices (ruling (a))', () => {
     // The category price stays for the direct LoRA routes (requestMeter.ts).
     expect(LORA_RENDER_CREDITS).toBe(8)
     expect(readsEstimateCard('FluxMultiLoRARemoteNode', multi())).toBe(true)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
   })
 
   it('Flux Dev + LoRA 8 whatever the LoRA; Flux Dev + LoRAs 10 a call, held for two with two or more LoRAs, on both paths', async () => {

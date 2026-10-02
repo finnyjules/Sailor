@@ -322,7 +322,7 @@ describe('prices (ruling (a))', () => {
     for (const i of [generate, restyle]) expect(readsEstimateCard('TextEffectNode', i)).toBe(false)
     expect(readsEstimateCard('SketchToImageNode', sketch)).toBe(false)
     expect(readsEstimateCard('ConsistentFaceNode', face)).toBe(false)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
   })
 
   it('per call, on both paths: Text effect 6 generating (was 8), 8 restyling; Sketch 8; Face references 23 (was 16)', async () => {
@@ -649,7 +649,7 @@ describe('the direct character-shot route\'s price (fix round 1, ruling 2)', () 
     expect(MODEL_COSTS[FACE_SLUG]).toMatchObject({ usd: 0.15, credits: 23, confidence: 'verified' })
     expect(costForModel(FACE_SLUG)!.credits).toBe(creditsForUsd((PAID_RATES[FACE_SLUG] as { usd: number }).usd))
     expect(resolveCredits(FACE_SLUG)).toBe(23)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
   })
 
   it('the trainer shows the same dollars a shot', () => {

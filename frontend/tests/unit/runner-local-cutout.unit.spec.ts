@@ -734,7 +734,7 @@ describe('prices (R7 rule 4)', () => {
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, BG_REMOVE_CLASS)).toBe(false)
     expect(PAID_NODE_CLASSES).not.toContain(BG_REMOVE_CLASS)
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, BG_REMOVE_CLASS)).toBe(false)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-ideogram-4.5')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
   })
 
   it('priced only while its family is on: frames × one call (1 credit each); one picture when nothing was counted', () => {

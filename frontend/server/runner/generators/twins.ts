@@ -59,6 +59,8 @@
  * grok-imagine-2            Replicate  —           runner-only (F7): fal's xai/grok-imagine-image/v2 publishes no price
  *                                                  and no OpenAPI yet (grokImagine2.ts)
  * ideogram-4.5              fal        —           runner-only: Ideogram 4.5 is not on Replicate (ideogram45.ts)
+ * flux-3-image              fal        —           runner-only: Replicate's black-forest-labs/flux-3-image is not wired
+ *                                                  (flux3Image.ts)
  * muse-image                fal        —           runner-only (F13): Meta's Muse Image is not on Replicate (museImage.ts)
  * nano-banana-2-lite        Replicate  —           runner-only (F14): fal's google/nano-banana-2-lite bills by tokens and
  *                                                  publishes no price a picture (nanoBanana2Lite.ts)
@@ -218,6 +220,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:seedream-5-lite': r('fal', null, 'fal sizes by named sizes, Replicate only 2K or 3K'),
   'image:ideogram-4': r('fal', 'replicate', '2K only: Replicate makes only its ~4 MP sizes, so a 1K request has no backup; Replicate takes no seed and always expands the prompt'),
   'image:ideogram-4.5': r('fal', null, 'Ideogram 4.5 is not on Replicate'),
+  'image:flux-3-image': r('fal', null, 'Replicate\'s FLUX 3 Image is not wired as a backup'),
   'image:muse-image': r('fal', null, 'Muse Image is not on Replicate'),
   'image:nano-banana-2-lite': r('replicate', null, 'fal bills Nano Banana 2 Lite by tokens and publishes no price a picture'),
   'image:reve-2.1': r('fal', null, 'Reve 2.1 is not on Replicate'),

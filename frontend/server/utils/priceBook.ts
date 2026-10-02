@@ -282,7 +282,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-ideogram-4.5: Ideogram 4.5 on fal, priced by its quality alone
 // ($0.03 low, $0.06 medium, $0.22 high, whatever the size; runner-only,
 // family ideogram-4.5, no backup). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-ideogram-4.5'
+// lineup-flux-3-image: FLUX 3 Image on fal at the full $0.048 a megapixel
+// (never fal's launch promotion, which ends 2026-10-08), at the most each size
+// can bill: 1K 2 MP ($0.096), 2K 5 MP ($0.24), every ratio (runner-only,
+// family flux-3-image, no backup). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-flux-3-image'
 
 export const BASE_RENDER_CREDITS = 1
 

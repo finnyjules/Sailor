@@ -874,6 +874,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── grok-imagine-2 (model line-up F7): Grok Imagine 2 on Replicate, runner-only ──
   // ── ideogram-4 (model line-up F8): Ideogram 4 on fal, runner-only ──
   // ── ideogram-4.5: Ideogram 4.5 on fal, runner-only ──
+  // ── flux-3-image: FLUX 3 Image on fal, runner-only ──
   // ── muse-image (model line-up F13): Muse Image (Meta) on fal, runner-only ──
   // ── nano-banana-2-lite (model line-up F14): Nano Banana 2 Lite on Replicate, runner-only ──
   // ── reve-2.1 (model line-up F15): Reve 2.1 on fal, runner-only ──
@@ -888,6 +889,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'grok-imagine-2': 'grok-imagine-2',
       'ideogram-4': 'ideogram-4',
       'ideogram-4.5': 'ideogram-4.5',
+      'flux-3-image': 'flux-3-image',
       'muse-image': 'muse-image',
       'nano-banana-2-lite': 'nano-banana-2-lite',
       'reve-2.1': 'reve-2.1',

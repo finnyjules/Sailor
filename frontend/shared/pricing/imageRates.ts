@@ -4,7 +4,8 @@
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
  * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts),
  * Ideogram 4.5 (ideogram45.ts), Muse Image (museImage.ts), Reve 2.1
- * (reve21.ts) and Recraft V4.1 (recraftV41.ts), Replicate for the rest,
+ * (reve21.ts), Recraft V4.1 (recraftV41.ts) and FLUX 3 Image
+ * (flux3Image.ts), Replicate for the rest,
  * the runner-only Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite among
  * them (qwenImage3.ts, grokImagine2.ts, nanoBanana2Lite.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
@@ -50,7 +51,8 @@
  */
 import { creditsForUsd, usdChargedAtCost } from './markup'
 import {
-  BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, FLUX_2_DEV_MAX_MEGAPIXELS, IDEOGRAM_4_MAX_MEGAPIXELS, effectiveImageSettings, maxImageCount,
+  BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, FLUX_2_DEV_MAX_MEGAPIXELS, FLUX_3_IMAGE_MAX_MEGAPIXELS, IDEOGRAM_4_MAX_MEGAPIXELS, effectiveImageSettings,
+  maxImageCount,
   type ImageSettings,
 } from './imageSettings'
 
@@ -141,6 +143,20 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     unit: 'per_megapixel', perMegapixel: 0.025, perMegapixelByTier: { TURBO: 0.0075, BALANCED: 0.015, QUALITY: 0.025 },
     minMegapixels: 1, maxMegapixels: IDEOGRAM_4_MAX_MEGAPIXELS,
     service: 'fal', source: fal('ideogram/v4'), read: READ, confidence: 'verified',
+  },
+  // FLUX 3 Image (runner-only), fal only. fal bills it by the megapixel
+  // (the page's billing: unit "megapixels", price 0.024) at a launch promotion:
+  // "these promotional launch rates are 50% off for a limited time. The
+  // discount ends October 8, after which a 1K (1 MP) image will cost $0.048"
+  // (llms.txt, read 2026-10-02). Priced at the full $0.048 a megapixel, never
+  // the promotion, so no picture is charged below cost after it ends. The
+  // megapixels are the most each size can bill (imageSettings.ts
+  // FLUX_3_IMAGE_BILLED_MEGAPIXELS: 1K 2 MP, 2K 5 MP). The builder sends
+  // enable_prompt_expansion false and nothing else that costs extra. No backup.
+  'flux-3-image': {
+    unit: 'per_megapixel', perMegapixel: 0.048, minMegapixels: 1, maxMegapixels: FLUX_3_IMAGE_MAX_MEGAPIXELS,
+    service: 'fal', source: fal('blackforestlabs/flux-3/text-to-image'), read: '2026-10-02', confidence: 'verified',
+    note: 'the full rate after fal\'s launch promotion (50% off, $0.024 a megapixel, until 2026-10-08)',
   },
   // Ideogram 4.5 (runner-only), fal only: "Your request will cost $0.03 per
   // image with Low, $0.06 with Medium, and $0.22 with High quality. The image
