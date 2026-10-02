@@ -150,7 +150,7 @@ import {
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds, subjectClick } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
 import { isPieced, vocalsSilentStems, vocalsSound, wavIsSilent, type PiecedSound, type PythonWav, type VocalsSound } from '../soundWav'
-import { floatWavJoiner, pieceSilent, pieceSound, pieceSpan, pieceWav } from '../../media/split'
+import { SPLIT_BLOCK_SECONDS, floatWavJoiner, pieceSilent, pieceSound, pieceSpan, pieceWav } from '../../media/split'
 import { floatWav } from '../../media/encode'
 import { keepSound } from '../../media/values'
 import { wizperInput } from './soundIn'
@@ -1596,12 +1596,26 @@ export async function planWhisper(ctx: PlanContext): Promise<NodePlan> {
  */
 export function offsetChunks(chunks: readonly WhisperChunk[], span: { start: number; seconds: number }): WhisperChunk[] {
   let before = 0
+  // R11.5 fix round 1: every time within its piece (Whisper often ends the last segment a little past the
+  // sound), so no caption crosses a join and the times stay in order.
+  const inPiece = (t: number) => Math.min(Math.max(t, 0), span.seconds)
   return chunks.map((c) => {
-    const start = c.start ?? before
-    const end = c.end ?? span.seconds
+    const start = inPiece(c.start ?? before)
+    const end = inPiece(c.end ?? span.seconds)
     before = end
     return { start: start + span.start, end: end + span.start, text: c.text }
   })
+}
+
+/**
+ * R11.5 fix round 1 (the controller's ruling: the money rule beats the
+ * brief's "piece 1 only"): a node in pieces delivers only when every piece
+ * did. When one fails, or Stop lands mid-node, the pieces already answered
+ * delivered nothing the person keeps: each is marked undelivered (charged 0,
+ * Sailor absorbs it), as R3's rule says.
+ */
+async function piecesUndelivered(io: PipelineIO, keys: readonly string[]): Promise<void> {
+  for (const key of keys) await io.undelivered?.(key, 'sailor-fault')
 }
 
 /**
@@ -1611,7 +1625,8 @@ export function offsetChunks(chunks: readonly WhisperChunk[], span: { start: num
  * segments are moved by where it starts and the three texts made from them
  * all, as from one answer. A silent piece makes no call. Stop between pieces
  * sends nothing more (the call in flight is cancelled by the engine); a
- * piece that fails fails the node, the pieces before it charged (delivered).
+ * piece that fails, or Stop, fails the node and charges nothing: the pieces
+ * before it are marked undelivered (fix round 1, the controller's ruling).
  * A resumed node sends each piece's written-down request again.
  */
 function whisperPiecesPlan(ctx: PlanContext, inputs: Record<string, unknown>, fps: number, w: PiecedSound): NodePlan {
@@ -1620,26 +1635,34 @@ function whisperPiecesPlan(ctx: PlanContext, inputs: Record<string, unknown>, fp
     kind: 'pipeline', prefix: 'whisper',
     run: async (io: PipelineIO) => {
       const chunks: WhisperChunk[] = []
-      for (let i = 0; i < p.starts.length; i++) {
-        if (io.signal.aborted) throw new MediaError('stopped')
-        const span = pieceSpan(p, i)
-        const key = `wizper-${i + 1}`
-        let payload = io.recorded?.(key) ?? null
-        if (!payload) {
-          if (await pieceSilent(p, i)) continue
-          if (!ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
-          payload = whisperInput(inputs, await ctx.bytesToUrl({ filename: 'whisper.wav', subfolder: '', type: 'kept' }, await pieceWav(p, i)))
+      const sent: string[] = []
+      try {
+        for (let i = 0; i < p.starts.length; i++) {
+          if (io.signal.aborted) throw new MediaError('stopped')
+          const span = pieceSpan(p, i)
+          const key = `wizper-${i + 1}`
+          let payload = io.recorded?.(key) ?? null
+          if (!payload) {
+            if (await pieceSilent(p, i)) continue
+            if (!ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
+            payload = whisperInput(inputs, await ctx.bytesToUrl({ filename: 'whisper.wav', subfolder: '', type: 'kept' }, await pieceWav(p, i)))
+          }
+          const usd = paidCallUsd({ endpoint: WHISPER_SLUG, inputSeconds: span.seconds })
+          if (usd == null) throw new Error('Whisper transcribe has no price yet')
+          const got = await io.call({ key, provider: 'fal', endpoint: WHISPER_SLUG, payload, media: 'value', wait: 'video', usd })
+          let part: WhisperChunk[]
+          try { part = wizperChunks(got.result) }
+          catch (e) {
+            await io.undelivered?.(key, 'no-file')
+            throw e
+          }
+          sent.push(key)
+          chunks.push(...offsetChunks(part, span))
         }
-        const usd = paidCallUsd({ endpoint: WHISPER_SLUG, inputSeconds: span.seconds })
-        if (usd == null) throw new Error('Whisper transcribe has no price yet')
-        const got = await io.call({ key, provider: 'fal', endpoint: WHISPER_SLUG, payload, media: 'value', wait: 'video', usd })
-        let part: WhisperChunk[]
-        try { part = wizperChunks(got.result) }
-        catch (e) {
-          await io.undelivered?.(key, 'no-file')
-          throw e
-        }
-        chunks.push(...offsetChunks(part, span))
+      }
+      catch (e) {
+        await piecesUndelivered(io, sent)
+        throw e
       }
       return { values: whisperValues(whisperOutputs(chunks, fps, w.seconds)), ui: null }
     },
@@ -1813,9 +1836,10 @@ export async function planVocals(ctx: PlanContext): Promise<NodePlan> {
  * Each piece's two stems are appended to the joined stems as they come (one
  * piece in memory at a time), and the two joined float WAVs kept for the run.
  * A silent piece makes no call (silent stems of its length). Stop between
- * pieces sends nothing more; a piece that fails fails the node, the pieces
- * before it charged (delivered); joined stems that can't be kept charge
- * nothing (every piece marked undelivered). The work folder goes on every path.
+ * pieces sends nothing more; a piece that fails, Stop, or joined stems that
+ * can't be made or kept charge nothing: every piece answered is marked
+ * undelivered (fix round 1, the controller's ruling). The work folder goes on
+ * every path.
  */
 async function vocalsPieces(ctx: PlanContext, io: PipelineIO, w: PiecedSound, model: string, shifts: number, work: number): Promise<{ values: Record<number, RunnerValue>; ui: null }> {
   const media = io.media
@@ -1856,16 +1880,20 @@ async function vocalsPieces(ctx: PlanContext, io: PipelineIO, w: PiecedSound, mo
           throw new Error(VOCALS_WORDS.noAnswer)
         }
         const maxBytes = vocalsStemMaxBytes(span.seconds)
+        // Each stem must be its piece's length (fix round 1): a block's difference is trimmed or padded, more
+        // is no answer (a stem that would shift everything after the join).
+        const frames = p.starts[i + 1] === undefined ? p.frames - p.starts[i]! : p.starts[i + 1]! - p.starts[i]!
+        const fit = { frames, slack: Math.round(SPLIT_BLOCK_SECONDS * VOCALS_RATE) }
         for (const [url, joined] of [[urls.vocals, vocals], [urls.instrumental, instrumental]] as const) {
           const { bytes } = await io.download(url, { kind: 'audio', maxBytes })
           if (!isWav(bytes)) {
             await io.undelivered?.(key, 'no-file')
             throw new Error(VOCALS_WORDS.noAnswer)
           }
-          try { await joined.append(bytes) }
+          try { await joined.append(bytes, fit) }
           catch (e) {
-            if (!io.signal.aborted) await io.undelivered?.(key, 'not-kept')
-            throw e
+            await io.undelivered?.(key, e instanceof MediaError && e.word === 'failed' ? 'no-file' : 'not-kept')
+            throw e instanceof MediaError && e.word === 'failed' ? new Error(VOCALS_WORDS.noAnswer) : e
           }
         }
       }
@@ -1875,6 +1903,8 @@ async function vocalsPieces(ctx: PlanContext, io: PipelineIO, w: PiecedSound, mo
     catch (e) {
       await vocals.abort()
       await instrumental.abort()
+      // Fix round 1 (the controller's ruling): nothing reaches the person, so no piece is charged.
+      await piecesUndelivered(io, sent)
       throw e
     }
     // Kept by path (the tools read a sound by its path, never whole).
@@ -1888,7 +1918,7 @@ async function vocalsPieces(ctx: PlanContext, io: PipelineIO, w: PiecedSound, mo
       }
     }
     catch (e) {
-      if (!io.signal.aborted) for (const key of sent) await io.undelivered?.(key, 'not-kept')
+      await piecesUndelivered(io, sent)
       throw e
     }
   }

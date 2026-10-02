@@ -20,13 +20,13 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createFakeFal, createFakeReplicate, makeKit } from './__runner__/kit'
 import { requireMediaTools } from './__runner__/mediaParity'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import {
-  VOCALS_CLASS, VOCALS_PIECE_SECONDS, VOCALS_RATE, VOCALS_SLUG, WHISPER_CLASS, WHISPER_PIECE_SECONDS, WHISPER_SLUG,
+  VOCALS_CLASS, VOCALS_PIECE_SECONDS, VOCALS_RATE, VOCALS_SLUG, VOCALS_WORDS, WHISPER_CLASS, WHISPER_PIECE_SECONDS, WHISPER_SLUG,
   soundReadOnlyByPieces, vocalsCalls, whisperCalls,
 } from '#shared/runner/localModels'
 import { SOUND_PIECE_WINDOW_SECONDS, quietestCuts, soundPieceBounds, soundPieceCount } from '#shared/runner/soundPieces'
@@ -38,7 +38,17 @@ import { offsetChunks, whisperOutputs } from '~~/server/runner/generators/localM
 import { floatWav } from '~~/server/media/encode'
 import { probeMedia } from '~~/server/media/probe'
 import { floatWavFrames, pieceSamples, pieceSpan, splitSound, type SoundPieces } from '~~/server/media/split'
-import type { PiecedSound } from '~~/server/runner/soundWav'
+import { isPieced, vocalsSoundOf, type PiecedSound } from '~~/server/runner/soundWav'
+
+/** Fix round 1: a header that says more than the file decodes to (a VBR MP3's estimate), by `extra` seconds. */
+const HEADER = vi.hoisted(() => ({ extra: 0 }))
+vi.mock('~~/server/media/probe', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/media/probe')>()
+  return { ...real, soundSeconds: (p: Parameters<typeof real.soundSeconds>[0], t: Parameters<typeof real.soundSeconds>[1]) => {
+    const s = real.soundSeconds(p, t)
+    return s === null ? null : s + HEADER.extra
+  } }
+})
 
 const WHISPER_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'media-sound', 'whisper-captions'])
 const VOCALS_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'media-sound', 'vocal-split'])
@@ -207,6 +217,44 @@ describe('the splitter (server/media/split.ts)', () => {
   }, 60_000)
 })
 
+describe('fix round 1', () => {
+  it('Important: the choice between one call and pieces is made on the decoded length the price reads — a song whose header says past one call but which decodes within it is sent as ONE call, never more than held', async () => {
+    await requireMediaTools()
+    // Locally one Vocal separator call takes 20 minutes and pieces are 10: the header says 20:50, the file is 19:10.
+    const dir = scratch('long-sound-header-')
+    writeFileSync(join(dir, 'song.wav'), noiseWav(1000, 1150))
+    HEADER.extra = 100
+    const dirs: string[] = []
+    try {
+      const io = {
+        access: { verifiedPath: async () => join(dir, 'song.wav'), rootOf: () => dir } as never,
+        userId: null, hosted: false, pieceDirs: dirs,
+      }
+      const got = await vocalsSoundOf({ kind: 'files', files: [{ filename: 'song.wav', subfolder: '', type: 'input' }] }, 'LoadAudio', io)
+      expect(isPieced(got)).toBe(true)
+      if (!isPieced(got)) return
+      expect(got.seconds).toBe(1150)
+      // Priced as one call on these 1,150 s: so it is one piece.
+      const bounds = soundPieceBounds(got.seconds, 1200, VOCALS_PIECE_SECONDS)
+      expect(bounds).toEqual([1150])
+      expect(got.pieces.starts).toEqual([0])
+      expect(got.pieces.starts.length).toBeLessThanOrEqual(bounds.length)
+    }
+    finally {
+      HEADER.extra = 0
+      for (const d of dirs) rmSync(d, { recursive: true, force: true })
+    }
+    // Past one call (and with `single` given), it is still cut.
+    const p = await smallPieces(16000, 1)
+    expect(p.starts.length).toBe(4)
+  }, 120_000)
+
+  it('Minor 4: a segment stamped past its piece\'s end (or before its start) is held to the piece, so captions never cross a join', () => {
+    expect(offsetChunks([{ start: -0.2, end: 3 }, { start: 39.5, end: 41.2 }].map(c => ({ ...c, text: 'x' })), { start: 100, seconds: 40 }))
+      .toEqual([{ start: 100, end: 103, text: 'x' }, { start: 139.5, end: 140, text: 'x' }])
+  })
+})
+
 // ── The plans, with fake calls ───────────────────────────────────────────────
 
 describe('Whisper transcribe in pieces (the plan)', () => {
@@ -266,31 +314,34 @@ describe('Whisper transcribe in pieces (the plan)', () => {
     expect(want.srt).toContain('00:01:10,975 --> 00:01:11,975\nwizper-3 a')
   }, 60_000)
 
-  it('Stop between pieces: nothing more is sent; a piece that fails fails the node (the pieces before it delivered); an answer with no transcript is undelivered', async () => {
+  it('Stop between pieces: nothing more is sent; a piece that fails fails the node; either way nothing is charged (fix round 1); an answer with no transcript is undelivered', async () => {
     await requireMediaTools()
     const p = await smallPieces(16000, 1)
     const stopped = ioOf({ onCall: () => stopped.stop.abort() })
     await expect((await whisperPlan(p)).plan.run(stopped.io)).rejects.toThrow(MEDIA_WORDS.stopped)
     expect(stopped.calls.map(c => c.key)).toEqual(['wizper-1'])
+    // Fix round 1 (the controller's ruling): nothing reached the person, so the piece answered is charged 0.
+    expect(stopped.lost).toEqual(['wizper-1:sailor-fault'])
     const failing = ioOf({ onCall: (k) => { if (k === 'wizper-3') throw new Error('The provider refused this prompt') } })
     await expect((await whisperPlan(p)).plan.run(failing.io)).rejects.toThrow('The provider refused this prompt')
     expect(failing.calls.map(c => c.key)).toEqual(['wizper-1', 'wizper-3'])
-    expect(failing.lost).toEqual([])
+    expect(failing.lost).toEqual(['wizper-1:sailor-fault'])
     const empty = ioOf({ answer: k => (k === 'wizper-3' ? 'nothing' : undefined) })
     await expect((await whisperPlan(p)).plan.run(empty.io)).rejects.toThrow()
-    expect(empty.lost).toEqual(['wizper-3:no-file'])
+    expect(empty.lost).toEqual(['wizper-3:no-file', 'wizper-1:sailor-fault'])
   }, 60_000)
 })
 
 describe('Vocal separator in pieces (the plan)', () => {
   const STEMS = (k: string) => ({ vocals: `https://replicate.delivery/${k}-vocals.wav`, no_vocals: `https://replicate.delivery/${k}-no_vocals.wav` })
-  /** A stem: 1 s of stereo float32 at 44.1 kHz, every sample the piece's number (vocals) or minus it (instrumental). */
-  const stem = (url: string) => {
+  /** A stem: its piece's length (`off` frames more or less) of stereo float32 at 44.1 kHz (as the silent piece's are), every sample the piece's number (vocals) or minus it (instrumental). */
+  const stemOf = (p: SoundPieces, off = 0) => (url: string) => {
     const n = Number(/demucs-(\d+)/.exec(url)![1])
     const v = url.includes('no_vocals') ? -n / 10 : n / 10
-    return floatWav({ rate: VOCALS_RATE, channels: [new Float32Array(VOCALS_RATE).fill(v), new Float32Array(VOCALS_RATE).fill(v)] })
+    const frames = (p.starts[n] ?? p.frames) - p.starts[n - 1]! + off
+    return floatWav({ rate: VOCALS_RATE, channels: [new Float32Array(frames).fill(v), new Float32Array(frames).fill(v)] })
   }
-  async function vocalsRun(p: SoundPieces, o: { onCall?: (key: string, stop: AbortController) => void } = {}) {
+  async function vocalsRun(p: SoundPieces, o: { onCall?: (key: string, stop: AbortController) => void; off?: (key: string) => number } = {}) {
     const sent: string[] = []
     const plan = await planNode({
       prompt: { s: { class_type: 'LoadAudio', inputs: { audio: 'song.wav' } }, n: { class_type: VOCALS_CLASS, inputs: { audio: ['s', 0], model: 'htdemucs', shifts: 1 } } } as ApiPrompt,
@@ -321,7 +372,7 @@ describe('Vocal separator in pieces (the plan)', () => {
       },
       recorded: () => null,
       call: async (c: (typeof calls)[number]) => { calls.push(c); o.onCall?.(c.key, stop); return { result: { output: STEMS(c.key) }, raw: null, urls: [] } },
-      download: async (url: string) => ({ bytes: stem(url), contentType: 'audio/wav' }),
+      download: async (url: string) => ({ bytes: stemOf(p, o.off?.(/demucs-\d+/.exec(url)![0]) ?? 0)(url), contentType: 'audio/wav' }),
       undelivered: async (k: string, why: string) => { lost.push(`${k}:${why}`) },
     } as unknown as PipelineIO
     const run = (plan as Extract<NodePlan, { kind: 'pipeline' }>).run(io)
@@ -344,28 +395,40 @@ describe('Vocal separator in pieces (the plan)', () => {
       0: { kind: 'files', files: [{ filename: 'k1.wav', subfolder: '', type: 'kept' }], sound: { decode: 'load' } },
       1: { kind: 'files', files: [{ filename: 'k2.wav', subfolder: '', type: 'kept' }], sound: { decode: 'load' } },
     })
-    // 1 s (piece 1), the silent piece's 30 s, 1 s, 1 s.
-    const silent = p.starts[2]! - p.starts[1]!
-    for (const f of t.kept) expect(await floatWavFrames(f)).toBe(3 * VOCALS_RATE + silent)
+    // Each piece's stem its own length (the silent piece's silence too): the whole song's length, in order.
+    for (const f of t.kept) expect(await floatWavFrames(f)).toBe(p.frames)
     const vocals = new DataView(new Uint8Array(readFileSync(t.kept[0]!)).buffer)
     const at = (frame: number) => vocals.getFloat32(58 + frame * 8, true)
-    expect([at(0), at(VOCALS_RATE + 5), at(VOCALS_RATE + silent + 5), at(2 * VOCALS_RATE + silent + 5)]).toEqual([Math.fround(0.1), 0, Math.fround(0.3), Math.fround(0.4)])
+    expect([at(0), at(p.starts[1]! + 5), at(p.starts[2]! + 5), at(p.starts[3]! + 5), at(p.frames - 1)]).toEqual([Math.fround(0.1), 0, Math.fround(0.3), Math.fround(0.4), Math.fround(0.4)])
     const inst = new DataView(new Uint8Array(readFileSync(t.kept[1]!)).buffer)
     expect(inst.getFloat32(58, true)).toBe(Math.fround(-0.1))
     expect(t.lost).toEqual([])
   }, 120_000)
 
-  it('Stop between pieces sends nothing more and keeps nothing; a piece that fails keeps nothing, the one before it delivered', async () => {
+  it('Stop between pieces sends nothing more and keeps nothing; a piece that fails keeps nothing; either way nothing is charged (fix round 1)', async () => {
     await requireMediaTools()
     const p = await smallPieces(VOCALS_RATE, 2)
     const stopped = await vocalsRun(p, { onCall: (_k, stop) => stop.abort() })
     await expect(stopped.run).rejects.toThrow(MEDIA_WORDS.stopped)
     expect(stopped.calls.map(c => c.key)).toEqual(['demucs-1'])
-    expect(stopped.kept).toEqual([])
+    expect([stopped.kept, stopped.lost]).toEqual([[], ['demucs-1:sailor-fault']])
     const failing = await vocalsRun(p, { onCall: (k) => { if (k === 'demucs-3') throw new Error('Replicate: The input or output was flagged as sensitive') } })
     await expect(failing.run).rejects.toThrow('flagged')
     expect(failing.calls.map(c => c.key)).toEqual(['demucs-1', 'demucs-3'])
-    expect([failing.kept, failing.lost]).toEqual([[], []])
+    // Fix round 1 (the controller's ruling): piece 1 is charged 0 too.
+    expect([failing.kept, failing.lost]).toEqual([[], ['demucs-1:sailor-fault']])
+  }, 120_000)
+
+  it('Minors 2 and 3: a stem within a block of its piece\'s length is trimmed or padded; one further off is no answer, and every piece answered goes uncharged', async () => {
+    await requireMediaTools()
+    const p = await smallPieces(VOCALS_RATE, 2)
+    const near = await vocalsRun(p, { off: k => (k === 'demucs-1' ? 300 : k === 'demucs-3' ? -300 : 0) })
+    await near.run
+    for (const f of near.kept) expect(await floatWavFrames(f)).toBe(p.frames)
+    const far = await vocalsRun(p, { off: k => (k === 'demucs-3' ? VOCALS_RATE : 0) })
+    await expect(far.run).rejects.toThrow(VOCALS_WORDS.noAnswer)
+    // (The engine keeps a call's first mark: demucs-3's second is a no-op there.)
+    expect([far.kept, far.lost]).toEqual([[], ['demucs-3:no-file', 'demucs-1:sailor-fault', 'demucs-3:sailor-fault']])
   }, 120_000)
 })
 
@@ -419,7 +482,7 @@ describe('through the engine (ComfyUI off): held as pieces × price, charged wha
     expect(whisperCredits({ audioUpTo: upTo })).toBeGreaterThan(whisperCredits({}))
   }, 180_000)
 
-  it('Whisper: Stop between pieces cancels the call in flight, sends nothing more, and releases the rest of the hold', async () => {
+  it('Whisper: Stop between pieces cancels the call in flight, sends nothing more, charges nothing and releases the hold', async () => {
     await requireMediaTools()
     let answered = 0
     const fal = createFakeFal({
@@ -442,9 +505,10 @@ describe('through the engine (ComfyUI off): held as pieces × price, charged wha
     const take = (await k.store.get(runId))!.takes[0]!
     const first = take.nodes.n!.calls!.find(c => c.key === 'wizper-1')!
     const [h] = [...k.ledger.holds.values()]
-    // The delivered piece stays charged (it was delivered; the person stopped the node); the rest goes back.
-    expect(h!.state === 'released' ? 0 : h!.actual).toBe(perFrameCredits([{ usd: first.usd }]))
-    expect(h!.credits).toBeGreaterThan(perFrameCredits([{ usd: first.usd }]))
+    // Fix round 1 (the controller's ruling): the answered piece delivered nothing the person keeps, so it is
+    // charged 0 (Sailor absorbs it), and the whole hold goes back.
+    expect([first.status, first.lost]).toEqual(['done', true])
+    expect(h!.state === 'released' ? 0 : h!.actual).toBe(0)
   }, 180_000)
 
   const vocalsPrompt = (): ApiPrompt => ({
@@ -454,12 +518,22 @@ describe('through the engine (ComfyUI off): held as pieces × price, charged wha
     i: { class_type: 'SaveAudioMP3', inputs: { audio: ['n', 1], filename_prefix: 'karaoke_instrumental', quality: 'V0' } },
   })
   const SONG = 10 * 60 + 20
-  /** Each stem: 1 s (the joined stems' order and lengths are the plan's test's). */
-  const stemDownload = async (url: string) => ({
-    bytes: floatWav({ rate: VOCALS_RATE, channels: [new Float32Array(VOCALS_RATE).fill(url.includes('no_vocals') ? 0.25 : 0.5), new Float32Array(VOCALS_RATE).fill(0.1)] }),
-    contentType: 'audio/wav',
-  })
-  const STEM_URLS = { vocals: 'https://replicate.delivery/vocals.wav', no_vocals: 'https://replicate.delivery/no_vocals.wav' }
+  /**
+   * Replicate's answers, numbered in order, and their stems: each the length of the FLAC piece it answers (read
+   * from the FLAC's STREAMINFO, as the uploads came), mono float32 at 44.1 kHz.
+   */
+  const stemsFor = (k: { upload: { mock: { calls: unknown[][] } } }) => {
+    let n = 0
+    const answer = () => { n++; return { vocals: `https://replicate.delivery/${n}-vocals.wav`, no_vocals: `https://replicate.delivery/${n}-no_vocals.wav` } }
+    const download = async (url: string) => {
+      const i = Number(/\/(\d+)-/.exec(url)![1])
+      const flacs = k.upload.mock.calls.map(c => c[0] as Uint8Array).filter(b => String.fromCharCode(...b.subarray(0, 4)) === 'fLaC')
+      const b = flacs[i - 1]!
+      const frames = (b[21]! & 0x0F) * 2 ** 32 + ((b[22]! << 24) >>> 0) + (b[23]! << 16) + (b[24]! << 8) + b[25]!
+      return { bytes: floatWav({ rate: VOCALS_RATE, channels: [new Float32Array(frames).fill(url.includes('no_vocals') ? 0.25 : 0.5)] }), contentType: 'audio/wav' }
+    }
+    return { answer, download }
+  }
   const vocalsCredits = (seen: Record<string, unknown>) => {
     const p = localModelPrice(vocalsCalls({ model: 'htdemucs', shifts: 1 }, { place: 'hosted', ...seen }))
     if ('refused' in p) throw new Error(p.refused)
@@ -468,8 +542,10 @@ describe('through the engine (ComfyUI off): held as pieces × price, charged wha
 
   it('Karaoke\'s chain, hosted, a 10-minute-20 song: two Demucs calls, both saves made from the joined stems, held for its pieces and charged the two delivered', async () => {
     await requireMediaTools()
-    const replicate = createFakeReplicate({ answer: () => STEM_URLS })
-    const k = makeKit({ hosted: true, replicate, deps: { families: () => VOCALS_ON, download: stemDownload } })
+    const stems: { answer?: () => unknown; download?: (url: string) => Promise<{ bytes: Uint8Array; contentType: string }> } = {}
+    const replicate = createFakeReplicate({ answer: () => stems.answer!() })
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => VOCALS_ON, download: url => stems.download!(url) } })
+    Object.assign(stems, stemsFor(k))
     made.push(k.root, k.dir)
     putInput(k.root, 'song.wav', noiseWav(4000, SONG, [[590, 591]]))
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [vocalsPrompt()], ...START })
@@ -499,18 +575,23 @@ describe('through the engine (ComfyUI off): held as pieces × price, charged wha
     expect((await k.engine.quoteRun({ userId: k.userId, takes: [vocalsPrompt()], ...START })).credits).toBe(h!.credits)
     // Its two joined stems and the converted song were counted against the kept room before the hold.
     expect(take.keptUpTo?.n).toBeGreaterThan(Math.ceil(SONG) * VOCALS_RATE * 2 * 2)
+    // The joined stems are the whole song's length.
+    const stem = take.nodes.n!.values![0] as { kind: 'files'; files: { filename: string; subfolder: string }[] }
+    expect(stem.files).toHaveLength(1)
   }, 180_000)
 
-  it('Karaoke\'s chain: a failure in piece 2 charges piece 1 only; the node fails and nothing after it runs', async () => {
+  it('Karaoke\'s chain: a failure in piece 2 charges nothing (fix round 1, the controller\'s ruling: piece 1 delivered nothing the person keeps); the node fails and nothing after it runs', async () => {
     await requireMediaTools()
     let answered = 0
+    const stems: { answer?: () => unknown; download?: (url: string) => Promise<{ bytes: Uint8Array; contentType: string }> } = {}
     const replicate = createFakeReplicate({
       answer: () => {
         if (answered++ === 0) replicate.failNext(1)
-        return STEM_URLS
+        return stems.answer!()
       },
     })
-    const k = makeKit({ hosted: true, replicate, deps: { families: () => VOCALS_ON, download: stemDownload } })
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => VOCALS_ON, download: url => stems.download!(url) } })
+    Object.assign(stems, stemsFor(k))
     made.push(k.root, k.dir)
     putInput(k.root, 'song.wav', noiseWav(4000, SONG))
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [vocalsPrompt()], ...START })
@@ -520,8 +601,8 @@ describe('through the engine (ComfyUI off): held as pieces × price, charged wha
     expect(replicate.submitted().length).toBe(2)
     for (const id of ['v', 'i']) expect(take.nodes[id]!.status).not.toBe('done')
     const first = take.nodes.n!.calls!.find(c => c.key === 'demucs-1')!
-    expect(first.status).toBe('done')
+    expect([first.status, first.lost]).toEqual(['done', true])
     const [h] = [...k.ledger.holds.values()]
-    expect(h!.state === 'released' ? 0 : h!.actual).toBe(perFrameCredits([{ usd: first.usd }]))
+    expect(h!.state === 'released' ? 0 : h!.actual).toBe(0)
   }, 180_000)
 })

@@ -282,7 +282,7 @@ async function piecesOf(value: RunnerValue & { kind: 'files' }, io: PieceIO, o: 
   // A length the header doesn't state is read whole, under R5's caps, as before.
   if (secs === null || !(secs > o.single)) return null
   if (secs > o.ceiling + 1) throw new MediaError('tooLong')
-  const pieces = await splitSound(probe, { stream: 0, rate: o.rate, channels: o.channels, limit: o.limit, ceiling: o.ceiling, userId: io.userId, ...(io.signal ? { signal: io.signal } : {}) })
+  const pieces = await splitSound(probe, { stream: 0, rate: o.rate, channels: o.channels, limit: o.limit, ceiling: o.ceiling, single: o.single, userId: io.userId, ...(io.signal ? { signal: io.signal } : {}) })
   io.pieceDirs?.push(pieces.dir)
   return { wav: new Uint8Array(0), seconds: pieces.seconds, frames: pieces.frames, rate: pieces.rate, channels: pieces.channels, pieces }
 }

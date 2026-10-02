@@ -101,6 +101,13 @@ export function wavLayout(head: Uint8Array): { format: number; channels: number;
 export async function splitSound(probe: MediaProbe, o: {
   stream: number; rate: number; channels: 1 | 2
   limit: number; ceiling: number
+  /**
+   * R11.5 fix round 1: the longest sound ONE call takes where it runs. A sound
+   * that decodes to no more is never cut (one piece), whatever its header
+   * said: the price (soundPieceBounds) calls it one call on the same decoded
+   * length, so the pieces can never outnumber the hold. Absent: cut at `limit`.
+   */
+  single?: number
   userId: string | null; signal?: AbortSignal
 }): Promise<SoundPieces> {
   const s = probe.sound[o.stream]
@@ -128,7 +135,8 @@ export async function splitSound(probe: MediaProbe, o: {
     if (seconds > o.ceiling) throw new MediaError('tooLong')
     if (read.frames < 1) throw new MediaError('noSound')
     const block = Math.round(SPLIT_BLOCK_SECONDS * o.rate)
-    const cuts = quietestCuts(read.quiet, {
+    // Priced as one call on this very length: sent as one.
+    const cuts = o.single !== undefined && !(seconds > o.single) ? [] : quietestCuts(read.quiet, {
       total: read.frames, block,
       limit: Math.floor(o.limit * o.rate), window: Math.floor(SOUND_PIECE_WINDOW_SECONDS * o.rate),
     })
@@ -258,7 +266,7 @@ export async function removeSoundPieces(p: Pick<SoundPieces, 'dir'>): Promise<vo
  * at a time as they come (`append`), and the header written once at the end
  * (`finish`), so the join never holds more than one part in memory.
  */
-export async function floatWavJoiner(out: string): Promise<{ append(part: Uint8Array): Promise<void>; finish(): Promise<void>; abort(): Promise<void> }> {
+export async function floatWavJoiner(out: string): Promise<{ append(part: Uint8Array, o?: { frames: number; slack: number }): Promise<void>; finish(): Promise<void>; abort(): Promise<void> }> {
   const fh = await open(out, 'wx')
   const HEAD = 58
   let fmt: { channels: number; rate: number } | null = null
@@ -271,16 +279,30 @@ export async function floatWavJoiner(out: string): Promise<{ append(part: Uint8A
     await fh.close()
   }
   return {
-    async append(part) {
+    async append(part, o) {
       const lay = wavLayout(part.subarray(0, Math.min(part.length, 4096)))
       if (lay.format !== 3 || lay.bits !== 32) throw new MediaError('failed')
       if (fmt && (fmt.channels !== lay.channels || fmt.rate !== lay.rate)) throw new MediaError('failed')
       fmt ??= { channels: lay.channels, rate: lay.rate }
       const bytes = Math.min(lay.dataBytes, part.length - lay.dataOffset)
-      const whole = bytes - (bytes % (4 * lay.channels))
-      if (HEAD + data + whole > 0xFFFFFFFF) throw new MediaError('tooBig')
+      const frameBytes = 4 * lay.channels
+      let whole = bytes - (bytes % frameBytes)
+      // R11.5 fix round 1: a part must be the length it stands for (`frames`): a little longer is trimmed,
+      // a little shorter padded with silence (at most `slack` frames either way); more fails.
+      let pad = 0
+      if (o) {
+        const got = whole / frameBytes
+        if (Math.abs(got - o.frames) > o.slack) throw new MediaError('failed')
+        if (got > o.frames) whole = o.frames * frameBytes
+        else pad = (o.frames - got) * frameBytes
+      }
+      if (HEAD + data + whole + pad > 0xFFFFFFFF) throw new MediaError('tooBig')
       await fh.write(part, lay.dataOffset, whole, HEAD + data)
       data += whole
+      if (pad) {
+        await fh.write(new Uint8Array(pad), 0, pad, HEAD + data)
+        data += pad
+      }
     },
     async finish() {
       if (!fmt) throw new MediaError('failed')
