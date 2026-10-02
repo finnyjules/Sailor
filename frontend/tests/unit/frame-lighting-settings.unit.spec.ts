@@ -149,9 +149,9 @@ describe('lights elsewhere', () => {
     const units = buildUnits([rect, newLightLayer('lamp')], [], null, 1000, 1000)
     expect(units.map(u => u.id)).toEqual(['r'])
   })
-  it('a light animates Position X/Y only', () => {
+  it('a light animates its position and light dials only (stage 4)', () => {
     const props = animatableProperties(newLightLayer('spot') as any)
-    expect(props.map(p => p.label)).toEqual(['Position X', 'Position Y'])
+    expect(props.map(p => p.label)).toEqual(['Position X', 'Position Y', 'Height', 'Colour', 'Brightness', 'Reach', 'Aim X', 'Aim Y', 'Cone'])
   })
   it('layerPaints and localLayerBox', () => {
     const l = newLightLayer('lamp') as any

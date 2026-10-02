@@ -24,6 +24,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // (evaluate.ts/types.ts don't import this file).
 import { DEFAULT_FRAME_LIGHT, type FrameLight } from '~/lib/compositor/frameLight'
 import { DEFAULT_LIGHTING, MAX_LIGHTS, storedLighting, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
+import { applyLightingTracks } from '~/lib/frame/lighting/motion'
 import { lightFrame, lightingAvailable, lightBoxWithFrameLights } from '~/lib/frame/lighting/lightingPass'
 import { bumpLightingMapEpoch, layerSig, onLightingRelease, type LightingStamp } from '~/lib/frame/lighting/maps'
 import type { LayerMotionState } from '~/lib/motion/evaluate'
@@ -6919,7 +6920,11 @@ export function paintLayerStack(
   // which has no light layer yet) paints through the read-only conversion, so every painter —
   // cards, Render, video, web export — shows it converted. Never persisted here (the editor
   // converts once on open). No legacy Relight ⇒ the same arrays, untouched.
-  const legacy = legacyRelightView(items, localLayers, lighting, W, H)
+  // Light layers stage 4: a Darkness band sets the Frame's lighting at `t` — ONE value for every
+  // reader below (the legacy conversion, lit finishes, the lighting pass). No band ⇒ same ref.
+  const litNow = applyLightingTracks(lighting, motion?.motionx, t)
+  const legacy = legacyRelightView(items, localLayers, litNow, W, H)
+  lighting = litNow
   if (legacy) ({ items, localLayers, lighting } = legacy)
   // Relight photo caches hold two entries per visible photo (plus slack for another surface).
   let relightPhotos = 0

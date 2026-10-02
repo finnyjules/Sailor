@@ -60,11 +60,12 @@ describe('frameTarget + animatableProperties', () => {
     expect(paths).toContain('layers.L1.fill')
     expect(paths).toContain('layers.L1.fill.phase')
   })
-  it('tags every property with a group (Transform / Fill / Effects)', () => {
+  it('tags every property with a group (Transform / Fill / Effects / Light)', () => {
     const props = animatableProperties(layer())
     expect(props.find(p => p.path === 'layers.L1.x')!.group).toBe('Transform')
     expect(props.find(p => p.path === 'layers.L1.fill')!.group).toBe('Fill')
-    expect(props.every(p => ['Transform', 'Fill', 'Effects'].includes(p.group))).toBe(true)
+    expect(props.find(p => p.path === 'layers.L1.lift')!.group).toBe('Light')
+    expect(props.every(p => ['Transform', 'Fill', 'Effects', 'Light'].includes(p.group))).toBe(true)
   })
   it('enumerates every number/colour/gradient effect dial, with range, skipping enum/bool dials', () => {
     const l = layer({ effects: [{ id: 'fx1', type: 'bloom', threshold: 0.5, radius: 0.1, intensity: 1 }] })
@@ -315,5 +316,55 @@ describe('morph motion-only row', () => {
   it('treats morph as a motion-only row named Morph', () => {
     expect(MOTION_ONLY_LABELS.morph).toBe('Morph')
     expect(isMotionOnlyPath('layers.a.morph')).toBe(true)
+  })
+})
+
+describe('light bands (Frame light layers stage 4)', () => {
+  const lampL = () => ({ id: 'lp', kind: 'light', x: 0.5, y: 0.5, rotation: 0, opacity: 1,
+    light: { type: 'lamp', height: 0.55, color: '#ffb36b', brightness: 1.6, reach: 1, aimX: 0.5, aimY: 0.5, cone: 0.35, edge: 0.5 } } as unknown as LocalLayer)
+  const spotL = () => { const l = lampL() as any; return { ...l, id: 'sp', light: { ...l.light, type: 'spot' } } as LocalLayer }
+  const textL = (over: Record<string, unknown> = {}) => ({ id: 'tx', kind: 'text', text: 'Hi', x: 0.5, y: 0.5, rotation: 0, opacity: 1, ...over } as unknown as LocalLayer)
+  const num = (path: string, a: number, b: number): Track => ({ path, type: 'number', keyframes: [{ t: 0, value: a, ease: 'linear' }, { t: 1, value: b, ease: 'linear' }] })
+
+  it('applyResolvedValue routes light dials and Lift; inapplicable ⇒ same ref', () => {
+    expect((applyResolvedValue(lampL(), 'light.brightness', 2.5) as any).light.brightness).toBe(2.5)
+    expect((applyResolvedValue(lampL(), 'light.reach', 9) as any).light.reach).toBe(2)
+    expect((applyResolvedValue(textL(), 'lift', 0.1) as any).lift).toBe(0.1)
+    const t = textL(); expect(applyResolvedValue(t, 'light.brightness', 2)).toBe(t)
+    const l = lampL(); expect(applyResolvedValue(l, 'lift', 0.1)).toBe(l)
+  })
+
+  it('applyMotionxTracks folds a light band and a colour band onto the light', () => {
+    const colour: Track = { path: 'layers.lp.light.color', type: 'color', keyframes: [{ t: 0, value: '#000000', ease: 'linear' }, { t: 1, value: '#ffffff', ease: 'linear' }] }
+    const [out] = applyMotionxTracks([lampL()], [num('layers.lp.light.height', 0, 1), colour], 0.5) as any[]
+    expect(out.light.height).toBeCloseTo(0.5, 10)
+    expect(out.light.color).toMatch(/^#[0-9a-f]{6}$/)
+    expect(out.light.color).not.toBe('#ffb36b')
+  })
+
+  it('idle (no light band, or only a Darkness band) ⇒ the same array', () => {
+    const arr = [lampL(), textL()]
+    expect(applyMotionxTracks(arr, [num('frame.darkness', 0, 1)], 0.5)).toBe(arr)
+    expect(applyMotionxTracks(arr, [{ ...num('layers.lp.light.height', 0, 1), muted: true }], 0.5)).toBe(arr)
+    expect(applyMotionxTracks(arr, [num('layers.tx.light.height', 0, 1)], 0.5)).toBe(arr)
+  })
+
+  it('animatableProperties: a lamp moves and has its light dials; a spot adds aim and cone', () => {
+    const lamp = animatableProperties(lampL())
+    expect(lamp.map(p => p.label)).toEqual(['Position X', 'Position Y', 'Height', 'Colour', 'Brightness', 'Reach'])
+    expect(lamp.slice(2).every(p => p.group === 'Light')).toBe(true)
+    expect(lamp.find(p => p.label === 'Colour')).toMatchObject({ path: 'layers.lp.light.color', type: 'color' })
+    expect(lamp.find(p => p.label === 'Reach')).toMatchObject({ min: 0.2, max: 2 })
+    const spot = animatableProperties(spotL())
+    expect(spot.map(p => p.label)).toEqual(['Position X', 'Position Y', 'Height', 'Colour', 'Brightness', 'Reach', 'Aim X', 'Aim Y', 'Cone'])
+    expect(spot.find(p => p.label === 'Cone')).toMatchObject({ path: 'layers.sp.light.cone', min: 0.1, max: 0.8 })
+  })
+
+  it('animatableProperties: a casting text gains Lift; a non-casting one does not', () => {
+    expect(animatableProperties(textL()).find(p => p.label === 'Lift'))
+      .toEqual({ path: 'layers.tx.lift', type: 'number', label: 'Lift', group: 'Light', min: 0.005, max: 0.15 })
+    expect(animatableProperties(textL({ castsShadow: false })).some(p => p.label === 'Lift')).toBe(false)
+    // An image does not cast by default.
+    expect(animatableProperties(textL({ kind: 'image' })).some(p => p.label === 'Lift')).toBe(false)
   })
 })

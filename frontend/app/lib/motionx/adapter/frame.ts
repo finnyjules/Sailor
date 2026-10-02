@@ -13,6 +13,8 @@ import { isGradient, type Paint } from '~/lib/compositor/paint'
 import { withScrolledStops, withGradientStops, paintStopsToColor } from '~/lib/compositor/gradientPaint'
 import { effectStackOf, writeStackToLayer, EFFECT_LABELS } from '~/lib/compositor/effectStack'
 import { dialSpecsFor } from '~/lib/compositor/effectDials'
+import { applyLightValue } from '~/lib/frame/lighting/motion'
+import { effectiveCasts } from '~/lib/frame/lighting/settings'
 
 const TRANSFORM = new Set(['x', 'y', 'rotation', 'scale', 'opacity'])
 
@@ -50,7 +52,7 @@ export function applyResolvedValue(layer: LocalLayer, prop: string, value: Prope
     if (!changed) return layer
     return { ...layer, ...writeStackToLayer(next) } as LocalLayer
   }
-  return layer
+  return applyLightValue(layer, prop, value)
 }
 
 /** Evaluate all `tracks` at `t` and fold the resolved values onto cloned `layers`.
@@ -285,7 +287,7 @@ export function frameTarget(layer: LocalLayer): BehaviourTarget {
   }
 }
 
-export type PropertyGroup = 'Transform' | 'Fill' | 'Effects' | 'Copies'
+export type PropertyGroup = 'Transform' | 'Fill' | 'Effects' | 'Copies' | 'Light'
 export interface AnimatableProperty {
   path: string
   type: 'number' | 'color' | 'gradient'
@@ -328,11 +330,16 @@ export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
     { path: `layers.${id}.rotation`, type: 'number', label: 'Rotation', group: 'Transform', min: -360, max: 360 },
     { path: `layers.${id}.opacity`, type: 'number', label: 'Opacity', group: 'Transform', min: 0, max: 1 },
   ]
-  // A light is a point: it can move, nothing else (no scale, rotation, opacity, fill or effects).
+  // A light is a point: it moves and its dials change — no scale, rotation, opacity, fill or
+  // effects. Ranges are the light sanitizer's (lib/frame/lighting/settings.ts).
   if (layer.kind === 'light') {
+    const L = (key: string, label: string, min?: number, max?: number): AnimatableProperty =>
+      ({ path: `layers.${id}.light.${key}`, type: key === 'color' ? 'color' : 'number', label, group: 'Light', min, max })
     return [
       { path: `layers.${id}.x`, type: 'number', label: 'Position X', group: 'Transform', min: -0.5, max: 1.5 },
       { path: `layers.${id}.y`, type: 'number', label: 'Position Y', group: 'Transform', min: -0.5, max: 1.5 },
+      L('height', 'Height', 0, 1), L('color', 'Colour'), L('brightness', 'Brightness', 0, 3), L('reach', 'Reach', 0.2, 2),
+      ...(layer.light.type === 'spot' ? [L('aimX', 'Aim X', -0.5, 1.5), L('aimY', 'Aim Y', -0.5, 1.5), L('cone', 'Cone', 0.1, 0.8)] : []),
     ]
   }
   const fill = (layer as unknown as { fill?: Paint }).fill
@@ -360,6 +367,8 @@ export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
       out.push({ path: `layers.${id}.cloner.${p.key}`, type: 'number', label: p.label, group: 'Copies', min: p.min, max: p.max })
     }
   }
+  // How high a casting layer stands above the Frame for the lights' shadows.
+  if (effectiveCasts(layer)) out.push({ path: `layers.${id}.lift`, type: 'number', label: 'Lift', group: 'Light', min: 0.005, max: 0.15 })
   return out
 }
 

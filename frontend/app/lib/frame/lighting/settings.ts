@@ -22,7 +22,7 @@ export const LIGHT_DEFAULTS: Record<LightType, LightParams> = {
 
 const num = (v: unknown, lo: number, hi: number, fb: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fb
-const HEX = /^#[0-9a-fA-F]{6}$/
+export const HEX = /^#[0-9a-fA-F]{6}$/
 
 function sanitizeParams(raw: unknown): LightParams {
   const r = (raw ?? {}) as Record<string, unknown>
