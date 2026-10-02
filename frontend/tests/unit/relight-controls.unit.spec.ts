@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight } from '~/lib/relight/settings'
@@ -99,7 +99,7 @@ describe('RelightControls', () => {
     })
     it('loading with no price shows the plain copy', () => {
       const t = mkSurfaces('loading', null).get('[data-testid="relight-status-loading"]').text()
-      expect(t).toBe('Reading shape')
+      expect(t).toBe('Reading shape · 0 s')
     })
     it('offers a Retry button on error, which emits retry-surfaces', async () => {
       const w = mkSurfaces('error')
@@ -165,7 +165,33 @@ describe('RelightControls', () => {
         },
       })
       expect(w.find('[data-testid="relight-surfaces-read"]').exists()).toBe(false)
-      expect(w.get('[data-testid="relight-status-loading"]').text()).toBe('Reading shape · ~$0.01')
+      const b = w.get('[data-testid="relight-status-loading"]')
+      // The same full-width button, greyed out and not clickable while the read runs.
+      expect(b.element.tagName).toBe('BUTTON')
+      expect(b.attributes('disabled')).toBeDefined()
+      expect(b.classes()).toContain('w-full')
+      expect(b.text()).toBe('Reading shape · ~$0.01 · 0 s')
+    })
+
+    it('the Read shape button is full width', () => {
+      expect(mkAbsent('~$0.01').get('[data-testid="relight-surfaces-read"]').classes()).toContain('w-full')
+    })
+
+    it('counts the wait from when the read started, and says "Still reading" after 30 s', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(new Date('2026-10-01T12:00:00Z'))
+        const startedAt = Date.now() - 12_000
+        const w = mount(RelightControls, {
+          props: { fx: sanitizeRelight(null), depthStatus: 'ready', surfacesStatus: 'loading', surfacesPrice: '~$0.01', surfacesStartedAt: startedAt },
+        })
+        expect(w.get('[data-testid="relight-status-loading"]').text()).toBe('Reading shape · ~$0.01 · 12 s')
+        await vi.advanceTimersByTimeAsync(20_000)
+        expect(w.get('[data-testid="relight-status-loading"]').text()).toBe('Still reading · ~$0.01 · 32 s')
+        w.unmount()
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
   describe('Finish button (stage 3)', () => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** The Relight effect's settings. Layout and presets follow the mockup (artifact 7rAD2Mu5a2S5d34kHU42iy). */
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import type { RelightEffect } from '~/lib/relight/settings'
@@ -10,7 +10,7 @@ import { RELIGHT_SETUP_NAMES, type RelightSetupName } from '~/lib/relight/preset
  *  Frame's lights; they are edited in the light inspector, not here). */
 export interface RelightLightChip { id: string; name: string; color: string; visible: boolean }
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   fx: RelightEffect
   /** The Frame's light layers, in stack order. */
   lights?: readonly RelightLightChip[]
@@ -30,6 +30,8 @@ withDefaults(defineProps<{
   surfacesPrice?: string | null
   /** The "Read shape" button's own price — shown whenever surfacesStatus is 'absent'. */
   surfacesReadPrice?: string | null
+  /** When the read in flight started (ms since epoch) — the button counts the wait from it. */
+  surfacesStartedAt?: number | null
   /** Words for the error line in place of the plain one — set only for a read that is still
    *  running on the provider ("Still reading — try again in a minute"). */
   surfacesNote?: string | null
@@ -45,8 +47,24 @@ withDefaults(defineProps<{
   /** A Finish call is running on this layer: every control above the button is inert, so the
    *  settings can't drift from the guide that was sent. */
   locked?: boolean
-}>(), { lights: () => [], selectedLight: null, activeSetup: null, surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false, finishBlocked: false, locked: false })
+}>(), { lights: () => [], selectedLight: null, activeSetup: null, surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesStartedAt: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false, finishBlocked: false, locked: false })
 const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; setup: [name: RelightSetupName]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': []; finish: [] }>()
+
+// The Read shape button's wait: seconds since the read started, ticking once a second while it runs.
+// After STILL_READING_S it says so — fal's queue can make a read take minutes.
+const STILL_READING_S = 30
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+watch(() => props.surfacesStatus === 'loading', (on) => {
+  if (ticker) { clearInterval(ticker); ticker = null }
+  if (on) { now.value = Date.now(); ticker = setInterval(() => { now.value = Date.now() }, 1000) }
+}, { immediate: true })
+onBeforeUnmount(() => { if (ticker) clearInterval(ticker) })
+const readingLabel = computed(() => {
+  const secs = props.surfacesStartedAt ? Math.max(0, Math.floor((now.value - props.surfacesStartedAt) / 1000)) : 0
+  const what = secs >= STILL_READING_S ? 'Still reading' : 'Reading shape'
+  return [what, props.surfacesPrice, `${secs} s`].filter(Boolean).join(' · ')
+})
 
 // Compare is a hold. Every way the hold can end releases it — including the pointer being taken
 // away (pointercancel / lostpointercapture), the panel going away mid-hold, and — the fallback
@@ -73,13 +91,12 @@ onBeforeUnmount(() => compare(false))
   <div class="space-y-4 text-[12px]">
     <div data-testid="relight-controls-body" class="space-y-4" :class="locked ? 'opacity-50 pointer-events-none select-none' : ''"
       :inert="locked || undefined" :aria-disabled="locked || undefined">
-    <button v-if="surfacesStatus === 'absent'" data-testid="relight-surfaces-read"
-      class="h-7 px-2.5 rounded-[8px] bg-white/10 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
-      title="Reads this photo's surfaces for more realistic light — once per photo"
-      @click="emit('read-surfaces')">Read shape · {{ surfacesReadPrice }}</button>
-    <p v-else-if="surfacesStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading" title="Worked out once per photo">
-      {{ surfacesPrice ? `Reading shape · ${surfacesPrice}` : 'Reading shape' }}
-    </p>
+    <button v-if="surfacesStatus === 'absent' || surfacesStatus === 'loading'"
+      :data-testid="surfacesStatus === 'loading' ? 'relight-status-loading' : 'relight-surfaces-read'"
+      :disabled="surfacesStatus === 'loading'"
+      class="w-full h-8 px-3 rounded-[8px] bg-white/10 text-white/85 hover:bg-white/15 hover:text-white cursor-pointer disabled:bg-white/5 disabled:text-white/45 disabled:cursor-default"
+      :title="surfacesStatus === 'loading' ? 'Reading this photo\'s shape — you can keep working, it lands on its own' : 'Reads this photo\'s surfaces for more realistic light — once per photo'"
+      @click="emit('read-surfaces')">{{ surfacesStatus === 'loading' ? readingLabel : `Read shape · ${surfacesReadPrice}` }}</button>
     <p v-else-if="surfacesStatus === 'error'" class="text-red-300/80 flex items-center gap-2" data-testid="relight-status-error" title="Worked out once per photo">
       <span>{{ surfacesNote ?? "Couldn't read this photo's shape" }}</span>
       <button data-testid="relight-surfaces-retry" class="text-white/70 hover:text-white underline underline-offset-2 cursor-pointer" @click="emit('retry-surfaces')">Retry</button>

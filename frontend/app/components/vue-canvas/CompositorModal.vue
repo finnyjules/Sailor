@@ -137,7 +137,7 @@ import {
   onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, depthStatusFor,
 } from '~/lib/compositor/depthRegistry'
 import {
-  onSurfacesChange, peekSurfacesFor, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesSettled, surfacesStatusFor,
+  onSurfacesChange, peekSurfacesFor, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesSettled, surfacesStartedAt, surfacesStatusFor,
   surfacesWasPaidFor, surfacesMessageFor, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
@@ -3016,6 +3016,11 @@ const activeEffectSurfacesReadPrice = computed<string | null>(() => {
   if (!activeEffectDepth.value) return null
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
   return hosted ? `${surfacesCredits()} credits` : formatCostBadge(SURFACES_USD, true, false)
+})
+// When the selected photo's paid read started — the panel counts the wait from it.
+const activeEffectSurfacesStartedAt = computed<number | null>(() => {
+  void surfacesTick.value
+  return activeEffectDepth.value ? surfacesStartedAt(activeEffectDepth.value) : null
 })
 // Only the still-reading error (a read that outlasted the server's poll) has its own words;
 // every other error keeps the panel's plain line.
@@ -11884,6 +11889,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :surfaces-status="activeEffectSurfacesStatus"
               :surfaces-price="activeEffectSurfacesPrice"
               :surfaces-read-price="activeEffectSurfacesReadPrice"
+              :surfaces-started-at="activeEffectSurfacesStartedAt"
               :surfaces-note="activeEffectSurfacesNote"
               :finish-price="relightFinishPrice"
               :finish-busy="!!relightFinishing"

@@ -29,7 +29,7 @@ type Status = 'idle' | 'loading' | 'ready' | 'error' | 'off' | 'absent'
 const asSource = (ref: DepthRef): DepthSource =>
   typeof ref === 'string' ? { filename: ref } : ref
 
-interface Entry { status: Status; img: HTMLImageElement | null; message?: string | null; paid: boolean }
+interface Entry { status: Status; img: HTMLImageElement | null; message?: string | null; paid: boolean; startedAt?: number }
 
 let entries = new Map<string, Entry>()
 let listeners = new Set<() => void>()
@@ -69,6 +69,13 @@ export function surfacesWasPaidFor(ref: DepthRef): boolean {
   return entries.get(depthKey(ref))?.paid ?? false
 }
 
+/** When the read in flight for this photo started (ms since epoch) — null unless 'loading'.
+ *  Kept here, not in the panel, so the panel's elapsed time survives closing and reopening it. */
+export function surfacesStartedAt(ref: DepthRef): number | null {
+  const e = entries.get(depthKey(ref))
+  return e?.status === 'loading' ? e.startedAt ?? null : null
+}
+
 export function onSurfacesChange(cb: () => void): () => void {
   listeners.add(cb)
   return () => { listeners.delete(cb) }
@@ -88,7 +95,7 @@ function off(key: string, message: string) {
 export const SURFACES_STILL_READING = 'Still reading — try again in a minute'
 
 function start(src: DepthSource, key: string): void {
-  entries.set(key, { status: 'loading', img: null, paid: true })
+  entries.set(key, { status: 'loading', img: null, paid: true, startedAt: Date.now() })
   notify()
 
   void (async () => {
