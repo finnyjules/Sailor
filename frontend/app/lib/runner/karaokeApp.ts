@@ -6,13 +6,12 @@
  *   seconds sent, measured by the quote), and shown next to the run button.
  * - The two stems are taken by node id (KARAOKE_STEMS), never by file name.
  * - Stop ends the run (useAppRun.stop); closing the app stops it too.
- * - Ruling (d): with the app's families off, locally the workflow goes to the
- *   engine's /prompt as before R8 (a named stop-gap, removed by R10.1); in
- *   hosted the app says it is switched off.
+ * - With the app's families off it says it is switched off, in both places
+ *   (R10.1: nothing goes to the engine).
  * - R11.5 (ruling (h)): a song over one call's longest (hosted 10 minutes,
  *   locally 20) runs on the runner in pieces of at most 10 minutes; past the
  *   hard ceiling (an hour; hosted, as long as the stems stay readable) it is
- *   refused plainly, before any hold, never sent to the engine.
+ *   refused plainly, before any hold.
  * - A price check that failed (not a refusal) shows its words and leaves Run
  *   on: pressing it prices the exact prompt again before anything starts.
  */
@@ -38,7 +37,6 @@ export const KARAOKE_WORDS = {
   failed: 'The separation didn’t work. Try again.',
   empty: 'The separation finished without both tracks. Try again.',
   slow: 'The separation took too long, so it was stopped.',
-  noStart: 'The separation didn’t start. Try again.',
 } as const
 
 /** A long run's wait: a 10-minute song can take a while at the service. */
@@ -55,34 +53,6 @@ export function karaokeViewUrl(f: RunnerImage, now = Date.now()): string {
 
 export interface KaraokeStems { promptId: string, vocals: RunnerImage, instrumental: RunnerImage }
 
-/**
- * The engine stop-gap (ruling (d) and (i), this computer only): /prompt and
- * /history, the stems taken by node id. Gone with R10.1.
- */
-export async function runOnEngine(prompt: ApiPrompt, o: { fetch?: typeof fetch, sleep?: (ms: number) => Promise<void>, waitMs?: number } = {}): Promise<KaraokeStems> {
-  const f = o.fetch ?? fetch
-  const sleep = o.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
-  const res = await f('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) }).catch(() => null)
-  if (!res?.ok) throw new Error(KARAOKE_WORDS.noStart)
-  const promptId: string | undefined = (await res.json().catch(() => null))?.prompt_id
-  if (!promptId) throw new Error(KARAOKE_WORDS.noStart)
-  const deadline = Date.now() + (o.waitMs ?? WAIT_MS)
-  while (Date.now() < deadline) {
-    await sleep(800)
-    const r = await f(`/history/${promptId}`).catch(() => null)
-    if (!r?.ok) continue
-    const entry = (await r.json().catch(() => null))?.[promptId]
-    if (!entry) continue
-    if (entry?.status?.status_str === 'error') throw new Error(KARAOKE_WORDS.failed)
-    const first = (id: string): RunnerImage | undefined => entry?.outputs?.[id]?.audio?.[0]
-    const vocals = first(KARAOKE_STEMS.vocals)
-    const instrumental = first(KARAOKE_STEMS.instrumental)
-    if (vocals && instrumental) return { promptId, vocals, instrumental }
-    if (entry?.status?.completed) throw new Error(KARAOKE_WORDS.empty)
-  }
-  throw new Error(KARAOKE_WORDS.slow)
-}
-
 export type KaraokeStatus = 'idle' | 'running' | 'done' | 'error'
 
 /**
@@ -94,33 +64,25 @@ export function useKaraokeRun(o: {
   addTake: (t: AppTakeInput) => unknown
   hosted?: boolean
   app?: ReturnType<typeof useAppRun>
-  engine?: (prompt: ApiPrompt) => Promise<KaraokeStems>
   /** Passed to the runner wait (tests feed events through it). */
   wait?: Pick<AwaitOutputsOptions, 'target' | 'timeoutMs'>
 }) {
   const hosted = o.hosted ?? false
   const app = o.app ?? useAppRun({ hosted })
-  const engine = o.engine ?? (p => runOnEngine(p))
   const status = ref<KaraokeStatus>('idle')
   const errorMessage = ref<string | null>(null)
-  /** This run went to the engine (no Stop there). */
-  const onEngine = ref(false)
-
-  /** Locally, the workflow the runner won't take (families off) goes to the engine. */
-  const engineStopGap = computed(() => !hosted && app.declined.value)
-  /** What shows in place of a price: the refusal's or failed check's words, or "switched off" in hosted. */
+  /** What shows in place of a price: the refusal's or failed check's words, or "switched off". */
   const blocked = computed<string | null>(() => {
-    if (engineStopGap.value) return null
     if (app.declined.value) return new AppRunDeclined().message
     return app.refused.value
   })
-  const priceText = computed(() => (engineStopGap.value ? null : app.priceText.value))
+  const priceText = app.priceText
   const running = computed(() => status.value === 'running')
   // A failed price check never leaves the button dead: Run asks for the price again (useAppRun.run).
   const canRun = computed(() => !!o.song.value && !running.value && !app.quoting.value
-    && (engineStopGap.value || app.quoteFailed.value || (!blocked.value && app.price.value !== null)))
-  /** Stop is offered while a runner run is going. */
-  const canStop = computed(() => running.value && !onEngine.value)
+    && (app.quoteFailed.value || (!blocked.value && app.price.value !== null)))
+  /** Stop is offered while a run is going. */
+  const canStop = computed(() => running.value)
 
   function quote(): Promise<void> {
     return app.quote(o.song.value ? buildKaraokePrompt(o.song.value.filename) : null)
@@ -135,19 +97,12 @@ export function useKaraokeRun(o: {
     status.value = 'done'
   }
 
-  async function viaEngine(prompt: ApiPrompt): Promise<void> {
-    onEngine.value = true
-    try { land(await engine(prompt)) }
-    finally { onEngine.value = false }
-  }
-
   async function run(): Promise<void> {
     if (!canRun.value || !o.song.value) return
     const prompt = buildKaraokePrompt(o.song.value.filename)
     errorMessage.value = null
     status.value = 'running'
     try {
-      if (engineStopGap.value) return await viaEngine(prompt)
       const { promptId, outputs } = await app.run(prompt, [KARAOKE_STEMS.vocals, KARAOKE_STEMS.instrumental], {
         timeoutMs: WAIT_MS, ...o.wait, words: { failed: KARAOKE_WORDS.failed, empty: KARAOKE_WORDS.empty, slow: KARAOKE_WORDS.slow },
       })
@@ -157,13 +112,8 @@ export function useKaraokeRun(o: {
       land({ promptId, vocals, instrumental })
     }
     catch (e) {
-      // The runner said no at the start: locally, the engine as before; hosted, "switched off" or the
-      // refusal's words.
-      // R11.5: a long one runs in pieces; past the hard ceiling it is refused plainly, never sent to the engine.
-      if (e instanceof AppRunDeclined && !hosted) {
-        try { return await viaEngine(prompt) }
-        catch (err) { e = err }
-      }
+      // The runner said no (AppRunDeclined): "switched off", in both places; a refusal: its own words.
+      // R11.5: a long one runs in pieces; past the hard ceiling it is refused plainly.
       const name = e instanceof Error ? e.name : ''
       if (e instanceof AppRunCancelled || name === 'AppRunStopped') { status.value = 'idle'; return }
       errorMessage.value = e instanceof Error && e.message ? e.message : KARAOKE_WORDS.failed

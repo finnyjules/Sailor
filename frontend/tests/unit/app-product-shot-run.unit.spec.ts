@@ -6,9 +6,9 @@
  *   product kept exact) are runner-eligible with their families on, in both
  *   places, and left as before with them off.
  * - Fake runner events: each step's picture comes from its Save image by node
- *   id; the price shows before the run; Stop; a refusal; a decline (hosted:
- *   switched off; this computer: the engine as before, ruling (d)); a "no" at
- *   the cost gate.
+ *   id; the price shows before the run; Stop; a refusal; a decline says the
+ *   app is switched off in both places (R10.1: no engine fallback); a "no"
+ *   at the cost gate.
  * - Through the kit (fake fal, Replicate and ledger; ComfyUI off), hosted:
  *   the three steps run one after another; each result lands (the backdrop,
  *   the cut-out with its alpha, the shot); each quote equals its hold.
@@ -16,16 +16,17 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
 import {
-  PRODUCT_SHOT_SAVE, PRODUCT_SHOT_WORDS, buildBackgroundPrompt, buildBlendPrompt, buildCutoutPrompt, runOnEngine, useProductShotStep,
+  PRODUCT_SHOT_SAVE, PRODUCT_SHOT_WORDS, buildBackgroundPrompt, buildBlendPrompt, buildCutoutPrompt, useProductShotStep,
   type ProductShotStep, type StepResult,
 } from '~/lib/runner/productShotApp'
+import * as productShotApp from '~/lib/runner/productShotApp'
 import { mapWsEvent } from '~/lib/graph/wsEventMap'
 import { createFakeReplicate, makeKit } from './__runner__/kit'
 
@@ -60,14 +61,18 @@ function fakeDeps(o: Partial<AppRunDeps> = {}) {
   }
 }
 
-function setup(step: ProductShotStep, o: { hosted?: boolean, deps?: Partial<AppRunDeps>, engine?: (p: ApiPrompt, id: string) => Promise<StepResult> } = {}) {
+afterEach(() => { vi.unstubAllGlobals() })
+
+function setup(step: ProductShotStep, o: { hosted?: boolean, deps?: Partial<AppRunDeps> } = {}) {
   const deps = fakeDeps(o.deps)
   const hosted = o.hosted ?? false
   const w = fakeWindow()
-  const engine = vi.fn(o.engine ?? (async (): Promise<StepResult> => ({ promptId: 'p1', image: file('engine.png') })))
+  // R10.1: the step has no other way out than its runner deps; any fetch (the engine's /prompt) would land here.
+  const fetched = vi.fn(async () => { throw new Error('nothing but the runner may be called') })
+  vi.stubGlobal('fetch', fetched)
   const app = useAppRun({ hosted, debounceMs: 0, deps })
-  const s = useProductShotStep(step, { hosted, app, engine, wait: { target: w } })
-  return { deps, w, engine, s }
+  const s = useProductShotStep(step, { hosted, app, wait: { target: w } })
+  return { deps, w, fetched, s }
 }
 
 describe('the prompts', () => {
@@ -186,43 +191,37 @@ describe('a step, fed fake runner events', () => {
     expect(deps.start).not.toHaveBeenCalled()
   })
 
-  it('hosted, a decline says the app is switched off; nothing is sent', async () => {
-    const { s, deps, engine } = setup('cutout', { hosted: true, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
-    await s.quote(CUT)
-    expect(s.blocked.value).toBe('This app is switched off right now.')
-    expect(s.canRun.value).toBe(false)
-    await expect(s.run(CUT)).rejects.toThrow('This app is switched off right now.')
-    expect(deps.start).not.toHaveBeenCalled()
-    expect(engine).not.toHaveBeenCalled()
+  it('R10.1: a decline says the app is switched off in both places; nothing is sent', async () => {
+    for (const hosted of [false, true]) {
+      const { s, deps, fetched } = setup('cutout', { hosted, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
+      await s.quote(CUT)
+      expect(s.blocked.value).toBe('This app is switched off right now.')
+      expect(s.priceText.value).toBeNull()
+      expect(s.canRun.value).toBe(false)
+      await expect(s.run(CUT)).rejects.toThrow('This app is switched off right now.')
+      expect(deps.start).not.toHaveBeenCalled()
+      expect(fetched).not.toHaveBeenCalled()
+      vi.unstubAllGlobals()
+    }
   })
 
-  it('this computer, a decline (at the quote or at the start) sends the step to the engine, with no price and no Stop', async () => {
-    const a = setup('background', { deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
-    await a.s.quote(BG)
-    expect(a.s.blocked.value).toBeNull()
-    expect(a.s.priceText.value).toBeNull()
-    expect(await a.s.run(BG)).toEqual({ promptId: 'p1', image: file('engine.png') })
-    expect(a.engine).toHaveBeenCalledWith(BG, PRODUCT_SHOT_SAVE.background)
-    expect(a.deps.start).not.toHaveBeenCalled()
-
-    const declined = Object.assign(new Error('x'), { data: { data: { reason: RUNNER_NOT_ELIGIBLE } } })
-    const b = setup('shot', { deps: { start: vi.fn(async () => { throw declined }) } })
-    await b.s.quote(KEEP)
-    expect(await b.s.run(KEEP)).toEqual({ promptId: 'p1', image: file('engine.png') })
-    expect(b.engine).toHaveBeenCalledWith(KEEP, PRODUCT_SHOT_SAVE.shot)
+  it('R10.1: a decline at the start says the app is switched off in both places, never the engine', async () => {
+    for (const hosted of [false, true]) {
+      const declined = Object.assign(new Error('x'), { data: { data: { reason: RUNNER_NOT_ELIGIBLE } } })
+      const b = setup('shot', { hosted, deps: { start: vi.fn(async () => { throw declined }) } })
+      await b.s.quote(KEEP)
+      await expect(b.s.run(KEEP)).rejects.toThrow('This app is switched off right now.')
+      expect(b.s.blocked.value).toBe('This app is switched off right now.')
+      expect(b.fetched).not.toHaveBeenCalled()
+      vi.unstubAllGlobals()
+    }
   })
 })
 
-describe('the engine stop-gap (this computer only)', () => {
-  it('takes the picture by node id; its errors never name the engine', async () => {
-    const history = { p1: { status: { status_str: 'success', completed: true }, outputs: { 4: { images: [file('blend.png')] }, 5: { images: [file('shot.png')] } } } }
-    const f = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === '/prompt' ? { prompt_id: 'p1' } : history) })) as unknown as typeof fetch
-    expect(await runOnEngine(KEEP, PRODUCT_SHOT_SAVE.shot, PRODUCT_SHOT_WORDS.shot, { fetch: f, sleep: async () => {} })).toEqual({ promptId: 'p1', image: file('shot.png') })
-    const down = vi.fn(async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch
-    await expect(runOnEngine(KEEP, '5', PRODUCT_SHOT_WORDS.shot, { fetch: down })).rejects.toThrow(PRODUCT_SHOT_WORDS.noStart)
-    const bad = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === '/prompt' ? { prompt_id: 'p1' } : { p1: { status: { status_str: 'error' } } }) })) as unknown as typeof fetch
-    await expect(runOnEngine(KEEP, '5', PRODUCT_SHOT_WORDS.shot, { fetch: bad, sleep: async () => {} })).rejects.toThrow(PRODUCT_SHOT_WORDS.shot.failed)
-    const words = [PRODUCT_SHOT_WORDS.noStart, ...(['background', 'cutout', 'shot'] as const).flatMap(k => Object.values(PRODUCT_SHOT_WORDS[k]))]
+describe('R10.1: no engine', () => {
+  it('the helper keeps no engine way out, and its words never name a service', () => {
+    expect('runOnEngine' in productShotApp).toBe(false)
+    const words = (['background', 'cutout', 'shot'] as const).flatMap(k => Object.values(PRODUCT_SHOT_WORDS[k]))
     for (const w of words) expect(w).not.toMatch(/comfy|8188|isnet|replicate|token|model/i)
   })
 })
@@ -278,7 +277,6 @@ async function kitApp() {
   }
   const step = (s: ProductShotStep) => useProductShotStep(s, {
     hosted: true, app: useAppRun({ hosted: true, debounceMs: 0, deps }), wait: { target: w },
-    engine: async () => { throw new Error('the engine must not be used') },
   })
   return { k, replicate, step, started }
 }

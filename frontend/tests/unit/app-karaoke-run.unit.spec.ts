@@ -3,19 +3,19 @@
  * components/apps/KaraokeMakerApp.vue).
  *
  * - Fake runner events: both stems land in one take, by node id; the price
- *   shows before the run; Stop; a refusal; a decline (hosted: switched off;
- *   this computer: the engine as before, ruling (d)); R11.5: a long song
- *   runs in pieces, and one past the ceiling is refused plainly, never sent
- *   to the engine.
+ *   shows before the run; Stop; a refusal; a decline says the app is
+ *   switched off in both places (R10.1: no engine fallback); R11.5: a long
+ *   song runs in pieces, and one past the ceiling is refused plainly.
+ * - R10.1's guard: nothing in components/apps or the apps' run helpers
+ *   calls the engine's /prompt or /history.
  * - Through the kit (fake Replicate answering two WAVs, ComfyUI off): the
  *   app's exact prompt makes two MP3 files, the quote equals the hold, and
  *   Stop mid-call releases the hold.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
-import type { ApiPrompt } from '#shared/runner/graph'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { VOCALS_RATE, VOCALS_WORDS, vocalsCalls } from '#shared/runner/localModels'
@@ -25,7 +25,8 @@ import { MeterRefusalError } from '~~/server/utils/requestMeter'
 import { quoteAnswerOf } from '~~/server/api/runs/quote.post'
 import { floatWav } from '~~/server/media/encode'
 import { QUOTE_FAILED, useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
-import { KARAOKE_STEMS, KARAOKE_WORDS, buildKaraokePrompt, runOnEngine, useKaraokeRun, type KaraokeStems } from '~/lib/runner/karaokeApp'
+import * as karaokeApp from '~/lib/runner/karaokeApp'
+import { KARAOKE_STEMS, KARAOKE_WORDS, buildKaraokePrompt, useKaraokeRun } from '~/lib/runner/karaokeApp'
 import type { AppTakeInput } from '~/composables/useAppTakes'
 import { mapWsEvent } from '~/lib/graph/wsEventMap'
 import { createFakeReplicate, makeKit } from './__runner__/kit'
@@ -57,16 +58,20 @@ function fakeDeps(o: Partial<AppRunDeps> = {}) {
   }
 }
 
-function setup(o: { hosted?: boolean, deps?: Partial<AppRunDeps>, engine?: (p: ApiPrompt) => Promise<KaraokeStems> } = {}) {
+afterEach(() => { vi.unstubAllGlobals() })
+
+function setup(o: { hosted?: boolean, deps?: Partial<AppRunDeps> } = {}) {
   const deps = fakeDeps(o.deps)
   const hosted = o.hosted ?? false
   const w = fakeWindow()
   const song = ref<{ filename: string } | null>(null)
   const takes: AppTakeInput[] = []
-  const engine = vi.fn(o.engine ?? (async (): Promise<KaraokeStems> => ({ promptId: 'p1', vocals: file('ev.mp3'), instrumental: file('ei.mp3') })))
+  // R10.1: the app has no other way out than its runner deps; any fetch (the engine's /prompt) would land here.
+  const fetched = vi.fn(async () => { throw new Error('nothing but the runner may be called') })
+  vi.stubGlobal('fetch', fetched)
   const app = useAppRun({ hosted, debounceMs: 0, deps })
-  const k = useKaraokeRun({ song, addTake: t => takes.push(t), hosted, app, engine, wait: { target: w } })
-  return { deps, w, song, takes, engine, k }
+  const k = useKaraokeRun({ song, addTake: t => takes.push(t), hosted, app, wait: { target: w } })
+  return { deps, w, song, takes, fetched, k }
 }
 
 describe('the prompt', () => {
@@ -172,46 +177,35 @@ describe('the app, fed fake runner events', () => {
     expect(takes).toEqual([])
   })
 
-  it('a decline in hosted: "switched off", the button off, nothing sent anywhere', async () => {
-    const { song, k, deps, engine } = setup({ hosted: true, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
-    song.value = { filename: 'song.wav' }
-    await k.quote()
-    expect(k.blocked.value).toBe('This app is switched off right now.')
-    expect(k.canRun.value).toBe(false)
-    await k.run()
-    expect(deps.start).not.toHaveBeenCalled()
-    expect(engine).not.toHaveBeenCalled()
+  it('R10.1: a decline says "switched off" in both places: the button off, nothing sent anywhere', async () => {
+    for (const hosted of [false, true]) {
+      const { song, k, deps, fetched } = setup({ hosted, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
+      song.value = { filename: 'song.wav' }
+      await k.quote()
+      expect(k.blocked.value).toBe('This app is switched off right now.')
+      expect(k.priceText.value).toBeNull()
+      expect(k.canRun.value).toBe(false)
+      await k.run()
+      expect(deps.start).not.toHaveBeenCalled()
+      expect(fetched).not.toHaveBeenCalled()
+      vi.unstubAllGlobals()
+    }
   })
 
-  it('a decline on this computer: the engine as before (ruling (d)), no price, no Stop', async () => {
-    let finish!: () => void
-    const { song, k, deps, engine, takes } = setup({
-      deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) },
-      engine: () => new Promise((r) => { finish = () => r({ promptId: 'p1', vocals: file('ev.mp3'), instrumental: file('ei.mp3') }) }),
-    })
-    song.value = { filename: 'song.wav' }
-    await k.quote()
-    expect(k.blocked.value).toBeNull()
-    expect(k.priceText.value).toBeNull()
-    expect(k.canRun.value).toBe(true)
-    const done = k.run()
-    await vi.waitFor(() => expect(engine).toHaveBeenCalledWith(buildKaraokePrompt('song.wav')))
-    expect(k.canStop.value).toBe(false)
-    finish()
-    await done
-    expect(deps.start).not.toHaveBeenCalled()
-    expect(takes).toHaveLength(1)
-    expect(k.status.value).toBe('done')
-  })
-
-  it('a decline at the start on this computer goes to the engine too', async () => {
-    const declined = Object.assign(new Error('x'), { data: { data: { reason: RUNNER_NOT_ELIGIBLE } } })
-    const { song, k, engine, takes } = setup({ deps: { start: vi.fn(async () => { throw declined }) } })
-    song.value = { filename: 'song.wav' }
-    await k.quote()
-    await k.run()
-    expect(engine).toHaveBeenCalledTimes(1)
-    expect(takes).toHaveLength(1)
+  it('R10.1: a decline at the start says "switched off" in both places, never the engine', async () => {
+    for (const hosted of [false, true]) {
+      const declined = Object.assign(new Error('x'), { data: { data: { reason: RUNNER_NOT_ELIGIBLE } } })
+      const { song, k, fetched, takes } = setup({ hosted, deps: { start: vi.fn(async () => { throw declined }) } })
+      song.value = { filename: 'song.wav' }
+      await k.quote()
+      await k.run()
+      expect(fetched).not.toHaveBeenCalled()
+      expect(takes).toHaveLength(0)
+      expect(k.status.value).toBe('error')
+      expect(k.errorMessage.value).toBe('This app is switched off right now.')
+      expect(k.blocked.value).toBe('This app is switched off right now.')
+      vi.unstubAllGlobals()
+    }
   })
 
   it('R11.5: a song past the ceiling (the refusal\'s code) is refused plainly in both places, never the engine', async () => {
@@ -223,7 +217,7 @@ describe('the app, fed fake runner events', () => {
       expect(s.k.blocked.value).toBe(VOCALS_WORDS.tooLong)
       expect(s.k.canRun.value).toBe(false)
       await s.k.run()
-      expect(s.engine).not.toHaveBeenCalled()
+      expect(s.fetched).not.toHaveBeenCalled()
       expect(s.deps.start).not.toHaveBeenCalled()
     }
   })
@@ -242,16 +236,16 @@ describe('fix round 1', () => {
     expect(code.k.blocked.value).toBe('Too long.')
     expect(code.k.canRun.value).toBe(false)
     await code.k.run()
-    expect(code.engine).not.toHaveBeenCalled()
+    expect(code.fetched).not.toHaveBeenCalled()
   })
 
   it('R11.5: the run\'s own refusal carrying the code shows its words on this computer, never the engine', async () => {
     const tooLong = Object.assign(new Error('x'), { statusCode: 400, data: { message: 'Too long.', data: { reason: RUNNER_SOUND_TOO_LONG } } })
-    const { song, k, engine, takes } = setup({ deps: { start: vi.fn(async () => { throw tooLong }) } })
+    const { song, k, fetched, takes } = setup({ deps: { start: vi.fn(async () => { throw tooLong }) } })
     song.value = { filename: 'song.wav' }
     await k.quote()
     await k.run()
-    expect(engine).not.toHaveBeenCalled()
+    expect(fetched).not.toHaveBeenCalled()
     expect(takes).toHaveLength(0)
     expect(k.status.value).toBe('error')
     expect(k.errorMessage.value).toBe('Too long.')
@@ -335,16 +329,24 @@ describe('fix round 1', () => {
   })
 })
 
-describe('the engine stop-gap (this computer only)', () => {
-  it('takes the stems by node id; its errors never name the engine', async () => {
-    const history = { p1: { status: { status_str: 'success', completed: true }, outputs: { 3: { audio: [file('a.mp3')] }, 4: { audio: [file('b.mp3')] } } } }
-    const f = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === '/prompt' ? { prompt_id: 'p1' } : history) })) as unknown as typeof fetch
-    const r = await runOnEngine(buildKaraokePrompt('s.wav'), { fetch: f, sleep: async () => {} })
-    expect(r).toEqual({ promptId: 'p1', vocals: file('a.mp3'), instrumental: file('b.mp3') })
-    const down = vi.fn(async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch
-    await expect(runOnEngine(buildKaraokePrompt('s.wav'), { fetch: down })).rejects.toThrow(KARAOKE_WORDS.noStart)
-    const bad = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === '/prompt' ? { prompt_id: 'p1' } : { p1: { status: { status_str: 'error' } } }) })) as unknown as typeof fetch
-    await expect(runOnEngine(buildKaraokePrompt('s.wav'), { fetch: bad, sleep: async () => {} })).rejects.toThrow(KARAOKE_WORDS.failed)
+describe('R10.1: no engine', () => {
+  it('nothing in components/apps or the apps\' run helpers calls /prompt or /history', () => {
+    const appRoot = join(__dirname, '..', '..', 'app')
+    const files = [
+      ...readdirSync(join(appRoot, 'components', 'apps')).map(n => join(appRoot, 'components', 'apps', n)),
+      ...['karaokeApp.ts', 'autoSubtitleApp.ts', 'productShotApp.ts', 'faceSwapApp.ts'].map(n => join(appRoot, 'lib', 'runner', n)),
+      join(appRoot, 'composables', 'useAppRun.ts'),
+    ]
+    expect(files.length).toBeGreaterThan(5)
+    for (const f of files) {
+      const text = readFileSync(f, 'utf8')
+      expect(text, f).not.toMatch(/['"`]\/(prompt|history)\b/)
+      expect(text, f).not.toMatch(/runOnEngine/)
+    }
+  })
+
+  it('the helper keeps no engine way out', () => {
+    expect('runOnEngine' in karaokeApp).toBe(false)
     for (const words of Object.values(KARAOKE_WORDS)) expect(words).not.toMatch(/comfy|8188|demucs|model/i)
   })
 })
@@ -404,7 +406,7 @@ function kitApp(o: { hold?: boolean } = {}) {
   const song = ref<{ filename: string } | null>({ filename: 'song.wav' })
   const takes: AppTakeInput[] = []
   const app = useAppRun({ hosted: true, debounceMs: 0, deps })
-  const ka = useKaraokeRun({ song, addTake: t => takes.push(t), hosted: true, app, engine: async () => { throw new Error('the engine must not be used') }, wait: { target: w } })
+  const ka = useKaraokeRun({ song, addTake: t => takes.push(t), hosted: true, app, wait: { target: w } })
   return { k, replicate, ka, takes, w, started }
 }
 

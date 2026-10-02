@@ -5,9 +5,9 @@
  * - The prompt: runner-eligible with its families on, in both places; left
  *   as before with any of them off.
  * - Fake runner events: the captioned video lands in a take, by node id; the
- *   price shows before the run; Stop; a refusal; a decline (hosted: switched
- *   off; this computer: the engine as before, ruling (d)); R11.5: a long
- *   sound runs in pieces, and a refusal for length is never sent to the engine.
+ *   price shows before the run; Stop; a refusal; a decline says the app is
+ *   switched off in both places (R10.1: no engine fallback); R11.5: a long
+ *   sound runs in pieces, and a refusal for length is plain words.
  * - Through the kit (fake fal answering Whisper's captions, ComfyUI off):
  *   the app's exact prompt makes the captioned video with its sound, the
  *   quote equals the hold, and Stop mid-call releases the hold.
@@ -15,17 +15,17 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
-import type { ApiPrompt } from '#shared/runner/graph'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { RUNNER_SOUND_TOO_LONG } from '#shared/runner/messages'
+import { RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG } from '#shared/runner/messages'
 import { probeMedia } from '~~/server/media/probe'
 import { useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
 import {
-  AUTO_SUBTITLE_OUT, AUTO_SUBTITLE_WORDS, buildAutoSubtitlePrompt, runOnEngine, useAutoSubtitleRun, type AutoSubtitleResult, type AutoSubtitleSettings,
+  AUTO_SUBTITLE_OUT, AUTO_SUBTITLE_WORDS, buildAutoSubtitlePrompt, useAutoSubtitleRun, type AutoSubtitleSettings,
 } from '~/lib/runner/autoSubtitleApp'
+import * as autoSubtitleApp from '~/lib/runner/autoSubtitleApp'
 import type { AppTakeInput } from '~/composables/useAppTakes'
 import { mapWsEvent } from '~/lib/graph/wsEventMap'
 import { createFakeFal, makeKit } from './__runner__/kit'
@@ -58,17 +58,21 @@ function fakeDeps(o: Partial<AppRunDeps> = {}) {
   }
 }
 
-function setup(o: { hosted?: boolean, deps?: Partial<AppRunDeps>, engine?: (p: ApiPrompt) => Promise<AutoSubtitleResult> } = {}) {
+afterEach(() => { vi.unstubAllGlobals() })
+
+function setup(o: { hosted?: boolean, deps?: Partial<AppRunDeps> } = {}) {
   const deps = fakeDeps(o.deps)
   const hosted = o.hosted ?? false
   const w = fakeWindow()
   const video = ref<{ filename: string } | null>(null)
   const settings = ref<AutoSubtitleSettings>({ ...SETTINGS })
   const takes: AppTakeInput[] = []
-  const engine = vi.fn(o.engine ?? (async (): Promise<AutoSubtitleResult> => ({ promptId: 'p1', video: file('engine.mp4') })))
+  // R10.1: the app has no other way out than its runner deps; any fetch (the engine's /prompt) would land here.
+  const fetched = vi.fn(async () => { throw new Error('nothing but the runner may be called') })
+  vi.stubGlobal('fetch', fetched)
   const app = useAppRun({ hosted, debounceMs: 0, deps })
-  const a = useAutoSubtitleRun({ video, settings: () => settings.value, addTake: t => takes.push(t), hosted, app, engine, wait: { target: w } })
-  return { deps, w, video, settings, takes, engine, a }
+  const a = useAutoSubtitleRun({ video, settings: () => settings.value, addTake: t => takes.push(t), hosted, app, wait: { target: w } })
+  return { deps, w, video, settings, takes, fetched, a }
 }
 
 describe('the prompt', () => {
@@ -186,28 +190,34 @@ describe('the app, fed fake runner events', () => {
     expect(takes).toEqual([])
   })
 
-  it('a decline in hosted: "switched off", the button off, nothing sent anywhere', async () => {
-    const { video, a, deps, engine } = setup({ hosted: true, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
-    video.value = { filename: 'clip.mp4' }
-    await a.quote()
-    expect(a.blocked.value).toBe('This app is switched off right now.')
-    expect(a.canRun.value).toBe(false)
-    await a.run()
-    expect(deps.start).not.toHaveBeenCalled()
-    expect(engine).not.toHaveBeenCalled()
+  it('R10.1: a decline says "switched off" in both places: the button off, nothing sent anywhere', async () => {
+    for (const hosted of [false, true]) {
+      const { video, a, deps, fetched } = setup({ hosted, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
+      video.value = { filename: 'clip.mp4' }
+      await a.quote()
+      expect(a.blocked.value).toBe('This app is switched off right now.')
+      expect(a.priceText.value).toBeNull()
+      expect(a.canRun.value).toBe(false)
+      await a.run()
+      expect(deps.start).not.toHaveBeenCalled()
+      expect(fetched).not.toHaveBeenCalled()
+      vi.unstubAllGlobals()
+    }
   })
 
-  it('a decline on this computer: the engine as before (ruling (d)), no price, no Stop', async () => {
-    const { video, a, deps, engine, takes } = setup({ deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ declined: true })) } })
-    video.value = { filename: 'clip.mp4' }
-    await a.quote()
-    expect(a.blocked.value).toBeNull()
-    expect(a.priceText.value).toBeNull()
-    expect(a.canRun.value).toBe(true)
-    await a.run()
-    expect(engine).toHaveBeenCalledWith(buildAutoSubtitlePrompt('clip.mp4', SETTINGS))
-    expect(deps.start).not.toHaveBeenCalled()
-    expect(takes[0]!.videos![0]).toContain('filename=engine.mp4')
+  it('R10.1: a decline at the start says "switched off" in both places, never the engine', async () => {
+    for (const hosted of [false, true]) {
+      const declined = Object.assign(new Error('x'), { data: { data: { reason: RUNNER_NOT_ELIGIBLE } } })
+      const { video, a, fetched, takes } = setup({ hosted, deps: { start: vi.fn(async () => { throw declined }) } })
+      video.value = { filename: 'clip.mp4' }
+      await a.quote()
+      await a.run()
+      expect(fetched).not.toHaveBeenCalled()
+      expect(takes).toHaveLength(0)
+      expect(a.status.value).toBe('error')
+      expect(a.errorMessage.value).toBe('This app is switched off right now.')
+      vi.unstubAllGlobals()
+    }
   })
 
   it('R11.5: a long sound runs in pieces, so a refusal for length is the ceiling\'s: a plain refusal in both places, never the engine', async () => {
@@ -218,7 +228,7 @@ describe('the app, fed fake runner events', () => {
     expect(local.a.blocked.value).toBe('This sound is too long to transcribe here.')
     expect(local.a.canRun.value).toBe(false)
     await local.a.run()
-    expect(local.engine).not.toHaveBeenCalled()
+    expect(local.fetched).not.toHaveBeenCalled()
     const hosted = setup({ hosted: true, deps: { postQuote: tooLong } })
     hosted.video.value = { filename: 'clip.mp4' }
     await hosted.a.quote()
@@ -226,17 +236,8 @@ describe('the app, fed fake runner events', () => {
     expect(hosted.a.canRun.value).toBe(false)
   })
 
-  it('the engine stop-gap takes the video from Save video by node id, and words its errors plainly', async () => {
-    const history = (entry: unknown) => async (url: string) => (url === '/prompt'
-      ? { ok: true, json: async () => ({ prompt_id: 'p9' }) }
-      : { ok: true, json: async () => ({ p9: entry }) }) as unknown as Response
-    const got = await runOnEngine(buildAutoSubtitlePrompt('clip.mp4', SETTINGS), {
-      sleep: async () => {},
-      fetch: history({ outputs: { 4: { images: [file('preview.png')] }, 6: { images: [file('auto_subtitle_00002_.mp4')], animated: [true] } }, status: { completed: true } }) as typeof fetch,
-    })
-    expect(got).toEqual({ promptId: 'p9', video: file('auto_subtitle_00002_.mp4') })
-    await expect(runOnEngine({}, { sleep: async () => {}, fetch: history({ status: { status_str: 'error' } }) as typeof fetch })).rejects.toThrow(AUTO_SUBTITLE_WORDS.failed)
-    await expect(runOnEngine({}, { sleep: async () => {}, fetch: (async () => { throw new Error('ECONNREFUSED') }) as typeof fetch })).rejects.toThrow(AUTO_SUBTITLE_WORDS.noStart)
+  it('R10.1: the helper keeps no engine way out', () => {
+    expect('runOnEngine' in autoSubtitleApp).toBe(false)
   })
 })
 
@@ -273,7 +274,7 @@ function kitApp(o: { hold?: boolean } = {}) {
   const video = ref<{ filename: string } | null>({ filename: CLIP })
   const takes: AppTakeInput[] = []
   const app = useAppRun({ hosted: true, debounceMs: 0, deps })
-  const a = useAutoSubtitleRun({ video, settings: () => SETTINGS, addTake: t => takes.push(t), hosted: true, app, engine: async () => { throw new Error('the engine must not be used') }, wait: { target: w } })
+  const a = useAutoSubtitleRun({ video, settings: () => SETTINGS, addTake: t => takes.push(t), hosted: true, app, wait: { target: w } })
   return { k, fal, a, takes, w, started }
 }
 

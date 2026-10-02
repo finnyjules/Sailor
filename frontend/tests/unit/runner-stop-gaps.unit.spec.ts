@@ -101,7 +101,6 @@ async function writePng(path: string, w = 16, h = 16) {
  * and gets a case below (the test pins the list).
  */
 const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
-  1: 'R10.1: apps’ local /prompt with families off ("This app is switched off right now.")',
   27: 'R10.7: local LoRA training removed',
   28: 'R10.2 / R10.6: stock local-diffusion classes and blueprints ("This needs the local engine" locally)',
 }
@@ -154,8 +153,29 @@ describe('R11.9c fix round 1: the Shader effects still left to the engine are na
 })
 
 describe('R11.9: every named stop-gap, one case per row', () => {
-  it('the expected exceptions are exactly rows 1, 27 and 28 (R10)', () => {
-    expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([1, 27, 28])
+  it('the expected exceptions are exactly rows 27 and 28 (R10)', () => {
+    expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([27, 28])
+  })
+
+  // Row 1 (R10.1): the mini apps have no engine way out. With their families off they say "This app is switched
+  // off right now." in both places; nothing in them calls /prompt or /history.
+  it('row 1 (R10.1): the mini apps never call the engine; a decline says they are switched off, in both places', () => {
+    const appRoot = join(__dirname, '..', '..', 'app')
+    const files = [
+      ...readdirSync(join(appRoot, 'components', 'apps')).map(n => join(appRoot, 'components', 'apps', n)),
+      ...['karaokeApp.ts', 'autoSubtitleApp.ts', 'productShotApp.ts', 'faceSwapApp.ts'].map(n => join(appRoot, 'lib', 'runner', n)),
+    ]
+    for (const f of files) {
+      const text = readFileSync(f, 'utf8')
+      expect(text, f).not.toMatch(/['"`]\/(prompt|history)\b/)
+      expect(text, f).not.toMatch(/runOnEngine|engineStopGap/)
+    }
+    const proven: [string, string][] = [
+      ['app-karaoke-run.unit.spec.ts', 'R10.1: a decline at the start says "switched off" in both places, never the engine'],
+      ['app-auto-subtitle-run.unit.spec.ts', 'R10.1: a decline at the start says "switched off" in both places, never the engine'],
+      ['app-product-shot-run.unit.spec.ts', 'R10.1: a decline at the start says the app is switched off in both places, never the engine'],
+    ]
+    for (const [file, name] of proven) expect(readFileSync(join(__dirname, file), 'utf8').includes(name), `${file} — “${name}”`).toBe(true)
   })
 
   // Rows 2–9 and 11–14: closed by their own tasks. Each is probed where a probe is cheap (its graph is the runner's

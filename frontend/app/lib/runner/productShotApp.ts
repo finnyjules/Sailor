@@ -14,9 +14,8 @@
  * Each step's picture is taken from its Save image by node id
  * (PRODUCT_SHOT_SAVE), never by file name.
  *
- * Ruling (d): with a step's families off, locally the workflow goes to the
- * engine's /prompt as before R8 (a named stop-gap, removed by R10.1); in
- * hosted the app says it is switched off.
+ * With a step's families off the app says it is switched off, in both
+ * places (R10.1: nothing goes to the engine).
  */
 import { computed, ref } from 'vue'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -92,7 +91,6 @@ export const PRODUCT_SHOT_WORDS = {
   background: { failed: 'The background didn’t work. Try again.', empty: 'The background finished without a picture. Try again.', slow: 'The background took too long, so it was stopped.' },
   cutout: { failed: 'The cut-out didn’t work. Try another photo.', empty: 'The cut-out finished without a picture. Try again.', slow: 'The cut-out took too long, so it was stopped.' },
   shot: { failed: 'The shot didn’t work. Try again.', empty: 'The shot finished without a picture. Try again.', slow: 'The shot took too long, so it was stopped.' },
-  noStart: 'This didn’t start. Try again.',
 } as const
 
 export type ProductShotStep = 'background' | 'cutout' | 'shot'
@@ -101,32 +99,6 @@ export type ProductShotStep = 'background' | 'cutout' | 'shot'
 const WAIT_MS = 5 * 60_000
 
 export interface StepResult { promptId: string, image: RunnerImage }
-
-/**
- * The engine stop-gap (ruling (d), this computer only): /prompt and
- * /history, the picture taken by node id. Gone with R10.1.
- */
-export async function runOnEngine(prompt: ApiPrompt, nodeId: string, words: { failed: string, empty: string, slow: string }, o: { fetch?: typeof fetch, sleep?: (ms: number) => Promise<void>, waitMs?: number } = {}): Promise<StepResult> {
-  const f = o.fetch ?? fetch
-  const sleep = o.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
-  const res = await f('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) }).catch(() => null)
-  if (!res?.ok) throw new Error(PRODUCT_SHOT_WORDS.noStart)
-  const promptId: string | undefined = (await res.json().catch(() => null))?.prompt_id
-  if (!promptId) throw new Error(PRODUCT_SHOT_WORDS.noStart)
-  const deadline = Date.now() + (o.waitMs ?? WAIT_MS)
-  while (Date.now() < deadline) {
-    await sleep(700)
-    const r = await f(`/history/${promptId}`).catch(() => null)
-    if (!r?.ok) continue
-    const entry = (await r.json().catch(() => null))?.[promptId]
-    if (!entry) continue
-    if (entry?.status?.status_str === 'error') throw new Error(words.failed)
-    const image: RunnerImage | undefined = entry?.outputs?.[nodeId]?.images?.[0]
-    if (image) return { promptId, image }
-    if (entry?.status?.completed) throw new Error(words.empty)
-  }
-  throw new Error(words.slow)
-}
 
 export function productShotViewUrl(f: RunnerImage, now = Date.now()): string {
   return `/view?${new URLSearchParams({
@@ -145,7 +117,6 @@ export function productShotViewUrl(f: RunnerImage, now = Date.now()): string {
 export function useProductShotStep(step: ProductShotStep, o: {
   hosted?: boolean
   app?: ReturnType<typeof useAppRun>
-  engine?: (prompt: ApiPrompt, nodeId: string) => Promise<StepResult>
   /** Passed to the runner wait (tests feed events through it). */
   wait?: Pick<AwaitOutputsOptions, 'target' | 'timeoutMs'>
 } = {}) {
@@ -153,51 +124,32 @@ export function useProductShotStep(step: ProductShotStep, o: {
   const app = o.app ?? useAppRun({ hosted })
   const words = PRODUCT_SHOT_WORDS[step]
   const nodeId = PRODUCT_SHOT_SAVE[step]
-  const engine = o.engine ?? ((p: ApiPrompt, id: string) => runOnEngine(p, id, words))
-  /** This run went to the engine (no Stop there). */
-  const onEngine = ref(false)
   const running = ref(false)
 
-  /** Locally, a workflow the runner won't take (families off) goes to the engine. */
-  const engineStopGap = computed(() => !hosted && app.declined.value)
-  /** What shows in place of a price: a refusal's words, or "switched off" in hosted. A failed check isn't a block. */
+  /** What shows in place of a price: a refusal's words, or "switched off". A failed check isn't a block. */
   const blocked = computed<string | null>(() => {
-    if (engineStopGap.value) return null
     if (app.declined.value) return new AppRunDeclined().message
     return app.quoteFailed.value ? null : app.refused.value
   })
-  const priceText = computed(() => (engineStopGap.value ? null : app.priceText.value))
+  const priceText = app.priceText
   /** Run asks for the exact prompt's price itself, so a missing or failed price never leaves the button dead. */
   const canRun = computed(() => !running.value && !app.quoting.value && !blocked.value)
-  const canStop = computed(() => running.value && !onEngine.value && app.running.value)
+  const canStop = computed(() => running.value && app.running.value)
 
   function quote(prompt: ApiPrompt | null): Promise<void> {
     return app.quote(prompt)
   }
 
-  async function viaEngine(prompt: ApiPrompt): Promise<StepResult> {
-    onEngine.value = true
-    try { return await engine(prompt, nodeId) }
-    finally { onEngine.value = false }
-  }
-
   async function run(prompt: ApiPrompt): Promise<StepResult | null> {
     running.value = true
     try {
-      if (engineStopGap.value) return await viaEngine(prompt)
-      try {
-        const { promptId, outputs } = await app.run(prompt, [nodeId], {
-          timeoutMs: WAIT_MS, ...o.wait, words: { failed: words.failed, empty: words.empty, slow: words.slow },
-        })
-        const image = outputs[nodeId]?.images[0]
-        if (!image) throw new Error(words.empty)
-        return { promptId, image }
-      }
-      catch (e) {
-        // The runner said no at the start: locally, the engine as before; hosted, "switched off".
-        if (e instanceof AppRunDeclined && !hosted) return await viaEngine(prompt)
-        throw e
-      }
+      // A decline (AppRunDeclined) throws "switched off", in both places.
+      const { promptId, outputs } = await app.run(prompt, [nodeId], {
+        timeoutMs: WAIT_MS, ...o.wait, words: { failed: words.failed, empty: words.empty, slow: words.slow },
+      })
+      const image = outputs[nodeId]?.images[0]
+      if (!image) throw new Error(words.empty)
+      return { promptId, image }
     }
     catch (e) {
       const name = e instanceof Error ? e.name : ''

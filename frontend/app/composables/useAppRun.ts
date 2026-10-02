@@ -8,7 +8,9 @@
  *   `price` holds the answer, `priceText` shows it in the node badge's
  *   format (dollars here, credits in hosted, "up to" when held on a bound),
  *   `refused` holds a refusal's plain words (the run button stays off), and
- *   `declined` is set when the runner won't take the workflow (ruling (d)).
+ *   `declined` is set when the runner won't take the workflow: the app then
+ *   says it is switched off, in both places (R10.1: no app falls back to the
+ *   engine).
  * - `run(prompt, nodeIds)`: prices exactly this prompt (a fresh quote for
  *   it, or a new one; a refusal or failed check starts nothing), asks the
  *   canvas's cost-confirm gate on that figure (AppRunCancelled on "no"),
@@ -31,7 +33,7 @@ import type { CostEstimate } from '~/lib/costEstimate'
 export type AppQuote = { usd: number, credits: number, upTo: boolean } | { declined: true } | { refused: string, reason?: string }
 export interface AppPrice { usd: number, credits: number, upTo: boolean }
 
-/** The runner won't take this workflow (off, or a family off): the app falls back or says it is switched off. */
+/** The runner won't take this workflow (off, or a family off): the app says it is switched off (R10.1: never the engine). */
 export class AppRunDeclined extends Error {
   constructor() { super('This app is switched off right now.'); this.name = 'AppRunDeclined' }
 }
