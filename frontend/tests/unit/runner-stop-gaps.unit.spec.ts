@@ -47,7 +47,7 @@ import { saveFramesKeptBytes, saveFramesStartProblem, savedFrameBytesBound, save
 import { clipAtCaps, paidVideoClipBound } from '~~/server/runner/video/shapes'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
-import { SHADER_CATALOG_VERSION, shaderBakeKeySync, shaderBakedText } from '#shared/runner/shaderBakeKey'
+import { SHADER_CATALOG_VERSION, SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST, shaderBakeKeySync, shaderBakedText, shaderEngineReason } from '#shared/runner/shaderBakeKey'
 import { makeKit } from './__runner__/kit'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 
@@ -105,6 +105,53 @@ const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
   27: 'R10.7: local LoRA training removed',
   28: 'R10.2 / R10.6: stock local-diffusion classes and blueprints ("This needs the local engine" locally)',
 }
+
+/**
+ * R11.9c fix round 1 (M1, I3): the Shader effects the runner still leaves to the engine (locally; in hosted the
+ * needs-the-engine words name the cause), each with its plain words and the task that closes it. The list must
+ * shrink when each is closed.
+ */
+const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {
+  'a My effect or a draft': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.myEffect },
+  'an effect the runner doesn’t know': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.unknownEffect },
+  'params only Python reads': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.oddParams },
+  'a wired setting': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.wired },
+  'a bake that no longer agrees with its settings': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.keyMismatch },
+  'its picture made in the run': { closedBy: 'R10.2 (design open question 5)', words: SHADER_NEEDS_PICTURE_FIRST },
+  // I3: a bake this browser or machine can't make (no ImageDecoder, a codec, WebGL), locally with the engine there.
+  'a bake this browser can’t make (locally, the engine there)': { closedBy: 'R10.2', words: 'It will run on the local engine instead.' },
+}
+
+describe('R11.9c fix round 1: the Shader effects still left to the engine are named, with their words', () => {
+  it('the list is exactly these, each closed by R10.2', () => {
+    expect(Object.keys(SHADER_ENGINE_CASES)).toHaveLength(7)
+    for (const [name, c] of Object.entries(SHADER_ENGINE_CASES)) {
+      expect(c.closedBy, name).toMatch(/^R10\.2/)
+      expect(c.words, name).toMatch(/^[A-Z].*\.$/)
+    }
+  })
+  it('each graph case is left to the engine, naming its cause', () => {
+    const SH: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake'])
+    const shader = (over: Record<string, unknown>, image?: Link): ApiPrompt => ({
+      ...(image ? {} : { 0: { class_type: 'Image', inputs: { image: 'src.png', export: false, filename_prefix: 'ComfyUI', batch_index: -1 } } }),
+      fx: { class_type: 'ShaderEffect', inputs: { image: image ?? ['0', 0], effect: 'halftone', params: '{}', time: 0, duration: 0, fps: 24, seed: 42, resolution: 768, aspect: '1:1', ...over } },
+      s: saveImage(['fx', 0]),
+    })
+    const stale = shader({})
+    stale.fx!.inputs.sailor_baked = shaderBakedText([`shader_bake_${'0'.repeat(32)}.png`], 'f'.repeat(64))
+    const cases: [string, ApiPrompt][] = [
+      ['a My effect or a draft', shader({ effect: 'mine_abc~v1' })],
+      ['an effect the runner doesn’t know', shader({ effect: 'no_such_effect' })],
+      ['params only Python reads', shader({ params: '{"u_amount":"0.5"}' })],
+      ['a bake that no longer agrees with its settings', stale],
+    ]
+    for (const [name, p] of cases) {
+      expect(runnerTakesNode(p, 'fx', SH), name).toBe(false)
+      expect(needsEngineReasons(p, { runnerOn: true, families: SH }), name).toEqual([SHADER_ENGINE_CASES[name]!.words])
+    }
+    expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_ENGINE_CASES['a wired setting']!.words)
+  })
+})
 
 describe('R11.9: every named stop-gap, one case per row', () => {
   it('the expected exceptions are exactly rows 1, 27 and 28 (R10)', () => {

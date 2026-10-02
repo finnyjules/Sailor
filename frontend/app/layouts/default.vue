@@ -885,17 +885,28 @@ async function runVueWorkflow(
   // Shader effects (step 3, R2.10): outside the assembly lock, while `shader-bake` is on,
   // the browser bakes each one the runner can replay, in takes that go to the runner.
   if (useDirect && runnerEnabled && runnerFamilies.has('shader-bake')) {
-    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies, { hosted: hostedShell })
-    // R11.9c: Stop while the shader frames were being drawn: nothing is sent.
-    // An animated shader that couldn't be prepared (or makes too many frames) stops the run in plain words, never the engine.
-    const animatedFailure = bake.failed.find(f => f.animated)
-    if (bake.stopped || animatedFailure) {
-      if (animatedFailure && !bake.stopped) toast.error('A shader effect couldn’t be prepared', { description: animatedFailure.error })
+    // R11.9c fix round 1 (m2): say that frames are being drawn while they are.
+    let drawing: string | number | undefined
+    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies, {
+      hosted: hostedShell,
+      tabId: runTabId,
+      onStart: () => { drawing = toast.loading('Drawing the shader’s frames…') },
+    }).finally(() => { if (drawing !== undefined) toast.dismiss(drawing) })
+    // R11.9c: Stop while the shader frames were being drawn or uploaded: nothing is sent (the server deletes them).
+    // Fix round 1 (I3): a failure of the graph itself (over the caps, a source that can't be read) stops the run
+    // in plain words everywhere; one of this browser or machine falls back to the local engine where it is there
+    // (a stop-gap R10.2 closes), and stops the run in plain words elsewhere (hosted, or the engine off).
+    const graphFailure = bake.failed.find(f => f.cause === 'graph')
+    const envFailure = bake.failed.find(f => f.cause === 'environment')
+    const engineThere = !hostedShell && (engineUp.value || direct.isMainSocketOpen())
+    const refusal = graphFailure ?? (envFailure && !engineThere ? envFailure : undefined)
+    if (bake.stopped || refusal) {
+      if (refusal && !bake.stopped) toast.error('A shader effect couldn’t be prepared', { description: refusal.error })
       if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
       currentRunSilent.value = false
       return false
     }
-    if (bake.failed.length) toast.error('A shader effect couldn’t be prepared', { description: 'It will run without Sailor’s runner.' })
+    if (envFailure) toast.error('A shader effect couldn’t be prepared in this browser', { description: 'It will run on the local engine instead.' })
   }
 
   // Engine-free: with the local engine off, only what the runner takes goes
@@ -1502,8 +1513,8 @@ async function handleRunnerGateAction(e: Event) {
 
 // Stop/interrupt the current ComfyUI execution and clear the queue
 async function stopVueWorkflow() {
-  // R11.9c: a shader bake still drawing or uploading its frames ends, and its run is not sent.
-  stopShaderBakes()
+  // R11.9c: a shader bake still drawing or uploading its frames for this tab ends, and its run is not sent.
+  stopShaderBakes(activeTab.value?.id || '')
   // Runner runs: only the ones registered to the active tab (other tabs' runs keep going).
   const stopTabId = activeTab.value?.id || ''
   const runnerRunIds = runnerEnabled ? runnerRunIdsForTab(inFlight({ tabId: stopTabId }), stopTabId) : []

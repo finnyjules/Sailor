@@ -13,10 +13,14 @@
  * every frame: its time setting's frames (`frame_plan`, u_time stepped by
  * 1 / fps), an animated picture's frames (ImageDecoder), or a clip's frames
  * (Mediabunny, picked as Load video frames or Get video components picks
- * them), a PNG each, uploaded only once every frame is rendered. The frame
- * cap (hosted 300, locally 900) is checked before any render; Stop
- * (`stopShaderBakes`) ends the bake and uploads nothing more; a failure is
- * reported `animated`, for a plain error at Run (never the engine).
+ * them), a PNG each. The caps (frames: hosted 300, locally 900; a frame's
+ * and the batch's pixels: the shared shaderBakeProblem the runner checks
+ * too) are checked before anything is drawn. Fix round 1: each frame is
+ * uploaded as soon as it is drawn, into the bake's own folder
+ * (`shader_bake/<random>`, so accounts never share a name); Stop
+ * (`stopShaderBakes`) or a failure gives the bake up and the server deletes
+ * its frames (keeps nothing). A failure says whether the graph or this
+ * browser caused it (`cause`), for default.vue to refuse or fall back.
  *
  * A node it can't bake is left without `sailor_baked`, and so to the engine
  * (or named as needing it): an effect the runner doesn't know (a My effect,
@@ -29,7 +33,7 @@ import { familyOn, type RunnerFamily } from '#shared/runner/families'
 import { runnerTakesNode } from '#shared/runner/eligibility'
 import {
   SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, aspectSize, framePlan, resolveShaderEffectId, shaderBakeKey,
-  shaderBakedText, shaderFrameCap, shaderSeedUniform, shaderSourceOfNode, shaderSourcesOf, shaderTooManyFramesWords, sha256Hex,
+  shaderBakedText, shaderBakeProblem, shaderFrameCap, shaderFrameCount, shaderSeedUniform, shaderSourceOfNode, shaderSourcesOf, shaderTooManyFramesWords, sha256Hex,
   type ShaderClipSource,
 } from '#shared/runner/shaderBakeKey'
 import { parseParams, resolveUniforms } from '~/lib/shaderfx/params'
@@ -66,8 +70,13 @@ export interface BakeFrames {
 export interface ShaderBakeContext {
   catalog: ShaderFxCatalog
   renderer: { render(passes: ShaderPass[], base: TexImageSource, width: number, height: number): HTMLCanvasElement }
-  /** Uploads a PNG to input under `name`; the stored name as a card's widget holds it ('sub/name.png'). Stop aborts it. */
-  upload(bytes: Uint8Array, name: string, signal?: AbortSignal): Promise<string>
+  /**
+   * Uploads a PNG to input under `name`, in `subfolder` (fix round 1, I4: the bake's own folder); the stored
+   * name as a card's widget holds it ('sub/name.png'). Stop aborts it.
+   */
+  upload(bytes: Uint8Array, name: string, signal?: AbortSignal, subfolder?: string): Promise<string>
+  /** Fix round 1 (I2): the bake was given up (Stop, a failure): the server deletes its folder's frames. */
+  abandon?(folder: string): Promise<void>
   /** The picture a source file names (a card's widget text, 'name.png [input]'), EXIF turned. */
   sourceFile(file: string): Promise<BakePicture>
   /** R11.9c: an animated picture's frames, or a clip's frames as its loader picks them. */
@@ -85,8 +94,16 @@ export interface ShaderBakeContext {
 /** A run's context: made once for the run, released (its WebGL context lost) when the run's bakes are done. */
 export interface ShaderBakeRunContext extends ShaderBakeContext { release(): void }
 
-/** A node whose bake failed: `animated` (R11.9c) when it makes several frames, so the run is refused, never sent to the engine. */
-export interface ShaderBakeFailure { nodeId: string; error: string; animated?: true }
+/**
+ * A node whose bake failed. `animated` (R11.9c): it makes several frames.
+ * `cause` (fix round 1, I3): 'graph' when the graph itself can't be baked
+ * (over the caps, a source that can't be read): plain words, everywhere;
+ * 'environment' when this browser or machine can't (no ImageDecoder, a codec
+ * it can't decode, WebGL failing, an upload failing): locally with the
+ * engine there the workflow goes to the engine as before (a stop-gap R10.2
+ * closes), in hosted (or with no engine) plain words saying what to do.
+ */
+export interface ShaderBakeFailure { nodeId: string; error: string; cause: 'graph' | 'environment'; animated?: true }
 
 export interface ShaderBakeResult {
   /** The nodes given a bake. */
@@ -97,26 +114,47 @@ export interface ShaderBakeResult {
   stopped?: true
 }
 
-/** R11.9c: how a bake is run: where (the frame cap) and Stop. */
-export interface ShaderBakeOptions { hosted?: boolean; signal?: AbortSignal }
+/** R11.9c: how a bake is run: where (the caps), Stop, and (fix round 1, I4) the folder its frames go into. */
+export interface ShaderBakeOptions { hosted?: boolean; signal?: AbortSignal; folder?: string }
 
 /** R11.9c: Stop during a bake. */
 export const SHADER_BAKE_STOPPED = 'Stopped'
 class BakeStopped extends Error { constructor() { super(SHADER_BAKE_STOPPED) } }
-/** R11.9c: a bake past the frame cap, in plain words (refused before any render). */
-class BakeOverCap extends Error {}
+/** A failure of the graph itself (fix round 1, I3): over the caps, a source that can't be read. Plain words everywhere. */
+export class BakeGraphError extends Error {}
+/** A failure of this browser or machine (fix round 1, I3): plain words saying what to do. */
+export class BakeEnvError extends Error {}
 const stopCheck = (signal: AbortSignal | undefined) => { if (signal?.aborted) throw new BakeStopped() }
 
-/** The bakes running now, so Stop reaches them (`stopShaderBakes`). */
-const running = new Set<AbortController>()
+/** Fix round 1 (I3): what to do when this browser or machine can't bake, in plain words. */
+export const SHADER_BAKE_ENV_WORDS = {
+  noImageDecoder: 'This browser can’t read the frames of an animated picture. Try Chrome, or save the animation as an MP4 clip.',
+  clipFormat: 'This browser can’t read this clip’s video format. Try Chrome, or convert the clip to MP4.',
+  webgl: 'This browser couldn’t draw the shader. Try Chrome, or turn on hardware acceleration in the browser’s settings.',
+  tooLargeForBrowser: 'This picture is too large for this browser to draw the shader. Use a smaller picture or a lower resolution.',
+  upload: 'The shader’s frames couldn’t be uploaded. Check your connection and run it again.',
+} as const
 
-/** R11.9c: Stop: every bake running now ends, and uploads nothing more. */
-export function stopShaderBakes(): void {
-  for (const c of running) c.abort()
+/** Fix round 1 (I3): the words for a source that can't be read (the graph's). */
+export const SHADER_SOURCE_UNREADABLE = 'The shader’s picture or clip couldn’t be read. Load it again, or use another file.'
+
+/** The bakes running now and the tab each runs for, so Stop reaches them (`stopShaderBakes`). */
+const running = new Map<AbortController, string | null>()
+
+/**
+ * R11.9c: Stop: the bakes running for this tab end (fix round 1, m1: other
+ * tabs' bakes keep going; with no tab, every bake), and keep nothing.
+ */
+export function stopShaderBakes(tabId?: string | null): void {
+  for (const [c, tab] of running) if (tabId == null || tab == null || tab === tabId) c.abort()
 }
 
-/** A rendered frame, kept as a Blob (the browser may page it out) under its content-hash name until the upload. */
-interface BakedFrame { blob: Blob; name: string }
+/** Fix round 1 (I4): a new bake's own folder under input (`shader_bake/<32 random hex>`). */
+export function newBakeFolder(): string {
+  const b = new Uint8Array(16)
+  globalThis.crypto.getRandomValues(b)
+  return `shader_bake/${[...b].map(x => x.toString(16).padStart(2, '0')).join('')}`
+}
 
 /** A colour both Python's parse_hex and the browser's hexVec3 read the same: 3, 6 or 8 hex digits, one optional '#'. */
 const portableHex = (x: unknown) => typeof x === 'string' && /^#?(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(x)
@@ -204,39 +242,61 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
       stopCheck(signal)
       const textures: Record<string, TexImageSource> = {}
       let texturesLoaded = false
-      const frames: BakedFrame[] = []
+      const files: string[] = []
+      /** Fix round 1 (I2): the shared size check, before anything is drawn. */
+      const check = (count: number, w: number, h: number, overSource: boolean) => {
+        const words = shaderBakeProblem(count, w, h, !!o.hosted, overSource)
+        if (words) throw new BakeGraphError(words)
+      }
+      // Fix round 1 (I2): each frame is uploaded as soon as it is drawn (memory stays about one frame).
       const render = async (base: TexImageSource, w: number, h: number, t: number, hasInput: boolean) => {
         stopCheck(signal)
-        if (frames.length >= cap) throw new BakeOverCap(shaderTooManyFramesWords(cap, plan.length <= cap))
+        if (files.length >= cap) throw new BakeGraphError(shaderTooManyFramesWords(cap, plan.length <= cap))
         if (!texturesLoaded) {
-          for (const tx of def.textures) textures[tx.uniform] = await ctx.texture(def, tx)
+          try { for (const tx of def.textures) textures[tx.uniform] = await ctx.texture(def, tx) }
+          catch { throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.webgl) }
           texturesLoaded = true
         }
         const uniforms = bakeUniforms(def, typeof params === 'string' ? params : '', { time: t, seed, hasInput })
-        const canvas = ctx.renderer.render(expandPasses(def.id, def.source, uniforms, textures, def.passes ?? 1), base, w, h)
-        const rgba = ctx.readPixels(canvas, w, h)
+        let rgba: Uint8Array
+        try {
+          const canvas = ctx.renderer.render(expandPasses(def.id, def.source, uniforms, textures, def.passes ?? 1), base, w, h)
+          rgba = ctx.readPixels(canvas, w, h)
+        }
+        catch (e) { throw e instanceof BakeEnvError ? e : new BakeEnvError(SHADER_BAKE_ENV_WORDS.webgl) }
         // Python keeps o[..., :3]: the alpha the shader wrote is dropped.
         for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255
         const png = await ctx.encodePng(rgba, w, h)
-        frames.push({ blob: new Blob([png as BlobPart], { type: 'image/png' }), name: `shader_bake_${(await sha256Hex(png)).slice(0, 32)}.png` })
+        const name = `shader_bake_${(await sha256Hex(png)).slice(0, 32)}.png`
+        stopCheck(signal)
+        try { files.push(await ctx.upload(png, name, signal, o.folder)) }
+        catch (e) {
+          stopCheck(signal)
+          throw e instanceof BakeEnvError || e instanceof BakeGraphError ? e : new BakeEnvError(SHADER_BAKE_ENV_WORDS.upload)
+        }
       }
-      const picture = src.kind === 'picture' ? await ctx.sourceFile(src.file) : null
+      let picture: BakePicture | null = null
+      if (src.kind === 'picture') {
+        try { picture = await ctx.sourceFile(src.file) }
+        catch (e) { throw e instanceof BakeEnvError || e instanceof BakeGraphError ? e : new BakeGraphError(SHADER_SOURCE_UNREADABLE) }
+      }
       if (src.kind === 'clip' || picture?.animated) {
         // R11.9c: a batch source (a clip, an animated picture): frame_plan's batch, frame i at time + i / fps.
         animated = true
         const from: BakeFramesSource = src.kind === 'clip' ? src : { kind: 'picture', file: (src as { file: string }).file }
         const many = await ctx.sourceFrames(from, signal ?? new AbortController().signal)
         try {
-          if (many.count > cap) throw new BakeOverCap(shaderTooManyFramesWords(cap, true))
+          // The count the node makes from it (#shared shaderFrameCount: one frame with a duration makes frame_plan's).
+          check(shaderFrameCount(many.count, inputs) ?? many.count, many.width, many.height, many.count > 1)
           const it = many.frames[Symbol.asyncIterator]()
           const first = await it.next()
           stopCheck(signal)
-          if (first.done) throw new Error('The shader’s clip has no frames to render')
+          if (first.done) throw new BakeGraphError(SHADER_SOURCE_UNREADABLE)
           await render(first.value, many.width, many.height, time, true)
           const second = await it.next()
           if (second.done) {
             // One frame: Python's frame_plan of a batch of one (the time setting's frames, all from it).
-            if (plan.length > cap) throw new BakeOverCap(shaderTooManyFramesWords(cap, false))
+            check(plan.length, many.width, many.height, false)
             for (const [, t] of plan.slice(1)) await render(first.value, many.width, many.height, t, true)
           }
           else {
@@ -247,16 +307,10 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
         finally { many.close() }
       }
       else {
-        if (plan.length > cap) throw new BakeOverCap(shaderTooManyFramesWords(cap, false))
         const size = picture ? { w: picture.width, h: picture.height } : aspectSize(Math.trunc(resolution), aspect)
+        check(plan.length, size.w, size.h, false)
         const base = picture?.image ?? ctx.blank(size.w, size.h)
         for (const [, t] of plan) await render(base, size.w, size.h, t, !!picture)
-      }
-      // Every frame rendered: only now is anything uploaded (Stop before here uploads nothing).
-      const files: string[] = []
-      for (const f of frames) {
-        stopCheck(signal)
-        files.push(await ctx.upload(new Uint8Array(await f.blob.arrayBuffer()), f.name, signal))
       }
       stopCheck(signal)
       inputs.sailor_baked = shaderBakedText(files, await shaderBakeKey(inputs, sources, ctx.catalog.version, files))
@@ -268,7 +322,9 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
         result.stopped = true
         return result
       }
-      result.failed.push({ nodeId, error: e instanceof Error ? e.message : String(e), ...(animated ? { animated: true as const } : {}) })
+      const cause = e instanceof BakeGraphError ? 'graph' as const : 'environment' as const
+      const error = e instanceof BakeGraphError || e instanceof BakeEnvError ? e.message : SHADER_BAKE_ENV_WORDS.webgl
+      result.failed.push({ nodeId, error, cause, ...(animated ? { animated: true as const } : {}) })
     }
   }
   return result
@@ -317,14 +373,17 @@ export async function bakeShaderTakes(
   prompts: readonly (ApiPrompt | null | undefined)[],
   families: ReadonlySet<RunnerFamily>,
   makeContext: () => Promise<ShaderBakeRunContext>,
-  o: { hosted?: boolean } = {},
+  o: { hosted?: boolean; tabId?: string | null; folder?: string; onStart?: () => void } = {},
 ): Promise<ShaderBakeResult> {
   const result: ShaderBakeResult = { baked: [], failed: [] }
   const wanted = prompts.filter((p): p is ApiPrompt => takeWantsShaderBake(p, families))
   if (!wanted.length) return result
-  // R11.9c: Stop reaches this run's bake (stopShaderBakes).
+  o.onStart?.()
+  // R11.9c: Stop reaches this run's bake (stopShaderBakes; fix round 1, m1: this tab's).
   const stop = new AbortController()
-  running.add(stop)
+  running.set(stop, o.tabId ?? null)
+  // Fix round 1 (I4): this bake's own folder.
+  const folder = o.folder ?? newBakeFolder()
   try {
     let ctx: ShaderBakeRunContext
     try { ctx = await makeContext() }
@@ -333,14 +392,15 @@ export async function bakeShaderTakes(
         for (const [nodeId, n] of Object.entries(p)) {
           if (n.class_type !== 'ShaderEffect') continue
           const many = (shaderSourceOfNode(p, nodeId)?.kind === 'clip') || framePlan(1, Number(n.inputs?.time) || 0, Number(n.inputs?.duration) || 0, Number(n.inputs?.fps) || 1).length > 1
-          result.failed.push({ nodeId, error: e instanceof Error ? e.message : String(e), ...(many ? { animated: true as const } : {}) })
+          // No WebGL context (or catalog) in this browser: this machine's, not the graph's.
+          result.failed.push({ nodeId, error: SHADER_BAKE_ENV_WORDS.webgl, cause: 'environment', ...(many ? { animated: true as const } : {}) })
         }
       }
       return result
     }
     try {
       for (const p of wanted) {
-        const r = await bakeShaderEffects(p, ctx, { hosted: o.hosted, signal: stop.signal })
+        const r = await bakeShaderEffects(p, ctx, { hosted: o.hosted, signal: stop.signal, folder })
         result.baked.push(...r.baked)
         result.failed.push(...r.failed)
         if (r.stopped) {
@@ -351,6 +411,9 @@ export async function bakeShaderTakes(
     }
     finally {
       ctx.release()
+      // Fix round 1 (I2): a bake given up (Stop, a failure) keeps nothing: the server deletes its frames
+      // (or, if this call never arrives, sweeps them once they are old; a run never claims them).
+      if ((result.stopped || result.failed.length) && ctx.abandon) await ctx.abandon(folder).catch(() => {})
     }
     return result
   }
@@ -449,7 +512,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
  * renderer for the run (the node previews keep theirs; its WebGL context is
  * lost when the run's bakes are done) and the /upload/image rail.
  */
-export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | null | undefined)[], families: ReadonlySet<RunnerFamily>, o: { hosted?: boolean } = {}): Promise<ShaderBakeResult> {
+export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | null | undefined)[], families: ReadonlySet<RunnerFamily>, o: { hosted?: boolean; tabId?: string | null; onStart?: () => void } = {}): Promise<ShaderBakeResult> {
   return bakeShaderTakes(prompts, families, async () => {
     const { fetchShaderFxCatalog, assetUrl } = await import('~/lib/shaderfx/catalog')
     const { ShaderFxRenderer } = await import('~/lib/shaderfx/renderer')
@@ -465,9 +528,10 @@ export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | nul
         renderer.dispose()
         if (gl && !gl.isContextLost()) gl.getExtension('WEBGL_lose_context')?.loseContext()
       },
-      async upload(bytes, name, signal) {
+      async upload(bytes, name, signal, subfolder) {
         const fd = new FormData()
         fd.append('image', new File([bytes as BlobPart], name, { type: 'image/png' }))
+        if (subfolder) fd.append('subfolder', subfolder)
         fd.append('overwrite', 'true')
         const res = await fetch('/upload/image', { method: 'POST', body: fd, ...(signal ? { signal } : {}) })
         if (!res.ok) throw new Error(`The shader’s picture couldn’t be uploaded (${res.status})`)
@@ -487,6 +551,9 @@ export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | nul
           return { image: img, width: img.naturalWidth, height: img.naturalHeight }
         }
         finally { URL.revokeObjectURL(url) }
+      },
+      async abandon(folder) {
+        await fetch('/api/runs/shader-bake-abandon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }), keepalive: true })
       },
       sourceFrames(src, signal) {
         return src.kind === 'picture' ? pictureFrames(src.file, signal) : clipFrames(src.clip, signal)
@@ -510,7 +577,7 @@ export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | nul
         const gl = canvas.getContext('webgl2')
         if (!gl) throw new Error('The shader’s picture couldn’t be read')
         // A browser may clamp a large canvas silently: then this is not Python's size, and nothing is uploaded.
-        if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) throw new Error('The picture is too large for this browser to render the shader')
+        if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.tooLargeForBrowser)
         gl.bindFramebuffer(gl.FRAMEBUFFER, null)
         const up = new Uint8Array(width * height * 4)
         gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, up)
@@ -549,25 +616,34 @@ async function pictureFrames(file: string, signal: AbortSignal): Promise<BakeFra
   type Decoded = { image: VideoFrame }
   type Decoder = { tracks: { ready: Promise<void>; selectedTrack: { frameCount: number } | null }; completed: Promise<void>; decode(o: { frameIndex: number }): Promise<Decoded>; close(): void }
   const Ctor = (globalThis as { ImageDecoder?: new (init: { data: ArrayBuffer; type: string }) => Decoder }).ImageDecoder
-  if (!Ctor) throw new Error('This browser can’t read the frames of an animated picture for a shader. Use Chrome or Edge.')
+  if (!Ctor) throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.noImageDecoder)
   const res = await fetch(viewUrlOf(file), { signal })
-  if (!res.ok) throw new Error('A picture for the shader couldn’t be loaded')
+  if (!res.ok) throw new BakeGraphError(SHADER_SOURCE_UNREADABLE)
   const data = await res.arrayBuffer()
   const type = pictureType(new Uint8Array(data))
-  if (!type) throw new Error('A picture for the shader couldn’t be read')
-  const decoder = new Ctor({ data, type })
-  await decoder.tracks.ready
-  await decoder.completed
-  const count = decoder.tracks.selectedTrack?.frameCount ?? 0
-  if (!count) { decoder.close(); throw new Error('A picture for the shader couldn’t be read') }
-  const firstFrame = (await decoder.decode({ frameIndex: 0 })).image
+  if (!type) throw new BakeGraphError(SHADER_SOURCE_UNREADABLE)
+  let decoder: Decoder
+  try { decoder = new Ctor({ data, type }) }
+  catch { throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.noImageDecoder) }
+  let count = 0
+  let firstFrame: VideoFrame
+  try {
+    await decoder.tracks.ready
+    await decoder.completed
+    count = decoder.tracks.selectedTrack?.frameCount ?? 0
+    if (!count) throw new Error('no frames')
+    firstFrame = (await decoder.decode({ frameIndex: 0 })).image
+  }
+  catch { decoder.close(); throw new BakeGraphError(SHADER_SOURCE_UNREADABLE) }
   const width = firstFrame.displayWidth
   const height = firstFrame.displayHeight
   let held: VideoFrame | null = firstFrame
   async function* frames(): AsyncIterable<TexImageSource> {
     for (let i = 0; i < count; i++) {
       if (signal.aborted) return
-      const next: VideoFrame = i === 0 ? firstFrame : (await decoder.decode({ frameIndex: i })).image
+      let next: VideoFrame
+      try { next = i === 0 ? firstFrame : (await decoder.decode({ frameIndex: i })).image }
+      catch { throw new BakeGraphError(SHADER_SOURCE_UNREADABLE) }
       if (held && held !== next) held.close()
       held = next
       yield next
@@ -613,8 +689,12 @@ async function clipFrames(clip: ShaderClipSource, signal: AbortSignal): Promise<
   const { Input, UrlSource, ALL_FORMATS, VideoSampleSink } = await import('mediabunny')
   const input = new Input({ source: new UrlSource(viewUrlOf(clip.file)), formats: ALL_FORMATS })
   try {
-    const track = await input.getPrimaryVideoTrack()
-    if (!track) throw new Error('The shader’s clip has no video in it')
+    let track: Awaited<ReturnType<typeof input.getPrimaryVideoTrack>>
+    try { track = await input.getPrimaryVideoTrack() }
+    catch { throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.clipFormat) }
+    if (!track) throw new BakeGraphError(SHADER_SOURCE_UNREADABLE)
+    // A codec this browser's WebCodecs can't decode (ProRes, some HEVC or AV1) is this machine's, not the clip's.
+    if (!(await track.canDecode().catch(() => false))) throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.clipFormat)
     const w = track.codedWidth
     const h = track.codedHeight
     const stats = await track.computePacketStats()
@@ -631,20 +711,30 @@ async function clipFrames(clip: ShaderClipSource, signal: AbortSignal): Promise<
     async function* frames(): AsyncIterable<TexImageSource> {
       let index = -1
       let kept = 0
-      for await (const sample of sink.samples()) {
-        try {
-          if (signal.aborted) return
-          index++
-          if (index < pick.start || (index - pick.start) % pick.stride !== 0) continue
-          const frame = sample.toVideoFrame()
-          try { g.drawImage(frame, 0, 0, pick.tw, pick.th) }
-          finally { frame.close() }
-          kept++
-          yield canvas
-          if (kept >= pick.count) return
+      const samples = sink.samples()
+      try {
+        for (;;) {
+          let step: Awaited<ReturnType<typeof samples.next>>
+          // A frame this browser can't decode partway is this machine's codec support, not the clip's.
+          try { step = await samples.next() }
+          catch { throw new BakeEnvError(SHADER_BAKE_ENV_WORDS.clipFormat) }
+          if (step.done) return
+          const sample = step.value
+          try {
+            if (signal.aborted) return
+            index++
+            if (index < pick.start || (index - pick.start) % pick.stride !== 0) continue
+            const frame = sample.toVideoFrame()
+            try { g.drawImage(frame, 0, 0, pick.tw, pick.th) }
+            finally { frame.close() }
+            kept++
+            yield canvas
+            if (kept >= pick.count) return
+          }
+          finally { sample.close() }
         }
-        finally { sample.close() }
       }
+      finally { await samples.return(undefined).catch(() => {}) }
     }
     return { count, width: pick.tw, height: pick.th, frames: frames(), close() { input.dispose() } }
   }

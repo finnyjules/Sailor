@@ -3,7 +3,7 @@
  * browser (routing, the needs-the-engine names) and the server (the runner).
  * A class not listed carries files on every slot, as before step 3.
  * Keep this file free of imports but ./graph, ./svgImage (constants only) and
- * ./shaderBakeKey (whose own imports are leaves: ./graph, ./pyText, ./families).
+ * ./shaderBakeKey (whose own imports are leaves: ./graph, ./pyText, ./families, ./media).
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 import { SVG_IMAGE_MODEL_IDS } from './svgImage'

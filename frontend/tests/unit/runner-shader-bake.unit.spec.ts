@@ -7,7 +7,7 @@
  * No GL render is compared: the browser's bytes are the result.
  */
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
@@ -21,7 +21,9 @@ import {
   SHADER_ASPECTS, SHADER_CATALOG_VERSION, bakedFileHash, shaderSeedUniform, SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, SHADER_LEGACY_EFFECT_IDS, SHADER_NEEDS_PICTURE_FIRST,
   aspectSize, canonicalJson, framePlan, parseShaderBaked, sha256HexSync, shaderBakeKey, shaderBakeKeySync, shaderBakeKeyText, shaderBakedText,
   SHADER_MAX_FRAMES, shaderMakesBatch, shaderOverCapWords, shaderPlanCount, shaderSourceOfNode, shaderSourcesOf, shaderTooManyFramesWords,
+  SHADER_ENGINE_WORDS, SHADER_FRAMES_TOO_MUCH, shaderBakeProblem, shaderEngineReason, shaderFrameCount,
 } from '#shared/runner/shaderBakeKey'
+import { CLAIMED_MARKER, SHADER_BAKE_UNCLAIMED_MS, __resetShaderBakeSweepForTests, abandonShaderBake, bakeFolderOf, bakeFoldersOf, sweepShaderBakes } from '~~/server/runner/shaderBakeFiles'
 import { outputKind } from '#shared/runner/values'
 import { outputKindsFor } from '#shared/runner/eligibility'
 import { frameShapes } from '~~/server/runner/video/shapes'
@@ -653,6 +655,28 @@ describe('R11.9c: an animated Shader effect is baked frame by frame and kept as 
     expect(needsEngineReasons(made, { runnerOn: true, families: MEDIA_SHADER })).toEqual([SHADER_NEEDS_PICTURE_FIRST])
   })
 
+  it('fix round 1 (M1): each Shader effect still left to the engine names its cause in plain words', () => {
+    const reason = (p: ApiPrompt) => needsEngineReasons(p, { runnerOn: true, families: SHADER })
+    const one = (over: Record<string, unknown>) => cardShader(over)
+    expect(reason(one({ effect: 'mine_abc~v2' }))).toEqual([SHADER_ENGINE_WORDS.myEffect])
+    expect(reason(one({ effect: 'no_such_effect' }))).toEqual([SHADER_ENGINE_WORDS.unknownEffect])
+    // A setting wired from a node whose value is made in the run (a typed card's is put in as typed, R11.9a).
+    expect(shaderEngineReason(one({ seed: ['9', 0] }), 'fx', SHADER)).toBe(SHADER_ENGINE_WORDS.wired)
+    // Params only Python reads: the browser doesn't bake it.
+    const odd = one({ params: '{"u_amount":"0.5"}' })
+    delete odd.fx!.inputs.sailor_baked
+    expect(reason(odd)).toEqual([SHADER_ENGINE_WORDS.oddParams])
+    const changed = cardShader()
+    changed.fx!.inputs.seed = 43
+    expect(reason(changed)).toEqual([SHADER_ENGINE_WORDS.keyMismatch])
+    // Simply not baked (its take was bound for the engine, or a still's bake failed in this browser): no reason.
+    const unbaked = cardShader()
+    delete unbaked.fx!.inputs.sailor_baked
+    expect(shaderEngineReason(unbaked, 'fx', SHADER)).toBeNull()
+    // Off: nothing is said.
+    expect(shaderEngineReason(one({ effect: 'mine_abc~v2' }), 'fx', new Set(['cards']))).toBeNull()
+  })
+
   it('the frame cap (hosted 300, locally 900) in plain words, saying what to shorten', () => {
     expect(SHADER_MAX_FRAMES).toEqual({ hosted: 300, local: 900 })
     const at = (n: number, fps: number) => baked(gen({ duration: n / fps, fps }), 'fx', names(n), [])
@@ -777,6 +801,91 @@ describe('R11.9c: an animated Shader effect is baked frame by frame and kept as 
     const r2 = await k.engine.startRun({ userId: k.userId, takes: [short], ...START })
     await k.engine.settled(r2.runId)
     expect((await k.store.get(r2.runId))!.takes[0]!.nodes.fx!.error).toBe(SHADER_BAKE_FRAMES)
+  })
+
+  it('fix round 1 (I1): a clip of one frame with a duration makes frame_plan\'s frames from it, as Python does (the shared count)', async () => {
+    const k = await setUp()
+    copyFileSync(clipPath('g_video_smooth.mp4'), join(k.root, 'input', 'clip.mp4'))
+    const one = { max_frames: 1 }
+    const plain: ApiPrompt = { l: loadFrames('clip.mp4', one), s: saveImage(['l', 0]) }
+    const r0 = await k.engine.startRun({ userId: k.userId, takes: [plain], ...START })
+    await k.engine.settled(r0.runId)
+    const picked = savedFrames(k)
+    expect(picked.length).toBe(1)
+    const first = await rawOf(new Uint8Array(readFileSync(join(k.root, 'output', picked[0]!))))
+    for (const f of picked) rmSync(join(k.root, 'output', f))
+    // duration 0.125 at 24 fps: round(3) = 3 frames, all from the one frame.
+    expect(shaderFrameCount(1, shaderInputs({ duration: 0.125, fps: 24 }))).toBe(3)
+    expect(shaderFrameCount(5, shaderInputs({ duration: 0.125, fps: 24 }))).toBe(5)
+    const { files } = await bake(k, 3, first.w, first.h, 4)
+    const p: ApiPrompt = { l: loadFrames('clip.mp4', one), fx: { class_type: 'ShaderEffect', inputs: { image: ['l', 0], ...shaderInputs({ duration: 0.125, fps: 24 }) } }, s: saveImage(['fx', 0]) }
+    baked(p, 'fx', files, shaderSourcesOf(p, 'fx')!)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status, run.takes[0]!.nodes.fx!.error ?? '').toBe('done')
+    const v = run.takes[0]!.nodes.fx!.values![0] as Extract<RunnerValue, { kind: 'frames' }>
+    expect([v.kind, v.count]).toEqual(['frames', 3])
+    expect(savedFrames(k)).toHaveLength(3)
+  })
+
+  it('fix round 1 (I2): a bake past the batch\'s pixels is refused before the hold with the browser\'s own words (hosted 300 frames of 2048²)', async () => {
+    const k = await setUp({ hosted: true })
+    const frame0 = await png(pixels(2048, 2048, 3, 1), 2048, 2048, 3)
+    put(k.root, bakeNameOf(frame0), frame0)
+    const files = [bakeNameOf(frame0), ...names(300).slice(1)]
+    const p = baked(gen({ resolution: 2048, aspect: '1:1', duration: 300 / 24, fps: 24 }), 'fx', files, [])
+    expect(shaderPlanCount(p.fx!.inputs)).toBe(300)
+    const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e as Error & { data?: Record<string, unknown> })
+    expect(err).toBeInstanceOf(Error)
+    expect(err.data?.code).toBe('too-much-work')
+    expect(err.message).toContain(SHADER_FRAMES_TOO_MUCH)
+    expect(shaderBakeProblem(300, 2048, 2048, true, false)).toBe(SHADER_FRAMES_TOO_MUCH)
+    expect(err.message).toMatch(new RegExp(`^“[^”]+”: ${SHADER_FRAMES_TOO_MUCH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('fix round 1 (I2, I4): a bake in its own folder is claimed by the run that reads it; abandoned or old unclaimed ones are deleted', async () => {
+    const k = await setUp()
+    const { w, h } = aspectSize(256, '16:9')
+    const folder = `shader_bake/${'ab'.repeat(16)}`
+    const files: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const bytes = await png(pixels(w, h, 4, 50 + i), w, h, 4)
+      put(k.root, `${folder}/${bakeNameOf(bytes)}`, bytes)
+      files.push(`${folder}/${bakeNameOf(bytes)}`)
+    }
+    expect(bakedFileHash(files[0]!)).not.toBeNull()
+    const p = baked(gen({ duration: 0.25, fps: 8 }), 'fx', files, [])
+    expect(bakeFoldersOf([p])).toEqual([folder])
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.status).toBe('done')
+    const input = join(k.root, 'input')
+    expect(existsSync(join(input, folder, CLAIMED_MARKER))).toBe(true)
+    // Claimed: an abandon keeps it.
+    expect(await abandonShaderBake(input, folder, async () => true)).toBe(false)
+    // Unclaimed: abandoned only when every frame is the caller's; then gone.
+    const other = `shader_bake/${'cd'.repeat(16)}`
+    put(k.root, `${other}/${bakeNameOf(new Uint8Array([1]))}`, new Uint8Array([1]))
+    expect(await abandonShaderBake(input, other, async () => false)).toBe(false)
+    expect(existsSync(join(input, other))).toBe(true)
+    expect(await abandonShaderBake(input, other, async () => true)).toBe(true)
+    expect(existsSync(join(input, other))).toBe(false)
+    // Not a bake folder: nothing.
+    expect(bakeFolderOf('../shader_bake/x')).toBeNull()
+    expect(await abandonShaderBake(input, '../etc', async () => true)).toBe(false)
+    // The sweep: unclaimed folders older than SHADER_BAKE_UNCLAIMED_MS go; young or claimed ones stay.
+    const old = `shader_bake/${'ef'.repeat(16)}`
+    const young = `shader_bake/${'01'.repeat(16)}`
+    put(k.root, `${old}/a.png`, new Uint8Array([1]))
+    put(k.root, `${young}/a.png`, new Uint8Array([1]))
+    const past = new Date(Date.now() - SHADER_BAKE_UNCLAIMED_MS - 60_000)
+    utimesSync(join(input, old, 'a.png'), past, past)
+    utimesSync(join(input, old), past, past)
+    __resetShaderBakeSweepForTests()
+    expect(await sweepShaderBakes(input)).toBe(1)
+    expect([existsSync(join(input, old)), existsSync(join(input, young)), existsSync(join(input, folder))]).toEqual([false, true, true])
   })
 
   it('an animated picture (a GIF of two frames on an Image card): two baked frames kept as a batch', async () => {

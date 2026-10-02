@@ -9,7 +9,10 @@
 import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, outputKindsFor, rendersLocally, svgReaderProblems } from '#shared/runner/eligibility'
 import { outputKind } from '#shared/runner/values'
 import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/families'
-import { shaderOverCapWords } from '#shared/runner/shaderBakeKey'
+import { parseShaderBaked, shaderOverCapWords } from '#shared/runner/shaderBakeKey'
+import { dirname } from 'node:path'
+import { bakedPngSize } from './cards/shaderEffect'
+import { bakeFoldersOf, claimShaderBakes, sweepShaderBakes } from './shaderBakeFiles'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
@@ -19,7 +22,7 @@ import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiLink, type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
-import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, withAdvice, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
+import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, TOO_MUCH_WORK_WORDS, withAdvice, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
 import { stopGapRefusal, switchedOffNodes, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { objectInfoDisplayName } from '../native/objectInfo'
 import { UNNAMED_NODE, workflowNodeTitles } from '#shared/runner/needsEngine'
@@ -2528,14 +2531,30 @@ export function createEngine(deps: EngineDeps) {
       if (bad?.engine) throw stopGap(bad)
       if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}) })
     }
-    // R11.9c: an animated Shader effect's frames past the cap (hosted 300, locally 900), refused plainly before
-    // the hold, in words saying what to shorten (the browser checks the same before it bakes).
+    // R11.9c: a Shader effect's bake past the caps (its frames: hosted 300, locally 900; fix round 1, I2: each
+    // frame's and the batch's pixels, from frame 0's header, every frame being that size at its turn), refused
+    // plainly before the hold, in words saying what to shorten: the one check the browser makes before it draws
+    // (#shared shaderBakeProblem). Fix round 1 (M2): the bake's uploaded frames count in the run's kept room.
+    let bakeBytes = 0
     if (familyOn('shader-bake', families)) {
       for (const p of prompts) {
         for (const [id, n] of Object.entries(p)) {
-          const words = n.class_type === 'ShaderEffect' ? shaderOverCapWords(p, id, deps.hosted()) : null
+          if (n.class_type !== 'ShaderEffect') continue
+          const baked = parseShaderBaked(n.inputs?.sailor_baked)
+          if (!baked) continue
+          const refs = baked.files.map(parseInputFileRef)
+          let size: { w: number; h: number } | null = null
+          const first = refs[0]
+          // A frame that isn't there or can't be read fails plainly at its turn.
+          if (first && (await files.exists(first))) size = bakedPngSize(await files.read(first))
+          const words = shaderOverCapWords(p, id, deps.hosted(), size)
           if (words) throw stopGap({ message: words, nodeId: id, classType: n.class_type, code: 'too-much-work' })
+          for (const r of refs) if (r) bakeBytes += (await files.size(r)) ?? 0
         }
+      }
+      if (bakeBytes > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {
+        const at = prompts.flatMap(p => Object.entries(p)).find(([, n]) => n.class_type === 'ShaderEffect' && parseShaderBaked(n.inputs?.sailor_baked))
+        throw stopGap({ message: TOO_MUCH_WORK_WORDS, nodeId: at?.[0], classType: 'ShaderEffect', code: 'too-much-work' })
       }
     }
     // The video effects' start pass (R6 rule 3, ./video/start.ts): every frame batch's count and size
@@ -2567,7 +2586,7 @@ export function createEngine(deps: EngineDeps) {
         return peak ? peak.bytes : Number.POSITIVE_INFINITY
       }
       const others = (k: number) => (several ? prompts.reduce((sum, _p, j) => (j === k ? sum : sum + keptOf(j)), 0) : 0)
-      const opts = (k: number) => ({ hosted: deps.hosted(), shapes: shapes[k]!, release: !several, keptOthers: others(k) })
+      const opts = (k: number) => ({ hosted: deps.hosted(), shapes: shapes[k]!, release: !several, keptOthers: others(k) + bakeBytes })
       if (prompts.some((p, k) => nearLimit(p, families, opts(k)))) shapes = await shapeAll(true)
       for (const [k, p] of prompts.entries()) {
         if (!hasVideoEffect(p, families) && !several) continue
@@ -2655,7 +2674,7 @@ export function createEngine(deps: EngineDeps) {
     const room = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
     if (Number.isFinite(room) && prompts.some(framesSaved)) {
       const caps = deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
-      let total = localKept + soundKept
+      let total = localKept + soundKept + bakeBytes
       let first: { nodeId: string; classType: string } | null = null
       for (const p of prompts) {
         const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
@@ -2790,9 +2809,22 @@ export function createEngine(deps: EngineDeps) {
     }))
   }
 
+  /** The input folder (where the browser's bakes are), or null when the store can't say. */
+  function inputRoot(): string | null {
+    try { return deps.results.pathOf ? dirname(deps.results.pathOf({ type: 'input', subfolder: '', filename: 'probe' })) : null }
+    catch { return null }
+  }
+
   async function startRun(i: StartRunInput): Promise<LegStarted> {
     const prep = await prepareStart(i)
     const { prompts, chosenAtStart, nodeErrors } = prep
+    // R11.9c fix round 1 (I2): the bakes this run reads are claimed (kept as its inputs, never swept);
+    // unclaimed ones older than a few hours are swept now and then.
+    const root = inputRoot()
+    if (root) {
+      await claimShaderBakes(root, bakeFoldersOf(prompts))
+      void sweepShaderBakes(root).catch(() => {})
+    }
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))
 
     const now = deps.now()

@@ -28,7 +28,7 @@ import type { OutputFile, RunnerValue } from '../types'
 import { parseInputFileRef } from '../inputs'
 import { isLink } from '#shared/runner/graph'
 import { pyIntOf } from '#shared/runner/pyText'
-import { aspectSize, bakedFileHash, parseShaderBaked, shaderFrameCap, shaderMakesBatch, shaderPlanCount, shaderTooManyFramesWords } from '#shared/runner/shaderBakeKey'
+import { aspectSize, bakedFileHash, parseShaderBaked, shaderBakeProblem, shaderFrameCount, shaderMakesBatch } from '#shared/runner/shaderBakeKey'
 import { keepFrames } from '../../media/values'
 import { FRAMES_NEED_RUN } from '../media/frameNodes'
 import { sha256Hex } from '../handoff'
@@ -117,7 +117,7 @@ async function rgbPng(px: Uint8Array, w: number, h: number, compressionLevel: nu
 }
 
 /** R11.9c: the baked frames don't match what the node makes from its source (their count). */
-export const SHADER_BAKE_FRAMES = 'The shader’s baked frames don’t match its source. Run it again.'
+export const SHADER_BAKE_FRAMES = 'The shader’s frames don’t match its picture or clip here. Try a different clip, or trim it.'
 
 export function planShaderEffect(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
@@ -136,11 +136,12 @@ export function planShaderEffect(ctx: PlanContext): NodePlan {
       if (size.w > MAX_RENDER_DIM || size.h > MAX_RENDER_DIM) throw new Error(SHADER_PICTURE_TOO_WIDE)
       const cap = effectPictureCap('ShaderEffect', io.hosted)
       if (size.w * size.h > cap.max) throw new Error(cap.message)
-      // frame_plan: a batch's own frames (a clip, an animated picture), else the time setting's.
-      const expected = src.clip || src.frames > 1 ? src.frames : shaderPlanCount(inputs)
-      // R11.9c: the cap the start checked before the hold, again here (a backstop).
-      const frameCap = shaderFrameCap(io.hosted)
-      if (files.length > frameCap) throw new Error(shaderTooManyFramesWords(frameCap, src.clip || src.frames > 1))
+      // frame_plan: a batch's own frames when it has more than one, else the time setting's (fix round 1, I1:
+      // a clip of one frame with a duration too), the count the browser bakes (#shared shaderFrameCount).
+      const expected = shaderFrameCount(src.frames, inputs)
+      // R11.9c: the caps the start checked before the hold, again here (a backstop; the shared check).
+      const tooMuch = shaderBakeProblem(files.length, size.w, size.h, io.hosted, src.clip || src.frames > 1)
+      if (tooMuch) throw new Error(tooMuch)
       if (expected !== files.length) throw new Error(SHADER_BAKE_FRAMES)
       let preview: OutputFile | null = null
       /** Each baked file, checked against its name and the size, as 8-bit RGB. */

@@ -32,6 +32,7 @@
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 import { pyFloatOf } from './pyText'
 import { familyOn, type RunnerFamily } from './families'
+import { MEDIA_CAPS } from './media'
 
 /** The catalog's `version` (shader_effects/manifest.json) the runner replays bakes of. */
 export const SHADER_CATALOG_VERSION = 1
@@ -65,6 +66,20 @@ export const SHADER_GENERATIVE_IDS: readonly string[] = [
   'nebula', 'oddgrid', 'pixel_bloom', 'plasma', 'prism', 'sear', 'sonar', 'starfield', 'static',
   'studio_backdrop', 'terrain_bands', 'thread_contours', 'voronoi_cells', 'warp_tunnel', 'wisps',
 ]
+
+/** R11.9c fix round 1 (M1): the plain words for each Shader effect the runner leaves to the engine, by cause. */
+export const SHADER_ENGINE_WORDS = {
+  /** A My effect or a draft (its id is the user's own: `mine_…`). */
+  myEffect: 'This shader is one of your own effects, which only the local engine runs for now.',
+  /** An effect id the runner's catalog doesn't list. */
+  unknownEffect: 'This shader effect isn’t one Sailor knows yet. Pick another effect.',
+  /** A setting wired in from another node. */
+  wired: 'This shader’s settings are wired in from another node. Type them into the shader instead.',
+  /** Params text Python reads one way and the browser another. */
+  oddParams: 'This shader’s settings are written in a way only the local engine reads. Change any setting in the shader to rewrite them.',
+  /** A bake whose key doesn't agree with the prompt as sent. */
+  keyMismatch: 'This shader changed after its frames were drawn. Run it again.',
+} as const
 
 /** The node's `aspect` options. */
 export const SHADER_ASPECTS = ['1:1', '16:9', '9:16', '4:5', '3:2'] as const
@@ -366,6 +381,41 @@ export function shaderPlanCount(inputs: Record<string, unknown>): number | null 
 }
 
 /**
+ * R11.9c fix round 1 (I1): how many frames the node makes from a source of
+ * `sourceFrames` frames (1 for a still or no picture): `frame_plan`'s count —
+ * a batch's own frames when it has more than one, else the time setting's
+ * (a clip or animation of one frame with a duration makes `round(duration ·
+ * fps)` frames from it, as Python does). Null when the settings can't be read.
+ * The browser bakes this many and the runner's turn expects this many.
+ */
+export function shaderFrameCount(sourceFrames: number, inputs: Record<string, unknown>): number | null {
+  return sourceFrames > 1 ? sourceFrames : shaderPlanCount(inputs)
+}
+
+/** `render_effect` refuses a side over MAX_RENDER_DIM. */
+export const SHADER_MAX_SIDE = 8192
+
+/** R11.9c fix round 1 (I2): the words when a bake's pixels pass the caps. */
+export const SHADER_FRAME_TOO_LARGE = 'This picture is too large for a shader here. Use a smaller picture or clip.'
+export const SHADER_FRAMES_TOO_MUCH = 'This shader’s frames are too large to work with here. Lower its resolution, use a smaller picture or clip, or make fewer frames.'
+
+/**
+ * R11.9c fix round 1 (I2): the one check of a bake's size both the browser
+ * (before it draws anything) and the runner (before the hold) make: the
+ * frame cap (SHADER_MAX_FRAMES), each frame's side and pixels, and the
+ * batch's frames and pixels against R5's batch caps (MEDIA_CAPS, as the
+ * start pass and keepFrames hold every batch to). Plain words, or null.
+ */
+export function shaderBakeProblem(count: number, w: number, h: number, hosted: boolean, overSource: boolean): string | null {
+  const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  const cap = shaderFrameCap(hosted)
+  if (count > cap) return shaderTooManyFramesWords(cap, overSource)
+  if (w > SHADER_MAX_SIDE || h > SHADER_MAX_SIDE || w * h > caps.framePixels) return SHADER_FRAME_TOO_LARGE
+  if (count > 1 && (count > caps.batchFrames || count * w * h > caps.batchPixels)) return SHADER_FRAMES_TOO_MUCH
+  return null
+}
+
+/**
  * R11.9c: whether the Shader effect hands on a frame batch (a clip's frames
  * value) rather than one picture, read from its bake: several frames (its
  * time setting's, an animated picture's), or any over a clip (Python's
@@ -401,12 +451,16 @@ export function shaderTooManyFramesWords(cap: number, overSource: boolean): stri
  * effect's bake holds against the place's cap, in plain words; null when
  * within it (or not baked).
  */
-export function shaderOverCapWords(prompt: ApiPrompt, nodeId: string, hosted: boolean): string | null {
+export function shaderOverCapWords(prompt: ApiPrompt, nodeId: string, hosted: boolean, size: { w: number; h: number } | null = null): string | null {
   const baked = parseShaderBaked(prompt[nodeId]?.inputs?.sailor_baked)
-  const cap = shaderFrameCap(hosted)
-  if (!baked || baked.files.length <= cap) return null
+  if (!baked) return null
+  const n = baked.files.length
   const src = shaderSourceOfNode(prompt, nodeId)
-  return shaderTooManyFramesWords(cap, src?.kind === 'clip' || (src?.kind === 'picture' && baked.files.length !== shaderPlanCount(prompt[nodeId]!.inputs ?? {})))
+  const overSource = src?.kind === 'clip' || (src?.kind === 'picture' && n !== shaderPlanCount(prompt[nodeId]!.inputs ?? {}))
+  // Fix round 1 (I2): with frame 0's size, the whole shared check (frames, a frame's pixels, the batch's).
+  if (size) return shaderBakeProblem(n, size.w, size.h, hosted, overSource)
+  const cap = shaderFrameCap(hosted)
+  return n > cap ? shaderTooManyFramesWords(cap, overSource) : null
 }
 
 /**
@@ -441,10 +495,58 @@ export function shaderBakeTaken(prompt: ApiPrompt, nodeId: string): boolean {
   return baked.key === shaderBakeKeySync(inputs, shaderSourcesOf(prompt, nodeId)!, SHADER_CATALOG_VERSION, baked.files)
 }
 
-/** Why the runner leaves a Shader effect to the engine, when there is a plain reason to give (else null). */
+/** The settings a Shader effect reads as typed (a wire into any of them leaves it to the engine). */
+const SHADER_SETTINGS = ['effect', 'params', 'time', 'duration', 'fps', 'seed', 'resolution', 'aspect'] as const
+
+const LOOKS_HEX = /^#?(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+
+/**
+ * R11.9c fix round 1 (M1): whether params text has a shape both Python and
+ * the browser read alike, without the catalog: blank, or a JSON object whose
+ * values are finite numbers, null, portable colours, or lists of stops with
+ * number positions and portable colours. (The browser's own check,
+ * paramsPortable, also knows each param's type; this one only names the cause.)
+ */
+export function shaderParamsLookPortable(text: unknown): boolean {
+  if (typeof text !== 'string') return false
+  if (!text.trim()) return true
+  let v: unknown
+  try { v = JSON.parse(text) }
+  catch { return false }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  for (const x of Object.values(v as Record<string, unknown>)) {
+    if (x === null || (typeof x === 'number' && Number.isFinite(x))) continue
+    if (typeof x === 'string' && LOOKS_HEX.test(x)) continue
+    if (Array.isArray(x) && x.every(s => !!s && typeof s === 'object' && typeof (s as { pos?: unknown }).pos === 'number' && Number.isFinite((s as { pos: number }).pos)
+      && typeof (s as { color?: unknown }).color === 'string' && LOOKS_HEX.test((s as { color: string }).color))) continue
+    return false
+  }
+  return true
+}
+
+/**
+ * Why the runner leaves a Shader effect to the engine, when there is a plain
+ * reason to give (else null): its picture made in the run, and (R11.9c fix
+ * round 1, M1) a My effect, an effect the runner doesn't know, a wired
+ * setting, params only Python reads, or a bake that no longer agrees with
+ * its settings. A node simply not baked (its take bound for the engine, or a
+ * still whose bake failed in this browser) names none.
+ */
 export function shaderEngineReason(prompt: ApiPrompt, nodeId: string, families: ReadonlySet<RunnerFamily>): string | null {
   const node = prompt[nodeId]
   if (node?.class_type !== 'ShaderEffect' || !familyOn('shader-bake', families)) return null
-  const image = node.inputs?.image
-  return isLink(image) && sourceEnd(prompt, image).kind === 'made' ? SHADER_NEEDS_PICTURE_FIRST : null
+  const inputs = node.inputs ?? {}
+  const image = inputs.image
+  if (isLink(image) && sourceEnd(prompt, image).kind === 'made') return SHADER_NEEDS_PICTURE_FIRST
+  if (SHADER_SETTINGS.some(k => isLink(inputs[k]))) return SHADER_ENGINE_WORDS.wired
+  if (typeof inputs.effect === 'string' && !SHADER_EFFECT_IDS.includes(resolveShaderEffectId(inputs.effect))) {
+    return inputs.effect.startsWith('mine_') ? SHADER_ENGINE_WORDS.myEffect : SHADER_ENGINE_WORDS.unknownEffect
+  }
+  if (!shaderParamsLookPortable(inputs.params)) return SHADER_ENGINE_WORDS.oddParams
+  const baked = parseShaderBaked(inputs.sailor_baked)
+  if (baked && !shaderBakeTaken(prompt, nodeId)) {
+    const sources = shaderSourcesOf(prompt, nodeId)
+    if (sources && baked.key !== shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION, baked.files)) return SHADER_ENGINE_WORDS.keyMismatch
+  }
+  return null
 }
