@@ -23,6 +23,11 @@ const STUDIO_OWNED = [
   'something calm for a meditation app splash',
   'a tileable geometric wallpaper',
   'a looping mesh gradient in teal and violet',
+  // The Frame's own phrases (re-review N1 of the light layers stage-4 fix wave: a global
+  // Edit-an-image boost took them from the Frame and sent them to the sketch pad).
+  'blue background',
+  'a blue background',
+  'put a logo on this',
 ]
 
 // Genuine image ideas — the fast-path is exactly what these want.
@@ -51,6 +56,9 @@ describe('studioOwnsPhrase', () => {
   it('is empty-safe', () => {
     expect(studioOwnsPhrase('')).toBe(false)
     expect(studioOwnsPhrase('   ')).toBe(false)
+  })
+  it('the Frame keeps its own phrases', () => {
+    for (const p of ['blue background', 'a blue background', 'put a logo on this']) expect(studioMatch(p)?.nodeType, p).toBe('Compositor')
   })
   it('names the studio it matched', () => {
     const m = studioMatch('a seamless terrazzo pattern')

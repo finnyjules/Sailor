@@ -313,21 +313,30 @@ const REACHABLE: { phrase: string; expect: string }[] = [
 describe('lighting phrases route to the Frame', () => {
   // 'make it night' is left to the Frame's own assistant: as a canvas intent it steals image ideas
   // ("a snowy street at night…") from the sketch fast-path, and on a photo it is EditImage's.
-  for (const phrase of ['add a light', 'add a warm lamp', 'light the scene', 'darker', 'spotlight']) {
+  for (const phrase of ['add a light', 'add a warm lamp', 'light the scene', 'spotlight']) {
     it(`"${phrase}" → Compositor`, () => {
       expect(topN(phrase, 3)).toContain('Compositor')
     })
   }
-  // The neighbours those intents must not steal: a photo made darker is an image edit, a light
-  // added to a 3D scene is 3D Studio's.
-  for (const phrase of ['make the photo darker', 'make it darker']) {
-    it(`"${phrase}" is still #1 → EditImageNode`, () => {
-      expect(topN(phrase, 3)[0]).toBe('EditImageNode')
-    })
-  }
+  // The neighbours those intents must not steal: a photo made darker is an image edit (Relight
+  // leads, as before stage 4), a light added to a 3D scene is 3D Studio's.
+  it('"make the photo darker" is #1 → an image edit, not the Frame', () => {
+    expect(['RelightNode', 'EditImageNode']).toContain(topN('make the photo darker', 3)[0])
+  })
   it('"add a light to the scene" → Scene3DStudio in top-3', () => {
     expect(topN('add a light to the scene', 3)).toContain('Scene3DStudio')
   })
+  // The stage-4 fix wave's re-review (N1): a global Edit-an-image boost flipped these first picks.
+  // They keep the pick they had before the fix wave.
+  for (const [phrase, first] of [
+    ['make a picture of a cat', 'GenerateImageNode'],
+    ['make the background blue', 'Compositor'],
+    ['brighten it', 'GradientStudio'],
+  ] as const) {
+    it(`"${phrase}" is still #1 → ${first}`, () => {
+      expect(topN(phrase, 3)[0]).toBe(first)
+    })
+  }
 })
 
 describe('ambiguous requests stay discoverable (top-6)', () => {

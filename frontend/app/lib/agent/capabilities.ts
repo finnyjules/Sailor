@@ -150,8 +150,8 @@ const GENERATORS: AgentCapability[] = [
     intents: ['make a text effect', 'stylize this word', 'typographic art', 'chrome text', 'holographic letters', 'make a logo word', 'fancy text', 'word art', '3d text effect', 'liquid metal text', 'title treatment', 'neon text'] },
 
   // ---- Image · editing & transformation ----
-  { nodeType: 'EditImageNode', kind: 'effect', boost: 3.5, title: 'Edit an image', summary: 'Natural-language image editing (Nano Banana 2 / Flux 2 Pro) — change, add, remove anything.', inputs: [{ name: 'input_image', type: 'IMAGE' }], outputs: IMG,
-    intents: ['make the photo darker', 'make it darker', 'edit this image', 'change her shirt', 'make her hair blue', 'change the background', 'edit the photo', 'modify this picture', 'alter the image', 'change the sky', 'make it nighttime', 'make it look like nighttime', 'tweak this image', 'photoshop this', 'add an object', 'add a hat', 'put glasses on', 'add a logo to the image'] },
+  { nodeType: 'EditImageNode', kind: 'effect', title: 'Edit an image', summary: 'Natural-language image editing (Nano Banana 2 / Flux 2 Pro) — change, add, remove anything.', inputs: [{ name: 'input_image', type: 'IMAGE' }], outputs: IMG,
+    intents: ['edit this image', 'change her shirt', 'make her hair blue', 'change the background', 'edit the photo', 'modify this picture', 'alter the image', 'change the sky', 'make it nighttime', 'make it look like nighttime', 'tweak this image', 'photoshop this', 'add an object', 'add a hat', 'put glasses on', 'add a logo to the image'] },
     // Removal, recolor and in-image text edits have DEDICATED nodes below
     // (RemoveObjectNode / RecolorObjectNode / TextEditNode) — their verbs
     // moved there; EditImageNode keeps the broad/ambiguous edits.
@@ -358,7 +358,7 @@ const STUDIOS: AgentCapability[] = [
       // Not 'make it night': a bare "night" here makes the Frame claim image ideas ("a snowy street at
       // night…") from the sketch fast-path (sketch-studio-gate), and it is EditImage's phrase on a
       // photo. Inside a Frame the Frame assistant gets the words directly and makes it night.
-      'add a light', 'add a warm lamp', 'light the scene', 'darker', 'spotlight'] },
+      'add a light', 'add a warm lamp', 'light the scene', 'spotlight'] },
   { nodeType: 'SmartLayout', kind: 'studio', frontendOnly: false, title: 'Smart Layout', summary: 'Format-aware Swiss/International-style auto-layout — design once, reflow to many ad aspect ratios; brand-themed.', inputs: [{ name: 'image_layer_1', type: 'IMAGE' }, { name: 'text_layer_1', type: 'STRING' }], outputs: [{ name: 'images', type: 'IMAGE' }],
     intents: ['make a poster layout', 'design a layout', 'auto-layout', 'arrange into a composition', 'create an ad layout', 'social media post layout', 'lay this out nicely', 'arrange text and images', 'make a flyer', 'design a banner', 'multi-format layout', 'resize this design to other formats', 'adapt to story or square', 'swiss design poster', 'grid layout', 'headline and body layout', 'brand-styled layout'] },
   {
