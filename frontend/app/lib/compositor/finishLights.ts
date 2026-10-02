@@ -276,8 +276,14 @@ export function applyFinishLit(
   ctx.clearRect(0, 0, w, h)
   ctx.drawImage(out, 0, 0)
   ctx.restore()
+  _litRuns++
   return true
 }
+
+let _litRuns = 0
+/** How many lit finish draws have run in this page (a test hook: a Frame with no light layer must
+ *  never reach the lit shaders). The lean bundle's stub does not export it. */
+export function __finishLitRuns(): number { return _litRuns }
 
 // ---- Painter state. Lives here so the lean web bundle (which never paints lights + finishes,
 // see frameNeedsFullBundle) stubs it all out with no-ops. ----

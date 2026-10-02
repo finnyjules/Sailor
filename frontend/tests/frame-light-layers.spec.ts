@@ -1137,3 +1137,272 @@ test.describe('Frame light layers (stage 1) — speed', () => {
     })
   })
 })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Stage 3: Gold foil and Spot UV lit by the Frame's light layers.
+//
+// A dark-green Frame with a gold foil "GOLD" (Georgia) across the top and a blue Spot UV ellipse
+// below it. With no light the finishes take the hidden light exactly as before stage 3: the lit
+// shaders never run (`__finishLitRuns`, read from the app's own finishLights.ts instance) and a
+// lamp added then deleted leaves the picture byte-identical. The shader-level byte-identity of the
+// no-light path is the unit suite's job (finish-lights / finish-pass unit specs).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+const FOIL_FILL = { type: 'foil', metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }
+const FIN_BG = '#0b3d2e'
+const GOLD = { id: 'gold', kind: 'text', x: 0.5, y: 0.3, rotation: 0, opacity: 1, text: 'GOLD', fontFamily: 'Georgia', fontWeight: 700, fontSize: 0.24, color: FOIL_FILL, align: 'center', lineHeight: 1.1, effects: [] as unknown[] }
+const UV = { id: 'uv', kind: 'ellipse', x: 0.5, y: 0.74, w: 0.6, h: 0.26, rotation: 0, opacity: 1, fill: '#2a6f97', stroke: '', strokeWidth: 0,
+  effects: [{ id: 'uv1', type: 'spot_uv', visible: true, gloss: 0.75, raised: 0.5, varnishOnly: false }] }
+const FINISHES = [UV, GOLD]   // bottom → top
+/** The foil word's band and the ellipse's inner box (canvas fractions). */
+const GOLD_BAND: Box = [0.12, 0.2, 0.88, 0.4]
+const UV_IN: Box = [0.28, 0.67, 0.72, 0.81]
+/** A white lamp where the hidden light sits by default (top left, height 0.6). */
+const whiteLamp = (x = 0.15, y = 0.1, over: Record<string, unknown> = {}) => light('lamp', 'lamp', x, y, { color: '#ffffff', brightness: 1.6, height: 0.6, ...over })
+
+const finishModuleUrl = new WeakMap<Page, string>()
+/** Lit finish draws so far, from the app's own finishLights.ts instance; -1 until it has loaded. */
+const finishLitRuns = (page: Page) => {
+  const url = finishModuleUrl.get(page)
+  return url ? page.evaluate(async (u) => (await import(u)).__finishLitRuns() as number, url) : Promise.resolve(-1)
+}
+
+/** Foil pixels of a snapshot inside a box (gold or tinted metal over the dark-green ground:
+ *  far from the ground colour), as per-bin stats over `bins` columns and the brightest 5 %. */
+const foilStats = (page: Page, name: string, b: Box, bins = 8) => page.evaluate(([n, b, bins]) => {
+  const s = (window as any).__snaps[n as string]
+  const [x0, y0, x1, y1] = (b as number[]).map((v, i) => Math.round(v * (i % 2 ? s.h : s.w)))
+  const bg = [0x0b, 0x3d, 0x2e]
+  const binSum = new Array(bins as number).fill(0), binN = new Array(bins as number).fill(0)
+  const px: { l: number; r: number; g: number; b: number }[] = []
+  for (let y = y0!; y < y1!; y++) for (let x = x0!; x < x1!; x++) {
+    const i = (y * s.w + x) * 4
+    const r = s.d[i], g = s.d[i + 1], bl = s.d[i + 2]
+    if (Math.abs(r - bg[0]!) + Math.abs(g - bg[1]!) + Math.abs(bl - bg[2]!) < 60) continue
+    const l = 0.299 * r + 0.587 * g + 0.114 * bl
+    const k = Math.min((bins as number) - 1, Math.floor(((x - x0!) / (x1! - x0!)) * (bins as number)))
+    binSum[k] += l; binN[k]++
+    px.push({ l, r, g, b: bl })
+  }
+  px.sort((a, c) => c.l - a.l)
+  const top = px.slice(0, Math.max(1, Math.round(px.length * 0.05)))
+  const avg = (f: (p: typeof px[number]) => number, a: typeof px) => Math.round(a.reduce((t, p) => t + f(p), 0) / Math.max(1, a.length) * 10) / 10
+  const binMeans = binSum.map((v, i) => binN[i] > 50 ? Math.round(v / binN[i] * 10) / 10 : -1)
+  return {
+    count: px.length, mean: avg(p => p.l, px), binMeans,
+    brightestBin: binMeans.indexOf(Math.max(...binMeans)),
+    top: { r: avg(p => p.r, top), g: avg(p => p.g, top), b: avg(p => p.b, top) },
+  }
+}, [name, b, bins] as const)
+
+/** Mean luminance of snapshot `n` over the pixels that are foil in snapshot `mask` (the
+ *  no-light picture, where the ground is still its own colour), inside a box. */
+const foilMeanUnder = (page: Page, mask: string, n: string, b: Box) => page.evaluate(([m, n, b]) => {
+  const S = (window as any).__snaps, M = S[m as string], s = S[n as string]
+  const [x0, y0, x1, y1] = (b as number[]).map((v, i) => Math.round(v * (i % 2 ? s.h : s.w)))
+  let sum = 0, k = 0
+  for (let y = y0!; y < y1!; y++) for (let x = x0!; x < x1!; x++) {
+    const i = (y * s.w + x) * 4
+    if (Math.abs(M.d[i] - 0x0b) + Math.abs(M.d[i + 1] - 0x3d) + Math.abs(M.d[i + 2] - 0x2e) < 60) continue
+    sum += 0.299 * s.d[i] + 0.587 * s.d[i + 1] + 0.114 * s.d[i + 2]; k++
+  }
+  return { mean: Math.round(sum / Math.max(1, k) * 10) / 10, px: k }
+}, [mask, n, b] as const)
+
+/** Per-pixel compare of two snapshots in a box: how many pixels differ, and by how much at most. */
+const boxDiff = (page: Page, a: string, b: string, box: Box) => page.evaluate(([a, b, box]) => {
+  const S = (window as any).__snaps, A = S[a as string], B = S[b as string]
+  const [x0, y0, x1, y1] = (box as number[]).map((v, i) => Math.round(v * (i % 2 ? A.h : A.w)))
+  let n = 0, max = 0, tot = 0
+  for (let y = y0!; y < y1!; y++) for (let x = x0!; x < x1!; x++) {
+    const i = (y * A.w + x) * 4; tot++
+    let m = 0; for (let c = 0; c < 3; c++) m = Math.max(m, Math.abs(A.d[i + c] - B.d[i + c]))
+    if (m > 0) n++; max = Math.max(max, m)
+  }
+  return { differ: n, max, total: tot }
+}, [a, b, box] as const)
+
+async function shot(page: Page, file: string) {
+  await mkdir(SHOTS, { recursive: true })
+  await page.getByTestId('compositor-stack-canvas').screenshot({ path: `${SHOTS}/${file}` })
+}
+/** Select the foil word and open its colour picker (where Gold foil's Light row lives). */
+async function openGoldPicker(page: Page) {
+  await page.getByTestId('compositor-left-panel').getByText('GOLD', { exact: true }).click()
+  await page.getByRole('button', { name: /^foil$/i }).click()
+  await expect(page.getByTestId('foil-fill-controls')).toBeVisible()
+}
+
+test.describe('Frame light layers (stage 3) — foil and Spot UV lit by Frame lights', () => {
+  test.beforeEach(async ({ page }) => {
+    page.on('request', (r) => { if (r.url().includes('/lib/compositor/finishLights.ts')) finishModuleUrl.set(page, r.url()) })
+  })
+
+  test('no light: the lit shaders never run, and a lamp added then deleted leaves the picture byte-identical', async ({ page }) => {
+    await openFrame(page, 1000, 1000, FIN_BG)
+    await setLayers(page, FINISHES)
+    const unlit = await snap(page, 'unlit')
+    await expect.poll(() => finishLitRuns(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(0)
+    const runs0 = await finishLitRuns(page)
+    const f0 = await foilStats(page, 'unlit', GOLD_BAND)
+    console.log('[s3 no light] lit finish runs:', runs0, '| foil', JSON.stringify(f0))
+    expect(runs0).toBe(0)
+    expect(f0.count).toBeGreaterThan(2000)            // the foil word is there (and painted by the hidden light)
+    await shot(page, 'foil-no-light.png')
+
+    await setLayers(page, [...FINISHES, whiteLamp()])
+    const lit = await snap(page, 'lit')
+    const runsLit = await finishLitRuns(page)
+    expect(runsLit).toBeGreaterThan(0)
+    expect(lit).not.toBe(unlit)
+
+    await page.getByTestId('light-dot').click()
+    await page.getByTestId('light-delete').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(0)
+    const runsAfter = await finishLitRuns(page)
+    const after = await snap(page, 'after')
+    await page.waitForTimeout(500)
+    console.log('[s3 no light] lit runs with the lamp:', runsLit, 'after delete:', runsAfter, '→', await finishLitRuns(page), '| identical to the first capture:', after === unlit)
+    expect(after).toBe(unlit)
+    expect(await finishLitRuns(page)).toBe(runsAfter)
+  })
+
+  test('the foil highlight follows the lamp, takes a red lamp’s colour, and goes dark at Darkness 100 % far from the lamp', async ({ page }) => {
+    await openFrame(page, 1000, 1000, FIN_BG)
+    await setLayers(page, FINISHES)
+    await snap(page, 'unlit')
+    const none = await foilStats(page, 'unlit', GOLD_BAND)
+
+    // A white lamp low over the left end of the word, then dragged (real mouse) over the right end.
+    await setLayers(page, [...FINISHES, whiteLamp(0.12, 0.3, { height: 0.3 })])
+    await snap(page, 'L')
+    await shot(page, 'foil-lamp-left.png')
+    await dragDotTo(page, page.getByTestId('light-dot'), 0.88, 0.3)
+    await expect.poll(async () => lightsOf(await layers(page))[0].x, { timeout: 5_000 }).toBeGreaterThan(0.84)
+    await snap(page, 'R')
+    await shot(page, 'foil-lamp-right.png')
+    const L = await foilStats(page, 'L', GOLD_BAND), R = await foilStats(page, 'R', GOLD_BAND)
+    console.log('[s3 foil follows] bins (left→right) lamp left:', L.binMeans.join(' '), '| lamp right:', R.binMeans.join(' '))
+    expect(L.brightestBin).toBeLessThanOrEqual(2)
+    expect(R.brightestBin).toBeGreaterThanOrEqual(5)
+    const nb = L.binMeans.length
+    expect(L.binMeans[0]! - R.binMeans[0]!).toBeGreaterThan(10)
+    expect(R.binMeans[nb - 1]! - L.binMeans[nb - 1]!).toBeGreaterThan(10)
+
+    // White vs red lamp at the hidden light's own place: the highlight turns red.
+    await setLayers(page, [...FINISHES, whiteLamp()])
+    await snap(page, 'white')
+    await shot(page, 'foil-white-lamp.png')
+    await setLayers(page, [...FINISHES, whiteLamp(0.15, 0.1, { color: '#ff2a2a' })])
+    await snap(page, 'red')
+    await shot(page, 'foil-red-lamp.png')
+    const W = await foilStats(page, 'white', GOLD_BAND), Rd = await foilStats(page, 'red', GOLD_BAND)
+    console.log('[s3 red lamp] brightest 5 % — no light:', JSON.stringify(none.top), '| white lamp:', JSON.stringify(W.top), '| red lamp:', JSON.stringify(Rd.top))
+    expect(Rd.top.r).toBeGreaterThan(Rd.top.g + 40)
+    expect(Rd.top.r).toBeGreaterThan(Rd.top.b + 40)
+    expect((Rd.top.r - Rd.top.g) - (W.top.r - W.top.g)).toBeGreaterThan(25)
+
+    // Darkness 100 %, the lamp low at the far right edge, well below the word: the foil goes
+    // darker than with no light. (The bottom corners sit under the editor's toolbar.)
+    await setLayers(page, [...FINISHES, whiteLamp(0.97, 0.8, { height: 0.2 })])
+    if (!(await page.getByTestId('light-darkness').count())) await page.getByTestId('light-dot').click()
+    await setRow(page, 'light-darkness', 100)
+    await expect.poll(async () => (await layers(page)).length).toBe(3)
+    await snap(page, 'dark')
+    await shot(page, 'foil-darkness-100.png')
+    const N0 = await foilMeanUnder(page, 'unlit', 'unlit', GOLD_BAND), D = await foilMeanUnder(page, 'unlit', 'dark', GOLD_BAND)
+    console.log('[s3 darkness 100] foil mean luminance over the word’s pixels — no light:', N0.mean, '| Darkness 100, lamp far:', D.mean, '| px', D.px)
+    expect(D.mean).toBeLessThan(N0.mean - 20)
+  })
+
+  test('Spot UV: the shine follows the lamp, and the layer is lit once (its Lit switch changes none of its pixels)', async ({ page }) => {
+    await openFrame(page, 1000, 1000, FIN_BG)
+    await setLayers(page, FINISHES)
+    const uvHalves = async (n: string) => ({ left: await mean(page, n, [UV_IN[0], UV_IN[1], 0.5, UV_IN[3]]), right: await mean(page, n, [0.5, UV_IN[1], UV_IN[2], UV_IN[3]]) })
+    await setLayers(page, [...FINISHES, whiteLamp(0.2, 0.74, { height: 0.25 })])
+    await snap(page, 'uvL')
+    await shot(page, 'spot-uv-lamp-left.png')
+    await setLayers(page, [...FINISHES, whiteLamp(0.8, 0.74, { height: 0.25 })])
+    await snap(page, 'uvR')
+    await shot(page, 'spot-uv-lamp-right.png')
+    const hl = await uvHalves('uvL'), hr = await uvHalves('uvR')
+    console.log('[s3 spot uv follows] ellipse halves — lamp left:', JSON.stringify(hl), '| lamp right:', JSON.stringify(hr))
+    expect(hl.left - hl.right).toBeGreaterThan(5)
+    expect(hr.right - hr.left).toBeGreaterThan(5)
+
+    // Lit once: the same Frame with the ellipse's Lit switch off. The lighting pass would re-light
+    // its pixels only if the switch mattered; it must not, so the ellipse is pixel-for-pixel equal.
+    await setLayers(page, [{ ...UV, lit: false }, GOLD, whiteLamp(0.8, 0.74, { height: 0.25 })])
+    await snap(page, 'uvRoff')
+    const d = await boxDiff(page, 'uvR', 'uvRoff', UV_IN)
+    console.log('[s3 spot uv lit once] ellipse pixels, Lit on vs off:', JSON.stringify(d))
+    expect(d.differ).toBe(0)
+    // Teeth: the same switch on a plain (no Spot UV) ellipse does change its pixels.
+    const plain = { ...UV, effects: [] }
+    await setLayers(page, [plain, GOLD, whiteLamp(0.8, 0.74, { height: 0.25 })])
+    await snap(page, 'plainOn')
+    await setLayers(page, [{ ...plain, lit: false }, GOLD, whiteLamp(0.8, 0.74, { height: 0.25 })])
+    await snap(page, 'plainOff')
+    const t = await boxDiff(page, 'plainOn', 'plainOff', UV_IN)
+    console.log('[s3 spot uv lit once] teeth — plain ellipse, Lit on vs off:', JSON.stringify(t))
+    expect(t.differ / t.total).toBeGreaterThan(0.5)
+  })
+
+  test('the Light row reads “Lit by the Frame’s lights” and selects the lamp; the handle hides; deleting the lamp brings presets and handle back', async ({ page }) => {
+    await openFrame(page, 1000, 1000, FIN_BG)
+    await setLayers(page, [...FINISHES, whiteLamp()])
+    await openGoldPicker(page)
+    const row = page.getByTestId('finish-light-framelit')
+    await expect(row).toHaveText("Lit by the Frame's lights")
+    await expect(page.getByTestId('finish-light-preset')).toHaveCount(0)
+    await expect(page.getByTestId('frame-light-handle')).toHaveCount(0)
+    await page.screenshot({ path: `${SHOTS}/s3-light-row.png` })
+    await row.click()
+    await expect(page.getByTestId('light-delete')).toBeVisible()      // the lamp's inspector: it is selected
+    await page.getByTestId('light-delete').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(0)
+    await openGoldPicker(page)
+    await expect(page.getByTestId('finish-light-preset')).toBeVisible()
+    await expect(page.getByTestId('finish-light-framelit')).toHaveCount(0)
+    await expect(page.getByTestId('frame-light-handle')).toBeVisible()
+  })
+
+  test('web export file of a lamp + foil + Spot UV Frame looks like the editor', async ({ page, context }) => {
+    const errors: string[] = []
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+    await openFrame(page, 1000, 1000, FIN_BG)
+    // A foil block (no glyphs: a font-free region) and the Spot UV ellipse, lit from the left.
+    const block = { id: 'block', kind: 'rect', x: 0.5, y: 0.3, w: 0.7, h: 0.26, rotation: 0, opacity: 1, fill: FOIL_FILL, stroke: '', strokeWidth: 0, radius: 0 }
+    await setLayers(page, [UV, block])
+    await snap(page, 'plainEditor')
+    await setLayers(page, [UV, block, whiteLamp(0.2, 0.5, { height: 0.35 })])
+    await snap(page, 'editor')
+    await page.getByTestId('compositor-right-panel').getByRole('button', { name: /^Download/ }).click()
+    await page.getByTestId('frame-web-export').click()
+    const sheet = page.getByTestId('frame-web-export-sheet')
+    const ready = sheet.getByText('One file · plays anywhere'), failed = sheet.getByText("The export couldn't be built", { exact: false })
+    await expect(ready.or(failed)).toBeVisible({ timeout: 90_000 })
+    if (await failed.isVisible()) throw new Error(`web export failed: ${errors.find(e => e.includes('[Frame] web export failed')) ?? errors.join(' | ')}`)
+    const [wdl] = await Promise.all([page.waitForEvent('download'), sheet.getByRole('button', { name: 'Download' }).click()])
+    const html = await readFile((await wdl.path())!, 'utf8')
+    expect(html).toContain('"kind":"light"')
+    expect(html).not.toContain('"needsOutlines":false')     // the full frame.js, not frame-lean.js
+    const r = await canvasRect(page)
+    const exp = await renderExported(context, html, 0, { width: Math.round(r.width), height: Math.round(r.height) })
+    await snapUrl(page, 'web', exp.png, 'editor')
+    await mkdir(SHOTS, { recursive: true })
+    await writeFile(`${SHOTS}/s3-web-export.png`, Buffer.from(exp.png.replace(/^data:image\/png;base64,/, ''), 'base64'))
+    // Regions away from fine detail: inside the foil block (left, lamp side, and right), inside the
+    // ellipse (left and right), and the lit ground between them.
+    const regions: Record<string, Box> = {
+      foilLeft: [0.2, 0.22, 0.35, 0.38], foilRight: [0.65, 0.22, 0.8, 0.38],
+      uvLeft: [0.28, 0.68, 0.45, 0.8], uvRight: [0.55, 0.68, 0.72, 0.8], ground: [0.05, 0.5, 0.3, 0.58],
+    }
+    const reg: Record<string, number[]> = {}
+    for (const [k, b] of Object.entries(regions)) reg[k] = [await mean(page, 'editor', b), await mean(page, 'web', b), await mean(page, 'plainEditor', b)]
+    console.log('[s3 web export] requests', exp.requests.length, '| regions [editor, export, no light]:', JSON.stringify(reg))
+    expect(exp.requests).toEqual([])
+    for (const [editor, file] of Object.values(reg)) expect(Math.abs(editor! - file!)).toBeLessThan(3)
+    // Teeth: the lamp really changes these regions in the editor.
+    expect(Math.max(...Object.values(reg).map(([e, , p]) => Math.abs(e! - p!)))).toBeGreaterThan(10)
+  })
+})
