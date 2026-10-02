@@ -65,10 +65,10 @@ import { COST_CONFIRM_EVENT, type CostConfirmRequestDetail } from '~/lib/costCon
 import { resolveCreditDelta, type CreditWatchCandidate } from '~/lib/graph/creditAttribution'
 import { resolveEventTab } from '~/lib/graph/resolveEventTab'
 import { withKeyedLock } from '~/lib/graph/keyedLock'
-import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, type LegStarted } from '~/lib/runner/client'
+import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, needsEngineReasons, blockedRunRefusal } from '~/lib/runner/needsEngine'
+import { workflowNodeTitles, blockedRunRefusal, engineRoute, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
 import { outputClassesOf } from '#shared/runner/validate'
 import { bakeShaderEffectsForRun, stopShaderBakes } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
@@ -894,44 +894,14 @@ async function runVueWorkflow(
     }).finally(() => { if (drawing !== undefined) toast.dismiss(drawing) })
     // R11.9c: Stop while the shader frames were being drawn or uploaded: nothing is sent (the server deletes them).
     // Fix round 1 (I3): a failure of the graph itself (over the caps, a source that can't be read) stops the run
-    // in plain words everywhere; one of this browser or machine falls back to the local engine where it is there
-    // (a stop-gap R10.2 closes), and stops the run in plain words elsewhere (hosted, or the engine off).
+    // in plain words. R10.2: so does one of this browser or machine, everywhere: never the local engine.
     const graphFailure = bake.failed.find(f => f.cause === 'graph')
     const envFailure = bake.failed.find(f => f.cause === 'environment')
-    const engineThere = !hostedShell && (engineUp.value || direct.isMainSocketOpen())
-    const refusal = graphFailure ?? (envFailure && !engineThere ? envFailure : undefined)
+    const refusal = graphFailure ?? envFailure
     if (bake.stopped || refusal) {
-      if (refusal && !bake.stopped) toast.error('A shader effect couldn’t be prepared', { description: refusal.error })
-      if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
-      currentRunSilent.value = false
-      return false
-    }
-    if (envFailure) toast.error('A shader effect couldn’t be prepared in this browser', { description: 'It will run on the local engine instead.' })
-  }
-
-  // Engine-free: with the local engine off, only what the runner takes goes
-  // out. Anything else is refused here, naming the nodes that need the engine,
-  // instead of a /prompt that can only fail. An open run socket means the
-  // engine is plainly there, whatever the last health poll said.
-  if (useDirect && directPrompt && !engineUp.value && !direct.isMainSocketOpen()) {
-    // Runner routing (below) considers every take, not just the first — the
-    // refusal must name nodes across all of them too, or a take-2+-only
-    // engine-bound node would dispatch to a /prompt that can only fail.
-    const needsSet = new Set<string>()
-    const reasonSet = new Set<string>()
-    for (const tk of [firstTake, ...extraTakes]) {
-      if (!tk.directPrompt) continue
-      const titleOf = workflowNodeTitles(tk.plainWorkflow, objectInfo.value)
-      for (const name of nodesNeedingEngine(tk.directPrompt, {
-        runnerOn: runnerEnabled,
-        families: runnerFamilies,
-        titleOf,
-      })) needsSet.add(name)
-      for (const why of needsEngineReasons(tk.directPrompt, { runnerOn: runnerEnabled, families: runnerFamilies, titleOf })) reasonSet.add(why)
-    }
-    const needs = [...needsSet]
-    if (needs.length) {
-      toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs, [...reasonSet]) })
+      if (refusal && !bake.stopped) {
+        toast.error(refusal === graphFailure ? 'A shader effect couldn’t be prepared' : 'A shader effect couldn’t be prepared in this browser', { description: refusal.error })
+      }
       if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
       currentRunSilent.value = false
       return false
@@ -970,6 +940,8 @@ async function runVueWorkflow(
       }
       const runnerPrompts = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
       let sentToRunner = false
+      // R10.2: the runner's words when it declined the run (the engine route below names the nodes).
+      let declinedWords: string | null = runnerEnabled ? null : RUNNER_OFF_WORDS
       if (shouldUseRunner(runnerEnabled, runnerPrompts, runnerFamilies)) {
         // One run for all takes: with a Gate they pause once and you pick;
         // without one they simply all finish. The project is the run's own
@@ -989,9 +961,12 @@ async function runVueWorkflow(
           sentToRunner = true
         }
         catch (err) {
-          // 404 (runner off) or a not-eligible 400 (the server's families are off): this run goes to ComfyUI as before.
+          // 404 (runner off) or a not-eligible 400 (a family off, a class the runner doesn't run): R10.2's
+          // engine route below decides, and refuses unless every node the runner refuses is local-only.
           if (!isRunnerDeclined(err)) throw err
-          console.warn('[Run] the Sailor runner is off on the server or does not take this workflow; running on ComfyUI')
+          const said = (err as { data?: { message?: unknown } } | null)?.data?.message
+          declinedWords = isRunnerNotFound(err) ? RUNNER_OFF_WORDS : (typeof said === 'string' && said.trim() ? said : null)
+          console.warn('[Run] the Sailor runner declined this workflow')
         }
       }
       // Going to ComfyUI: a discontinued or runner-only model is refused here,
@@ -1002,6 +977,27 @@ async function runVueWorkflow(
       )
       if (blocked) {
         toast.error(blocked.title, { description: blocked.description })
+        if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
+        currentRunSilent.value = false
+        return false
+      }
+      // R10.2: the canvas never falls back silently. A run the runner didn't take goes to the local engine
+      // only locally, with the engine up, when every node the runner refuses is local-only
+      // (#shared/runner/localOnly.ts); otherwise it is refused here, naming each node, before any /prompt.
+      // An open run socket means the engine is plainly there, whatever the last health poll said.
+      const route = sentToRunner ? null : engineRoute(
+        [firstTake, ...extraTakes].map(tk => ({ prompt: tk.directPrompt, titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })),
+        {
+          runnerOn: runnerEnabled,
+          families: runnerFamilies,
+          hosted: hostedShell,
+          engineUp: engineUp.value || direct.isMainSocketOpen(),
+          outputTypesOf: ct => objectInfo.value?.[ct]?.output,
+          declined: declinedWords,
+        },
+      )
+      if (route?.to === 'refused') {
+        toast.error(route.title, { description: route.description })
         if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
         currentRunSilent.value = false
         return false

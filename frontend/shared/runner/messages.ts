@@ -9,7 +9,11 @@ export const RUNNER_WORKER = -1
 /**
  * `data.reason` on the server's refusal of a workflow it does not take (its
  * families are off, or a node is not one the runner runs). The browser treats
- * it like the runner being off (a 404): the run goes to ComfyUI instead.
+ * it like the runner being off (a 404). R10.2: the canvas then sends the run
+ * to the local engine only when every node the runner refuses is one of
+ * decision 4's local-only classes (./localOnly.ts), locally, with the engine
+ * up; otherwise it refuses the run in plain words (./needsEngine.ts
+ * `engineRoute`), naming each node.
  * R11.9a: only eligibility declines now (a family off, a class the runner
  * doesn't run: `data.code` `switched-off` or `not-taken`); every start pass
  * refuses plainly instead, with a `data.code` (RunnerReasonCode).
@@ -29,14 +33,15 @@ export const RUNNER_SOUND_TOO_LONG = 'sound-too-long'
 /**
  * Why a workflow, or one node of it, doesn't run here: the `code` a refusal's
  * data carries (R11.9a). Every exit that once left a workflow to the engine
- * carries one. Only `switched-off` and `not-taken` still go to the engine
- * (with RUNNER_NOT_ELIGIBLE) until R10; every other code is a plain refusal,
+ * carries one. Only `switched-off` and `not-taken` are declines (with
+ * RUNNER_NOT_ELIGIBLE), which the canvas turns into a refusal unless every
+ * refused node is local-only (R10.2); every other code is a plain refusal,
  * before anything is held.
  */
 export type RunnerReasonCode =
-  /** Row 25: the node's family is off (to the engine until R10.0 switches every family on). */
+  /** Row 25: the node's family is off (refused on the canvas, R10.2). */
   | 'switched-off'
-  /** A class the runner doesn't run at all (R10.2's local-engine set, or no rule row): to the engine until R10. */
+  /** A class the runner doesn't run at all: to the local engine only for R10.2's local-only set, locally; otherwise refused. */
   | 'not-taken'
   /** Row 24: what the node needs (the video tools, the depth model, the bundled font) isn't on this server. */
   | 'not-installed'
@@ -73,6 +78,12 @@ export type RunnerReasonCode =
 export function switchedOffWords(title: string | null): string {
   return title ? `“${title}” is switched off right now.` : 'This node is switched off right now.'
 }
+
+/**
+ * R10.2: a node the runner refuses for no more particular reason (a class it
+ * doesn't run that isn't local-only, or one set up in a way it can't take).
+ */
+export const NOT_TAKEN_NODE_WORDS = 'Sailor can’t run this node as it’s set up. Check its settings and what’s wired into it.'
 
 /** Row 24. */
 export const NOT_INSTALLED_WORDS = 'This isn’t installed on this server.'

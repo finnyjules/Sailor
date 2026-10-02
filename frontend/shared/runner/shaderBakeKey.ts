@@ -67,16 +67,19 @@ export const SHADER_GENERATIVE_IDS: readonly string[] = [
   'studio_backdrop', 'terrain_bands', 'thread_contours', 'voronoi_cells', 'warp_tunnel', 'wisps',
 ]
 
-/** R11.9c fix round 1 (M1): the plain words for each Shader effect the runner leaves to the engine, by cause. */
+/**
+ * R11.9c fix round 1 (M1): the plain words for each Shader effect the runner doesn't take, by cause.
+ * R10.2: each is a refusal now, everywhere (never the engine): the words say what to change.
+ */
 export const SHADER_ENGINE_WORDS = {
   /** A My effect or a draft (its id is the user's own: `mine_…`). */
-  myEffect: 'This shader is one of your own effects, which only the local engine runs for now.',
+  myEffect: 'This shader is one of your own effects, which can’t run in a workflow yet. Pick one of Sailor’s effects.',
   /** An effect id the runner's catalog doesn't list. */
   unknownEffect: 'This shader effect isn’t one Sailor knows yet. Pick another effect.',
   /** A setting wired in from another node. */
   wired: 'This shader’s settings are wired in from another node. Type them into the shader instead.',
   /** Params text Python reads one way and the browser another. */
-  oddParams: 'This shader’s settings are written in a way only the local engine reads. Change any setting in the shader to rewrite them.',
+  oddParams: 'This shader’s settings are written in a way Sailor can’t read. Change any setting in the shader to rewrite them.',
   /** A bake whose key doesn't agree with the prompt as sent. */
   keyMismatch: 'This shader changed after its frames were drawn. Run it again.',
 } as const
@@ -84,7 +87,7 @@ export const SHADER_ENGINE_WORDS = {
 /** The node's `aspect` options. */
 export const SHADER_ASPECTS = ['1:1', '16:9', '9:16', '4:5', '3:2'] as const
 
-/** The needs-engine reason of a Shader effect whose picture is made in the same run (ruling: refused for now). */
+/** Why a Shader effect whose picture is made in the same run is refused (ruling: refused for now; R10.2: everywhere). */
 export const SHADER_NEEDS_PICTURE_FIRST = 'This shader needs its picture before the run. Put the picture in an Image card first.'
 
 /** An effect id as the node reads it: a legacy name → its current one. */

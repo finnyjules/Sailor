@@ -5,6 +5,9 @@
  * with a reason code. Rows closed by other tasks are asserted where they are
  * true now; the rows that belong to R9/R10 are listed as
  * expected exceptions until those tasks land, so the list must shrink then.
+ * R10.2 closed the canvas's silent fallback: a decline (`switched-off`,
+ * `not-taken`) and every Shader effect engine case end in a plain refusal,
+ * unless every refused node is local-only (tests/unit/runner-no-silent-engine.unit.spec.ts).
  *
  * Also R11.7's and R11.8's named stop-gaps: a made sound past a reader's cap
  * (named with its maker's setting to shorten), a paid video model's sound
@@ -28,7 +31,7 @@ import {
 import { FRAME_WIDGET_NAMES, shownLabel, stopGapRefusal, switchedOffNodes, wiredDearestBound, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { isRunnerEligible, runnerRuleFor, runnerTakesNode } from '#shared/runner/eligibility'
-import { blockedRunRefusal, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
+import { blockedRunRefusal, engineRoute, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import {
   BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, MASK_EXTRACTOR_CLASS, SAM_MASK_WORDS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
@@ -102,34 +105,33 @@ async function writePng(path: string, w = 16, h = 16) {
  */
 const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
   27: 'R10.7: local LoRA training removed',
-  28: 'R10.2 / R10.6: stock local-diffusion classes and blueprints ("This needs the local engine" locally)',
+  // R10.2 closed the canvas route for row 28 (local-only classes go to the engine only locally, with it up);
+  // what is left is R10.6's: blueprints, and hosted offering no local-only class.
+  28: 'R10.6: blueprints and hosted node search (R10.2 closed the canvas route)',
 }
 
 /**
- * R11.9c fix round 1 (M1, I3): the Shader effects the runner still leaves to the engine (locally; in hosted the
- * needs-the-engine words name the cause), each with its plain words and the task that closes it. The list must
- * shrink when each is closed.
+ * R11.9c fix round 1 (M1, I3) named the Shader effects the runner left to the engine; R10.2 closed every one:
+ * each is a plain refusal with its words, locally with the engine up as in hosted, and a bake this browser or
+ * machine can't make stops the run in plain words everywhere (layouts/default.vue; the guard is in
+ * runner-no-silent-engine.unit.spec.ts). The list of cases still left to the engine is empty.
  */
-const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {
-  'a My effect or a draft': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.myEffect },
-  'an effect the runner doesn’t know': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.unknownEffect },
-  'params only Python reads': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.oddParams },
-  'a wired setting': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.wired },
-  'a bake that no longer agrees with its settings': { closedBy: 'R10.2', words: SHADER_ENGINE_WORDS.keyMismatch },
-  'its picture made in the run': { closedBy: 'R10.2 (design open question 5)', words: SHADER_NEEDS_PICTURE_FIRST },
-  // I3: a bake this browser or machine can't make (no ImageDecoder, a codec, WebGL), locally with the engine there.
-  'a bake this browser can’t make (locally, the engine there)': { closedBy: 'R10.2', words: 'It will run on the local engine instead.' },
+const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {}
+const SHADER_CLOSED_CASES: Readonly<Record<string, string>> = {
+  'a My effect or a draft': SHADER_ENGINE_WORDS.myEffect,
+  'an effect the runner doesn’t know': SHADER_ENGINE_WORDS.unknownEffect,
+  'params only Python reads': SHADER_ENGINE_WORDS.oddParams,
+  'a wired setting': SHADER_ENGINE_WORDS.wired,
+  'a bake that no longer agrees with its settings': SHADER_ENGINE_WORDS.keyMismatch,
+  'its picture made in the run': SHADER_NEEDS_PICTURE_FIRST,
 }
 
-describe('R11.9c fix round 1: the Shader effects still left to the engine are named, with their words', () => {
-  it('the list is exactly these, each closed by R10.2', () => {
-    expect(Object.keys(SHADER_ENGINE_CASES)).toHaveLength(7)
-    for (const [name, c] of Object.entries(SHADER_ENGINE_CASES)) {
-      expect(c.closedBy, name).toMatch(/^R10\.2/)
-      expect(c.words, name).toMatch(/^[A-Z].*\.$/)
-    }
+describe('R10.2: the Shader effects once left to the engine are refused plainly, with their words', () => {
+  it('none is left to the engine', () => {
+    expect(Object.keys(SHADER_ENGINE_CASES)).toHaveLength(0)
+    for (const [name, words] of Object.entries(SHADER_CLOSED_CASES)) expect(words, name).toMatch(/^[A-Z].*\.$/)
   })
-  it('each graph case is left to the engine, naming its cause', () => {
+  it('each graph case is refused, locally with the engine up, naming the node and its cause', () => {
     const SH: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake'])
     const shader = (over: Record<string, unknown>, image?: Link): ApiPrompt => ({
       ...(image ? {} : { 0: { class_type: 'Image', inputs: { image: 'src.png', export: false, filename_prefix: 'ComfyUI', batch_index: -1 } } }),
@@ -144,11 +146,14 @@ describe('R11.9c fix round 1: the Shader effects still left to the engine are na
       ['params only Python reads', shader({ params: '{"u_amount":"0.5"}' })],
       ['a bake that no longer agrees with its settings', stale],
     ]
+    const titleOf = (id: string) => (id === 'fx' ? 'Halftone' : id)
     for (const [name, p] of cases) {
       expect(runnerTakesNode(p, 'fx', SH), name).toBe(false)
-      expect(needsEngineReasons(p, { runnerOn: true, families: SH }), name).toEqual([SHADER_ENGINE_CASES[name]!.words])
+      expect(needsEngineReasons(p, { runnerOn: true, families: SH }), name).toEqual([SHADER_CLOSED_CASES[name]])
+      expect(engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: false, engineUp: true }), name)
+        .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
     }
-    expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_ENGINE_CASES['a wired setting']!.words)
+    expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_CLOSED_CASES['a wired setting'])
   })
 })
 
@@ -545,11 +550,14 @@ describe('R11.9: every named stop-gap, one case per row', () => {
   })
 
   // ── Row 25: a family that is off ──
-  it('row 25: a family off still goes to the engine until R10.0, with a code and "Name is switched off right now."', async () => {
+  it('row 25: a family off is declined with a code and "Name is switched off right now.", which the canvas refuses (R10.2)', async () => {
     const off = new Set<RunnerFamily>([...EVERY].filter(f => f !== 'effects-blur'))
     const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]) }
     expect(switchedOffNodes(p, off)).toEqual(['b'])
     expect(needsEngineReasons(p, { runnerOn: true, families: off, titleOf: id => (id === 'b' ? 'Soft blur' : id) })).toEqual([switchedOffWords('Soft blur')])
+    // R10.2: never the engine, even locally with it up.
+    expect(engineRoute([{ prompt: p, titleOf: id => (id === 'b' ? 'Soft blur' : id) }], { runnerOn: true, families: off, hosted: false, engineUp: true }))
+      .toEqual({ to: 'refused', title: '“Soft blur” can’t run', description: switchedOffWords('Soft blur') })
     const k = makeKit({ deps: { families: () => off } })
     await writePng(join(k.root, 'input', 'p.png'))
     const err = await k.engine.startRun({ userId: k.userId, takes: [p], workflow: { nodes: [{ id: 'b', type: 'Blur', title: 'Soft blur' }] }, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)

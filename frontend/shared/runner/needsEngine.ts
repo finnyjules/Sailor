@@ -7,14 +7,15 @@
  * layouts/default.vue (through app/lib/runner/needsEngine.ts) and the server
  * (server/utils/blockedModels.ts) share them, so there is one rule.
  */
-import type { ApiPrompt } from './graph'
+import { isLink, type ApiNode, type ApiPrompt } from './graph'
 import { isRunnerEligible, runnerTakesNode, svgReaderProblems } from './eligibility'
+import { isLocalOnlyClass } from './localOnly'
 import { prunedAny, pruneInvalidOutputs } from './validate'
-import { NO_FAMILIES, type RunnerFamily } from './families'
+import { EVERY_KNOWN_FAMILY, NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
 import { switchedOffNodes } from './stopGaps'
-import { switchedOffWords } from './messages'
+import { NOT_TAKEN_NODE_WORDS, switchedOffWords } from './messages'
 import { isEditorOnlyClass, retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
@@ -77,6 +78,144 @@ export function needsEngineReasons(
   return [...new Set(reasons)]
 }
 
+// ── R10.2: the canvas never falls back silently ─────────────────────────────
+
+/**
+ * What a refused node's output is replaced with when judging the nodes it
+ * feeds (`engineRoute`): a runner source of the same type, so a node the runner
+ * refuses only because it reads a refused node (Save image after VAE decode,
+ * or after a switched-off Blur) isn't counted as refused itself. Any other
+ * type stands in as a picture: ComfyUI itself checks a wire's type.
+ */
+const STAND_IN_SOURCES: Readonly<Record<string, { node: ApiNode; slot: number }>> = {
+  IMAGE: { node: { class_type: 'LoadImage', inputs: { image: 'stand-in.png', upload: 'image' } }, slot: 0 },
+  MASK: { node: { class_type: 'LoadImage', inputs: { image: 'stand-in.png', upload: 'image' } }, slot: 1 },
+  STRING: { node: { class_type: 'PrimitiveString', inputs: { value: '' } }, slot: 0 },
+  INT: { node: { class_type: 'PrimitiveInt', inputs: { value: 0 } }, slot: 0 },
+  FLOAT: { node: { class_type: 'PrimitiveFloat', inputs: { value: 0 } }, slot: 0 },
+  BOOLEAN: { node: { class_type: 'PrimitiveBoolean', inputs: { value: false } }, slot: 0 },
+  AUDIO: { node: { class_type: 'LoadAudio', inputs: { audio: 'stand-in.wav' } }, slot: 0 },
+  VIDEO: { node: { class_type: 'LoadVideo', inputs: { file: 'stand-in.mp4' } }, slot: 0 },
+}
+
+/** The output types of a class (/object_info's `output`), or undefined when not known. */
+export type OutputTypesOf = (classType: string) => readonly string[] | undefined
+
+/**
+ * The run with every wire from a `refused` node reading a stand-in source of
+ * its type instead (STAND_IN_SOURCES): each node is then judged on its own.
+ */
+function withStandIns(run: ApiPrompt, refused: ReadonlySet<string>, outputTypesOf?: OutputTypesOf): ApiPrompt {
+  const out: ApiPrompt = {}
+  for (const [id, node] of Object.entries(run)) {
+    let inputs: Record<string, unknown> | null = null
+    for (const [name, v] of Object.entries(node.inputs ?? {})) {
+      if (!isLink(v) || !refused.has(v[0]) || !run[v[0]]) continue
+      const type = outputTypesOf?.(run[v[0]]!.class_type)?.[v[1]]
+      const stand = STAND_IN_SOURCES[type ?? 'IMAGE'] ?? STAND_IN_SOURCES.IMAGE!
+      const standId = `stand-in:${v[0]}:${v[1]}`
+      out[standId] = { class_type: stand.node.class_type, inputs: { ...stand.node.inputs } }
+      inputs ??= { ...node.inputs }
+      inputs[name] = [standId, stand.slot]
+    }
+    out[id] = inputs ? { ...node, inputs } : node
+  }
+  return out
+}
+
+/** Where a run that isn't going to the runner goes: the local engine, or nowhere, with words. */
+export type EngineRoute =
+  | { to: 'engine' }
+  | { to: 'refused'; title: string; description: string }
+
+/**
+ * R10.2: whether a run the runner won't take (declined, or skipped because the
+ * browser already knows it won't) may go to the local engine. Only when:
+ *   - this is local, not hosted;
+ *   - the engine is up;
+ *   - every node the runner refuses is one of decision 4's local-only classes
+ *     (./localOnly.ts). A node the runner refuses only because it reads a
+ *     refused node (Save image after VAE decode) rides along: it is judged
+ *     with a stand-in source in that node's place, so only the node at fault
+ *     is named.
+ * Otherwise the run is refused in the runner's words, naming each node:
+ *   - a node refused for its own sake (not local-only): its reason (a Shader
+ *     effect's cause, "is switched off right now", or NOT_TAKEN_NODE_WORDS);
+ *   - nothing refused here but the runner still declined (or is off): the
+ *     runner's own words (`declined`: the server's message, or RUNNER_OFF_WORDS);
+ *   - only local-only nodes, in hosted: they run only on the local engine;
+ *   - only local-only nodes, locally with the engine off: "This workflow needs
+ *     the local engine" (the old toast, kept for these classes only).
+ * `titleOf` names a take's nodes (workflowNodeTitles).
+ */
+export function engineRoute(
+  takes: { prompt: ApiPrompt | null | undefined; titleOf: (id: string) => string }[],
+  opts: {
+    runnerOn: boolean
+    families?: ReadonlySet<RunnerFamily>
+    hosted: boolean
+    engineUp: boolean
+    outputTypesOf?: OutputTypesOf
+    /** The runner's words when it declined the run (the server's refusal message). */
+    declined?: string | null
+  },
+): EngineRoute {
+  // With the runner off, nodes are judged as the runner would judge them with every family on: a
+  // local-only graph still goes to the engine, and anything else is refused in `declined`'s words.
+  const families = opts.runnerOn ? (opts.families ?? NO_FAMILIES) : EVERY_KNOWN_FAMILY
+  const lenient = { plainRefusals: true }
+  const refused = new Map<string, string>()
+  const localOnly = new Set<string>()
+  for (const take of takes) {
+    if (!take.prompt) continue
+    const { run, ids } = blockedNodes(take.prompt, families)
+    if (!ids.length) continue
+    const local = ids.filter(id => isLocalOnlyClass(run[id]!.class_type))
+    for (const id of local) localOnly.add(take.titleOf(id))
+    const judged = withStandIns(run, new Set(ids), opts.outputTypesOf)
+    const off = new Set(switchedOffNodes(run, families))
+    for (const id of ids) {
+      if (isLocalOnlyClass(run[id]!.class_type)) continue
+      if (runnerTakesNode(judged, id, families, lenient)) continue
+      const title = take.titleOf(id)
+      if (refused.has(title)) continue
+      const why = shaderEngineReason(run, id, families) ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS)
+      refused.set(title, why)
+    }
+  }
+  if (refused.size) {
+    const titles = [...refused.keys()]
+    const named = titles.slice(0, MAX_NAMED).map((t) => {
+      const why = refused.get(t)!
+      return why.startsWith(`“${t}”`) ? why : `“${t}”: ${why}`
+    })
+    const more = titles.length - named.length
+    return {
+      to: 'refused',
+      title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`,
+      description: [...named, ...(more > 0 ? [`And ${more} more.`] : [])].join(' '),
+    }
+  }
+  if (!localOnly.size) {
+    return { to: 'refused', title: 'This workflow can’t run', description: opts.declined?.trim() || WORKFLOW_CANT_RUN_WORDS }
+  }
+  const titles = [...localOnly]
+  if (opts.hosted) return { to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(titles) }
+  if (!opts.engineUp) return { to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(titles) }
+  return { to: 'engine' }
+}
+
+/** The words for a run while the runner is switched off (in this browser's settings, or a 404 from the server). */
+export const RUNNER_OFF_WORDS = 'Running workflows in Sailor is switched off on this server right now.'
+
+/** A run the runner declined though no node of it is refused here (the server's families differ), with no words of its own. */
+export const WORKFLOW_CANT_RUN_WORDS = 'Sailor can’t run this workflow yet.'
+
+/** In hosted, a run whose only refused nodes are local-only: they run only on the local engine, on one's own computer. */
+export function localOnlyHostedWords(titles: string[]): string {
+  return `${quotedList(titles)} ${titles.length === 1 ? 'runs' : 'run'} only on the local engine, on your own computer.`
+}
+
 interface WorkflowNodeLike { id: string | number; type?: string; title?: string }
 
 /**
@@ -123,13 +262,17 @@ const MAX_NAMED = 4
  * `Only the engine can run “Upscale” and “Blur image”.`
  */
 export function needsEngineDescription(titles: string[], reasons: readonly string[] = []): string {
+  return [`Only the engine can run ${quotedList(titles)}.`, ...reasons.map(r => (/[.!?]$/.test(r) ? r : `${r}.`))].join(' ')
+}
+
+/** “A”, “B” and “C” (at most MAX_NAMED, then "and N more"); "this workflow" when empty. */
+function quotedList(titles: string[]): string {
   const quoted = titles.slice(0, MAX_NAMED).map(t => `“${t}”`)
   const more = titles.length - quoted.length
   if (more > 0) quoted.push(`${more} more`)
-  const list = quoted.length <= 1
+  return quoted.length <= 1
     ? (quoted[0] ?? 'this workflow')
     : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
-  return [`Only the engine can run ${list}.`, ...reasons.map(r => (/[.!?]$/.test(r) ? r : `${r}.`))].join(' ')
 }
 
 /**
