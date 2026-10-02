@@ -251,13 +251,10 @@ describe('engine up: pass-through and a saved copy', () => {
     expect(down.LoadImage.input.required.image[0]).toEqual(['a.jpg', 'b.png'])
   })
 
-  it('does not save a single node or a pool worker\'s catalog', async () => {
+  it('does not save a single node\'s catalog', async () => {
     engineAnswers({ LoadImage: staleCatalog().LoadImage })
     await call('GET', '/object_info/LoadImage')
     expect(engineFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info/LoadImage')
-    engineAnswers(staleCatalog())
-    await call('GET', '/object_info?comfyWorker=2')
-    expect(engineFetch.mock.calls[1][0]).toBe('http://127.0.0.1:8191/object_info')
     await __objectInfoSaveSettledForTests()
     expect(fs.existsSync(path.join(tmp, 'data', 'object_info.json'))).toBe(false)
   })
@@ -300,14 +297,12 @@ describe('engine up: exact bytes, Python JSON, and a remembered outage', () => {
     }
   })
 
-  it('the main engine already known down (cached health): the stored catalog, no fetch; a pool worker is still asked', async () => {
+  it('the engine already known down (cached health): the stored catalog, no fetch', async () => {
     writeBaseline(staleCatalog())
     engineHealthState.value = 'down'
     engineAnswers({ Live: {} })
     expect((await call('GET', '/object_info')).body).not.toEqual({ Live: {} })
     expect(engineFetch).not.toHaveBeenCalled()
-    expect((await call('GET', '/object_info?comfyWorker=2')).body).toEqual({ Live: {} })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8191/object_info')
   })
 })
 

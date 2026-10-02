@@ -20,3 +20,16 @@ export function viewUrl(f: GateChoiceFile): string {
 export function isVideoFile(name: string): boolean {
   return /\.(mp4|webm|mov|m4v)$/i.test(name)
 }
+
+/**
+ * R10.3: where a Gate's Continue / Redo / Restart goes. A runner run's Gate
+ * goes to the runner (`sailor:runnerGateAction`). A Gate paused inside a run
+ * the local engine is running (R10.2's explicit local-only route, e.g. a
+ * KSampler graph) still resumes through the engine's own resume route, but
+ * only locally: hosted never sends it (and its proxy refuses it, enginePath F1).
+ */
+export function gateResumeRoute(promptId: string | null | undefined, opts: { runner: boolean, hosted: boolean }): 'runner' | 'engine' | 'none' {
+  if (opts.runner) return 'runner'
+  if (opts.hosted || !promptId) return 'none'
+  return 'engine'
+}

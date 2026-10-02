@@ -164,7 +164,7 @@ describe('normalizeEnginePath', () => {
 
   it('preserves query strings', () => {
     expect(normalizeEnginePath('/api/view?filename=a.png&type=output')).toBe('/view?filename=a.png&type=output')
-    expect(normalizeEnginePath('/comfyui/queue?comfyWorker=2')).toBe('/queue?comfyWorker=2')
+    expect(normalizeEnginePath('/comfyui/queue?x=2')).toBe('/queue?x=2')
     expect(normalizeEnginePath('/comfyui/api/prompt?x=1')).toBe('/prompt?x=1')
     expect(normalizeEnginePath('/api/wallet?x=1')).toBe('/api/wallet?x=1')
   })
@@ -236,7 +236,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   beforeEach(() => { mode = 'hosted' })
 
   it('routes every /prompt alias through the METER, never the raw proxy', async () => {
-    for (const p of ['/prompt', '/api/prompt', '/comfyui/prompt', '/comfyui/api/prompt', '/prompt?comfyWorker=1', '/api/prompt?comfyWorker=1']) {
+    for (const p of ['/prompt', '/api/prompt', '/comfyui/prompt', '/comfyui/api/prompt', '/prompt?x=1', '/api/prompt?x=1']) {
       proxyRequest.mockClear(); handleMeteredPrompt.mockClear()
       await middleware(ev(p, 'POST'))
       expect(handleMeteredPrompt, `POST ${p} must be metered`).toHaveBeenCalledTimes(1)
@@ -245,7 +245,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   })
 
   it('routes every GET /queue alias through the ownership filter', async () => {
-    for (const p of ['/queue', '/api/queue', '/comfyui/queue', '/comfyui/api/queue', '/queue?comfyWorker=0']) {
+    for (const p of ['/queue', '/api/queue', '/comfyui/queue', '/comfyui/api/queue', '/queue?x=0']) {
       proxyRequest.mockClear(); handleHostedQueueGet.mockClear()
       await middleware(ev(p, 'GET'))
       expect(handleHostedQueueGet, `GET ${p} must be filtered`).toHaveBeenCalledTimes(1)
@@ -397,7 +397,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
       ['/sailor/projects/abc/generations', 'GET'],
       ['/comfyui/sailor/projects', 'GET'],
       ['/comfyui/sailor/projects/abc', 'DELETE'],
-      ['/sailor/projects?comfyWorker=1', 'GET'],
+      ['/sailor/projects?x=1', 'GET'],
       ['/sailor/assets/../projects/abc', 'GET'],
     ] as const) {
       proxyRequest.mockClear(); handleHostedSailor.mockClear()
@@ -534,7 +534,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   // LoadImage-family combo. The canvas needs the schemas, so it is scrubbed
   // rather than refused — but it must never raw-proxy.
   it('F2: routes every GET /object_info alias through the scrubber', async () => {
-    for (const p of ['/object_info', '/object_info/LoadImage', '/comfyui/object_info', '/api/object_info', '/comfyui/api/object_info', '/object_info?comfyWorker=2']) {
+    for (const p of ['/object_info', '/object_info/LoadImage', '/comfyui/object_info', '/api/object_info', '/comfyui/api/object_info', '/object_info?x=2']) {
       proxyRequest.mockClear(); handleHostedObjectInfo.mockClear()
       await middleware(ev(p, 'GET'))
       expect(handleHostedObjectInfo, `GET ${p} must be scrubbed`).toHaveBeenCalledTimes(1)
@@ -637,7 +637,7 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
       ['/comfyui/internal/files/output', 'http://127.0.0.1:8188/internal/files/output'],
       ['/comfyui/settings', 'http://127.0.0.1:8188/settings'],
       ['/comfyui/sailor/render_timeline', 'http://127.0.0.1:8188/sailor/render_timeline'],
-      ['/queue?comfyWorker=2', 'http://127.0.0.1:8191/queue'],
+      ['/queue?a=2', 'http://127.0.0.1:8188/queue?a=2'],
       ['/comfyui', 'http://127.0.0.1:8188/'],
     ]
     for (const [p, url] of expected) {
@@ -672,7 +672,7 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
     for (const [p, m] of [
       ['/sailor/projects', 'GET'], ['/api/sailor/projects', 'GET'], ['/comfyui/sailor/projects/abc', 'GET'],
       ['/comfyui/api/sailor/projects/abc/generations', 'GET'], ['/sailor/projects/abc', 'DELETE'],
-      ['/sailor/spend/summary', 'GET'], ['/sailor/projects?comfyWorker=2', 'GET'],
+      ['/sailor/spend/summary', 'GET'], ['/sailor/projects?x=2', 'GET'],
     ] as const) {
       proxyRequest.mockClear()
       const res = await middleware(ev(p, m))
@@ -714,7 +714,7 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
   it('answers /upload/image and /upload/mask natively (A4), under any spelling', async () => {
     // GET is aiohttp's 405 on these POST routes — enough to prove the router
     // owns them without a body; native-uploads covers the writes.
-    for (const p of ['/upload/image', '/api/upload/mask', '/comfyui/upload/image', '/comfyui/api/upload/image?comfyWorker=2']) {
+    for (const p of ['/upload/image', '/api/upload/mask', '/comfyui/upload/image', '/comfyui/api/upload/image?x=2']) {
       proxyRequest.mockClear()
       const res = await middleware({ ...ev(p, 'GET'), node: { req: {}, res: { setHeader() {} } } })
       expect(proxyRequest, `${p} is native in local mode`).not.toHaveBeenCalled()
@@ -724,7 +724,7 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
 
   it('answers /object_info natively (A5), under any spelling, never entering the hosted scrubber', async () => {
     // fetch is stubbed to fail (engine down), so the committed baseline answers.
-    for (const p of ['/object_info', '/api/object_info', '/comfyui/object_info', '/comfyui/api/object_info/KSampler', '/object_info?comfyWorker=2']) {
+    for (const p of ['/object_info', '/api/object_info', '/comfyui/object_info', '/comfyui/api/object_info/KSampler', '/object_info?x=2']) {
       proxyRequest.mockClear()
       const res = await middleware({ ...ev(p, 'GET'), node: { req: {}, res: { setHeader() {} } } }) as any
       expect(proxyRequest, `${p} is native in local mode`).not.toHaveBeenCalled()
@@ -798,14 +798,6 @@ describe('engine down: engine-only routes answer 503, not a failed proxy', () =>
     expect(proxyRequest).not.toHaveBeenCalled()
     // A refused route stays refused (403), not turned into a 503.
     expect(await status('/sailor/render_timeline', 'POST')).toBe(403)
-  })
-
-  it('a pool worker target is still proxied — the health check only speaks for :8188', async () => {
-    mode = 'local'
-    engineHealthState.value = 'down'
-    await middleware(ev('/queue?comfyWorker=1', 'GET'))
-    expect(proxyRequest).toHaveBeenCalledTimes(1)
-    expect(proxyRequest.mock.calls[0]?.[1]).toBe('http://127.0.0.1:8190/queue')
   })
 
   it('the socket (/api/ws, /comfyui/ws) is left to its own handling, not answered 503', async () => {

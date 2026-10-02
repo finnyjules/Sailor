@@ -35,7 +35,6 @@ import { pyJsonDumps } from '../../shared/runner/pyJson'
 import { mediaTools } from '../media/tools'
 import type { NativeMedia } from '../media/thumbnails'
 import { isHosted } from '../utils/deployMode'
-import { resolveWorkerTarget } from '../utils/workerRoute'
 import { engineFolder, listdirEntries, pySafeResolve, resolveInside, writeFileAtomic } from './paths'
 import { pyDumps } from './pyJson'
 import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
@@ -629,7 +628,7 @@ export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
 
 /**
  * Hand the request to the local engine, exactly as the proxy would (same
- * worker via `?comfyWorker=N`, same path and query, same body). Null when the
+ * path and query, same body). Null when the
  * engine is not reachable OR does not answer within `timeoutMs` — a timed-out
  * abort is a network failure from this route's point of view, so it takes the
  * same "engine down" path as a connection refusal (the caller's existing 503
@@ -637,12 +636,11 @@ export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
  * back parsed, anything else as bytes with its content type.
  */
 export async function forwardToEngine(event: H3Event, canonicalPath: string, rawBody?: Buffer, timeoutMs?: number): Promise<MediaResult | null> {
-  const { port, cleanUrl } = resolveWorkerTarget(event.path)
-  // The main engine already known down (cached health check): don't wait out a doomed fetch.
-  if (port === ENGINE_MAIN_PORT && await engineHealth() === 'down') return null
-  const q = cleanUrl.indexOf('?')
-  const query = q === -1 ? '' : cleanUrl.slice(q)
-  const target = `http://127.0.0.1:${port}`
+  // The engine already known down (cached health check): don't wait out a doomed fetch.
+  if (await engineHealth() === 'down') return null
+  const q = event.path.indexOf('?')
+  const query = q === -1 ? '' : event.path.slice(q)
+  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
   const method = (event.method || 'GET').toUpperCase()
   const headers: Record<string, string> = { origin: target }
   if (rawBody) headers['content-type'] = 'application/json'

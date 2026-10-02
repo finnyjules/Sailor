@@ -237,11 +237,11 @@ describe('font_subset', () => {
     }
   })
 
-  it.skipIf(!hasFonts)('engine down: the whole font; engine up: the engine\'s own subset, with the same body and worker', async () => {
+  it.skipIf(!hasFonts)('engine down: the whole font; engine up: the engine\'s own subset, with the same body', async () => {
     const b64 = fs.readFileSync(TTF).toString('base64')
-    const down = await post('/sailor/font_subset?comfyWorker=1', { font: b64, text: 'a' })
+    const down = await post('/sailor/font_subset', { font: b64, text: 'a' })
     expect(down.body).toMatchObject({ font: b64, before: fs.statSync(TTF).size, after: fs.statSync(TTF).size })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8190/sailor/font_subset')
+    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8188/sailor/font_subset')
     expect(JSON.parse(String(engineFetch.mock.calls[0]?.[1]?.body))).toEqual({ font: b64, text: 'a' })
 
     engineFetch.mockReset()
@@ -360,21 +360,18 @@ describe('models', () => {
     expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8188/system_stats')
   })
 
-  it('download: handed to the proxy untouched when the engine answers (same worker)', async () => {
+  it('download: handed to the proxy untouched when the engine answers', async () => {
     engineFetch.mockResolvedValue(new Response('{}', { status: 200 }))
-    const r = await call('GET', '/sailor/models/download?key=upscale&comfyWorker=2')
+    const r = await call('GET', '/sailor/models/download?key=upscale')
     expect(r.body).toEqual({ fallthrough: true })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8191/system_stats')
+    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8188/system_stats')
   })
 
-  it('download: the main engine already known down (cached health) is 503 with no probe of its own', async () => {
+  it('download: the engine already known down (cached health) is 503 with no probe of its own', async () => {
     engineHealthState.value = 'down'
     engineFetch.mockResolvedValue(new Response('{}', { status: 200 }))
     const r = await call('GET', '/sailor/models/download?key=upscale')
     expect(r).toMatchObject({ status: 503, body: { error: 'This needs the local engine' } })
     expect(engineFetch).not.toHaveBeenCalled()
-    // A pool worker is not covered by the main engine's health: probed as before.
-    expect((await call('GET', '/sailor/models/download?key=upscale&comfyWorker=2')).body).toEqual({ fallthrough: true })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8191/system_stats')
   })
 })

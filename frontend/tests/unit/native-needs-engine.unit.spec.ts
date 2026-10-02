@@ -92,11 +92,10 @@ describe('workflowNodeTitles', () => {
 })
 
 describe('the run socket with the engine off', () => {
-  it('main waits for the engine instead of retrying; pool workers keep their own rules', async () => {
+  it('waits for the engine instead of retrying', async () => {
     const { mayReconnect } = await import('~/composables/useDirectExecution')
-    expect(mayReconnect(0, true)).toBe(true)
-    expect(mayReconnect(0, false)).toBe(false)
-    expect(mayReconnect(1, false)).toBe(true)
+    expect(mayReconnect(true)).toBe(true)
+    expect(mayReconnect(false)).toBe(false)
   })
 })
 

@@ -58,7 +58,7 @@ describe('which paths are native', () => {
     for (const p of ['/sailor/projects', '/comfyui/sailor/projects', '/api/sailor/projects', '/comfyui/api/sailor/projects', '/sailor/projects/a/versions/v?x=1', '/sailor/spend/summary', '/sailor/assets/../projects/a']) {
       expect(nativeEnginePath(p), p).not.toBeNull()
     }
-    expect(nativeEnginePath('/comfyui/sailor/projects/a?comfyWorker=2')).toBe('/sailor/projects/a')
+    expect(nativeEnginePath('/comfyui/sailor/projects/a?x=2')).toBe('/sailor/projects/a')
   })
 
   it('leaves every other path to the proxy', () => {

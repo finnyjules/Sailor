@@ -42,12 +42,10 @@ export function savedInputKey(o: { filename: string; subfolder?: string }): stri
 }
 
 /**
- * `target` (review I4) is the engine base URL that actually ran the prompt —
- * `http://127.0.0.1:8188` for the main instance, `:8189+N` for a pool worker
- * picked by `?comfyWorker=N`. The /view race-window harvest polls it; without
- * it, pool-worker runs were polled on the main engine forever and could never
- * settle. Nullable so pre-existing rows (and any caller that doesn't know)
- * fall back to the main engine.
+ * `target` (review I4) is the engine base URL that actually ran the prompt
+ * (`http://127.0.0.1:8188`). The /view race-window harvest polls it.
+ * Nullable so pre-existing rows (and any caller that doesn't know) fall back
+ * to the main engine.
  */
 export async function createGraphRun(r: { promptId: string; userId: string; credits: number; holdId: number | null; target?: string | null }): Promise<void> {
   await db().query(

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { SkipBack, RotateCcw, Play, Pause } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
-import { initialTicks, continueLabel, viewUrl, isVideoFile } from '~/lib/runner/gateChoices'
+import { initialTicks, continueLabel, viewUrl, isVideoFile, gateResumeRoute } from '~/lib/runner/gateChoices'
 import { isRunnerPromptId } from '#shared/runner/messages'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = defineProps<{
   id: string
@@ -77,9 +78,12 @@ function onActionFailed(e: Event) {
 onMounted(() => window.addEventListener('sailor:runnerGateActionFailed', onActionFailed))
 onBeforeUnmount(() => window.removeEventListener('sailor:runnerGateActionFailed', onActionFailed))
 
+const hosted = hostedModeEnabled(useRuntimeConfig().public)
+
 async function resumeGate(action: 'continue' | 'redo' | 'restart') {
   const fromPause = !!props.data.paused
-  if (isRunner.value) {
+  const route = gateResumeRoute(props.data.promptId, { runner: isRunner.value, hosted })
+  if (route === 'runner') {
     wasPaused = fromPause
     props.data.paused = false
     window.dispatchEvent(new CustomEvent('sailor:runnerGateAction', {
@@ -92,6 +96,10 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
     }))
     return
   }
+  // Hosted never reaches the engine's resume (no local engine runs there).
+  if (route === 'none') return
+  // A Gate inside a run on the local engine (R10.2's local-only route): the
+  // engine's own resume, locally only.
   props.data.paused = false
   try {
     const res = await $fetch<{ prompt_id?: string }>('/gate/resume', {

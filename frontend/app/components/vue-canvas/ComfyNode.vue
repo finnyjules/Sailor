@@ -274,10 +274,10 @@ const runStatus = computed(() => runRowStatus({
   note: (props.data.runNoteAt ?? 0) >= (props.data.runningSince ?? Number.POSITIVE_INFINITY) ? props.data.runNote ?? null : null,
   now: runRowNow.value,
 }))
-// Variant (direct-execution only): re-roll THIS node 4× in parallel across the
-// cloud pool — four fresh-seeded takes at once. Same 'self' scope + event; the
-// `takes` count flows through runVueWorkflow → queueParallel at the dispatch
-// site. Gated on the direct flag because the parallel pool is a direct-only path.
+// Variant (direct-execution only): re-roll THIS node as four fresh-seeded
+// takes. Same 'self' scope + event; the `takes` count flows through
+// runVueWorkflow to the dispatch site (one runner run, or queued in order on
+// the local engine). Gated on the direct flag because takes are a direct-only path.
 const { directExecutionEnabled } = useDirectExecutionEnabled()
 function rerollTakesParallel() { dispatchRun({ rerollScope: 'self', takes: 4 }) }
 // Variant: fresh run of everything before this node, new seeds throughout.

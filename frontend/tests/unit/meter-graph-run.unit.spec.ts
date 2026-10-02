@@ -408,9 +408,9 @@ describe('holdWithRefusal', () => {
 })
 
 describe('isPromptPath', () => {
-  it('matches /prompt and /prompt?comfyWorker=2, not /prompted', () => {
+  it('matches /prompt and /prompt?x=2, not /prompted', () => {
     expect(isPromptPath('/prompt')).toBe(true)
-    expect(isPromptPath('/prompt?comfyWorker=2')).toBe(true)
+    expect(isPromptPath('/prompt?x=2')).toBe(true)
     expect(isPromptPath('/prompted')).toBe(false)
   })
 })

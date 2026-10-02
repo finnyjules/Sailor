@@ -183,14 +183,14 @@ describe('video and audio need the local engine', () => {
     expect(r.body.asset).toMatchObject({ kind: 'video', duration_sec: null, width: null, height: null })
   })
 
-  it('with the engine up, the request goes to it unchanged — same worker, path and query — and its answer comes back', async () => {
+  it('with the engine up, the request goes to it unchanged — same path and query — and its answer comes back', async () => {
     engineAnswers({ thumbnails: ['data:engine'], asset_id: 'vid', count: 4 })
-    const r = await call('GET', '/comfyui/api/sailor/asset_thumbnails?asset_id=vid&count=4&comfyWorker=2')
+    const r = await call('GET', '/comfyui/api/sailor/asset_thumbnails?asset_id=vid&count=4')
     expect(r.body).toEqual({ thumbnails: ['data:engine'], asset_id: 'vid', count: 4 })
     expect(engineFetch).toHaveBeenCalledTimes(1)
     const [url, init] = engineFetch.mock.calls[0]!
-    expect(url).toBe('http://127.0.0.1:8191/sailor/asset_thumbnails?asset_id=vid&count=4')
-    expect(init).toMatchObject({ method: 'GET', headers: { origin: 'http://127.0.0.1:8191' } })
+    expect(url).toBe('http://127.0.0.1:8188/sailor/asset_thumbnails?asset_id=vid&count=4')
+    expect(init).toMatchObject({ method: 'GET', headers: { origin: 'http://127.0.0.1:8188' } })
   })
 
   it('an engine thumbnail keeps its bytes and headers', async () => {

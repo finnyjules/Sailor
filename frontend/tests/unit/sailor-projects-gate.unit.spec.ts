@@ -521,9 +521,9 @@ describe('the gate\'s envelope: auth, verbs, aliases', () => {
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
-  it('serves the same store whatever ?comfyWorker=N says', async () => {
+  it('serves the same store whatever the query says', async () => {
     seed('p-mine', { name: 'Mine' })
-    expect((await call('/sailor/projects/p-mine?comfyWorker=2')).body.project.name).toBe('Mine')
+    expect((await call('/sailor/projects/p-mine?x=2')).body.project.name).toBe('Mine')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -590,7 +590,7 @@ describe('LOCAL MODE — single user: no registry, no filter; projects served na
       ['/sailor/projects/p-theirs', 'GET', r => expect(r.body.project.name).toBe('Theirs')],
       ['/comfyui/sailor/projects', 'GET', r => expect(r.body.projects).toHaveLength(1)],
       ['/api/sailor/projects', 'GET', r => expect(r.body.projects).toHaveLength(1)],
-      ['/sailor/projects?comfyWorker=2', 'GET', r => expect(r.body.projects).toHaveLength(1)],
+      ['/sailor/projects?x=2', 'GET', r => expect(r.body.projects).toHaveLength(1)],
       ['/sailor/projects/p-orphan/generations', 'GET', r => expect(r.body).toEqual({ generations: [] })],
       ['/sailor/spend/summary', 'GET', r => expect(r.body).toEqual({ month: { usd: 0, credits: 0 }, total: { usd: 0, credits: 0 }, byProject: [] })],
     ]
@@ -612,7 +612,7 @@ describe('LOCAL MODE — single user: no registry, no filter; projects served na
     mode = 'local'
     for (const [p, target] of [
       ['/sailor/render_timeline', 'http://127.0.0.1:8188/sailor/render_timeline'],
-      ['/sailor/spacetype_encode?comfyWorker=2', 'http://127.0.0.1:8191/sailor/spacetype_encode'],
+      ['/sailor/spacetype_encode?x=2', 'http://127.0.0.1:8188/sailor/spacetype_encode?x=2'],
     ] as const) {
       proxyRequest.mockClear()
       const r = await via(p, 'GET', null)

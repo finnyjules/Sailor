@@ -36,7 +36,7 @@ import { runVariationsLoop } from '~/lib/canvas/variationsRun'
 import type { StartPickId } from '~/data/start-modal'
 import { estimateUsdForNodes, vueNodesToEstimateInput, type CostEstimate } from '~/lib/costEstimate'
 import { formatCostBadge, formatEstimateBadge, formatEstimateLong } from '~/lib/pricing'
-import { hostedModeEnabled, engineOrigin } from '~/lib/hostedMode'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import { tallyReplicateUsd } from '~/lib/graph/runCost'
 import { summarizeNodeErrors } from '~/lib/validationErrors'
 import { describeQueueRefusal, isH3RefusalBody } from '~/lib/queueRefusal'
@@ -574,12 +574,9 @@ async function runVueWorkflow(
   // byte-identical to before.
   const takeCount = (useDirect && (opts.takes ?? 1) > 1) ? Math.floor(opts.takes as number) : 1
 
-  // Pick the worker for the tab being run (always 0 when the pool is off), so
-  // separate canvases queue to separate ComfyUI servers and run concurrently.
-  // Once-only (worker assignment for parallel takes is decided by queueParallel).
+  // R10.3: one local engine (worker 0); runner runs register as RUNNER_WORKER.
   const runTabId = activeTab.value?.id || ''
-  const workerIdx = workerForTab(runTabId)
-  if (poolEnabled.value && runTabId) workerRunningTab[workerIdx] = runTabId
+  const workerIdx = 0
   // Runs are always queued from the displayed canvas of the run tab.
   const runDoc = savedWorkflows[runTabId]
   // The canvas this run is dispatched from — stamped on every registerRun below
@@ -850,15 +847,9 @@ async function runVueWorkflow(
   //
   // SCOPE: this lock covers ONLY assembly — producing firstTake + extraTakes
   // (plainWorkflow + directPrompt) plus the once-only cost-confirm gate. It
-  // does NOT cover dispatch. The DISPATCH (direct queueSmart/queueParallel)
-  // operates on the already-assembled
-  // artifacts and runs AFTER the lock releases. This matters because queueSmart's
-  // spill path awaits an /api/pool/ensure probe (up to 35s on a wedged cold
-  // boot) BEFORE the /prompt POST — holding the global lock across that probe
-  // would serialize dispatch across all concurrent runs and defeat the
-  // back-to-back overlap the epic built. The synchronous reserve() (Task 6)
-  // already orders spill claims without needing the lock. So: assemble under
-  // the lock, release, then dispatch unlocked.
+  // does NOT cover dispatch. The DISPATCH (the runner, or the local engine's
+  // /prompt) operates on the already-assembled artifacts and runs AFTER the
+  // lock releases, so a slow dispatch never serializes other runs' assembly.
   type Assembled = { firstTake: AssembledTake; extraTakes: AssembledTake[] }
   const assembled = await withKeyedLock('assemble-run', async (): Promise<Assembled | 'abort'> => {
     // Take 1 — assemble. The cost-confirm gate already ran (hoisted) BEFORE this
@@ -877,8 +868,7 @@ async function runVueWorkflow(
   })
   if (assembled === 'abort') return false
   // LOCK RELEASED. Dispatch below runs UNLOCKED on the already-assembled
-  // artifacts — the pool-ensure probe inside queueSmart no longer blocks a
-  // second run's assembly.
+  // artifacts.
   const { firstTake, extraTakes } = assembled
   const { plainWorkflow, directPrompt } = firstTake
 
@@ -915,19 +905,13 @@ async function runVueWorkflow(
 
   if (useDirect) {
     try {
-      // Register a returned run + arm its per-run watchdog. Each parallel take
-      // lands on the worker queueParallel actually assigned it (res.worker),
-      // NOT the tab's own workerIdx — that's why QueueResult carries `worker`.
+      // Register a returned run + arm its per-run watchdog. A runner run
+      // carries RUNNER_WORKER in res.worker; a local-engine run, worker 0.
       const registerResult = (res: import('~/composables/useDirectExecution').QueueResult) => {
         if (!res.prompt_id) return
-        // Pass res.reservationId so the synchronous reservation (queueSmart/
-        // queueParallel claimed at worker-pick time) UPGRADES to a real run
-        // instead of double-counting. canvasId (Part B) lets per-run event
-        // routing find this run's canvas even on terminal events.
-        registerRun(
-          { promptId: res.prompt_id, tabId: runTabId, live: !!opts.live, worker: res.worker ?? workerIdx, canvasId: runCanvasId },
-          res.reservationId,
-        )
+        // canvasId (Part B) lets per-run event routing find this run's canvas
+        // even on terminal events.
+        registerRun({ promptId: res.prompt_id, tabId: runTabId, live: !!opts.live, worker: res.worker ?? workerIdx, canvasId: runCanvasId })
         // Stash the run's OWN node catalog (captured at dispatch) so its cost
         // tally at execution_complete prices against these, not the active tab's
         // displayed nodes (which collide by id across canvases). Registered runs
@@ -1020,16 +1004,12 @@ async function runVueWorkflow(
       if (sentToRunner) {
         // Registered as the POST returned (sendRunnerPost), before its early events were replayed.
       } else if (takeCount > 1) {
-        // Parallel takes: fan N fresh-seeded prompts across the cloud pool.
-        // queueParallel decides worker assignment internally (and falls back to
-        // sequential-on-main when the pool is unavailable/ineligible). Register
-        // each success; surface the first failure once (aggregated).
-        console.log(`[Run] queueing ${takeCount} parallel takes directly (bypassing bridge)`)
-        const items = [firstTake, ...extraTakes].map((tk) => ({
-          prompt: tk.directPrompt!,
-          workflow: tk.plainWorkflow,
-        }))
-        const results = await direct.queueParallel(items, { objectInfo: objectInfo.value })
+        // Several takes on the local engine: queued one after another, in order
+        // (R10.3: no worker pool). Register each success; surface the first
+        // failure once (aggregated).
+        console.log(`[Run] queueing ${takeCount} takes on the local engine`)
+        const results: import('~/composables/useDirectExecution').QueueResult[] = []
+        for (const tk of [firstTake, ...extraTakes]) results.push(await direct.queue(tk.directPrompt!, tk.plainWorkflow))
         const failed = results.find((r) => (r.node_errors && Object.keys(r.node_errors).length) || r.error)
         if (failed) postQueueError(failed)
         for (const res of results) {
@@ -1037,10 +1017,8 @@ async function runVueWorkflow(
           registerResult(res)
         }
       } else {
-        console.log('[Run] queueing prompt directly (bypassing bridge)')
-        // queueSmart: main while idle; spills a pool-eligible run to a pool
-        // worker when main is busy, so back-to-back single runs overlap.
-        const res = await direct.queueSmart(directPrompt!, plainWorkflow, { objectInfo: objectInfo.value })
+        console.log('[Run] queueing prompt on the local engine')
+        const res = await direct.queue(directPrompt!, plainWorkflow)
         const hasNodeErrors = res.node_errors && Object.keys(res.node_errors).length
         if (hasNodeErrors || res.error) {
           // Any failure (structured node_errors OR a plain error message from a
@@ -1049,22 +1027,12 @@ async function runVueWorkflow(
           // the stall watchdog.
           postQueueError(res)
         } else {
-          // Cold-boot spill fallback (audit R2): the run wanted a pool worker
-          // but /api/pool/ensure rejected/timed out (wedged --cpu boot), so it
-          // ran on main instead. Surface that once so the user isn't left
-          // wondering why a "spilled" run landed on the main server. The run
-          // itself still registered + queued fine, so this is informational.
-          if (res.fellBackToMain) {
-            toast.warning('Couldn’t start a worker — running on the main server', {
-              description: 'A background worker didn’t come up in time. Your run is queued on the main server.',
-            })
-          }
           registerResult(res)
         }
       }
     } catch (err) {
       console.error('[Run] direct queue failed', err)
-      // Backstop for a throw that escapes queueSmart/queueParallel's own
+      // Backstop for a throw that escapes queue()'s own
       // internal catch (queue()'s /prompt POST failure normally resolves as a
       // QueueResult, handled above) — route it through the same
       // surfaceQueueError() so a metering refusal shape here ALSO gets the
@@ -1110,8 +1078,8 @@ async function handleRunFiltered(e: Event) {
   // 'downstream' = run this node + everything it feeds (push its current result
   // through the rest of the graph). Default/undefined = the upstream walk.
   const direction = detail?.direction as 'downstream' | undefined
-  // Parallel takes gesture: 'Re-roll ×4 (parallel)' passes takes:4 so the
-  // dispatch site fans out N fresh-seeded runs at once across the cloud pool.
+  // Takes gesture: 'Re-roll ×4' passes takes:4 so the dispatch site makes N
+  // fresh-seeded takes (one runner run, or queued in order on the local engine).
   const takes = detail?.takes as number | undefined
   // `live` runs are auto-previews (e.g. saving a Smart Layout): scope the run to
   // just these nodes (+ cached upstream), and skip the cost confirm / watchdog /
@@ -2261,16 +2229,6 @@ const vueCanvasRef = ref<any>(null)
 const canvasPromptRef = ref<InstanceType<typeof CanvasPromptHost> | null>(null)
 let currentProjectTabId: string | null = null // tracks which project tab's workflow is loaded
 
-// Public origin the ComfyUI canvas iframe loads from. In local mode this is the
-// operator's own ComfyUI on :8188 (or NUXT_PUBLIC_COMFY_ORIGIN if they moved it).
-//
-// F3 rider: hosted has NO engine origin, and that is now a property of this
-// line rather than of the deployment's env. The engine is reachable only
-// through the authed same-origin proxy, where every Stage-5 tenant gate lives —
-// a stray NUXT_PUBLIC_COMFY_ORIGIN in a hosted environment would have pointed
-// the canvas straight at an ungated engine, and the old `|| 127.0.0.1:8188`
-// fallback did it even with the variable unset.
-const comfyOrigin = engineOrigin(useRuntimeConfig().public)
 // The canvas caches the engine's node schema (/object_info). After a backend
 // restart with changed node definitions that cache is stale — widget values map
 // to the OLD widget order (e.g. a taste_profile value landing in the
@@ -2357,75 +2315,13 @@ watch(
 // console escape hatch is always present.
 if (import.meta.client) (globalThis as any).__reloadCanvas = forceReloadCanvas
 
-// ───────────────────────────────────────────────────────────────────────────
-// Parallel-run worker pool (prototype). OFF by default → a single worker,
-// identical to today's behavior. Enable in the browser console with:
-//   localStorage['sailor:pool'] = 'on'   // uses :8188 + :8189
-//   localStorage['sailor:pool'] = 'http://127.0.0.1:8188,http://127.0.0.1:8189'
-// then reload. Each project tab is round-robin assigned to a worker; runs on
-// different tabs hit different ComfyUI servers and execute concurrently.
-// ───────────────────────────────────────────────────────────────────────────
-const comfyWorkers = ref<string[]>([comfyOrigin])
-// Never hosted: pool workers are extra ComfyUI servers on the operator's own
-// machine. A hosted browser has no :8189 to probe (and no engine origin at
-// all), so the flag lingering in localStorage would fire a pointless
-// cross-origin fetch on every load.
-if (import.meta.client && !hostedShell) {
-  try {
-    const raw = localStorage.getItem('sailor:pool')
-    let desired: string[] | null = null
-    if (raw === 'on') desired = [comfyOrigin, comfyOrigin.replace(/:\d+/, ':8189')]
-    else if (raw) {
-      const list = raw.split(',').map(s => s.trim()).filter(Boolean)
-      if (list.length > 1) desired = list
-    }
-    // The pool flag can outlive the extra servers it points at (it lives in
-    // localStorage; the :8189 worker is something you start by hand). A dead
-    // worker is worse than no worker — every run round-robined onto it waits
-    // ~2 minutes for a bridge that never loads, then silently does nothing.
-    // So probe each extra worker first and only enable the ones that answer.
-    // no-cors because the extra workers are cross-origin without CORS headers:
-    // a resolved fetch (even opaque) means a server is listening; a network
-    // error means it isn't. Until the probe lands we stay single-worker, which
-    // is always safe (worker 0 = the shared iframe).
-    if (desired && desired.length > 1) {
-      Promise.all(desired.slice(1).map(async (origin) => {
-        try {
-          await fetch(`${origin}/`, { mode: 'no-cors', signal: AbortSignal.timeout(3000) })
-          return origin
-        } catch { return null }
-      })).then((probed) => {
-        const alive = probed.filter((o): o is string => !!o)
-        const dead = desired!.slice(1).filter((o) => !alive.includes(o))
-        if (dead.length) console.warn('[pool] ignoring unreachable worker(s):', dead.join(', '), '— runs stay on the primary server')
-        if (alive.length) comfyWorkers.value = [desired![0], ...alive]
-      })
-    }
-  } catch { /* ignore */ }
-}
-const poolEnabled = computed(() => comfyWorkers.value.length > 1)
-
-// tabId → worker index (round-robin in assignment order). Worker 0 always = the
-// existing shared iframe, so single-worker callers get index 0 unchanged.
-const tabWorker = reactive<Record<string, number>>({})
-function workerForTab(tabId?: string | null): number {
-  if (!poolEnabled.value || !tabId) return 0
-  if (tabWorker[tabId] == null) {
-    tabWorker[tabId] = Object.keys(tabWorker).length % comfyWorkers.value.length
-  }
-  return tabWorker[tabId]
-}
-// worker index → the tab currently running on it (set at submit; a worker runs
-// one prompt at a time, so this is enough to route that worker's events back).
-const workerRunningTab = reactive<Record<number, string>>({})
 // worker index → which doc canvas the in-flight run was queued from. Lets the
 // canvas component scope run events/animations to the right canvas — node ids
 // collide across a project's canvases, so worker alone isn't enough.
 const runningCanvasByWorker = reactive<Record<number, string | null>>({})
-// The worker the *currently viewed* canvas runs on — lets the canvas ignore
-// other workers' run events (so a background tab's run doesn't clear the active
-// tab's animation) and re-apply the right running node when you switch tabs.
-const activeWorker = computed(() => workerForTab(activeTab.value?.id))
+// The worker the *currently viewed* canvas runs on: always the one local
+// engine (R10.3 retired the worker pool).
+const activeWorker = 0
 
 async function fetchWorkflowFromHistory(promptId: string): Promise<any> {
   // Runner results keep the exact workflow they were made from.

@@ -48,7 +48,7 @@ describe('local /prompt proxy', () => {
   it('refuses a discontinued model in every spelling, 400, never forwarded', async () => {
     sora.discontinued = '2026-09-24'
     __resetModelMenusForTests()
-    for (const p of ['/prompt', '/api/prompt', '/comfyui/prompt', '/prompt?comfyWorker=1']) {
+    for (const p of ['/prompt', '/api/prompt', '/comfyui/prompt', '/prompt?x=1']) {
       const e = ev(p, prompt('sora-2'))
       const res = await middleware(e)
       expect(e.node.res, p).toMatchObject({ statusCode: 400 })

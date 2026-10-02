@@ -8,7 +8,7 @@ import path from 'node:path'
 import type { H3Event } from 'h3'
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus } from 'h3'
 import { ownedOutputKeys, ownedPromptIds, ownsPrompt, outputKey, pendingRuns } from './graphRuns'
-import { resolveWorkerTarget } from './workerRoute'
+import { ENGINE_MAIN_PORT } from '../native/engineHealth'
 import { settleGraphSuccess } from './meterGraphRun'
 import { assertCanonicalMultipart, parseUploadForm } from './multipart'
 import { canonicalUploadKey, engineDirForType, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
@@ -83,8 +83,7 @@ export function filterHistoryPayload(hist: Record<string, any>, owned: Set<strin
 export async function handleHostedQueueGet(event: H3Event): Promise<any> {
   const userId = event.context.userId
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-  const { port } = resolveWorkerTarget(event.path)
-  const res = await fetch(`http://127.0.0.1:${port}/queue`)
+  const res = await fetch(`http://127.0.0.1:${ENGINE_MAIN_PORT}/queue`)
   if (!res.ok) throw createError({ statusCode: 502, message: 'Engine queue unavailable' })
   return filterQueuePayload(await res.json(), await ownedPromptIds(userId))
 }
@@ -92,8 +91,7 @@ export async function handleHostedQueueGet(event: H3Event): Promise<any> {
 export async function handleHostedInterrupt(event: H3Event): Promise<any> {
   const userId = event.context.userId
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-  const { port } = resolveWorkerTarget(event.path)
-  const target = `http://127.0.0.1:${port}`
+  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
   const qres = await fetch(`${target}/queue`)
   const queue = qres.ok ? await qres.json() : {}
   const running = Array.isArray(queue?.queue_running) ? queue.queue_running : []
@@ -280,10 +278,8 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   if (!p || match?.kind !== 'route') throw createError({ statusCode: 404, message: 'Not Found' })
   // Engine-free Phase A (A5): the engine's catalog while it answers, else the
   // saved copy / committed baseline refreshed from disk (objectInfo.ts).
-  // `?comfyWorker=N` still targets the pool worker: node availability
-  // differs per worker, so answering from the main instance would hand the
-  // canvas a schema the executing engine does not have. The ownership lookup
-  // and the catalog are independent, so they run in parallel.
+  // The ownership lookup and the catalog are independent, so they run in
+  // parallel.
   const [owned, got] = await Promise.all([
     ownedInputFilenames(userId),
     objectInfoBody(event.path, p, match.node),
@@ -473,8 +469,8 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
     }
   }
 
-  // Any spelling of the path (`/api/…`, `/comfyui/…`, `?comfyWorker=N`) names
-  // the same two routes; the pool workers share these folders.
+  // Any spelling of the path (`/api/…`, `/comfyui/…`, a query) names the
+  // same two routes.
   const p = nativeEnginePath(event.path) ?? event.path.split('?')[0]!
   const res = await dispatchUpload(p, (event.method || 'POST').toUpperCase(), form)
   setResponseStatus(event, res.status)
@@ -1019,8 +1015,8 @@ const USERSCOPED_BODY_METHODS = new Set(['POST', 'PUT', 'PATCH'])
  * The response is returned byte-verbatim (a Buffer + the engine's
  * content-type), not round-tripped through JSON: userdata GET serves a raw
  * FileResponse that JSON.parse would mangle, and settings GET is already JSON
- * that survives as bytes. `?comfyWorker=N` still selects the pool worker; the
- * `/comfyui`-prefixed path is normalized the way the raw proxy would.
+ * that survives as bytes. The `/comfyui`-prefixed path is normalized the way
+ * the raw proxy would.
  *
  * NOTE this only yields per-user isolation when the engine runs `--multi-user`
  * AND the caller's id is a registered engine user (users.json). Without that,
@@ -1032,9 +1028,8 @@ export async function handleHostedUserScoped(event: H3Event): Promise<unknown> {
   const userId = event.context.userId
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
 
-  const { port, cleanUrl } = resolveWorkerTarget(event.path)
-  const target = `http://127.0.0.1:${port}`
-  const enginePath = normalizeEnginePath(cleanUrl)
+  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
+  const enginePath = normalizeEnginePath(event.path)
   const method = (event.method || 'GET').toUpperCase()
 
   // origin override for the engine's origin-check middleware; comfy-user is the

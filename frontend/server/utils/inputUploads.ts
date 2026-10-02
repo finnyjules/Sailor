@@ -117,10 +117,8 @@ export function canonicalUploadKey(type: string | null | undefined, subfolder: s
 }
 
 /**
- * The ComfyUI checkout marker: `main.py` alongside `input/`. Mirrors
- * comfyWorkerPool.ts's `resolveRepoRoot` (same `main.py` check, same
- * override/walk-up shape) but additionally requires `input/` to exist — the
- * directory this module's disk check actually depends on.
+ * The ComfyUI checkout marker: `main.py` alongside `input/` — the directory
+ * this module's disk check actually depends on.
  */
 function isEngineRoot(dir: string): boolean {
   return existsSync(path.join(dir, 'main.py')) && existsSync(path.join(dir, 'input'))

@@ -12,7 +12,6 @@
  */
 import type { H3Event } from 'h3'
 import { getRequestHeader } from 'h3'
-import { resolveWorkerTarget } from '../utils/workerRoute'
 import { engineFolder } from './paths'
 import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
 import { catalogDir, shaderAssetRoute, shaderEffectsRoute } from './shaderCatalog'
@@ -108,12 +107,11 @@ export const NEEDS_ENGINE: SmallResult = { status: 503, body: { error: 'This nee
 /** How long to wait for the local engine to answer the reachability check. */
 export const ENGINE_PROBE_TIMEOUT_MS = 2_000
 
-/** Whether the engine that would serve this request (same `?comfyWorker=N` port) answers at all. */
-export async function engineIsUp(event: H3Event): Promise<boolean> {
-  const { port } = resolveWorkerTarget(event.path)
-  // The main engine already known down (cached health check): no second probe.
-  if (port === ENGINE_MAIN_PORT && await engineHealth() === 'down') return false
-  const target = `http://127.0.0.1:${port}`
+/** Whether the local engine answers at all. */
+export async function engineIsUp(_event: H3Event): Promise<boolean> {
+  // The engine already known down (cached health check): no second probe.
+  if (await engineHealth() === 'down') return false
+  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
   try {
     const res = await fetch(`${target}/system_stats`, { headers: { origin: target }, signal: AbortSignal.timeout(ENGINE_PROBE_TIMEOUT_MS) })
     try { await res.body?.cancel() }

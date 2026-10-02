@@ -53,9 +53,8 @@ describe('graphRuns', () => {
     expect(query.mock.calls[0][0]).toMatch(/state = 'pending'/)
   })
 
-  // Review I4: the harvest path polls ONE engine. Without the target column
-  // a run dispatched to a pool worker (?comfyWorker=N) was polled on :8188
-  // forever and could never settle.
+  // Review I4: the harvest path polls the engine recorded for the run (the
+  // column stays; stored targets are read back as written).
   it('createGraphRun records which engine ran the prompt', async () => {
     query.mockResolvedValue({ rows: [] })
     await createGraphRun({ promptId: 'p1', userId: 'u1', credits: 7, holdId: 42, target: 'http://127.0.0.1:8191' })

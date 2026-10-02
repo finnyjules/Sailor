@@ -25,7 +25,7 @@ import { partialCharge, settleOnCompletion, type HistoryEntry, type RunChargePla
 import { FRAME_RENDER_TYPES } from '#shared/runner/eligibility'
 import { outputReadsOf } from './renderCredit'
 import { stripForeignComfyOrgCreds } from './spikeAuth'
-import { resolveWorkerTarget } from './workerRoute'
+import { ENGINE_MAIN_PORT } from '../native/engineHealth'
 import { getLiveLedger } from './ledgerLive'
 import { captureError } from './observe'
 import { annotatedFilepath, collectUploadFlaggedInputs } from './engineGate'
@@ -620,7 +620,7 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
     holdId = res.holdId
   }
 
-  // Finding 2: a thrown forward() (e.g. ECONNREFUSED to a wedged pool worker)
+  // Finding 2: a thrown forward() (e.g. ECONNREFUSED to a wedged engine)
   // must not leave the hold open until the 2h sweep — release it, then
   // propagate the original error so the caller still sees the real failure.
   let fwd: { status: number; body: any }
@@ -743,8 +743,7 @@ const SETTLE_MAX_POLLS = 900
 export async function handleMeteredPrompt(event: H3Event): Promise<any> {
   const userId = event.context.userId ?? null
   const body = await readBody(event)
-  const { port } = resolveWorkerTarget(event.path)
-  const target = `http://127.0.0.1:${port}`
+  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
   const ledger = getLiveLedger()
 
   // One read budget for the prompt: pictures and media lengths share it.
@@ -811,9 +810,8 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
       })
       return { status: res.status, body: await res.json().catch(() => ({})) }
     },
-    // Review I4: record WHICH engine ran this prompt. Without it the /view
-    // race-window harvest always polled :8188, so a run dispatched to a pool
-    // worker (?comfyWorker=N) could never be settled from the harvest path.
+    // Review I4: record WHICH engine ran this prompt, for the /view
+    // race-window harvest.
     registerRun: r => createGraphRun({ ...r, target }),
     startSettle: (r) => {
       // The run's copies go when its watcher ends (success, error or timeout).

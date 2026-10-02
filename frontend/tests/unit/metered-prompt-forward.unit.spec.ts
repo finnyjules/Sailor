@@ -155,10 +155,4 @@ describe('I4 — the run records which engine ran it', () => {
     await handleMeteredPrompt(ev({ prompt: GRAPH }))
     expect(createGraphRun.mock.calls[0][0]).toMatchObject({ target: 'http://127.0.0.1:8188' })
   })
-
-  it('records the pool worker when ?comfyWorker=N routed the run', async () => {
-    await handleMeteredPrompt(ev({ prompt: GRAPH }, '/prompt?comfyWorker=2'))
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8191/prompt')
-    expect(createGraphRun.mock.calls[0][0]).toMatchObject({ target: 'http://127.0.0.1:8191' })
-  })
 })

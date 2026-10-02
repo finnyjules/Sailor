@@ -52,7 +52,7 @@ const exists = (...p: string[]) => fs.existsSync(path.join(root, ...p))
 
 describe('routing', () => {
   it('owns /upload/image and /upload/mask under every engine spelling, nothing else under /upload', () => {
-    for (const p of ['/upload/image', '/api/upload/image', '/comfyui/upload/mask', '/comfyui/api/upload/mask', '/upload/image?comfyWorker=1']) {
+    for (const p of ['/upload/image', '/api/upload/image', '/comfyui/upload/mask', '/comfyui/api/upload/mask', '/upload/image?x=1']) {
       expect(nativeEnginePath(p), p).not.toBeNull()
     }
     for (const p of ['/upload', '/upload/imageX', '/upload/video']) expect(nativeEnginePath(p), p).toBeNull()

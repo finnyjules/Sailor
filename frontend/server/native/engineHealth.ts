@@ -11,7 +11,7 @@ export type EngineState = 'up' | 'down'
 
 export const ENGINE_HEALTH_CACHE_MS = 3_000
 export const ENGINE_HEALTH_TIMEOUT_MS = 1_500
-/** The main engine's port — the only one this check speaks for (pool workers on 8189+ are not covered). */
+/** The local engine's port. */
 export const ENGINE_MAIN_PORT = 8188
 const ENGINE_ORIGIN = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
 

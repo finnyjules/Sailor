@@ -630,7 +630,7 @@ describe('the parser decides, and the parsed form is what gets written', () => {
   })
 
   it('serves every spelling of the two routes, pool worker included, and 404s the rest', async () => {
-    for (const [i, p] of ['/upload/image?comfyWorker=2', '/comfyui/upload/image', '/api/upload/image', '/comfyui/api/upload/image'].entries()) {
+    for (const [i, p] of ['/upload/image?x=2', '/comfyui/upload/image', '/api/upload/image', '/comfyui/api/upload/image'].entries()) {
       rawBody.mockResolvedValue(upload({ filename: `w${i}.png` }))
       await handleHostedUpload(ev(p))
       expect(lastStatus, p).toBe(200)
@@ -646,7 +646,7 @@ describe('the parser decides, and the parsed form is what gets written', () => {
   it('refuses /upload/mask in hosted mode with a 403, before the body is read (controller ruling)', async () => {
     // original_ref can name any tenant's output; the masked copy would be
     // written under the caller's name.
-    for (const p of ['/upload/mask', '/api/upload/mask', '/comfyui/upload/mask?comfyWorker=1', '/comfyui/api/upload/mask']) {
+    for (const p of ['/upload/mask', '/api/upload/mask', '/comfyui/upload/mask?x=1', '/comfyui/api/upload/mask']) {
       rawBody.mockClear()
       rawBody.mockResolvedValue(raw([
         { disposition: 'name="image"; filename="m.png"', value: 'PIXELS' },

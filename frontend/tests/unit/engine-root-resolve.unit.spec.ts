@@ -10,10 +10,8 @@
  * `computeEngineRoot(cwd, envOverride)` is the pure resolver: env override
  * first (validated — an override that doesn't check out is a misconfigured
  * override, not a silent fallback), else walk up from `cwd` for the
- * ComfyUI checkout marker (`main.py` alongside `input/`, the same marker
- * comfyWorkerPool.ts's `resolveRepoRoot` uses for `main.py` alone — this
- * additionally requires `input/` since that's the directory whose presence
- * the overwrite gate actually depends on). Real temp directories, no fs
+ * ComfyUI checkout marker (`main.py` alongside `input/` — `input/` since
+ * that's the directory whose presence the overwrite gate actually depends on). Real temp directories, no fs
  * mocking — this file verifies the walk itself, not a caller's use of it.
  */
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'

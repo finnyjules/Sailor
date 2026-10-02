@@ -341,10 +341,11 @@ describe('layouts/default.vue: the run route', () => {
     expect(body.slice(routed - 40, routed)).toContain('sentToRunner ? null :')
     expect(refuse).toBeGreaterThan(routed)
     expect(body.slice(refuse, back)).toContain('toast.error(route.title, { description: route.description })')
-    for (const q of ['direct.queueParallel(', 'direct.queueSmart(']) {
-      expect(body.indexOf(q), q).toBeGreaterThan(back)
-      expect(body.split(q).length, q).toBe(2)
-    }
+    // R10.3: the local engine's two /prompt calls (one take, several takes in order) come after the refusal.
+    const queues = [...body.matchAll(/direct\.queue\(/g)].map(m => m.index!)
+    expect(queues).toHaveLength(2)
+    for (const q of queues) expect(q).toBeGreaterThan(back)
+    expect(body).not.toMatch(/direct\.queue(Parallel|Smart)\(/)
   })
 
   it('passes hosted, the engine’s state and the runner’s words to the route', () => {

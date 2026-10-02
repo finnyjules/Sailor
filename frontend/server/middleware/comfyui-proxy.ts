@@ -2,7 +2,6 @@
 // The ComfyUI iframes load directly from :8188, but the Nuxt frontend
 // still makes fetch() calls to these paths (e.g. /queue, /comfyui/settings).
 
-import { resolveWorkerTarget } from '../utils/workerRoute'
 import { PROXY_PREFIXES } from '../utils/authGuard'
 import { deployMode, engineMultiUser } from '../utils/deployMode'
 import { handleMeteredPrompt } from '../utils/meterGraphRun'
@@ -175,20 +174,16 @@ export default defineEventHandler(async (event) => {
   for (const prefix of PROXY_PREFIXES) {
     // Match /view, /view/, /view?query=..., /view/subpath, etc.
     if (path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix + '?')) {
-      // `?comfyWorker=N` selects a headless pool worker (8189+N) instead of
-      // the main instance (8188); see server/utils/workerRoute.ts.
-      const { port, cleanUrl } = resolveWorkerTarget(path)
-      const target = `http://127.0.0.1:${port}`
-      const backendPath = cleanUrl.startsWith('/comfyui')
-        ? cleanUrl.replace(/^\/comfyui/, '') || '/'
-        : cleanUrl
+      const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
+      const backendPath = path.startsWith('/comfyui')
+        ? path.replace(/^\/comfyui/, '') || '/'
+        : path
       // Spec ruling 4: with the main engine known down (the cached health
       // check, server/native/engineHealth.ts), an engine-only route — /prompt,
       // the timeline renders, spacetype_encode, … — answers a plain 503 rather
       // than h3's 502 from a refused proxy. Local and hosted alike (hosted gets
-      // here only for what its gate classified 'proxy'). Pool workers (8189+)
-      // aren't covered by that check and are proxied as before.
-      if (port === ENGINE_MAIN_PORT && !isWsPath(backendPath) && await engineHealth() === 'down') {
+      // here only for what its gate classified 'proxy').
+      if (!isWsPath(backendPath) && await engineHealth() === 'down') {
         setResponseStatus(event, 503)
         return { error: NEEDS_LOCAL_ENGINE_MESSAGE }
       }

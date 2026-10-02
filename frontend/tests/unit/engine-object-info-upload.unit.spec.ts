@@ -291,12 +291,6 @@ describe('handleHostedObjectInfo', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info/LoadImage')
   })
 
-  it('preserves ?comfyWorker=N targeting — node availability differs per worker', async () => {
-    fetchMock.mockImplementation(async () => engineOk(catalog()))
-    await handleHostedObjectInfo(ev('/object_info?comfyWorker=2'))
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8191/object_info')
-  })
-
   it('strips the /comfyui base like the raw proxy did', async () => {
     fetchMock.mockImplementation(async () => engineOk(catalog()))
     await handleHostedObjectInfo(ev('/comfyui/object_info'))

@@ -236,20 +236,4 @@ describe('buildWsUrl', () => {
     // proxy on the SAME port the page loaded from, never :8188 directly.
     expect(buildWsUrl('http://localhost:3002', CID)).toBe('ws://localhost:3002/ws?clientId=client-abc')
   })
-
-  it('omits the comfyWorker param for worker 0 / main (byte-identical to the 2-arg form)', () => {
-    expect(buildWsUrl('http://localhost:3002', CID, 0)).toBe('ws://localhost:3002/ws?clientId=client-abc')
-    // absent worker arg is treated as main too.
-    expect(buildWsUrl('http://localhost:3002', CID)).toBe(buildWsUrl('http://localhost:3002', CID, 0))
-  })
-
-  it('appends &comfyWorker=<0-based pool index> for pool workers (app-side N → N-1)', () => {
-    // app-side worker 1 → pool index 0; worker 2 → pool index 1.
-    expect(buildWsUrl('http://localhost:3002', CID, 1)).toBe(
-      'ws://localhost:3002/ws?clientId=client-abc&comfyWorker=0',
-    )
-    expect(buildWsUrl('http://localhost:3002', CID, 2)).toBe(
-      'ws://localhost:3002/ws?clientId=client-abc&comfyWorker=1',
-    )
-  })
 })

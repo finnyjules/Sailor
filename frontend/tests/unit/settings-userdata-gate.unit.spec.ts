@@ -205,11 +205,6 @@ describe('handleHostedUserScoped: forwards with the server-set comfy-user', () =
     expect((r.forwarded?.[1]?.body as Buffer)?.toString('utf8')).toBe('{"Comfy.Locale":"fr"}')
   })
 
-  it('keeps ?comfyWorker=N pointed at the pool worker', async () => {
-    const r = await via('/comfyui/settings?comfyWorker=2', 'GET', 'u1')
-    expect(r.forwarded?.[0]).toBe('http://127.0.0.1:8191/settings')
-  })
-
   it('an unauthenticated caller is refused 401 before any engine contact', async () => {
     const r = await via('/comfyui/settings', 'GET', null)
     expect(r.status).toBe(401)
