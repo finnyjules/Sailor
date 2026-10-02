@@ -325,6 +325,6 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
     variants: [variant], assets: { urls, fonts, shaders, depth, ...(surfaces.length ? { surfaces } : {}) }, wired,
     notices: [...notices.filter(n => n.group === 'fonts'), ...liveNotices, ...notices.filter(n => n.group !== 'fonts')],
     // Brush tips, Pixel reveal, Relight and Morph are not in frame-lean.js either: same full bundle.
-    needsOutlines: computeNeedsOutlines(plan, variant) || frameNeedsFullBundle(variant.layers, variant.motion?.behaviours) !== null,
+    needsOutlines: computeNeedsOutlines(plan, variant) || frameNeedsFullBundle(variant.layers, variant.motion?.behaviours, variant.motion?.motionx) !== null,
   }
 }

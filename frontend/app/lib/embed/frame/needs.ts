@@ -22,6 +22,7 @@
 import { effectStackOf, isGeometryKind, type EffectKind } from '~/lib/compositor/effectStack'
 import { isTipStroke } from '~/lib/brushTips/record'
 import { isFoilFill } from '~/lib/compositor/paint'
+import { isLightBandPath } from '~/lib/frame/lighting/motion'
 import { strokeStackOf } from '~/lib/compositor/strokeStack'
 
 /** The three F3 geometry kinds that read paper.js — `boolean`/`shatter` directly
@@ -60,7 +61,8 @@ export function layersNeedPaper(layers: readonly unknown[]): boolean {
 export function frameNeedsFullBundle(
   layers: readonly unknown[],
   behaviours?: ReadonlyArray<{ kind?: unknown }> | null,
-): 'brush tips' | 'Pixel reveal' | 'Relight' | 'Morph' | 'Print finishes under lights' | null {
+  motionx?: ReadonlyArray<{ path?: unknown; muted?: unknown }> | null,
+): 'Animated lights' | 'brush tips' | 'Pixel reveal' | 'Relight' | 'Morph' | 'Print finishes under lights' | null {
   for (const l of layers) {
     const strokes = (l as { strokes?: unknown } | null)?.strokes
     if (Array.isArray(strokes) && strokes.some(s => isTipStroke(s as Parameters<typeof isTipStroke>[0]))) return 'brush tips'
@@ -74,6 +76,8 @@ export function frameNeedsFullBundle(
     }
   }
   if (hasVisibleLight(layers) && layers.some(layerHasPrintFinish)) return 'Print finishes under lights'
+  // Light dials, Lift and Darkness on the timeline: the lean bundle has no light motion.
+  if ((motionx ?? []).some(t => !t?.muted && typeof t?.path === 'string' && isLightBandPath(t.path))) return 'Animated lights'
   return null
 }
 

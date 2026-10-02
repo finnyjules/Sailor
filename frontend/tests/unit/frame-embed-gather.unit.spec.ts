@@ -553,6 +553,18 @@ describe('frameNeedsFullBundle', () => {
     expect(frameNeedsFullBundle([foilRect, { ...light, visible: false }])).toBeNull()
     expect(frameNeedsFullBundle([createRectLayer({}), light])).toBeNull()
   })
+  it('animated lights (a light dial, Lift or Darkness band, unmuted) take the full bundle', () => {
+    const r = createRectLayer({})
+    const band = (path: string, muted = false) => ({ path, muted })
+    expect(frameNeedsFullBundle([r], [], [band('layers.a.light.brightness')])).toBe('Animated lights')
+    expect(frameNeedsFullBundle([r], [], [band('layers.a.lift')])).toBe('Animated lights')
+    expect(frameNeedsFullBundle([r], [], [band('frame.darkness')])).toBe('Animated lights')
+  })
+  it('no light band keeps the lean bundle (other bands, muted bands)', () => {
+    const r = createRectLayer({})
+    expect(frameNeedsFullBundle([r], [], [{ path: 'layers.a.opacity' }, { path: 'frame.darkness', muted: true }])).toBeNull()
+    expect(frameNeedsFullBundle([r], [], undefined)).toBeNull()
+  })
   it('a Shape morph between two shapes (no text partner) is not an outline need, but still takes the full bundle', () => {
     const a = createRectLayer({}), b = createRectLayer({})
     const behaviours = [{ id: 'm', kind: 'morph', layerId: a.id, params: { style: 'shape', target: `l:${b.id}` } }]

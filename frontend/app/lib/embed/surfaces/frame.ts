@@ -43,6 +43,7 @@ import { applyStackPost, chainActive } from '~/lib/compositor/postEffects'
 import '~/lib/motion/paint' // registers the per-layer animation painter paintLayerStack relies on
 import { slotPhase01 } from '~/lib/compositor/masterClock'
 import { readFrameLighting, visibleLights } from '~/lib/frame/lighting/settings'
+import { applyLightingTracks } from '~/lib/frame/lighting/motion'
 import { lightingAvailable } from '~/lib/frame/lighting/lightingPass'
 import { bleedAmbientAlpha } from '../frame/bleed'
 import { resolveNestedSurface, nestedDeviceSize } from '../nested'
@@ -220,7 +221,7 @@ const frameSurface: EmbedSurface = {
       // reveal, Relight): re-asked on the live layers, a lean mount that would need one rejects
       // (the poster stays) instead of drawing the Frame without it.
       if (LEAN_FRAME_BUNDLE) {
-        const missing = frameNeedsFullBundle(v.layers, v.motion?.behaviours)
+        const missing = frameNeedsFullBundle(v.layers, v.motion?.behaviours, v.motion?.motionx)
         if (missing) throw new Error(`embed: this Frame uses ${missing}, which the lean bundle does not carry`)
       }
       if (snap.needsOutlines || layersNeedPaper(v.layers)) {
@@ -299,11 +300,12 @@ const frameSurface: EmbedSurface = {
       // Light layers: the art is lit (ambient darkened by Darkness); the bleed outside it is the
       // background alone, so it gets the same ambient darkening or the artboard edge shows. Light
       // glow does not reach into the bleed (stage 1). 0 ⇒ nothing to do.
-      const bleedDark = (() => {
+      // Per paint: an animated Darkness band moves the bleed with the art.
+      const bleedDarkAt = (tSec: number): number => {
         if (!visibleLights(layers, v.groups).length) return 0
-        const lighting = readFrameLighting({ sailor_localLighting: v.lighting })
+        const lighting = readFrameLighting({ sailor_localLighting: applyLightingTracks(v.lighting, v.motion?.motionx, tSec) })
         return lighting.backgroundLit && lightingAvailable() ? bleedAmbientAlpha(lighting.darkness) : 0
-      })()
+      }
       await ensureLayerImages(layers, { keep: true })
       if (!(await ensureRevealShadersReady(v.motion?.behaviours))) throw new Error('embed: a transition shader did not become ready')
 
@@ -405,6 +407,7 @@ const frameSurface: EmbedSurface = {
         if (v.background != null) {
           paintBackground(ctx, s, tSec, u, 0, 0)
           ctx.setTransform(1, 0, 0, 1, 0, 0)
+          const bleedDark = bleedDarkAt(tSec)
           if (bleedDark > 0) {
             ctx.fillStyle = `rgba(0,0,0,${bleedDark})`
             ctx.fillRect(0, 0, canvas.width, canvas.height)

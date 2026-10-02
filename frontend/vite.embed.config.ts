@@ -197,6 +197,8 @@ const FRAME_LEAN_STUBS: [RegExp, string][] = [
   [/\/app\/lib\/embed\/frame\/bundleKind\.ts$/, './app/lib/embed/frame/bundleKind.lean.embed.ts'],
   // Print finishes lit by the Frame's lights (light layers stage 3): such Frames take the full bundle.
   [/\/app\/lib\/compositor\/finishLights\.ts$/, './app/lib/embed/frame/finishLightsLean.embed.ts'],
+  // Light motion (light layers stage 4): Frames with animated lights take the full bundle.
+  [/\/app\/lib\/frame\/lighting\/motion\.ts$/, './app/lib/embed/frame/lightMotionLean.embed.ts'],
   // Frame Morph (medial/morph/morphPieces, ~22k): morph Frames take the full bundle.
   [/\/app\/lib\/vector\/morphPieces\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
   [/\/app\/lib\/vector\/morph\.ts$/, './app/lib/embed/frame/morphLean.embed.ts'],
