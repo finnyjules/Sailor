@@ -1,17 +1,15 @@
 <script setup lang="ts">
-/** "Add property" picker (6a). Lists every animatable property of the selected layer,
- *  grouped Transform / Fill / Effects (from the adapter's animatableProperties), and
+/** "Add property" picker (6a). Lists every animatable property of the selected layer (or of
+ *  the Frame's All lights row), grouped Transform / Fill / Effects / Copies / Light (from the
+ *  adapter's animatableProperties), and
  *  emits `add` with the chosen property. The modal seeds a flat-hold band for it.
  *  Properties that already have a band are shown checked and disabled. */
-import type { AnimatableProperty, PropertyGroup } from '~/lib/motionx/adapter/frame'
+import { groupAnimatableProperties, type AnimatableProperty } from '~/lib/motionx/adapter/frame'
 
 const props = defineProps<{ properties: AnimatableProperty[]; animatedPaths: string[] }>()
 defineEmits<{ add: [prop: AnimatableProperty]; close: [] }>()
 
-const ORDER: PropertyGroup[] = ['Transform', 'Fill', 'Effects', 'Copies']
-const groups = computed(() =>
-  ORDER.map((group) => ({ group, items: props.properties.filter((p) => p.group === group) }))
-    .filter((g) => g.items.length > 0))
+const groups = computed(() => groupAnimatableProperties(props.properties))
 const isAnimated = (p: AnimatableProperty) => props.animatedPaths.includes(p.path)
 </script>
 

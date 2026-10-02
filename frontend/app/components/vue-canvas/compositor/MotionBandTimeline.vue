@@ -8,8 +8,8 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { isTextBehaviour } from '~/lib/motionx/text'
-import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
-import { animatableProperties, MOTION_ONLY_LABELS, isMotionOnlyPath } from '~/lib/motionx/adapter/frame'
+import { bandsForLayer, bandsForFrame, FRAME_ROW_ID, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
+import { animatableProperties, FRAME_DARKNESS_PROPERTY, MOTION_ONLY_LABELS, isMotionOnlyPath, type AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { staggerOf, echoOffsets, staggerOverrun, echoCut, fitFrameDuration, type StaggerOverrun } from '~/lib/motionx/copies'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
@@ -37,6 +37,8 @@ const props = defineProps<{
   bakeError?: string | null
   galleryOpen?: boolean
   propertyPickerOpen?: boolean
+  /** The Frame has a light layer: show the All lights row (the Frame's Darkness) on top. */
+  lightsRow?: boolean
 }>()
 const emit = defineEmits<{
   select: [id: string]
@@ -91,7 +93,14 @@ const FLAG_W = 52
 const flagX = computed(() => clampN(playheadX.value, FLAG_W / 2, Math.max(FLAG_W / 2, laneWidth.value - FLAG_W / 2)))
 
 const rowLabel = (l: LocalLayer) =>
-  (l as { name?: string }).name || (l.kind === 'text' ? ((l as { text?: string }).text?.split('\n')[0] || 'Text') : l.kind)
+  l.id === FRAME_ROW_ID ? 'All lights' : (l as { name?: string }).name || (l.kind === 'text' ? ((l as { text?: string }).text?.split('\n')[0] || 'Text') : l.kind)
+
+// ── The All lights row: the Frame itself, as a pseudo-layer at the top. Its id never matches a
+//    real layer (see FRAME_ROW_ID), it has no behaviours, letters, copies or older animation, and
+//    its only property is the Frame's Darkness — so every row/band helper below serves it as is.
+const FRAME_ROW = { id: FRAME_ROW_ID, kind: 'frame' } as unknown as LocalLayer
+const rowLayers = computed<LocalLayer[]>(() => (props.lightsRow ? [FRAME_ROW, ...props.layers] : props.layers))
+const propsFor = (l: LocalLayer): AnimatableProperty[] => (l.id === FRAME_ROW_ID ? [FRAME_DARKNESS_PROPERTY] : animatableProperties(l))
 
 // ── Layer groups (each layer is a collapsible header; its behaviours + property
 //    bands are the rows under it — DialKit's clip-per-row model). ──────────────
@@ -192,8 +201,8 @@ const reachOf = (b: Band) => (b.loop ? Math.max(b.end, props.duration) : b.end)
 // Property bands for any layer (untagged tracks), each its own row.
 function propBandsFor(l: LocalLayer): Band[] {
   const m = new Map<string, string>()
-  for (const p of animatableProperties(l)) m.set(p.path, p.label)
-  return bandsForLayer(l.id, props.motionx, (p) => m.get(p) ?? '')
+  for (const p of propsFor(l)) m.set(p.path, p.label)
+  return l.id === FRAME_ROW_ID ? bandsForFrame(props.motionx, (p) => m.get(p) ?? '') : bandsForLayer(l.id, props.motionx, (p) => m.get(p) ?? '')
 }
 const legacyFor = (l: LocalLayer) => legacyBandForLayer(l as never, props.duration)
 const legacyBandsFor = (l: LocalLayer): Band[] => { const b = legacyFor(l); return b ? [b] : [] }
@@ -205,7 +214,7 @@ const isLegacySel = (l: LocalLayer) => props.selection?.kind === 'legacy' && pro
 //    spans overlap in the same row are a genuine clash → flagged. ─────────────────────
 interface PropertyRow { path: string; label: string; behaviours: Band[]; property: Band | null; conflicts: Set<string> }
 function rowsFor(l: LocalLayer): PropertyRow[] {
-  const labels = new Map(animatableProperties(l).map((p) => [p.path, p.label] as const))
+  const labels = new Map(propsFor(l).map((p) => [p.path, p.label] as const))
   const order = [...labels.keys()]
   const byPath = new Map<string, PropertyRow>()
   const row = (path: string) => {
@@ -559,8 +568,9 @@ function deletePoint(b: Band, i: number) {
 
       <!-- Each layer is a collapsible group header; its behaviours + property bands are
            rows (one compact bar each) — DialKit's clip-per-row model. -->
-      <template v-for="l in layers" :key="l.id">
+      <template v-for="l in rowLayers" :key="l.id">
         <button class="col-span-2 flex items-center gap-1.5 h-[22px] text-[11px] cursor-pointer"
+          :data-testid="l.id === FRAME_ROW_ID ? 'all-lights-row' : undefined"
           :class="l.id === selectedId ? 'text-white' : 'text-white/55 hover:text-white/80'"
           @click="emit('select', l.id)">
           <span class="inline-block w-3 text-center transition-transform text-white/40 hover:text-white/70"
@@ -719,7 +729,7 @@ function deletePoint(b: Band, i: number) {
 
           <!-- empty layer -->
           <template v-if="rowCountFor(l) === 0">
-            <div /><div class="py-1 pl-5 text-[10px] text-white/25">No motion — add a behaviour above.</div>
+            <div /><div class="py-1 pl-5 text-[10px] text-white/25">{{ l.id === FRAME_ROW_ID ? 'No motion — add a property above.' : 'No motion — add a behaviour above.' }}</div>
           </template>
         </template>
       </template>

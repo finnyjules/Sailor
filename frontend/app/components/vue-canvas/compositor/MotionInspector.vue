@@ -42,6 +42,9 @@ const props = defineProps<{
   /** Every element a morph can turn into (local elements with an outline, no active corner pin,
    *  no cloner). The inspector leaves out the bar's own layer. */
   morphTargets?: { key: string; label: string }[]
+  /** The selected band's own value range (its animatable property's min/max) — a light's
+   *  x/y run −0.5..1.5, a Lift 0.005..0.15, the Frame's Darkness 0..1. Absent ⇒ the table below. */
+  range?: { min: number; max: number }
 }>()
 const emit = defineEmits<{
   'update:motionx': [tracks: Track[]]
@@ -502,9 +505,12 @@ const PROPERTY_RANGE: Record<string, { min: number; max: number }> = {
 }
 const pointRange = computed(() => {
   // `layers.<id>.<property…>` — the property is everything after the id.
+  if (props.range) return props.range
   const prop = (track.value?.path ?? '').split('.').slice(2).join('.')
   return PROPERTY_RANGE[prop] ?? { min: -1000, max: 1000 }
 })
+// A narrow range (Lift's 0.005..0.15) needs a finer step than the usual hundredths.
+const pointStep = computed(() => (pointRange.value.max - pointRange.value.min < 0.5 ? 0.001 : 0.01))
 function deleteBand() {
   if (!track.value) return
   emit('before-change')
@@ -940,7 +946,7 @@ function onGradient(g: Gradient) {
       <div v-if="typeof point.value === 'number'" class="mb-2">
         <StudioSlider data-testid="inspector-number" v-bind="gesture('inspector-number')"
           label="Value" :model-value="+point.value.toFixed(3)"
-          :min="pointRange.min" :max="pointRange.max" :step="0.01"
+          :min="pointRange.min" :max="pointRange.max" :step="pointStep"
           @update:model-value="(v) => setValue(v, 'inspector-number')" />
       </div>
       <div v-else-if="typeof point.value === 'string'" class="mb-2">

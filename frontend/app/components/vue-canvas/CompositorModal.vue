@@ -157,6 +157,7 @@ import LightDarknessSlider from '~/components/vue-canvas/compositor/LightDarknes
 import LayerLightToggles from '~/components/vue-canvas/compositor/LayerLightToggles.vue'
 import { lightingAvailable, releaseLighting } from '~/lib/frame/lighting/lightingPass'
 import { effectiveCasts, effectiveLit, defaultCastsShadow, type LightParams } from '~/lib/frame/lighting/settings'
+import { effectiveLift, DEFAULT_LIGHTING, LIGHT_DEFAULTS } from '~/lib/frame/lighting/settings'
 import { lightLabel } from '~/lib/frame/lighting/labels'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
@@ -173,14 +174,14 @@ import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, animatedDialKeysOf, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { isMotionOnlyPath, compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
+import { isMotionOnlyPath, compileBehaviourForLayer, animatableProperties, FRAME_DARKNESS_PROPERTY } from '~/lib/motionx/adapter/frame'
 import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
 import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
 import { migrateDialTracks } from '~/lib/motionx/adapter/migrateDialTracks'
 import { mergeAgentBands } from '~/lib/motionx/adapter/agentBands'
 import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
-import { legacyBandForLayer } from '~/lib/motionx/bands'
+import { legacyBandForLayer, FRAME_ROW_ID } from '~/lib/motionx/bands'
 import { isTextBehaviour, canAnimateLetters } from '~/lib/motionx/text'
 import { motionUsesShaderStyle, pixelRevealSplitLayerIds } from '~/lib/motionx/reveal'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
@@ -5165,13 +5166,32 @@ function onGalleryAdd(move: GalleryMove) {
 // a plain property band. Seeds a flat hold at the property's current value so the band
 // is visible + retimeable immediately and a no-op until a point is changed.
 const propertyPickerOpen = ref(false)
+// The timeline's All lights row (the Frame itself, shown while it has a light layer) is
+// selected instead of a layer: Add property then offers the Frame's Darkness.
+const motionFrameRow = ref(false)
+function selectMotionRow(id: string) {
+  if (id !== FRAME_ROW_ID) { selectLocal(id); return }
+  selectLocal(null)
+  motionFrameRow.value = true
+}
+watch(() => selectedLocal.value?.id, (id) => { if (id) motionFrameRow.value = false })
+watch(hasLights, (v) => { if (!v) motionFrameRow.value = false })
 const selectedAnimatableProps = computed<AnimatableProperty[]>(() =>
-  selectedLocal.value ? animatableProperties(selectedLocal.value as LocalLayer) : [])
+  motionFrameRow.value && hasLights.value ? [FRAME_DARKNESS_PROPERTY]
+    : selectedLocal.value ? animatableProperties(selectedLocal.value as LocalLayer) : [])
 const animatedPropertyPaths = computed<string[]>(() =>
   motionxTracks.value.filter((t) => !t.behaviourId).map((t) => t.path))
-function currentPropertyValue(l: LocalLayer, p: AnimatableProperty): number | string | Array<{ pos: number; color: string }> {
+function currentPropertyValue(l: LocalLayer | null, p: AnimatableProperty): number | string | Array<{ pos: number; color: string }> {
+  if (p.path === FRAME_DARKNESS_PROPERTY.path) return frameLighting.value.darkness ?? DEFAULT_LIGHTING.darkness
+  if (!l) return p.type === 'color' ? '#ffffff' : (p.min ?? 0)
   const prop = p.path.replace(`layers.${l.id}.`, '')
   const rec = l as unknown as Record<string, unknown>
+  if (prop === 'lift') return effectiveLift(l)
+  if (prop.startsWith('light.') && l.kind === 'light') {
+    const light = (l as unknown as LightLayer).light
+    const key = prop.slice(6) as keyof LightParams
+    return (light?.[key] ?? LIGHT_DEFAULTS[light?.type ?? 'lamp'][key]) as number | string
+  }
   if (prop === 'fill.phase') return 0
   if (prop === 'fill') { const f = rec.fill as Paint | undefined; return isGradient(f) ? paintStopsToColor(f) : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] }
   const cur = prop.startsWith('effects.') ? getByIdPath({ layers: [l] }, p.path) : rec[prop]
@@ -5181,7 +5201,7 @@ function currentPropertyValue(l: LocalLayer, p: AnimatableProperty): number | st
 }
 function addProperty(p: AnimatableProperty) {
   const l = selectedLocal.value as LocalLayer | null
-  if (!l || animatedPropertyPaths.value.includes(p.path)) return
+  if ((!l && p.path !== FRAME_DARKNESS_PROPERTY.path) || animatedPropertyPaths.value.includes(p.path)) return
   const track = seedHoldTrack(p.path, p.type, currentPropertyValue(l, p), motionDoc.value.duration ?? 4)
   recordHistory()
   setMotion({ motionx: setBandTrack(motionxTracks.value, p.path, track) } as Partial<FrameMotion>)
@@ -5209,10 +5229,26 @@ const legacyMotionLabel = computed(() => {
   const l = s?.kind === 'legacy' ? localLayers.value.find((x) => x.id === s.path) : null
   return l ? (legacyBandForLayer(l as never, motionDoc.value.duration ?? 4)?.label.replace('Older animation · ', '') ?? '') : ''
 })
+// The selected band's property — looked up on the band's OWN layer (or the Frame, for
+// Darkness), so its label and range are right whichever row the band sits in.
+const motionSelProp = computed<AnimatableProperty | null>(() => {
+  const sel = motionSel.value
+  if (!sel || (sel.kind !== 'band' && sel.kind !== 'point')) return null
+  if (sel.path === FRAME_DARKNESS_PROPERTY.path) return FRAME_DARKNESS_PROPERTY
+  const id = /^layers\.([^.]+)\./.exec(sel.path)?.[1]
+  const l = id ? localLayers.value.find((x) => x.id === id) : undefined
+  return l ? animatableProperties(l as LocalLayer).find((p) => p.path === sel.path) ?? null : null
+})
+const motionSelRange = computed(() => {
+  const p = motionSelProp.value
+  return p && p.min != null && p.max != null ? { min: p.min, max: p.max } : undefined
+})
 // Human label for the selected band's property path (Fill · Gradient, Opacity, …).
 const motionSelLabel = computed<string>(() => {
   const l = selectedLocal.value, sel = motionSel.value
-  if (!l || !sel) return ''
+  if (!sel) return ''
+  if (motionSelProp.value) return motionSelProp.value.label
+  if (!l) return ''
   return animatableProperties(l).find((p) => p.path === sel.path)?.label || sel.path.split('.').pop() || ''
 })
 // Letter/word/line counts of the selected TEXT layer, for the letter-behaviour inspector's
@@ -10727,15 +10763,15 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         <!-- The Motion tab is ONE DialKit-style dock (MotionBandTimeline): transport +
              Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows. -->
         <MotionBandTimeline
-          :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
+          :layers="localLayers" :selected-id="motionFrameRow ? FRAME_ROW_ID : (selectedLocal?.id ?? null)" :lights-row="hasLights"
           :motionx="motionxTracks" :behaviours="motionBehaviours"
           :duration="effectiveMotion.duration" :t="previewT"
           :selection="motionSel"
           :playing="playing" :fps="effectiveMotion.fps" :loop="effectiveMotion.loop ?? false"
           :baking="baking" :busy="exportingVideo" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
           :gallery-open="behaviourPickerOpen && !!selectedLocal"
-          :property-picker-open="propertyPickerOpen && !!selectedLocal"
-          @select="(id: string) => selectLocal(id)"
+          :property-picker-open="propertyPickerOpen && (!!selectedLocal || motionFrameRow)"
+          @select="selectMotionRow"
           @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
           @select-legacy="selectLegacyMotion"
           @update:motionx="updateMotionx" @before-change="recordHistory"
@@ -11010,7 +11046,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             class="mb-3"
             :motionx="motionxTracks" :behaviours="motionBehaviours" :selection="motionSel"
             :duration="effectiveMotion.duration" :t="previewT"
-            :label="motionSelLabel" :legacy-label="legacyMotionLabel" :piece-counts="motionPieceCounts"
+            :label="motionSelLabel" :range="motionSelRange" :legacy-label="legacyMotionLabel" :piece-counts="motionPieceCounts"
             :morph-targets="morphTargets"
             @update:motionx="updateMotionx" @before-change="recordHistory"
             @select-point="selectMotionPoint" @clear="clearMotionSel"

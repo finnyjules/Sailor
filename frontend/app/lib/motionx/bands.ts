@@ -46,7 +46,21 @@ export function bandsForLayer(
   tracks: Track[],
   labelFor?: (path: string) => string,
 ): Band[] {
-  const prefix = `layers.${layerId}.`
+  return bandsWithPrefix(`layers.${layerId}.`, tracks, labelFor)
+}
+
+/** The timeline row for the Frame itself ("All lights"). Never a layer id — layer ids are
+ *  generated, and no track path is `layers.__frame.…` — so selection, duplicate and delete
+ *  code that works on layers never meets it. */
+export const FRAME_ROW_ID = '__frame'
+
+/** Property bands for the Frame's own row: tracks whose path is `frame.<property>` (today
+ *  only the lighting Darkness, `frame.darkness`). */
+export function bandsForFrame(tracks: Track[], labelFor?: (path: string) => string): Band[] {
+  return bandsWithPrefix('frame.', tracks, labelFor)
+}
+
+function bandsWithPrefix(prefix: string, tracks: Track[], labelFor?: (path: string) => string): Band[] {
   const out: Band[] = []
   for (const tk of tracks) {
     if (!tk.path.startsWith(prefix)) continue

@@ -297,6 +297,18 @@ export interface AnimatableProperty {
   max?: number
 }
 
+/** The "Add property" picker's group order (empty groups are left out). */
+export const PROPERTY_GROUP_ORDER: readonly PropertyGroup[] = ['Transform', 'Fill', 'Effects', 'Copies', 'Light']
+export function groupAnimatableProperties(properties: readonly AnimatableProperty[]): Array<{ group: PropertyGroup; items: AnimatableProperty[] }> {
+  return PROPERTY_GROUP_ORDER.map((group) => ({ group, items: properties.filter((p) => p.group === group) }))
+    .filter((g) => g.items.length > 0)
+}
+
+/** The Frame's own animatable property — the "All lights" row's only one. Range: the
+ *  lighting sanitizer's (lib/frame/lighting/settings.ts). */
+export const FRAME_DARKNESS_PROPERTY: AnimatableProperty =
+  { path: 'frame.darkness', type: 'number', label: 'Darkness', group: 'Light', min: 0, max: 1 }
+
 /** Every Cloner dial that can be animated once the cloner is enabled, keyed by which
  *  mode(s) it applies to — `'both'` dials (falloff) show for either mode. Ranges/labels
  *  mirror the Design-tab cloner panel; `key` must be a real `Cloner` field. */

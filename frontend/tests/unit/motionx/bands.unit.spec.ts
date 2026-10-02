@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  trackSpan, bandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, behaviourLabel,
+  trackSpan, bandsForLayer, bandsForFrame, FRAME_ROW_ID, numberBandCurve, colorBandCss, gradientBandCss, behaviourLabel,
 } from '~/lib/motionx/bands'
 import type { Track } from '~/lib/motionx'
 
@@ -41,6 +41,28 @@ describe('bandsForLayer', () => {
     const bands = bandsForLayer('a', tracks, (p) => (p.endsWith('opacity') ? 'Opacity' : ''))
     expect(bands[0].label).toBe('Opacity')
     expect(bands[1].label).toBe('fill')
+  })
+})
+
+describe('bandsForFrame (the All lights row)', () => {
+  const tracks: Track[] = [
+    num('layers.a.opacity', [[0, 0], [1, 1]]),
+    num('frame.darkness', [[0.5, 0.2], [2, 0.9]]),
+    { ...num('frame.darkness', [[0, 0], [1, 1]]), behaviourId: 'b1' },   // a behaviour's track — not a property band
+  ]
+  it('holds only the frame.* property tracks', () => {
+    const bands = bandsForFrame(tracks, (p) => (p === 'frame.darkness' ? 'Darkness' : ''))
+    expect(bands).toHaveLength(1)
+    expect(bands[0]).toMatchObject({ key: 'frame.darkness', path: 'frame.darkness', kind: 'number', label: 'Darkness', start: 0.5, end: 2 })
+  })
+  it('never shows up under a layer, whatever the layer is called', () => {
+    expect(bandsForLayer('a', tracks).map((b) => b.path)).toEqual(['layers.a.opacity'])
+    expect(bandsForLayer(FRAME_ROW_ID, tracks)).toEqual([])
+    expect(bandsForLayer('frame', tracks)).toEqual([])
+  })
+  it('carries mute and loop like a layer band', () => {
+    const bands = bandsForFrame([{ ...num('frame.darkness', [[0, 0], [1, 1]]), muted: true, loop: true }])
+    expect(bands[0]).toMatchObject({ muted: true, loop: true, label: 'darkness' })
   })
 })
 

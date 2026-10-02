@@ -23,16 +23,21 @@ import type { FrameMotion } from './types'
 /**
  * FNV-1a over the JSON of everything that affects baked pixels.
  * NOTE: live-slot visual state (wired studio content) is NOT part of this key —
- * only localLayers+motion+W+H are hashed. So editing a studio wired into this
- * frame doesn't flip motionStale. Accepted blind spot, not fixed here.
+ * only localLayers+motion+W+H (+ the lighting record, see below) are hashed. So
+ * editing a studio wired into this frame doesn't flip motionStale. Accepted blind
+ * spot, not fixed here.
+ * The Frame's lighting (Darkness, Background lit) is hashed only while a light layer
+ * exists — it paints nothing otherwise — so a light-less Frame keeps its old key.
  */
 export function motionSourceKey(
   localLayers: LocalLayer[],
   motion: FrameMotion,
   W: number,
   H: number,
+  lighting?: FrameLighting,
 ): string {
-  const s = JSON.stringify({ localLayers, motion, W, H })
+  const lit = lighting && localLayers.some((l) => l.kind === 'light') ? lighting : undefined
+  const s = JSON.stringify(lit ? { localLayers, motion, W, H, lighting: lit } : { localLayers, motion, W, H })
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i)
@@ -196,6 +201,6 @@ export async function bakeAndUpload(
     fps: motion.fps,
     duration: motion.duration,
     rendered,
-    source_key: motionSourceKey(localLayers, motion, W, H),
+    source_key: motionSourceKey(localLayers, motion, W, H, doc?.lighting),
   }
 }
