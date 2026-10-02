@@ -151,7 +151,7 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   // (llms.txt, read 2026-10-02). Priced at the full $0.048 a megapixel, never
   // the promotion, so no picture is charged below cost after it ends. The
   // megapixels are the most each size can bill (imageSettings.ts
-  // FLUX_3_IMAGE_BILLED_MEGAPIXELS: 1K 2 MP, 2K 5 MP). The builder sends
+  // FLUX_3_IMAGE_BILLED_MEGAPIXELS: 1K 1 MP, as fal names it, 2K 5 MP). The builder sends
   // enable_prompt_expansion false and nothing else that costs extra. No backup.
   'flux-3-image': {
     unit: 'per_megapixel', perMegapixel: 0.048, minMegapixels: 1, maxMegapixels: FLUX_3_IMAGE_MAX_MEGAPIXELS,

@@ -162,13 +162,13 @@ export const IMAGE_MODELS: ImageModel[] = [
     pitch: 'Detailed, well-composed pictures with clean lettering.',
     description: 'Black Forest Labs\' newest image model. Follows the layout a prompt describes, renders text cleanly and makes rich, detailed photos and illustrations. It takes about a minute a picture. Pick 2K for a sharper, larger picture; it costs more.',
     tags: ['flagship', 'typography', 'photoreal'],
-    pricePerImage: 0.096,
+    pricePerImage: 0.048,
     aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '7:5', '5:7', '2:1', '1:2', '21:9'],
     defaultAspectRatio: '1:1',
     advanced: [
       { name: 'resolution', type: 'select', label: 'Size', default: '1K',
         options: ['1K', '2K'], optionLabels: ['1K', '2K, sharper'],
-        description: '1K is about one million pixels, 2K about four million. 2K costs about two and a half times as much.' },
+        description: '1K is about one million pixels, 2K about four million. 2K costs five times as much.' },
     ],
   },
   {
@@ -1138,6 +1138,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'p-image',
+    hidden: true,
     label: 'P-Image',
     brand: 'Pruna',
     replicateSlug: 'prunaai/p-image',

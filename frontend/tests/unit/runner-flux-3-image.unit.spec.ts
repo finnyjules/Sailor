@@ -57,7 +57,7 @@ const SINK = { class_type: 'SaveImage', inputs: {} }
 const LINK = ['9', 0]
 /** fal's full rate, a megapixel (llms.txt, read 2026-10-02: "$0.048" for a 1 MP picture once the promotion ends). */
 const PER_MP = 0.048
-const USD_1K = 2 * PER_MP // 0.096
+const USD_1K = 1 * PER_MP // 0.048
 const USD_2K = 5 * PER_MP // 0.24
 
 type ProviderPlan = Extract<NodePlan, { kind: 'provider' }>
@@ -366,12 +366,12 @@ describe('the price', () => {
     })
     expect((IMAGE_RATES[ID] as { perMegapixel: number }).perMegapixel).not.toBe(0.024)
     expect(IMAGE_BACKUP_RATES[ID]).toBeUndefined()
-    expect(FLUX_3_IMAGE_BILLED_MEGAPIXELS).toEqual({ '1K': 2, '2K': 5 })
+    expect(FLUX_3_IMAGE_BILLED_MEGAPIXELS).toEqual({ '1K': 1, '2K': 5 })
     expect(FLUX_3_IMAGE_MAX_MEGAPIXELS).toBe(5)
   })
 
-  it('the most each size can bill covers fal\'s own figures: 1K "1 MP" (1024² is over 1,000,000 pixels), 2K its 2368 × 1776 example', () => {
-    expect(FLUX_3_IMAGE_BILLED_MEGAPIXELS['1K']).toBeGreaterThanOrEqual(Math.ceil(1024 * 1024 / 1e6))
+  it('1K bills as fal names it, "a 1K (1 MP) image" (live check: 1024²; USER ruling 2026-10-02); 2K covers its 2368 × 1776 example', () => {
+    expect(FLUX_3_IMAGE_BILLED_MEGAPIXELS['1K']).toBe(1)
     expect(FLUX_3_IMAGE_BILLED_MEGAPIXELS['2K']).toBeGreaterThanOrEqual(Math.ceil(2368 * 1776 / 1e6))
     expect(FLUX_3_IMAGE_BILLED_MEGAPIXELS['2K']).toBeGreaterThanOrEqual(Math.ceil(2048 * 2048 / 1e6))
   })
@@ -410,7 +410,7 @@ describe('the price', () => {
   it('the gallery: the catalogue figure is 1K\'s, "up to" 2K\'s; the hosted label is the charge', () => {
     expect(IMAGE_MODELS_BY_ID[ID]!.pricePerImage).toBe(USD_1K)
     expect(imagePriceMaxUsd(ID)).toBeCloseTo(USD_2K, 9)
-    expect(imageRateLabel(ID, '1:1')).toBe('$0.096, up to $0.24')
+    expect(imageRateLabel(ID, '1:1')).toBe('$0.048, up to $0.24')
     expect(imageRateLabel(ID, '1:1', { hosted: true })).toBe(`${creditsForUsd(USD_1K)} credits, up to ${creditsForUsd(USD_2K)}`)
   })
 })

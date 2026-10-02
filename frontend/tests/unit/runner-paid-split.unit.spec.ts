@@ -685,7 +685,7 @@ describe('prices (ruling (a))', () => {
   it('priced by its calls with no flat row; the price book moved on', () => {
     expect(PAID_NODE_CLASSES).toContain(SPLIT_CLASS)
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, SPLIT_CLASS)).toBe(false)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-1k')
   })
 
   it('the hold is the cut-out and the fill, each call\'s own credits: LaMa 1 + 1, Bria Eraser 1 + 8; a wired, missing or unknown engine at the dearer', () => {

@@ -385,7 +385,7 @@ describe('prices (ruling (a))', () => {
       expect(PAID_NODE_CLASSES).toContain(c)
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
     }
-    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-1k')
   })
 
   it('credits on both paths: Layerize 18, Outpaint 10 or 8 by engine (a wired one at the dearest), Seedream 87 at auto_1K and 173 otherwise', () => {

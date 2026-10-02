@@ -249,15 +249,16 @@ export const IDEOGRAM_4_MAX_MEGAPIXELS = billedMegapixels(Math.max(...Object.val
  * ratio": 1k "about 1 megapixel", 2k "about 4" (docs.bfl.ai, read
  * 2026-10-02; BFL's megapixel is 1024 × 1024). Neither fal nor BFL lists the
  * exact sizes (fal's own 2k 4:3 example is 2368 × 1776, 4,205,568 pixels), so
- * the price reads the most a tier can bill under the ruling (pixels /
- * 1,000,000, rounded up): a 1K picture is over 1,000,000 pixels and under
- * 2,000,000, so 2 MP; a 2K one over 4,000,000 and under 5,000,000, so 5 MP.
+ * a 2K picture reads the most it can bill under the ruling (pixels /
+ * 1,000,000, rounded up): over 4,000,000 pixels and under 5,000,000, so 5 MP.
+ * 1K is billed as 1 MP (USER ruling 2026-10-02): the live check's 1:1 picture
+ * was 1024 × 1024 (1.05 MP), which fal's price text names "a 1K (1 MP) image".
  * The same at every ratio.
  */
 export const FLUX_3_IMAGE_RESOLUTIONS = ['1K', '2K'] as const
 export type Flux3ImageResolution = typeof FLUX_3_IMAGE_RESOLUTIONS[number]
 export const FLUX_3_IMAGE_DEFAULT_RESOLUTION: Flux3ImageResolution = '1K'
-export const FLUX_3_IMAGE_BILLED_MEGAPIXELS: Readonly<Record<Flux3ImageResolution, number>> = { '1K': 2, '2K': 5 }
+export const FLUX_3_IMAGE_BILLED_MEGAPIXELS: Readonly<Record<Flux3ImageResolution, number>> = { '1K': 1, '2K': 5 }
 /** Billed megapixels of the largest FLUX 3 picture the builder asks for (2K): 5. */
 export const FLUX_3_IMAGE_MAX_MEGAPIXELS = FLUX_3_IMAGE_BILLED_MEGAPIXELS['2K']
 /** The size the options pick (`resolution`), anything else 1K. */

@@ -363,7 +363,7 @@ describe('prices (ruling (a))', () => {
       expect(PAID_NODE_CLASSES).not.toContain(c)
       expect(MODEL_PRICED_NODE_CLASSES).toContain(c)
     }
-    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-image')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-flux-3-1k')
   })
 
   it('per call: Restore 8 credits, Remove background 1, on both paths (as before)', () => {

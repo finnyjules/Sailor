@@ -39,6 +39,8 @@ const HIDDEN_IMAGES = [
   // Picker trim, 2 Oct 2026: overlaps with a better or cheaper model kept in the picker.
   'imagen-4', 'imagen-4-fast', 'gpt-image-2', 'bria-fibo', 'bria-image-3.2', 'ideogram-4', 'reve-2.1',
   'recraft-v4', 'recraft-v4-pro',
+  // Benchmark, 2 Oct 2026: misspelled the neon sign ("LEJATE").
+  'p-image',
 ]
 const HIDDEN_VIDEOS = ['hailuo-2.3', 'wan-2.5-i2v-fast', 'wan-2.7-t2v', 'luma-ray-2-720p', 'ltx-video', 'kling-v2.5-turbo-pro']
 const DISCONTINUED_VIDEOS = ['sora-2', 'sora-2-pro']

@@ -286,7 +286,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // (never fal's launch promotion, which ends 2026-10-08), at the most each size
 // can bill: 1K 2 MP ($0.096), 2K 5 MP ($0.24), every ratio (runner-only,
 // family flux-3-image, no backup). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-flux-3-image'
+// lineup-flux-3-1k: FLUX 3 Image 1K billed as fal names it, 1 MP ($0.048), not
+// 2 MP: the live check's 1:1 picture was 1024 × 1024 (USER ruling 2026-10-02).
+// No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-flux-3-1k'
 
 export const BASE_RENDER_CREDITS = 1
 
