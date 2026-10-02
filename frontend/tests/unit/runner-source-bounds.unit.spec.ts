@@ -20,7 +20,7 @@
  *
  * No paid calls: the providers are fakes; keys unset.
  */
-import { readFileSync } from 'node:fs'
+import { copyFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -38,12 +38,13 @@ import {
 } from '#shared/runner/sourceBounds'
 import { SPEECH_MAX_CHARS } from '#shared/runner/audioGen'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
-import { linkPictureSize, pictureSize } from '~~/server/utils/graphInputPixels'
+import { graphInputSizes, linkPictureSize, pictureSize } from '~~/server/utils/graphInputPixels'
 import { localModelStartProblems, soundBoundOf } from '~~/server/runner/localModelStart'
 import { frameShapes, videoSourceShapeOf } from '~~/server/runner/video/shapes'
 import { soundEffectRaises, soundEffectStartProblems, soundShapes, soundSourceShapeOf } from '~~/server/runner/video/soundShapes'
 import { pythonWavBytesBound, KLING_LIPSYNC_MAX_SOUND_BYTES } from '#shared/runner/lipSyncEngines'
 import { makeKit } from './__runner__/kit'
+import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import { pictureRgb } from '~~/server/runner/generators/repairTiles'
 
 const FIXTURES = join(__dirname, 'fixtures')
@@ -193,9 +194,9 @@ describe('what can\'t be known before the run is held at the cap, never left to 
       expect(got.counts).toMatchObject({ b: LOCAL_MODEL_MAX_FRAMES[hosted ? 'hosted' : 'local'] })
       expect(got.counts.n).toBeLessThanOrEqual(SLOW_MOTION_AI_MAX_FRAMES[hosted ? 'hosted' : 'local'])
       expect(got.sizes?.n).toMatchObject({ upTo: true })
-      // Its sound: at R5's sound cap where it runs, `upTo` (never refused on).
+      // Its sound stays unknown (fix round 1): its readers keep their pre-task routes.
       const sounds = await soundShapes(p, EVERY, soundSourceShapeOf({ prompt: p, access, userId: null, hosted }))
-      expect(sounds.get('g:1')).toEqual({ rate: 8000, channels: 1, samples: caps.soundSamples, exact: false, upTo: true })
+      expect(sounds.has('g:1')).toBe(false)
     }
   })
 })
@@ -253,17 +254,20 @@ describe('music, speech and a cloned voice are bounded by their settings', () =>
     expect(soundBoundOf(p, ['l', 0], shapes)).toMatchObject({ seconds: 11 + 1e-3, header: true })
   })
 
-  it('a bound from settings is never a fact a refusal rests on: a sound effect over it is taken, and refuses only at its turn', async () => {
+  it('fix round 1 (I2): a maker\'s bound past a sound effect\'s limits goes to the engine before the hold, as before the task; one within them is taken', async () => {
     const speech: ApiPrompt = {
       sp: { class_type: 'GenerateSpeechNode', inputs: { text: ['x', 0] } },
       e: { class_type: 'SplitAudioChannels', inputs: { audio: ['sp', 0] } },
       s: { class_type: 'SaveAudio', inputs: { audio: ['e', 0], filename_prefix: 'audio/ComfyUI' } },
     }
     const shapes = await soundShapes(speech, EVERY, async () => null)
-    // Hours of speech by its bound: past hosted's effect limits, taken all the same (the turn judges the sound itself).
+    // Hours of speech by its bound: past hosted's effect limits, the engine (never the maker charged, then refused).
     expect(shapes.get('sp:0')!.samples).toBeGreaterThan(MEDIA_CAPS.hosted.soundSamples)
-    expect(soundEffectStartProblems(speech, EVERY, { hosted: true, sounds: shapes })).toBeNull()
-    // Mono speech into Split: Python raises, but on a bound that is the turn's to say.
+    expect(soundEffectStartProblems(speech, EVERY, { hosted: true, sounds: shapes })).toMatchObject({ engine: true, nodeId: 'e' })
+    // A short typed text: within them, taken.
+    const short: ApiPrompt = { ...speech, sp: { class_type: 'GenerateSpeechNode', inputs: { text: 'Hello there.' } } }
+    expect(soundEffectStartProblems(short, EVERY, { hosted: true, sounds: await soundShapes(short, EVERY, async () => null) })).toBeNull()
+    // Mono speech into Split: Python raises, but on a bound that is the turn's to say (L1, parked).
     expect(soundEffectRaises('SplitAudioChannels', {}, [shapes.get('sp:0')!])).toBeNull()
     expect(soundEffectRaises('SplitAudioChannels', {}, [{ rate: 32000, channels: 1, samples: 32000, exact: false }])).not.toBeNull()
     // Kling's 5 MB on its WAV: music's 31 s at 32 kHz stereo is under it.
@@ -361,4 +365,80 @@ describe('R3.5\'s Upscale on Real-ESRGAN: a picture whose header sharp can\'t re
     const ctx = { prompt: { u: { class_type: 'UpscaleImageNode', inputs: {} } }, nodeId: 'u', readFile: async () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]) } as never
     await expect(pictureRgb(ctx, { filename: 'odd.bin', subfolder: '', type: 'input' }, null)).resolves.toBeNull()
   })
+})
+
+// ── Fix round 1 (I1): a wired size setting is never exact ────────────────────
+
+describe('fix round 1 (I1): an effect\'s wired size setting is only a bound, never exact, never 0 pixels', () => {
+  const load: ApiPrompt = {
+    l: { class_type: 'LoadImage', inputs: { image: 'big.png' } },
+    k: { class_type: 'PrimitiveFloat', inputs: { value: 4 } },
+  }
+  const file = async () => ({ pixels: 3000 * 2000, width: 3000, height: 2000 })
+
+  it('the reviewer\'s probe: LoadImage 3000 × 2000 → Resize (scale wired to 4) → Upscale: the 96 MP bound, refused by the hosted gate', async () => {
+    const p: ApiPrompt = {
+      ...load,
+      r: { class_type: 'ResizeImage', inputs: { image: ['l', 0], scale: ['k', 0], mode: 'bilinear' } },
+      u: { class_type: 'UpscaleImageNode', inputs: { image: ['r', 0], model: 'Real-ESRGAN', scale_factor: 2 } },
+    }
+    expect(await linkPictureSize(p, ['r', 0], file)).toEqual({ px: 12_000 * 8000, exact: false })
+    const gate = await graphInputSizes(p, file)
+    expect(gate.pixels.u).toBeUndefined()
+    expect(gate.problems.map(x => x.nodeId)).toEqual(['u'])
+  })
+
+  it('Kuwahara\'s wired radius, Crop\'s wired sides and Film grain\'s wired size: bounded, not exact', async () => {
+    for (const fx of [
+      { class_type: 'Kuwahara', inputs: { image: ['l', 0], radius: ['k', 0] } },
+      { class_type: 'CropImage', inputs: { image: ['l', 0], left: ['k', 0], right: 0, top: 0, bottom: 0 } },
+      { class_type: 'FilmGrain', inputs: { image: ['l', 0], amount: 0.2, size: ['k', 0], seed: 1 } },
+    ]) {
+      const got = await linkPictureSize({ ...load, f: fx }, ['f', 0], file)
+      expect(got?.exact, fx.class_type).toBe(false)
+      expect(got!.px, fx.class_type).toBeGreaterThanOrEqual(3001 * 2001)
+    }
+    // A wired setting that doesn't change the size (Blur's radius) keeps the picture's exact size.
+    expect(await linkPictureSize({ ...load, f: { class_type: 'Blur', inputs: { image: ['l', 0], radius: ['k', 0] } } }, ['f', 0], file)).toEqual({ px: 6_000_000, exact: true })
+  })
+})
+
+// ── Fix round 1 (I2): the named graphs, in the engine ────────────────────────
+
+describe('fix round 1 (I2): a maker\'s bound past a length-capped reader goes to the engine before the hold, nothing charged (hosted)', () => {
+  const speech = (chars: number) => ({ class_type: 'GenerateSpeechNode', inputs: { model: 'MiniMax Speech-02 HD', text: 'x'.repeat(chars), voice_id: 'Wise_Woman', emotion: 'auto', speed: 1, volume: 1, pitch: 0, language_boost: 'auto' } })
+  const graphs: Record<string, ApiPrompt> = {
+    'long speech → Fade → Save audio': {
+      sp: speech(2500),
+      f: { class_type: 'AudioFade', inputs: { audio: ['sp', 0], fade_in: 0.5, fade_out: 0.5, curve: 'linear' } },
+      s: { class_type: 'SaveAudio', inputs: { audio: ['f', 0], filename_prefix: 'audio/ComfyUI' } },
+    },
+    'long speech → Vocal separator (wired directly)': {
+      sp: speech(2500),
+      v: { class_type: 'VocalSeparator', inputs: { audio: ['sp', 0], model: 'htdemucs', shifts: 1 } },
+      a: { class_type: 'SaveAudio', inputs: { audio: ['v', 0], filename_prefix: 'audio/ComfyUI' } },
+    },
+    'very long speech → Create video': {
+      l: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } },
+      g: { class_type: 'GetVideoComponents', inputs: { video: ['l', 0] } },
+      sp: speech(9000),
+      c: { class_type: 'CreateVideo', inputs: { images: ['g', 0], fps: 24, audio: ['sp', 0] } },
+      s: { class_type: 'SaveVideo', inputs: { video: ['c', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } },
+    },
+  }
+  // The node whose cap the maker's bound passes (the engine's route names it).
+  const at: Record<string, string> = { 'long speech → Fade → Save audio': 'f', 'long speech → Vocal separator (wired directly)': 'v', 'very long speech → Create video': 'c' }
+  for (const [name, p] of Object.entries(graphs)) {
+    it(name, async () => {
+      await requireMediaTools()
+      expect(runnerTakesWorkflow(p, EVERY), `${name}: the rows take it`).toBe(true)
+      const k = makeKit({ hosted: true, deps: { families: () => EVERY } })
+      if (p.l) copyFileSync(clipPath('e_stitch_0.mp4'), join(k.root, 'input', 'a.mp4'))
+      const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
+      expect(err?.data?.reason, `${name}: ${err?.message}`).toBe(RUNNER_NOT_ELIGIBLE)
+      expect(err?.data?.nodeId, `${name}: ${err?.message}`).toBe(at[name])
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      expect(k.replicate.submitted()).toEqual([])
+    }, 60_000)
+  }
 })

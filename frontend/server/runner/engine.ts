@@ -69,7 +69,7 @@ import {
   soundReadOnlyByPieces, vocalsStemsReadable, whisperCeilingSeconds, whisperMaxSeconds,
 } from '#shared/runner/localModels'
 import { perFrameCredits } from '#shared/pricing/nodePrice'
-import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
+import { hasSoundEffect, madeSoundReaderProblems, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
@@ -1372,6 +1372,9 @@ export function createEngine(deps: EngineDeps) {
         const longest = wholeSoundCap(take.prompt[id]!.class_type, deps.hosted() ? 'hosted' : 'local')
         // R11.5: past one call's cap it runs in pieces; past the ceiling it stops here.
         if (longest && typeof heard === 'number' && heard > longest.ceiling) throw new Error(longest.words)
+        // R11.8 fix round 1 (I2c): a Vocal separator's joined stems must stay readable by the node after it (R5's sound
+        // cap), judged on the sound itself before the first piece is sent.
+        if (take.prompt[id]!.class_type === VOCALS_CLASS && typeof heard === 'number' && !vocalsStemsReadable(heard, deps.hosted() ? 'hosted' : 'local')) throw new Error(longest!.words)
         // R11.5: where it runs decides whether its sound is one call or pieces, so it is priced with its place, as held.
         const seconds = longest ? { ...media.measured.seconds, place: deps.hosted() ? 'hosted' as const : 'local' as const } : media.measured.seconds
         // The tight hold (F22 fix round 1): the files must be the ones the start
@@ -2363,12 +2366,14 @@ export function createEngine(deps: EngineDeps) {
           // Whisper and Vocal separator alike, so an exact chain past the cap is refused here too. A paid
           // maker's bound (`upTo`, from its settings) is held on but never refused on: its sound is judged at
           // the node's turn, before anything is sent.
-          const sure = found !== null && !found.upTo
           const slack = found?.header ? 1 : 0
           // R11.5: past one call's cap the sound runs in pieces; only past the hard ceiling is it refused. A
           // Vocal separator's joined stems must also stay readable by the node after it (R5's sound cap).
-          const overCeiling = sure && bound !== null && bound > ceiling + slack + 1e-3
-          const unreadable = sure && bound !== null && n.class_type === VOCALS_CLASS && !vocalsStemsReadable(Math.min(bound, ceiling), place)
+          const overCeiling = bound !== null && bound > ceiling + slack + 1e-3
+          const unreadable = bound !== null && n.class_type === VOCALS_CLASS && !vocalsStemsReadable(Math.min(bound, ceiling), place)
+          // R11.8 fix round 1 (I2): a paid maker's bound past the cap leaves the workflow to the engine, as before the
+          // task (a stop-gap R11.9's plain words close): the maker is never charged and its sound then refused.
+          if ((overCeiling || unreadable) && found?.upTo) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_NOT_ELIGIBLE })
           if (overCeiling || unreadable) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_SOUND_TOO_LONG })
           // Held on the bound (or, where the maker can't be bounded, on one call's longest sound); the node's
           // turn measures the WAV it sends and is charged on that, never above the hold (a longer one is refused
@@ -2517,6 +2522,13 @@ export function createEngine(deps: EngineDeps) {
         const bad = soundEffectStartProblems(p, families, { hosted: deps.hosted(), sounds: all[k]!, keptOther: keptAll - soundKeptBytes(p, families, all[k]!, deps.hosted()) })
         if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
       }
+    }
+    // R11.8 fix round 1 (I2): Create video reading a paid maker's sound past R5's sound caps: the engine, as before.
+    for (const p of prompts) {
+      if (!Object.values(p).some(n => n.class_type === 'CreateVideo' && isLink(n.inputs?.audio))) continue
+      const sounds = await soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal }))
+      const bad = madeSoundReaderProblems(p, { hosted: deps.hosted(), sounds })
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

@@ -374,9 +374,9 @@ export async function localModelStartProblems(
       // Python would slow down, goes to the engine (a stop-gap R11.9 closes with plain words).
       if (outputKind(prompt, link, kinds) !== 'frames') {
         const pictures = pictureBound(prompt, link, families)
-        // R11.8: a count that can't be known is taken (a picture makes no call, so nothing is held); the node's
-        // turn refuses more than one, in plain words.
-        if (pictures !== null && pictures !== 1) return { counts, keptBytes: 0, problem: { message: SLOW_MOTION_AI_WORDS.pictureBatch, nodeId, classType: n.class_type } }
+        // Fix round 1 (L3): a count that can't be known goes to the engine as before (a batch fails at the turn after
+        // earlier paid nodes otherwise); R11.9's plain words close it.
+        if (pictures !== 1) return { counts, keptBytes: 0, problem: { message: pictures === null ? LOCAL_MODEL_WORDS.unknownCount : SLOW_MOTION_AI_WORDS.pictureBatch, nodeId, classType: n.class_type } }
         counts[nodeId] = 1
         continue
       }
@@ -483,7 +483,8 @@ export async function localModelStartProblems(
     if (resized) {
       const words = { message: UPSCALE_2X_WORDS.clipTooLarge, nodeId, classType: n.class_type }
       const overCount = resized.count > caps.batchFrames || resized.count * resized.w * resized.h > caps.batchPixels
-      if (resized.w * resized.h > caps.framePixels || (overCount && resized.exact)) return { counts, keptBytes: 0, problem: null, refused: words }
+      // Fix round 1 (L2): a count whose packets were counted is sure too.
+      if (resized.w * resized.h > caps.framePixels || (overCount && (resized.exact || resized.counted === true))) return { counts, keptBytes: 0, problem: null, refused: words }
     }
     counts[nodeId] = Math.max(1, count)
     // R7.3 (fix round 1): Object removal's mask must be its picture's size (Python fails in numpy's

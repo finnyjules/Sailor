@@ -20,8 +20,8 @@
  *   - R11.8 (ruling (k)): Generate music, Generate speech (and their twins)
  *     and Clone a singing voice, from their own settings
  *     (#shared/runner/sourceBounds): `upTo` shapes, a bound for the holds and
- *     the kept room only (their rate and channels are the service's); a paid
- *     video model's sound (Get video components of it) at R5's sound cap.
+ *     the kept room only (their rate and channels are the service's). A
+ *     paid video model's sound stays unknown (fix round 1).
  * A sound whose source is none of these can't be known before the run: a
  * sound effect reading it leaves the workflow to the engine.
  *
@@ -51,9 +51,6 @@ import {
   cloneSecondsBound, madeSoundShape, musicChannelsBound, musicSecondsBound, speechSecondsBound,
 } from '#shared/runner/sourceBounds'
 import { paidVideoLink, topoOrder, videoFileOf } from './shapes'
-
-/** R11.8: the lowest sound rate a paid video's sound is taken at, for its length bound (Whisper's own 16 kHz is above it). */
-export const PAID_VIDEO_SOUND_RATE_FLOOR = 8000
 import { soundCore } from './core/sound'
 
 const { pyRound } = soundCore()
@@ -296,13 +293,9 @@ export function soundSourceShapeOf(o: { prompt: ApiPrompt } & SoundReadIO): (nod
         return file ? await probe(file, 'first', 'sound', classType !== 'Audio' && soundReadOnlyByPieces(o.prompt, nodeId)) : null
       }
       if (classType === 'GetVideoComponents') {
-        // R11.8 (ruling (k)): a paid video model's sound can't be sized before it runs: held at R5's sound cap where
-        // it runs (keepSound keeps no more), at the lowest rate taken (8 kHz, one channel), so its seconds are a
-        // bound too; `upTo`, never a fact a refusal rests on.
-        if (isLink(inputs.video) && paidVideoLink(o.prompt, inputs.video)) {
-          const caps = o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
-          return { rate: PAID_VIDEO_SOUND_RATE_FLOOR, channels: 1, samples: caps.soundSamples, exact: false, upTo: true }
-        }
+        // R11.8 fix round 1: a paid video model's sound stays unknown, as before the task (its readers keep their
+        // pre-task routes: one call's cap for Whisper, the engine for a sound effect), until a per-model bound.
+        if (isLink(inputs.video) && paidVideoLink(o.prompt, inputs.video)) return null
         const file = isLink(inputs.video) ? videoFileOf(o.prompt, inputs.video) : null
         return file ? await probe(file, 'last', 'video') : null
       }
@@ -351,21 +344,41 @@ export function soundEffectStartProblems(prompt: ApiPrompt, families: ReadonlySe
     const outs = [0, 1].flatMap(slot => (o.sounds.has(`${id}:${slot}`) ? [o.sounds.get(`${id}:${slot}`)!] : []))
     if (!outs.length) return problem(id, MEDIA_EFFECT_WORDS.soundUnknown)
     const samples = (s: SoundShape) => s.channels * s.samples
-    // R11.8 (ruling (k)): a sound from a paid maker (`upTo`) is only a bound: past these limits it is taken all the
-    // same, and the node's turn judges the sound itself (planSoundEffect: the held samples; keepSound: R5's cap).
-    const upTo = (ins as SoundShape[]).some(s => s.upTo)
+    // R11.8 fix round 1 (I2): a sound from a paid maker (`upTo`) is judged on its bound too, before the hold: past
+    // these limits the workflow goes to the engine as before the task (a stop-gap R11.9's plain words close), so a
+    // maker is never charged and its sound then refused here.
     // Held at once: every input, each resampled to the output's rate (a copy while it is made), and every output.
     const rate = outs[0]!.rate
     let held = 0
     for (const s of ins as SoundShape[]) held += samples(s) + (s.rate !== rate ? s.channels * resampledBound(s.samples, s.rate, rate) : 0)
     for (const s of outs) held += samples(s)
-    if (held > caps.effectSoundSamples && !upTo) return problem(id, MEDIA_EFFECT_WORDS.soundTooLong)
+    if (held > caps.effectSoundSamples) return problem(id, MEDIA_EFFECT_WORDS.soundTooLong)
     for (const s of outs) {
-      if (samples(s) > caps.soundSamples && !upTo) return problem(id, MEDIA_WORDS.tooLong)
+      if (samples(s) > caps.soundSamples) return problem(id, MEDIA_WORDS.tooLong)
       kept += keptSoundBound(s, caps.soundSamples)
     }
   }
   if (first && kept > caps.keptBytesPerRun) return problem(first, MEDIA_EFFECT_WORDS.soundKeptTooMuch)
+  return null
+}
+
+/**
+ * R11.8 fix round 1 (I2): Create video reading a paid maker's sound (music,
+ * speech, a cloned voice) whose bound passes R5's sound caps where it runs
+ * (the saver reads it under them): the workflow goes to the engine, as before
+ * the task (a stop-gap R11.9's plain words close), never a maker charged and
+ * its sound then refused. Null when every such sound fits.
+ */
+export function madeSoundReaderProblems(prompt: ApiPrompt, o: { hosted: boolean; sounds: ReadonlyMap<string, SoundShape> }): Problem | null {
+  const caps = o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  for (const [id, n] of Object.entries(prompt)) {
+    if (n.class_type !== 'CreateVideo' || !isLink(n.inputs?.audio)) continue
+    const s = o.sounds.get(key(n.inputs.audio as ApiLink))
+    if (!s?.upTo) continue
+    if (s.channels * s.samples > caps.soundSamples || s.samples / s.rate > caps.soundSeconds) {
+      return { message: MEDIA_WORDS.tooLong, nodeId: id, classType: n.class_type, engine: true }
+    }
+  }
   return null
 }
 

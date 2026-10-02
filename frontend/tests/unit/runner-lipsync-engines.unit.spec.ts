@@ -36,7 +36,8 @@ import {
   FABRIC_LIPSYNC_NEEDS_FACE, FABRIC_LIPSYNC_SLUG, KLING_LIPSYNC_NEEDS_VIDEO, KLING_LIPSYNC_SLUG, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, pythonWavBytesBound,
   LIPSYNC_ENGINE_TOO_LONG, LIPSYNC_NEEDS_SOUND, fabricLipSyncResolution, lipSyncRunEngine,
 } from '#shared/runner/lipSyncEngines'
-import { LIPSYNC_SILENCE_TOO_LONG } from '#shared/runner/soundIn'
+import { LIPSYNC_SILENCE_TOO_LONG, RVC_MODELS, RVC_PITCH_ALGORITHMS, RVC_PITCH_CHANGES, RVC_PRESET_VOICES } from '#shared/runner/soundIn'
+import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { upstreamInputSeconds } from '~/lib/costEstimate'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { OutputFile } from '~~/server/runner/types'
@@ -422,6 +423,34 @@ describe('on the engine (fake Replicate and fal)', () => {
     await k.engine.settled(runId)
     // 6 s of 32 kHz stereo as Python's 16-bit WAV is well under Kling's 5 MB; a sound no maker bounds keeps the words.
     expect(KLING_LIPSYNC_SOUND_UNSIZED).toContain('can’t tell this sound’s size before the run')
+  }, 60_000)
+
+  it('fix round 1 (I3): Kling with a cloned voice over about 26 s (its bound past 5 MB as a WAV): refused before the hold, nothing charged, as before the task', async () => {
+    await requireMediaTools()
+    const fams = new Set<RunnerFamily>([...ON, 'audio-gen', 'media-sound'])
+    const k = await kitWith(true, { 'face.mp4': await mp4(5), 'long.wav': wav(40) }, fams)
+    const p = node(klingOpts({ audio: '' }), true)
+    p.la = { class_type: 'LoadAudio', inputs: { audio: 'long.wav' } }
+    p.snd = {
+      class_type: 'CloneSingingVoiceNode',
+      inputs: {
+        audio: ['la', 0], model: RVC_MODELS[0], rvc_model: RVC_PRESET_VOICES[0], custom_rvc_model_url: '', pitch_change: RVC_PITCH_CHANGES[0],
+        pitch_shift_semitones: 0, pitch_detection_algorithm: RVC_PITCH_ALGORITHMS[0], output_format: 'mp3',
+      },
+    }
+    expect(runnerTakesWorkflow(p, fams)).toBe(true)
+    const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
+    expect(err?.message).toBe(KLING_LIPSYNC_SOUND_UNSIZED)
+    expect(err?.data?.reason).not.toBe(RUNNER_NOT_ELIGIBLE)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.replicate.submitted()).toEqual([])
+    // A short clone (10 s: 11 s at most, 2.1 MB as a WAV) is taken.
+    writeFileSync(join(k.root, 'input', 'long.wav'), wav(10))
+    k.replicate.holdNext(1)
+    const started = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
+    expect(started, started?.message).toHaveProperty('runId')
+    await k.engine.stop(k.userId)
+    await k.engine.settled(started.runId)
   }, 60_000)
 
   it('Stop while Kling runs (its video and WAV handed off): cancelled on Replicate, the hold released, nothing left behind', async () => {

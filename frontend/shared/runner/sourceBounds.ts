@@ -18,7 +18,7 @@
  *    slowest speaking rate taken here (SPEECH_SLOWEST_CHARS_PER_SECOND at
  *    speed 1, slower in proportion below it), plus every pause marker it
  *    writes (`<#x#>`, x seconds, at most 99.99 each, as the model's pause
- *    syntax allows), plus a second. A text made in the run (not known before
+ *    syntax allows; below speed 1 stretched by it), plus a second. A text made in the run (not known before
  *    it) is bounded by the longest text the model reads, every character a
  *    pause at its densest. The runner asks for 32 kHz mono (speechInput).
  *  - Clone a singing voice (RVC): its sound's first 60 s are sent
@@ -109,9 +109,13 @@ export function speechPauseSeconds(text: string): number {
  * below the model's own reading of the text.
  */
 export function speechSecondsBound(text: string | null, speed: unknown): number {
-  const perChar = 1 / (SPEECH_SLOWEST_CHARS_PER_SECOND * speechSpeedOf(speed))
-  if (text === null) return SPEECH_MAX_CHARS * Math.max(perChar, SPEECH_PAUSE_MAX_SECONDS / PAUSE_MIN_CHARS) + MADE_SOUND_SLACK_SECONDS
-  return speechChars(text) * perChar + speechPauseSeconds(text) + MADE_SOUND_SLACK_SECONDS
+  const v = speechSpeedOf(speed)
+  const perChar = 1 / (SPEECH_SLOWEST_CHARS_PER_SECOND * v)
+  // Fix round 1 (M1): a pause is taken as stretched by the speed too (never shortened by it), in case the model
+  // time-stretches the whole sound.
+  const stretch = 1 / Math.min(v, 1)
+  if (text === null) return SPEECH_MAX_CHARS * Math.max(perChar, (stretch * SPEECH_PAUSE_MAX_SECONDS) / PAUSE_MIN_CHARS) + MADE_SOUND_SLACK_SECONDS
+  return speechChars(text) * perChar + stretch * speechPauseSeconds(text) + MADE_SOUND_SLACK_SECONDS
 }
 
 // ── Clone a singing voice ──

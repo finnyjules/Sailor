@@ -560,7 +560,8 @@ export type PictureRule =
   | { exact: number, width?: number, height?: number }
   | { unsized: true }
   // R11.8: an R2 effect's output, from its first picture (`input`) and its settings, by the runner's own EFFECTS table.
-  | { effect: string, input: unknown, params: Record<string, unknown> }
+  // `known`: every number setting is a literal number (fix round 1, I1): else its size is only bounded.
+  | { effect: string, input: unknown, params: Record<string, unknown>, known: boolean }
 
 const UNSIZED = { unsized: true } as const
 
@@ -746,7 +747,9 @@ function effectRule(classType: string, inputs: NodeInputs): PictureRule | null {
     return w && h ? { exact: w * h, width: w, height: h } : { atMost: EFFECT_MAX_PICTURE_PIXELS }
   }
   const first = schema.images.find(i => isLinkValue(inputs[i.name]))
-  if (first) return { effect: classType, input: inputs[first.name], params }
+  // Fix round 1 (I1): a number setting that is wired (or not a number) is not known before the run.
+  const known = Object.entries(schema.widgets).every(([name, w]) => (w.type !== 'FLOAT' && w.type !== 'INT') || typeof params[name] === 'number')
+  if (first) return { effect: classType, input: inputs[first.name], params, known }
   // A generator: its width × height (an effect whose size rests on a mask is not sized here).
   if (spec.batch === 'generator' && spec.outSize) {
     const out = spec.outSize(params, null)
@@ -838,6 +841,15 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
       if ('unknown' in input) return { px: EFFECT_MAX_PICTURE_PIXELS, exact: false }
       const outSize = EFFECTS[rule.effect]!.outSize
       if (!outSize) return input
+      // Fix round 1 (I1): a size setting not known before the run (wired) is never exact. Resize is bounded by its
+      // largest scale (each side rounded up); any other resizing effect by the effects' largest picture.
+      if (!rule.known) {
+        const most = effectSchemaOf(rule.effect)?.widgets.scale?.max
+        if (rule.effect === 'ResizeImage' && typeof most === 'number' && input.shapes) {
+          return { ...fromShapes(input.shapes.map(([w, h]) => [Math.ceil(w * most), Math.ceil(h * most)] as const), false), exact: false }
+        }
+        return { px: EFFECT_MAX_PICTURE_PIXELS, exact: false }
+      }
       if (input.shapes) return fromShapes(input.shapes.map(([w, h]) => { const o = outSize(rule.params, { w, h }); return [o.w, o.h] as const }), input.exact)
       return { px: EFFECT_MAX_PICTURE_PIXELS, exact: false }
     }
