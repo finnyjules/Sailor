@@ -37,7 +37,7 @@ import {
   defaultLit, defaultCastsShadow, defaultLift, type FrameLighting, type LightLayer,
 } from '~/lib/frame/lighting/settings'
 import { LIGHT_MOTION_KEYS, DARKNESS_PATH } from '~/lib/frame/lighting/motion'
-import { lightLabel } from '~/lib/frame/lighting/labels'
+import { lightLabel, coneToDeg } from '~/lib/frame/lighting/labels'
 import { defaultGrid, type MosaicGrid } from '~/lib/compositor/mosaicGrid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import {
@@ -1054,6 +1054,31 @@ function lightArgs(a: Record<string, unknown>, allowed: ReadonlySet<string>): { 
   return { pos, light: light as Partial<LightLayer['light']> }
 }
 
+/** Plain words for the light summaries (sentence case, no identifiers). */
+const LIGHT_TYPE_WORD: Record<string, string> = { lamp: 'lamp', spot: 'spot', sun: 'sun' }
+const LIGHT_KEY_LABEL: Record<string, string> = {
+  type: 'Kind', x: 'Position X', y: 'Position Y', height: 'Height', color: 'Colour', brightness: 'Brightness',
+  reach: 'Reach', aimX: 'Aim X', aimY: 'Aim Y', cone: 'Cone', lift: 'Lift', darkness: 'Darkness',
+}
+const lightCount = (n: number) => (n === 0 ? 'No lights' : n === 1 ? '1 light' : `${n} lights`)
+function lightWords(key: string, v: unknown): string {
+  const label = LIGHT_KEY_LABEL[key] ?? 'Value'
+  if (key === 'type') return `${label} ${typeof v === 'string' ? v.charAt(0).toUpperCase() + v.slice(1) : ''}`.trim()
+  if (key === 'cone' && typeof v === 'number') return `${label} ${coneToDeg(v)}°`
+  if (key === 'darkness' && typeof v === 'number') return `${label} ${Math.round(v * 100)}%`
+  if (typeof v === 'number') return `${label} ${Math.round(v * 100) / 100}`
+  return typeof v === 'string' ? `${label} ${v.toLowerCase()}` : label
+}
+/** A layer as the summaries name it: its own name, else its own text, else what it is. */
+const KIND_WORD: Partial<Record<string, string>> = { rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', image: 'Image', path: 'Shape', deal: 'Mosaic', scatter: 'Scatter', polygon: 'Polygon', star: 'Star', wired: 'Image', brush: 'Brush stroke' }
+function layerWords(layer: LocalLayer | undefined, fallback?: string): string {
+  if (!layer) return fallback ?? 'Layer'
+  const own = ((layer as { name?: string }).name ?? '').trim()
+  if (own) return `“${own}”`
+  if (layer.kind === 'text') return `“${layer.text}”`
+  return KIND_WORD[layer.kind] ?? 'Layer'
+}
+
 /** Where an `animateLight` key lands, and how its value is checked and clamped. */
 function lightBand(state: CompositorState, target: string, key: string): { path: string; color: boolean; clampTo: (v: number | string) => number | string } | string {
   if (target === 'frame') {
@@ -1784,16 +1809,46 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
       return { label: `${type} effect (frame)`, before: had ? type : 'none', after: a.remove === true ? 'removed' : 'updated' }
     }
     case 'setLayerMaskBreak': return { label: `${name} break-out`, before: '', after: a.remove === true ? 'removed' : String(a.edge ?? '') }
-    case 'addLight': return { label: `Added a ${['spot', 'sun'].includes(String(a.type)) ? String(a.type) : 'lamp'}`, before: '', after: '' }
-    case 'setLight': return { label: 'Changed the light', before: layer?.kind === 'light' ? lightLabel(layer as LightLayer) : '', after: Object.keys(a).filter(k => k !== 'id').map(k => `${k}: ${String(a[k])}`).join(', ') }
-    case 'setLighting': {
-      const parts: string[] = []
-      if (typeof a.darkness === 'number') parts.push(`Darkness ${Math.round(sanitizeLighting({ darkness: a.darkness }).darkness * 100)}%`)
-      if (typeof a.backgroundLit === 'boolean') parts.push(a.backgroundLit ? 'Background lit' : 'Background unlit')
-      return { label: parts.join(', ') || 'Lighting', before: '', after: '' }
+    case 'addLight': {
+      const n = state.layers.filter(l => l.kind === 'light').length
+      return { label: `Added a ${LIGHT_TYPE_WORD[String(a.type)] ?? 'lamp'}`, before: lightCount(n), after: lightCount(n + 1) }
     }
-    case 'setLayerLight': return { label: `${name} light`, before: '', after: ['lit', 'castsShadow', 'lift'].filter(k => k in a).map(k => `${k}: ${String(a[k])}`).join(', ') }
-    case 'animateLight': return { label: 'Animated the light', before: String(a.from ?? ''), after: String(a.to ?? '') }
+    case 'setLight': {
+      const l = layer?.kind === 'light' ? layer as LightLayer : undefined
+      const keys = Object.keys(a).filter(k => k in LIGHT_KEY_LABEL)
+      const now = (k: string): unknown => (k === 'x' || k === 'y' ? l?.[k] : (l?.light as Record<string, unknown> | undefined)?.[k])
+      return { label: 'Changed the light', before: keys.map(k => lightWords(k, now(k))).join(', '), after: keys.map(k => lightWords(k, a[k])).join(', ') }
+    }
+    case 'setLighting': {
+      const cur = state.lighting ?? DEFAULT_LIGHTING
+      const next = sanitizeLighting({ ...cur, ...a })
+      const words = (f: FrameLighting) => [
+        ...('darkness' in a ? [`Darkness ${Math.round(f.darkness * 100)}%`] : []),
+        ...('backgroundLit' in a ? [f.backgroundLit ? 'Background lit' : 'Background not lit'] : []),
+      ].join(', ')
+      return { label: 'Frame lighting', before: words(cur), after: words(next) }
+    }
+    case 'setLayerLight': {
+      const L = (layer ?? {}) as { kind?: LocalLayerKind; lit?: boolean; castsShadow?: boolean; lift?: number }
+      const kind = (L.kind ?? 'rect') as LocalLayerKind
+      const words = (lit: boolean, casts: boolean, lift: number) => [
+        ...('lit' in a ? [lit ? 'Lit' : 'Not lit'] : []),
+        ...('castsShadow' in a ? [casts ? 'Casts shadows' : 'No shadow'] : []),
+        ...('lift' in a ? [`Lift ${Math.round(lift * 1000) / 1000}`] : []),
+      ].join(', ')
+      const curLit = typeof L.lit === 'boolean' ? L.lit : defaultLit()
+      const curCasts = typeof L.castsShadow === 'boolean' ? L.castsShadow : defaultCastsShadow(kind)
+      const curLift = effectiveLift({ kind, lift: L.lift })
+      return {
+        label: `${layerWords(layer, cmd.target)} lighting`,
+        before: words(curLit, curCasts, curLift),
+        after: words(typeof a.lit === 'boolean' ? a.lit : curLit, typeof a.castsShadow === 'boolean' ? a.castsShadow : curCasts, typeof a.lift === 'number' ? effectiveLift({ kind, lift: a.lift }) : curLift),
+      }
+    }
+    case 'animateLight': {
+      const key = String(a.key ?? '')
+      return { label: 'Animated the light', before: lightWords(key, a.from), after: lightWords(key, a.to) }
+    }
     case 'animateDial': return { label: `Animate ${String(a.effect ?? '')} ${String(a.dial ?? '')} (layer ${name || String(cmd.target ?? '')})`, before: String(a.from ?? ''), after: String(a.to ?? '') }
     case 'placeTemplate': { const t = a.template as { name?: string } | undefined; return { label: 'Place template', before: '', after: t?.name ?? 'template' } }
     case 'setTemplateSlot': {

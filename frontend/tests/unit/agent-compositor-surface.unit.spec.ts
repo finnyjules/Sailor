@@ -853,14 +853,24 @@ describe('light ops', () => {
     expect(lights(r)).toHaveLength(0)
   })
 
-  it('summaries read plainly', () => {
+  it('summaries read plainly: no identifiers, the layer named by its own text', () => {
     const s = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'spot', id: 'S' } }))
-    expect(summarizeCompositorChange(state(), { op: 'addLight', args: { type: 'lamp' } })!.label).toBe('Added a lamp')
-    expect(summarizeCompositorChange(s, { op: 'setLight', target: 'S', args: { brightness: 1 } })!.label).toBe('Changed the light')
-    expect(summarizeCompositorChange(s, { op: 'setLighting', args: { darkness: 0.85 } })!.label).toBe('Darkness 85%')
-    expect(summarizeCompositorChange(s, { op: 'animateLight', target: 'S', args: { key: 'brightness', from: 0, to: 2 } })!.label).toBe('Animated the light')
+    const add = summarizeCompositorChange(state(), { op: 'addLight', args: { type: 'lamp' } })!
+    expect(add).toEqual({ label: 'Added a lamp', before: 'No lights', after: '1 light' })
+    const set = summarizeCompositorChange(s, { op: 'setLight', target: 'S', args: { aimX: 0.25, brightness: 1, cone: 0.5 } })!
+    expect(set.label).toBe('Changed the light')
+    expect(set.before).toBe('Aim X 0.5, Brightness 2.2, Cone 40°')
+    expect(set.after).toBe('Aim X 0.25, Brightness 1, Cone 57°')
+    expect(summarizeCompositorChange(s, { op: 'setLighting', args: { darkness: 0.85 } })).toEqual({ label: 'Frame lighting', before: 'Darkness 45%', after: 'Darkness 85%' })
+    expect(summarizeCompositorChange(s, { op: 'setLighting', args: { backgroundLit: false } })).toEqual({ label: 'Frame lighting', before: 'Background lit', after: 'Background not lit' })
+    const layerSum = summarizeCompositorChange(state(), { op: 'setLayerLight', target: 't1', args: { castsShadow: false, lit: false } })!
+    expect(layerSum).toEqual({ label: '“HELLO” lighting', before: 'Lit, Casts shadows', after: 'Not lit, No shadow' })
+    expect(summarizeCompositorChange(state(), { op: 'setLayerLight', target: 'r1', args: { lift: 0.1 } })!.label).toBe('Rectangle lighting')
+    expect(summarizeCompositorChange(s, { op: 'animateLight', target: 'S', args: { key: 'brightness', from: 0, to: 2 } })).toEqual({ label: 'Animated the light', before: 'Brightness 0', after: 'Brightness 2' })
+    expect(summarizeCompositorChange(s, { op: 'animateLight', target: 'frame', args: { key: 'darkness', from: 0.2, to: 0.85 } })!.after).toBe('Darkness 85%')
+    // No summary leaks a key name.
+    for (const sum of [add, set, layerSum]) expect(`${sum.label} ${sum.before} ${sum.after}`).not.toMatch(/aimX|castsShadow|backgroundLit|\blit:/)
   })
-
   it('the light hints carry the night/day guidance and the menu stays under the ceiling', () => {
     const cmds = describeCompositor(state()).commands
     for (const op of ['addLight', 'setLight', 'setLighting', 'setLayerLight', 'animateLight']) expect(cmds.some(c => c.op === op), op).toBe(true)

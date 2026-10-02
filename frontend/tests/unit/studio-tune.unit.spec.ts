@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const fetchMock = vi.fn()
 vi.mock('ofetch', () => ({ $fetch: (...args: unknown[]) => fetchMock(...args) }))
 
-import { STUDIO_TUNERS, studioTunerFor, tuneGradientNode, tuneShaderNode, tuneTextureNode, isNoOpTuneChange } from '~/lib/agent/studioTune'
+import { STUDIO_TUNERS, studioTunerFor, tuneGradientNode, tuneShaderNode, tuneTextureNode, tuneCompositorNode, isNoOpTuneChange } from '~/lib/agent/studioTune'
 import { defaultConfig as defaultGradientConfig } from '~/lib/gradientfx/randomize'
 import { gradientAgentControls } from '~/lib/gradientfx/agentControls'
 import { resolvePost } from '~/lib/gradientfx/types'
@@ -350,3 +350,56 @@ describe('every registered studio tuner is discoverable by the model', () => {
     }
   })
 })
+
+// Frame light layers stage 4: the canvas Frame tuner reads and writes the Frame's lighting, so
+// a lighting change it shows is a lighting change that lands; lighting animation stays in the Frame.
+describe('tuneCompositorNode — lights', () => {
+  const frame = (props: Record<string, unknown> = {}) => node('Compositor', { sailor_localLayers: [], ...props })
+  const plan = (commands: unknown[]) => fetchMock.mockResolvedValueOnce({ text: JSON.stringify({ commands }) })
+  const sentPrompt = () => JSON.stringify((fetchMock.mock.calls[0]![1] as { body: unknown }).body)
+
+  it('setLighting lands on the node, and restore leaves an untouched Frame without the key', async () => {
+    plan([{ op: 'setLighting', args: { darkness: 0.85 } }])
+    const n = frame()
+    const res = await tuneCompositorNode(n, 'make it night', KEY)
+    expect(res.ok).toBe(true)
+    expect(res.rows[0]).toMatchObject({ label: 'Frame lighting', before: 'Darkness 45%', after: 'Darkness 85%' })
+    expect(n.data.properties.sailor_localLighting).toEqual({ darkness: 0.85, backgroundLit: true })
+    res.restore()
+    expect('sailor_localLighting' in n.data.properties).toBe(false)
+  })
+
+  it('a tune that does not touch lighting writes no lighting key', async () => {
+    plan([{ op: 'setBackground', args: { paint: '#112233' } }])
+    const n = frame()
+    expect((await tuneCompositorNode(n, 'navy background', KEY)).ok).toBe(true)
+    expect('sailor_localLighting' in n.data.properties).toBe(false)
+  })
+
+  it('addLight and setLight land in the layers', async () => {
+    plan([{ op: 'addLight', args: { type: 'lamp', x: 0.2, y: 0.2, id: 'L' } }, { op: 'setLight', target: 'L', args: { brightness: 2.5 } }])
+    const n = frame()
+    const res = await tuneCompositorNode(n, 'add a warm lamp', KEY)
+    expect(res.rows.map(r => r.label)).toEqual(['Added a lamp', 'Changed the light'])
+    const layers = n.data.properties.sailor_localLayers as { id: string; kind: string; light: { brightness: number } }[]
+    expect(layers).toHaveLength(1)
+    expect(layers[0]).toMatchObject({ id: 'L', kind: 'light', light: { brightness: 2.5 } })
+  })
+
+  it('does not offer animateLight, and drops one if the model sends it', async () => {
+    plan([{ op: 'animateLight', target: 'frame', args: { key: 'darkness', from: 0, to: 1 } }])
+    const n = frame()
+    const res = await tuneCompositorNode(n, 'fade to night', KEY)
+    expect(sentPrompt()).not.toContain('animateLight')
+    expect(sentPrompt()).toContain('setLighting')
+    expect(res.ok).toBe(false)
+    expect(n.data.properties.sailor_motion).toBeUndefined()
+  })
+
+  it('describes the Frame\'s real Darkness', async () => {
+    plan([])
+    await tuneCompositorNode(frame({ sailor_localLighting: { darkness: 0.7, backgroundLit: false } }), 'darker', KEY)
+    expect(sentPrompt()).toContain('\\"lighting\\":{\\"darkness\\":0.7,\\"backgroundLit\\":false}')
+  })
+})
+

@@ -14,6 +14,7 @@
  */
 import { $fetch } from 'ofetch'
 import { applyCompositorCommand, describeCompositor, summarizeCompositorChange, verifyCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
+import { readFrameLighting, sanitizeLighting } from '~/lib/frame/lighting/settings'
 import { buildAgentPrompt, buildCommandSchema, parseAgentResponse } from '~/lib/agent/protocol'
 import type { Command, CommandResult, SurfaceSnapshot } from '~/lib/agent/commandSurface'
 import type { LayoutIssue } from '~/lib/agent/verify'
@@ -68,6 +69,9 @@ import {
 } from '~/lib/scene3d/agentControls'
 
 const MEDIA_OPS = new Set(['generateImage', 'editImage', 'removeImageBackground'])
+/** Frame ops the canvas tuner does not offer: it writes no motion doc, so a timeline band
+ *  (animateLight) would show a row and then never land. Lighting animation stays in the Frame. */
+const FRAME_TUNER_HIDDEN_OPS = new Set(['animateLight'])
 
 export interface TuneRow { label: string; before: string; after: string; rationale: string }
 export interface TuneResult { ok: boolean; rows: TuneRow[]; restore: () => void; notice?: string; error?: string }
@@ -110,6 +114,7 @@ function readState(node: any): CompositorState {
     layers: JSON.parse(JSON.stringify(props.sailor_localLayers ?? [])),
     background: props.sailor_localBg,
     postEffects: JSON.parse(JSON.stringify((props as any).sailor_localFx ?? [])),
+    lighting: readFrameLighting(props),
   }
 }
 /** Write a CompositorState back onto the node — mirrors useLocalLayerEditor's
@@ -122,6 +127,10 @@ function writeState(node: any, s: CompositorState) {
   else node.data.properties.sailor_localBg = bg
   if (s.postEffects?.length) node.data.properties.sailor_localFx = s.postEffects
   else delete node.data.properties.sailor_localFx
+  // Lighting only when it changed: an untouched Frame never gains a `sailor_localLighting` key.
+  if (s.lighting && JSON.stringify(sanitizeLighting(s.lighting)) !== JSON.stringify(readFrameLighting(node.data.properties))) {
+    node.data.properties.sailor_localLighting = sanitizeLighting(s.lighting)
+  }
 }
 
 /** The unified wired+local z-order (`sailor_stackOrder`, bottom→top, keys
@@ -138,14 +147,22 @@ function writeStackOrder(node: any, order: string[]) {
 export async function tuneCompositorNode(node: any, request: string, apiKey: string, tier = 'plan'): Promise<TuneResult> {
   const prior = readState(node)
   const priorOrder = readStackOrder(node)
-  const restore = () => { writeState(node, prior); writeStackOrder(node, priorOrder) }
+  // The stored lighting record as it was (absent stays absent), so restore is byte-identical.
+  const priorLighting = node?.data?.properties?.sailor_localLighting
+  const priorLightingCopy = priorLighting === undefined ? undefined : JSON.parse(JSON.stringify(priorLighting))
+  const restore = () => {
+    writeState(node, prior); writeStackOrder(node, priorOrder)
+    if (priorLightingCopy === undefined) delete node.data.properties.sailor_localLighting
+    else node.data.properties.sailor_localLighting = JSON.parse(JSON.stringify(priorLightingCopy))
+  }
   // Guard: only a Frame (Compositor) has the layer/background state this reads &
   // writes — never scribble those keys onto another node type.
   if (node?.data?.nodeType !== 'Compositor') {
     return { ok: false, rows: [], restore, notice: `I can only tune a Frame in place — “${node?.data?.title ?? 'this node'}” isn’t one.` }
   }
   let state = readState(node)
-  const snapshot = describeCompositor(state)
+  const described = describeCompositor(state)
+  const snapshot = { ...described, commands: described.commands.filter(c => !FRAME_TUNER_HIDDEN_OPS.has(c.op)) }
   let res: { text: string }
   try {
     res = await $fetch<{ text: string }>('/api/agent-plan', {
@@ -164,6 +181,7 @@ export async function tuneCompositorNode(node: any, request: string, apiKey: str
   let droppedMedia = false
   commands.forEach((cmd, i) => {
     if (MEDIA_OPS.has(cmd.op)) { droppedMedia = true; return }
+    if (FRAME_TUNER_HIDDEN_OPS.has(cmd.op)) return
     const test = applyCompositorCommand(state, cmd)
     if (!test.ok) return
     const sum = summarizeCompositorChange(state, cmd) ?? { label: cmd.op, before: '', after: '' }
