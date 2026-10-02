@@ -2,9 +2,10 @@
  * The sounds' start pass (step 3, R6.9, rule 3): every sound's rate, channels
  * and length through a workflow, before the run, from the sources' headers
  * and the widgets, and the sound effects checked against their limits. A
- * node the runner can't take here leaves the WHOLE workflow to the engine
- * (`engine: true`, RUNNER_NOT_ELIGIBLE), never a refusal: switching
- * `sound-effects` on never makes a working graph fail.
+ * node the runner can't take here once left the WHOLE workflow to the engine
+ * (`engine: true`); R11.9a refuses it plainly before the hold instead (USER
+ * ruling (e)): a made sound named with its maker's setting to shorten
+ * (`madeFrom`), a paid video model's sound with the model and the limit.
  *
  * Sources (`soundSourceShapeOf`):
  *   - Load audio, Record audio, an Audio card's own file: the file's first
@@ -305,8 +306,29 @@ export function soundSourceShapeOf(o: { prompt: ApiPrompt } & SoundReadIO): (nod
   }
 }
 
-type Problem = { message: string; nodeId: string; classType: string; engine: true }
+/**
+ * R11.9a: `madeFrom` is the reader's input wire whose sound is a paid maker's
+ * bound (`upTo`), with `seconds` that bound's length and `limitSeconds` the
+ * most that input may be (the figure's limit scaled to it), so the refusal
+ * can name the maker's setting to shorten.
+ */
+type Problem = { message: string; nodeId: string; classType: string; engine: true; madeFrom?: { link: ApiLink; seconds: number; limitSeconds: number } }
 type Refusal = { message: string; nodeId: string; classType: string }
+
+/** R11.9a: the first input wire of a node whose sound is a paid maker's bound (`upTo`), with the figure it passes. */
+function madeFromOf(prompt: ApiPrompt, id: string, shapes: ReadonlyMap<string, SoundShape>, value: number, limit: number): Problem['madeFrom'] {
+  const inputs = prompt[id]?.inputs ?? {}
+  for (const s of MEDIA_EFFECT_SCHEMAS[prompt[id]!.class_type]?.sounds ?? []) {
+    const v = inputs[s.name]
+    if (!isLink(v)) continue
+    const x = shapes.get(key(v as ApiLink))
+    if (x?.upTo && x.rate > 0) {
+      const seconds = x.samples / x.rate
+      return { link: v as ApiLink, seconds, limitSeconds: value > 0 ? (seconds * limit) / value : seconds }
+    }
+  }
+  return undefined
+}
 
 /**
  * The bytes a kept float WAV of this shape takes, at most. R11.8: a sound is
@@ -352,9 +374,9 @@ export function soundEffectStartProblems(prompt: ApiPrompt, families: ReadonlySe
     let held = 0
     for (const s of ins as SoundShape[]) held += samples(s) + (s.rate !== rate ? s.channels * resampledBound(s.samples, s.rate, rate) : 0)
     for (const s of outs) held += samples(s)
-    if (held > caps.effectSoundSamples) return problem(id, MEDIA_EFFECT_WORDS.soundTooLong)
+    if (held > caps.effectSoundSamples) return { ...problem(id, MEDIA_EFFECT_WORDS.soundTooLong), ...withMade(madeFromOf(prompt, id, o.sounds, held, caps.effectSoundSamples)) }
     for (const s of outs) {
-      if (samples(s) > caps.soundSamples) return problem(id, MEDIA_WORDS.tooLong)
+      if (samples(s) > caps.soundSamples) return { ...problem(id, MEDIA_WORDS.tooLong), ...withMade(madeFromOf(prompt, id, o.sounds, samples(s), caps.soundSamples)) }
       kept += keptSoundBound(s, caps.soundSamples)
     }
   }
@@ -376,11 +398,15 @@ export function madeSoundReaderProblems(prompt: ApiPrompt, o: { hosted: boolean;
     const s = o.sounds.get(key(n.inputs.audio as ApiLink))
     if (!s?.upTo) continue
     if (s.channels * s.samples > caps.soundSamples || s.samples / s.rate > caps.soundSeconds) {
-      return { message: MEDIA_WORDS.tooLong, nodeId: id, classType: n.class_type, engine: true }
+      const seconds = s.samples / s.rate
+      const limitSeconds = Math.min(caps.soundSeconds, caps.soundSamples / Math.max(1, s.channels) / s.rate)
+      return { message: MEDIA_WORDS.tooLong, nodeId: id, classType: n.class_type, engine: true, madeFrom: { link: n.inputs.audio as ApiLink, seconds, limitSeconds } }
     }
   }
   return null
 }
+
+const withMade = (m: Problem['madeFrom']) => (m ? { madeFrom: m } : {})
 
 /** The kept bytes the sound effects of a workflow keep at most (every output, never let go). */
 export function soundKeptBytes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, sounds: ReadonlyMap<string, SoundShape>, hosted?: boolean): number {

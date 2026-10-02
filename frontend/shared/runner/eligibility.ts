@@ -353,7 +353,26 @@ export interface RunnerEligibilityOptions {
    * call or charge, as ComfyUI runs it.
    */
   afterPruning?: boolean
+  /**
+   * R11.9a (ruling (e)): a node the runner refuses plainly before the hold
+   * (`stopGapRefusal`, ./stopGaps.ts) counts as taken: a refusing input check
+   * (PLAIN_REFUSAL_CHECKS) failing, a widget wired that is read as typed, or a
+   * clip's frames wired into a picture input. Its workflow goes to the runner,
+   * which refuses it in plain words instead of leaving it to the engine. Off
+   * (the default): exactly the rule before R11.9a.
+   */
+  plainRefusals?: boolean
 }
+
+/**
+ * R11.9a: the input checks whose failure is refused in plain words (ruling
+ * (e): the long tail), not left to the engine, while `plainRefusals` is set.
+ */
+export const PLAIN_REFUSAL_CHECKS: ReadonlySet<InputCheckName> = new Set<InputCheckName>([
+  'moodboard-reading', 'bake-params', 'effect-text', 'ascii-glyphs', 'painter', 'sam-points',
+  // R11.3's named stop-gaps: a lip-sync medium that isn't a file in Sailor (a web address, a data: link).
+  'lip-sync-media', 'lipsync-silence-video',
+])
 
 /** A widget as ComfyUI's validation reads it. */
 export interface RunnerWidgetSpec {
@@ -516,8 +535,12 @@ export const MAX_FRAME_WORK = 256 * 4 * 1024 * 1024
 /** A MASK input the runner can supply: a LoadImage's MASK output (1 − alpha of its file). */
 const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
 
-/** What Save image's and Preview image's `images` take: pictures as before, or a Recraft SVG model's SVG (R11.4). */
-const SVG_READER_KINDS: readonly ValueKind[] = ['files', 'svg']
+/**
+ * What Save image's and Preview image's `images` take: pictures as before, a
+ * Recraft SVG model's SVG (R11.4), or a clip's frames, saved one file per
+ * frame as Python saves a batch (R11.9a, row 15, ruling (q)).
+ */
+const PICTURE_SAVER_KINDS: readonly ValueKind[] = ['files', 'svg', 'frames']
 
 /**
  * The node classes (or extra models of a runner class) the families add,
@@ -1198,7 +1221,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // R11.4: both also take a Recraft SVG model's `svg` value (Save image writes the SVG into its folder).
   SaveImage: {
     family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'],
-    valueInputs: { images: SVG_READER_KINDS },
+    valueInputs: { images: PICTURE_SAVER_KINDS },
     widgets: {
       filename_prefix: { type: 'STRING', required: true },
       format: { type: 'COMBO', required: true, options: ['png', 'webp', 'jpeg'] },
@@ -1210,7 +1233,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       embed_metadata: { type: 'BOOLEAN', required: true },
     },
   },
-  PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], valueInputs: { images: SVG_READER_KINDS }, outputsNotLinked: [0] },
+  PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], valueInputs: { images: PICTURE_SAVER_KINDS }, outputsNotLinked: [0] },
   // ── cards (step 3, R1.6): Smart Layout (server/runner/cards/smartLayout.ts) ──
   // It renders, so it counts as work. Its pictures are a list (one per
   // output), which only Save image and Preview image may read; its layout
@@ -2039,6 +2062,26 @@ function modelKey(classType: string, inputs: Record<string, unknown>): string {
   return typeof inputs.model === 'string' ? inputs.model : ''
 }
 
+/**
+ * R11.9a (row 25): the families that switch this node on by its own rule row
+ * (its model's family for a row by model, an upgrade's, an opening one), with
+ * `all` on. Empty for a class with no row (or a model no row lists).
+ */
+export function ownRuleFamilies(classType: string, inputs: Record<string, unknown>, all: ReadonlySet<RunnerFamily>): RunnerFamily[] {
+  const rule = runnerRuleFor(classType, inputs, all)
+  if (!rule) return []
+  const out: RunnerFamily[] = []
+  if (rule.models) {
+    const key = modelKey(classType, inputs)
+    const m = Object.prototype.hasOwnProperty.call(rule.models, key) ? rule.models[key] : undefined
+    if (m) out.push(typeof m === 'string' ? m : m.family)
+  }
+  else if (rule.family) out.push(rule.family)
+  if (rule.upgrade) out.push(rule.upgrade.family)
+  if (rule.open) out.push(rule.open.family)
+  return out
+}
+
 /** Whether a rule row lets this node through with these families switched on. */
 export function nodeRuleAllows(
   classType: string,
@@ -2068,12 +2111,16 @@ export function nodeRuleAllows(
   if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]) && !rule.valueInputs?.[name])) return false
   if ((rule.offWidgets ?? []).some(name => isLink(inputs[name]) || pyTruthy(inputs[name]))) return false
   for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
-    if (!widgetValid(inputs, name, spec)) return false
+    const e = widgetError(inputs, name, spec)
+    if (e === null) continue
+    // R11.9a: a wired setting is refused plainly (stopGapRefusal), not left to the engine.
+    if (e === 'wired' && opts.plainRefusals && !rule.valueInputs?.[name]) continue
+    return false
   }
   if (rule.inputCheck) {
     const ctx: InputCheckContext = { classType, nodeId, hosted: !!opts.hosted, prompt, families }
     const names: readonly InputCheckName[] = typeof rule.inputCheck === 'string' ? [rule.inputCheck] : rule.inputCheck
-    if (names.some(name => !INPUT_CHECKS[name]!(inputs, ctx))) return false
+    if (names.some(name => !(opts.plainRefusals && PLAIN_REFUSAL_CHECKS.has(name)) && !INPUT_CHECKS[name]!(inputs, ctx))) return false
   }
   for (const [name, key] of Object.entries(rule.noJsonList ?? {})) {
     if (hasJsonList(inputs[name], key)) return false
@@ -2251,7 +2298,7 @@ function hasJsonList(v: unknown, key: string): boolean {
 const LINK_SOURCE_FAMILY: Readonly<Record<string, RunnerFamily>> = { ImageToMask: 'cards' }
 
 /** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
-function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, families: ReadonlySet<RunnerFamily>): boolean {
+function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, families: ReadonlySet<RunnerFamily>, opts: RunnerEligibilityOptions = {}): boolean {
   const notLinked = rule.outputsNotLinked ?? []
   const slotReaders = rule.outputReaders
   const opened = !!rule.open && families.has(rule.open.family)
@@ -2275,7 +2322,11 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
   const inputs = prompt[id]?.inputs ?? {}
   for (const name of rule.imageInputs ?? []) {
     const v = inputs[name]
-    if (isLink(v) && !carriesImage(prompt, v, families)) return false
+    if (!isLink(v) || carriesImage(prompt, v, families)) continue
+    // R11.9a (row 15): a clip's frames are taken where the row's value input lists them (Save image, Preview
+    // image), and into any other picture input refused plainly (stopGapRefusal).
+    if ((opts.plainRefusals || rule.valueInputs?.[name]?.includes('frames')) && outputKind(prompt, v, outputKindsFor(families)) === 'frames') continue
+    return false
   }
   for (const [name, sources] of Object.entries(rule.linkSources ?? {})) {
     const v = inputs[name]
@@ -2398,10 +2449,13 @@ export function valueWiresAllowed(
   prompt: ApiPrompt, id: string,
   kinds: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = OUTPUT_KINDS,
   families?: ReadonlySet<RunnerFamily>,
+  o: { plainRefusals?: boolean } = {},
 ): boolean {
   const node = prompt[id]
   if (!node) return false
   const takes = valueInputsOf(node.class_type, families)
+  // R11.9a (row 17): a value wired into a setting the row reads as typed is refused plainly instead.
+  const widgets = o.plainRefusals ? runnerRuleFor(node.class_type, node.inputs ?? {}, families ?? NO_FAMILIES)?.widgets : undefined
   for (const l of linksOf(node)) {
     const kind = outputKind(prompt, [l.from, l.slot], kinds)
     const allowed = Object.prototype.hasOwnProperty.call(takes, l.input) ? takes[l.input] : undefined
@@ -2409,10 +2463,28 @@ export function valueWiresAllowed(
       if (allowed && !allowed.includes('files')) return false
       continue
     }
+    // R11.9a (row 15): a clip's frames into a picture input (one that takes files) are refused plainly instead.
+    if (kind === 'frames' && o.plainRefusals && clipIntoPictureInput(node.class_type, l.input, families)) continue
+    if (!allowed && widgets && Object.prototype.hasOwnProperty.call(widgets, l.input)) continue
     if (!allowed?.includes(kind)) return false
   }
   return true
 }
+
+/**
+ * R11.9a (row 15): whether `input` of this class takes one picture (a file
+ * wire) and not a clip's frames: a clip wired in is refused plainly there.
+ */
+export function clipIntoPictureInput(classType: string, input: string, families?: ReadonlySet<RunnerFamily>): boolean {
+  const takes = valueInputsOf(classType, families)
+  const allowed = Object.prototype.hasOwnProperty.call(takes, input) ? takes[input] : undefined
+  if (allowed) return allowed.includes('files') && !allowed.includes('frames')
+  const rule = Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
+  return !!rule?.imageInputs?.includes(input) || IMAGE_INPUT_NAMES.has(input)
+}
+
+/** Inputs that, on any runner class without a value row for them, take a picture (a file wire). */
+const IMAGE_INPUT_NAMES: ReadonlySet<string> = new Set(['image', 'images', 'pixels'])
 
 /** One node an SVG is wired into that needs pixels (R11.4). */
 export interface SvgReaderProblem {
@@ -2558,7 +2630,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   if (!n) return false
   const inputs = n.inputs ?? {}
   const rule = families.size ? runnerRuleFor(n.class_type, inputs, families) : undefined
-  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id, prompt) && graphRuleAllows(prompt, id, rule, families)
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id, prompt) && graphRuleAllows(prompt, id, rule, families, opts)
   // The Video card on its media row (R5.4): a runner type, taken only as its row allows (off, exactly as before).
   if (rule === VIDEO_CARD_MEDIA_RULE && !byRule) return false
   if (n.class_type === 'FilmShotNode') {
@@ -2577,7 +2649,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   for (const v of Object.values(inputs)) {
     if (isLink(v) && !(v[0] in prompt)) return false
   }
-  if (!valueWiresAllowed(prompt, id, outputKindsFor(families), families)) return false
+  if (!valueWiresAllowed(prompt, id, outputKindsFor(families), families, { plainRefusals: !!opts.plainRefusals })) return false
   return true
 }
 

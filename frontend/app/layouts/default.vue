@@ -901,12 +901,13 @@ async function runVueWorkflow(
     const reasonSet = new Set<string>()
     for (const tk of [firstTake, ...extraTakes]) {
       if (!tk.directPrompt) continue
+      const titleOf = workflowNodeTitles(tk.plainWorkflow, objectInfo.value)
       for (const name of nodesNeedingEngine(tk.directPrompt, {
         runnerOn: runnerEnabled,
         families: runnerFamilies,
-        titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value),
+        titleOf,
       })) needsSet.add(name)
-      for (const why of needsEngineReasons(tk.directPrompt, { runnerOn: runnerEnabled, families: runnerFamilies })) reasonSet.add(why)
+      for (const why of needsEngineReasons(tk.directPrompt, { runnerOn: runnerEnabled, families: runnerFamilies, titleOf })) reasonSet.add(why)
     }
     const needs = [...needsSet]
     if (needs.length) {

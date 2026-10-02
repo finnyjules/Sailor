@@ -299,5 +299,7 @@ export function runnerTakesWorkflow(
   // plain words (NO_OUTPUTS_MESSAGE), as ComfyUI refuses it ("Prompt has no
   // outputs"); nothing of it would run anywhere (R3.8 fix round 2).
   if (r.failed) return true
-  return isRunnerEligible(r.prompt, families, { ...opts, afterPruning: prunedAny(r) })
+  // R11.9a: a node the runner refuses in plain words (./stopGaps.ts) goes to it, to be refused there,
+  // never to the engine (`plainRefusals` unless the caller says otherwise).
+  return isRunnerEligible(r.prompt, families, { plainRefusals: true, ...opts, afterPruning: prunedAny(r) })
 }

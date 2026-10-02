@@ -11,13 +11,16 @@ import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
-import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
+import { blockedModelUses, blockedModelsResponse, promptNodeTitle } from '#shared/runner/blockedModels'
 import { retiredPromptRefusal } from '../utils/blockedModels'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiLink, type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
-import { RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
+import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
+import { stopGapRefusal, switchedOffNodes } from '#shared/runner/stopGaps'
+import { UNNAMED_NODE, workflowNodeTitles } from '#shared/runner/needsEngine'
+import { madeSoundWords, paidVideoSoundRefusal, soundReaderName, startStopGap, type StartProblem } from './stopGapWords'
 import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
@@ -71,7 +74,7 @@ import {
 import { perFrameCredits } from '#shared/pricing/nodePrice'
 import { hasSoundEffect, madeSoundReaderProblems, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
-import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
+import { MEDIA_EFFECT_FAMILIES, MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { pythonWavOf, silentCardAt, soundMakerOf, vocalsSoundOf, whisperWavOf, type PythonWav } from './soundWav'
@@ -196,6 +199,12 @@ export interface EngineDeps {
   hosted(): boolean
   /** The runner families switched on, server side (the authority). None when absent. */
   families?(): ReadonlySet<RunnerFamily>
+  /**
+   * R11.9a (row 24): families switched on in the settings that answer as off
+   * because what they need isn't installed (config.ts runnerFamiliesUninstalled).
+   * A workflow that needs one is refused plainly. Absent: none.
+   */
+  uninstalled?(): ReadonlySet<RunnerFamily>
   /** The backup-service switch (config.ts runnerBackup). Absent: never switch. */
   backup?(): BackupSettings
   webhookUrl(): string | null
@@ -278,6 +287,12 @@ interface LiveRun {
 /** Provider calls one user may have queued or in flight across all their runs. */
 export const MAX_QUEUED_CALLS = 32
 const refuse = (message: string, status: number, data?: unknown) => new MeterRefusalError(message, status, data)
+
+/** R11.9a: the longest sound whose Vocal separator stems stay readable where it runs (vocalsStemsReadable), within the ceiling. */
+function vocalsReadableSeconds(place: 'hosted' | 'local', ceiling: number): number {
+  const caps = place === 'hosted' ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  return Math.max(0, Math.min(ceiling, Math.floor(caps.soundSamples / 2 / VOCALS_RATE) - 1))
+}
 /** A request saved before requests named their provider went to fal. */
 const providerOf = (req: PendingRequest): RunnerProvider => req.provider ?? 'fal'
 /**
@@ -2173,6 +2188,36 @@ export function createEngine(deps: EngineDeps) {
   async function prepareStart(i: StartRunInput) {
     const takes = i.takes
     if (!Array.isArray(takes) || !takes.length) throw refuse('There is nothing to run', 400)
+    // R11.9a: a refusal names the node by the title the person gave it (their own words), where it has one.
+    const titleOf = workflowNodeTitles(i.workflow as Parameters<typeof workflowNodeTitles>[0], null)
+    const ownTitle = (nodeId: string | undefined): string | null => {
+      if (nodeId === undefined) return null
+      const t = titleOf(nodeId)
+      return t && t !== UNNAMED_NODE ? t : null
+    }
+    const named = (nodeId: string | undefined, words: string) => {
+      const t = ownTitle(nodeId)
+      return t ? `“${t}”: ${words}` : words
+    }
+    // R11.9a: a start-pass problem that once left the workflow to the engine, refused plainly (ruling (e)).
+    const stopGap = (p: StartProblem) => {
+      const r = startStopGap(p)
+      return refuse(named(p.nodeId, r.message), 400, { nodeId: p.nodeId, classType: p.classType, ...(p.file ? { file: p.file } : {}), code: r.code })
+    }
+    // R11.8's stop-gaps: a made sound past a reader's cap names the maker's setting to shorten; a paid video
+    // model's sound into a sound effect names the model and the limit; anything else as stopGap.
+    const soundStopGap = (prompt: ApiPrompt, bad: { message: string; nodeId: string; classType: string; madeFrom?: { link: ApiLink; seconds: number; limitSeconds: number } }) => {
+      const caps = deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+      if (bad.madeFrom) {
+        const words = madeSoundWords(prompt, bad.madeFrom.link, { reader: soundReaderName(bad.classType), boundSeconds: bad.madeFrom.seconds, limitSeconds: bad.madeFrom.limitSeconds })
+        if (words) return refuse(named(bad.nodeId, words), 400, { nodeId: bad.nodeId, classType: bad.classType, code: 'made-sound-too-long' satisfies RunnerReasonCode })
+      }
+      if (bad.message === MEDIA_EFFECT_WORDS.soundUnknown) {
+        const words = paidVideoSoundRefusal(prompt, bad.nodeId, caps.soundSeconds)
+        if (words) return refuse(named(bad.nodeId, words), 400, { nodeId: bad.nodeId, classType: bad.classType, code: 'paid-video-sound' satisfies RunnerReasonCode })
+      }
+      return stopGap(bad)
+    }
     if (takes.length > deps.maxTakes) throw refuse(`At most ${deps.maxTakes} versions can run at once`, 400)
     // The server's families decide; a browser that disagrees is refused, with
     // a marker it reads as "run this on ComfyUI instead" (isRunnerDeclined).
@@ -2193,7 +2238,7 @@ export function createEngine(deps: EngineDeps) {
     const prompts: ApiPrompt[] = []
     let nodeErrors: Record<string, ComfyNodeError> | undefined
     for (const p of takes) {
-      if (!p || typeof p !== 'object') throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
+      if (!p || typeof p !== 'object') throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE, code: 'not-taken' satisfies RunnerReasonCode })
       const pruned = pruneInvalidOutputs(p as ApiPrompt, families)
       // ComfyUI: "Prompt has no outputs" (R3.8 fix round 1) or "Prompt outputs failed
       // validation". No marker: ComfyUI would refuse it too. Nothing is held.
@@ -2209,9 +2254,26 @@ export function createEngine(deps: EngineDeps) {
       }
       const svgReader = svgReaderProblems(pruned.prompt, families)[0]
       if (svgReader) throw refuse(svgReader.message, 400, { nodeId: svgReader.nodeId, classType: svgReader.classType })
-      if (!isRunnerEligible(pruned.prompt, families, { hosted: deps.hosted(), afterPruning: prunedAny(pruned) })) {
-        throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
+      const eligibility = { hosted: deps.hosted(), afterPruning: prunedAny(pruned), plainRefusals: true }
+      if (!isRunnerEligible(pruned.prompt, families, eligibility)) {
+        // R11.9a (row 24): a family switched on whose tools or model aren't installed: refused plainly.
+        const missing = deps.uninstalled?.() ?? NO_FAMILIES
+        if (missing.size && isRunnerEligible(pruned.prompt, new Set([...families, ...missing]), eligibility)) {
+          const [nodeId] = switchedOffNodes(pruned.prompt, families, missing)
+          throw refuse(named(nodeId, NOT_INSTALLED_WORDS), 400, { nodeId, classType: nodeId ? pruned.prompt[nodeId]?.class_type : undefined, code: 'not-installed' satisfies RunnerReasonCode })
+        }
+        // Row 25: a family off still goes to the engine until R10, named; anything else the runner doesn't run too.
+        const [off] = switchedOffNodes(pruned.prompt, families)
+        if (off !== undefined) {
+          throw refuse(switchedOffWords(ownTitle(off) ?? (() => { const t = promptNodeTitle(pruned.prompt, off); return t === UNNAMED_NODE ? null : t })()), 400, {
+            reason: RUNNER_NOT_ELIGIBLE, code: 'switched-off' satisfies RunnerReasonCode, nodeId: off, classType: pruned.prompt[off]?.class_type,
+          })
+        }
+        throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE, code: 'not-taken' satisfies RunnerReasonCode })
       }
+      // R11.9a (rows 15–19): what the runner takes only to refuse plainly, before anything is priced or held.
+      const gap = stopGapRefusal(pruned.prompt, families, { hosted: deps.hosted() })
+      if (gap) throw refuse(named(gap.nodeId, gap.message), 400, { nodeId: gap.nodeId, classType: gap.classType, code: gap.code })
       if (pruned.dropped.length) nodeErrors ??= pruned.nodeErrors
       prompts.push(pruned.prompt)
     }
@@ -2373,7 +2435,12 @@ export function createEngine(deps: EngineDeps) {
           const unreadable = bound !== null && n.class_type === VOCALS_CLASS && !vocalsStemsReadable(Math.min(bound, ceiling), place)
           // R11.8 fix round 1 (I2): a paid maker's bound past the cap leaves the workflow to the engine, as before the
           // task (a stop-gap R11.9's plain words close): the maker is never charged and its sound then refused.
-          if ((overCeiling || unreadable) && found?.upTo) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_NOT_ELIGIBLE })
+          // R11.9a: refused plainly instead, naming the maker's setting to shorten, with the figure.
+          if ((overCeiling || unreadable) && found?.upTo && isLink(link)) {
+            const limitSeconds = overCeiling ? ceiling : vocalsReadableSeconds(place, ceiling)
+            const words = madeSoundWords(p, link, { reader: soundReaderName(n.class_type), boundSeconds: bound!, limitSeconds }) ?? longest.words
+            throw refuse(named(nodeId, words), 400, { nodeId, classType: n.class_type, code: 'made-sound-too-long' satisfies RunnerReasonCode })
+          }
           if (overCeiling || unreadable) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_SOUND_TOO_LONG })
           // Held on the bound (or, where the maker can't be bounded, on one call's longest sound); the node's
           // turn measures the WAV it sends and is charged on that, never above the hold (a longer one is refused
@@ -2405,23 +2472,25 @@ export function createEngine(deps: EngineDeps) {
     // Load video's validate_inputs (R5.4): a video file that isn't there is refused now ("Invalid
     // video file"), and so is one with no picture in it or over the caps (from its header, rule 6),
     // before anything runs or is held. A file the build can't read, and a Video card export the
-    // runner can't do (fix round 1), leave the whole workflow to the engine (RUNNER_NOT_ELIGIBLE):
-    // switching media-video on never makes a working graph fail.
+    // runner can't do (fix round 1), are refused plainly too (R11.9a, row 20, ruling (e)), saying what to change.
     for (const p of prompts) {
       const bad = await loadVideoStartProblems(p, f => files.exists(f), (f, o) => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted(), card: o.card }), families)
-      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}), ...(bad.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+      // R11.9a (row 20): what the build can't read is refused plainly, saying what to change.
+      if (bad?.engine) throw stopGap(bad)
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}) })
     }
     // Load video frames' validate_inputs and Save video frames' sound (R5.5), the same way: a file
     // that isn't there is refused (a missing sound is skipped at its turn, as Python skips it); one
     // the build can't read leaves the whole workflow to the engine.
     for (const p of prompts) {
       const bad = await frameStartProblems(p, f => files.exists(f), f => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted() }), f => framesSoundVerdict(files, f, { userId: i.userId }))
-      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}), ...(bad.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+      if (bad?.engine) throw stopGap(bad)
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}) })
     }
     // The video effects' start pass (R6 rule 3, ./video/start.ts): every frame batch's count and size
     // through the chain, from the sources' headers and the widgets; a node past a limit (frames held,
-    // work, the batch caps, the run's kept total) or reading a source the build can't read leaves the
-    // whole workflow to the engine (RUNNER_NOT_ELIGIBLE), never a refusal.
+    // work, the batch caps, the run's kept total) or reading a source the build can't read is refused
+    // plainly (R11.9a, rows 22–24), never left to the engine.
     // Every figure is a true upper bound (R6.1 fix round 1): a source's frames from its header, its packets
     // counted where the file's rate varies or a hosted figure lands within 10% of its limit. Several takes run
     // side by side: none lets go of anything for the others, and each counts the others' kept bytes.
@@ -2430,11 +2499,13 @@ export function createEngine(deps: EngineDeps) {
       // the frames on silently); in hosted, one past ruling (p)'s size leaves the workflow to the engine.
       for (const p of prompts) {
         const lut = await lutStartProblems(p, families, { hosted: deps.hosted(), exists: f => files.exists(f), size: f => files.size(f), read: f => files.read(f) })
-        if (lut) throw refuse(lut.message, 400, { nodeId: lut.nodeId, classType: lut.classType, ...(lut.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+        // R11.9a (row 21): a LUT outside the folders or too large here, refused plainly.
+        if (lut?.engine) throw stopGap(lut)
+        if (lut) throw refuse(lut.message, 400, { nodeId: lut.nodeId, classType: lut.classType })
         // Audio waveform's sound (R6.7): a name outside the folders (local), a file over the size cap or a rate
         // past the runner's bound leaves the workflow to the engine; a missing or unreadable one is Python's silence.
         const wave = await waveformStartProblems(p, families, { access: files, userId: i.userId, hosted: deps.hosted() })
-        if (wave) throw refuse(wave.message, 400, { nodeId: wave.nodeId, classType: wave.classType, reason: RUNNER_NOT_ELIGIBLE })
+        if (wave) throw stopGap(wave)
       }
       const shapeAll = async (count: boolean) => Promise.all(prompts.map(p => frameShapes(p, families,
         videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count }))))
@@ -2456,15 +2527,16 @@ export function createEngine(deps: EngineDeps) {
       for (const [k, p] of prompts.entries()) {
         if (!hasVideoEffect(p, families) && !several) continue
         const bad = await mediaEffectStartProblems(p, families, opts(k))
-        if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+        // R11.9a (rows 22–24): refused plainly, saying what to change.
+        if (bad) throw stopGap(bad)
       }
     }
     // R7 (ruling (f)): each local-model picture node's pictures (a clip's frames, one call each) counted
     // before the hold, a true upper bound (./localModelStart.ts), and recorded on the take: the hold and
-    // the charge are priced on it, and its turn refuses more. A count that can't be known, or one over the
-    // frame cap, leaves the whole workflow to the engine (RUNNER_NOT_ELIGIBLE), never a refusal.
+    // the charge are priced on it, and its turn refuses more. A count or size that can't be known, or several
+    // still pictures into Slow motion (AI), is refused plainly (R11.9a), never left to the engine.
     // A clip's batches (its own, its cut-out's, its masks) are kept while the run goes on: in hosted, every
-    // take's together must fit the run's kept room, else the workflow is left to the engine too.
+    // take's together must fit the run's kept room, else it is refused: too much work for one run here.
     let localKept = 0
     for (const [index, p] of prompts.entries()) {
       if (!hasLocalModelPicture(p, families)) continue
@@ -2476,11 +2548,13 @@ export function createEngine(deps: EngineDeps) {
       })
       // R7.3 fix round 1: what Python itself fails on (Object removal's mask of another size) is refused plainly, before the hold.
       if (counted.refused) throw refuse(counted.refused.message, 400, { nodeId: counted.refused.nodeId, classType: counted.refused.classType })
-      if (counted.problem) throw refuse(counted.problem.message, 400, { nodeId: counted.problem.nodeId, classType: counted.problem.classType, reason: RUNNER_NOT_ELIGIBLE })
+      // R11.9a: what can't be counted or sized, or several still pictures into Slow motion (AI), refused plainly.
+      if (counted.problem) throw stopGap(counted.problem)
       localKept += counted.keptBytes
+      // R11.9a (row 23): past the run's kept room, "too much work for one run here".
       if (localKept > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {
         const [nodeId] = Object.keys(counted.counts)
-        throw refuse(LOCAL_MODEL_WORDS.overCap, 400, { nodeId, classType: nodeId ? p[nodeId]?.class_type : undefined, reason: RUNNER_NOT_ELIGIBLE })
+        throw stopGap({ message: LOCAL_MODEL_WORDS.overCap, nodeId, classType: nodeId ? p[nodeId]?.class_type : undefined })
       }
       for (const [nodeId, bytes] of Object.entries(counted.keptByNode ?? {})) keptUpTo[index]![nodeId] = bytes
       for (const [nodeId, frames] of Object.entries(counted.counts)) {
@@ -2501,7 +2575,8 @@ export function createEngine(deps: EngineDeps) {
     // through the chain, from the sources' headers and the widgets. Where Python itself raises on what is known
     // now (a sound's channels, a trim of no samples) it is refused in the node's words; a node past a limit (the
     // sound held at once, the sound caps, the run's kept total with the video effects' peak) or reading a sound
-    // that can't be known before the run leaves the whole workflow to the engine (RUNNER_NOT_ELIGIBLE).
+    // that can't be known before the run is refused plainly (R11.9a): a made sound named with its maker's
+    // setting to shorten, a paid video model's sound with the model and the limit.
     if (prompts.some(p => hasSoundEffect(p, families))) {
       const all = await Promise.all(prompts.map(p => soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal }))))
       for (const [k, p] of prompts.entries()) {
@@ -2520,7 +2595,7 @@ export function createEngine(deps: EngineDeps) {
       }
       for (const [k, p] of prompts.entries()) {
         const bad = soundEffectStartProblems(p, families, { hosted: deps.hosted(), sounds: all[k]!, keptOther: keptAll - soundKeptBytes(p, families, all[k]!, deps.hosted()) })
-        if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+        if (bad) throw soundStopGap(p, bad)
       }
     }
     // R11.8 fix round 1 (I2): Create video reading a paid maker's sound past R5's sound caps: the engine, as before.
@@ -2528,7 +2603,7 @@ export function createEngine(deps: EngineDeps) {
       if (!Object.values(p).some(n => n.class_type === 'CreateVideo' && isLink(n.inputs?.audio))) continue
       const sounds = await soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal }))
       const bad = madeSoundReaderProblems(p, { hosted: deps.hosted(), sounds })
-      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+      if (bad) throw soundStopGap(p, bad)
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

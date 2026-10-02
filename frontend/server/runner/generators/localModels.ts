@@ -1113,7 +1113,7 @@ export function planSamMask(ctx: PlanContext): NodePlan {
       else {
         const read = parseMaskPoints(inputs.points, pic.w, pic.h)
         if (!read.ok) throw new Error(read.why === 'label' ? SAM_MASK_WORDS.pointsLabel : read.why === 'unreadable' ? SAM_MASK_WORDS.pointsUnreadable : SAM_MASK_WORDS.pointsFail)
-        payload = samPointsInput(await pic.url(), read.points)
+        payload = samPointsInput(await pic.url(), read.points, read.boxes)
       }
       const got = await io.call({ key: 'sam', provider: 'fal', endpoint: SAM_3_SLUG, payload, media: 'image', usd })
       // Text: every mask (their union); clicks: the one asked for. None: an all-black mask, charged (ruling (k)).

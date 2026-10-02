@@ -77,9 +77,17 @@ export function buildSamInput(body: SamRequestBody, o: { syncMode?: boolean } = 
   return input
 }
 
-/** Mask extractor's call (R7.4): the clicks as pixel points, one mask back (`masks[0]`). */
-export function samPointsInput(imageUrl: string, points: readonly SamRequestPoint[]): Record<string, unknown> {
-  return buildSamInput({ image: imageUrl, points: [...points] }, { syncMode: false })
+/**
+ * Mask extractor's call (R7.4): the clicks as pixel points, one mask back
+ * (`masks[0]`). R11.9a (row 16): with the box corners Python's processor
+ * reads as labels 2 and 3, as SAM 3's boxes.
+ */
+export function samPointsInput(imageUrl: string, points: readonly SamRequestPoint[], boxes: readonly SamRequestBox[] = []): Record<string, unknown> {
+  const input = buildSamInput({ image: imageUrl, points: [...points] }, { syncMode: false })
+  if (boxes.length) {
+    input.box_prompts = boxes.map(b => ({ x_min: Math.round(b.xMin), y_min: Math.round(b.yMin), x_max: Math.round(b.xMax), y_max: Math.round(b.yMax) }))
+  }
+  return input
 }
 
 /** Mask by text's call (R7.4): the words, every mask back (their union is the mask, ruling (k)). */
@@ -127,13 +135,16 @@ export function subjectCallKinds(mode: unknown): readonly ('cutout' | 'click')[]
  *   - `ok`: the pixel points Python's processor receives (exact);
  *   - `fails`: Python raises on it (an entry that isn't an object, no x or y,
  *     a number float() or int() refuses, an infinite or NaN coordinate);
- *   - `label`: Python runs it, but a label is neither 0 nor 1, which SAM 3's
- *     schema doesn't take (a stop-gap: left to the engine);
+ *   - `label`: Python runs it, but a label SAM 3 can't be sent: neither 0
+ *     nor 1, nor −1 (padding, dropped), nor 2 and 3 (a box's corners, sent
+ *     as SAM 3's boxes, R11.9a row 16); or a corner with no partner;
  *   - `unreadable`: text JSON.parse refuses that Python's json.loads may read
- *     (NaN, Infinity): left to the engine as the bake cards' params are.
+ *     (NaN, Infinity).
+ * R11.9a (row 16): what isn't `ok` is refused plainly before the hold
+ * (SAM_MASK_WORDS.pointsFail), never left to the engine.
  */
 export type MaskPoints =
-  | { ok: true; points: SamRequestPoint[] }
+  | { ok: true; points: SamRequestPoint[]; boxes: SamRequestBox[] }
   | { ok: false; why: 'fails' | 'label' | 'unreadable' }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -190,6 +201,22 @@ export function parseMaskPoints(text: unknown, w: number, h: number): MaskPoints
     if (l === null) return { ok: false, why: 'fails' }
     labels.push(l)
   }
-  if (labels.some(l => l !== 0 && l !== 1)) return { ok: false, why: 'label' }
-  return { ok: true, points: points.map((p, i) => ({ ...p, label: labels[i] as 0 | 1 })) }
+  if (labels.some(l => l !== 0 && l !== 1 && l !== -1 && l !== 2 && l !== 3)) return { ok: false, why: 'label' }
+  // R11.9a (row 16): −1 is the processor's padding (dropped); 2 and 3 are a box's two corners (paired in order).
+  const kept: SamRequestPoint[] = []
+  const starts: SamRequestPoint[] = []
+  const ends: SamRequestPoint[] = []
+  points.forEach((p, i) => {
+    const l = labels[i]!
+    if (l === 0 || l === 1) kept.push({ ...p, label: l })
+    else if (l === 2) starts.push(p)
+    else if (l === 3) ends.push(p)
+  })
+  if (starts.length !== ends.length) return { ok: false, why: 'label' }
+  const boxes = starts.map((a, i) => {
+    const b = ends[i]!
+    return { xMin: Math.min(a.x, b.x), yMin: Math.min(a.y, b.y), xMax: Math.max(a.x, b.x), yMax: Math.max(a.y, b.y) }
+  })
+  if (!kept.length && !boxes.length) return { ok: false, why: 'label' }
+  return { ok: true, points: kept, boxes }
 }

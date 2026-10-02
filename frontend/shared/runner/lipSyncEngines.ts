@@ -105,7 +105,29 @@ export function lipSyncEngineMediaTaken(inputs: Record<string, unknown>): boolea
   return !('https' in m.video) && !('other' in m.video) && !('other' in m.audio)
 }
 
+/**
+ * R11.9a (R11.3's named stop-gaps 1–3): what a Fabric or Kling node sends
+ * that isn't a file in Sailor (a web address, a data: link), or null: the
+ * words of its plain refusal, before the hold.
+ */
+export function lipSyncEngineMediaWords(inputs: Record<string, unknown>): string | null {
+  const engine = lipSyncRunEngine(inputs)
+  if (engine !== 'fabric' && engine !== 'kling') return null
+  const m = lipSyncEngineMedia(inputs)
+  if (engine === 'fabric' && 'other' in m.image) return LIPSYNC_UPLOAD_FACE
+  if (engine === 'kling' && ('https' in m.video || 'other' in m.video)) return LIPSYNC_UPLOAD_VIDEO
+  if (('https' in m.audio && engine === 'fabric') || 'other' in m.audio) return LIPSYNC_UPLOAD_SOUND
+  return null
+}
+
 // ── Words (sentence case, no names of fields) ──
+
+/** R11.9a: a medium given as a web address or a data: link, which can't be measured before the run. */
+export const LIPSYNC_UPLOAD_SOUND = 'This lip-sync’s sound isn’t a file in Sailor, so it can’t be measured before the run. Upload the sound to Sailor.'
+export const LIPSYNC_UPLOAD_FACE = 'This lip-sync’s face picture isn’t a file in Sailor. Upload the picture to Sailor.'
+export const LIPSYNC_UPLOAD_VIDEO = 'This lip-sync’s face video isn’t a file in Sailor, so it can’t be measured before the run. Upload the video to Sailor.'
+/** R11.9a (R11.3's stop-gap 6): Sync lips in silence bills the whole face video, which must be measured. */
+export const LIPSYNC_SILENCE_NEEDS_UPLOAD = 'Silence mode needs a face video uploaded to Sailor.'
 
 /** Python's three raises, before its call (refused here before the hold). */
 export const LIPSYNC_NEEDS_SOUND = 'This lip-sync has no sound. Add a voice, or link an Audio card.'

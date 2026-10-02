@@ -18,8 +18,9 @@
  * and the run's kept total against MEDIA_CAPS.keptBytesPerRun (`keptPeak`):
  * every kept output (each batch at FFV1's bound, KEPT_BATCH_RATIO; Get video
  * components' sound; a Save video's re-encode), pessimistic about which
- * nodes run at the same time. The answer is always `engine: true`
- * (RUNNER_NOT_ELIGIBLE), never a refusal.
+ * nodes run at the same time. The answer is always `engine: true`; R11.9a
+ * (rows 22–24) refuses it plainly (engine.ts, server/runner/stopGapWords.ts),
+ * never the engine.
  *
  * `nearLimit` says whether any hosted figure lands within 10% of its limit
  * while a source's frames are only bounded from its header: the engine then
@@ -30,6 +31,7 @@ import { isLink } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { MEDIA_CAPS, MEDIA_WORDS, type MediaCaps } from '#shared/runner/media'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
+import { SOUND_RATE_ADVICE, withAdvice, type RunnerReasonCode } from '#shared/runner/messages'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { KEPT_MEDIA_MAKERS } from '../keptRelease'
 import { pythonInputRef, takenLuts, takenWaveforms } from '../inputs'
@@ -293,10 +295,18 @@ export async function lutStartProblems(prompt: ApiPrompt, families: ReadonlySet<
  * over the size cap; a rate over WAVE_MAX_RATE. Only the Audio waveforms the
  * runner takes (`video-draw` on).
  */
-export async function waveformStartProblems(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, io: SoundReadIO): Promise<Problem | null> {
+export async function waveformStartProblems(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, io: SoundReadIO): Promise<(Problem & { code: RunnerReasonCode }) | null> {
   for (const { nodeId, name } of takenWaveforms(prompt, families)) {
     const s = await waveSoundOf(name, io)
-    if (s.kind === 'engine') return { message: MEDIA_EFFECT_WORDS.waveSoundTooBig, nodeId, classType: 'AudioWaveform', engine: true }
+    // R11.9a (row 21): refused plainly (engine.ts), saying what to change.
+    if (s.kind === 'engine') {
+      const message = s.why === 'outside' ? WAVE_SOUND_OUTSIDE_WORDS
+        : withAdvice(MEDIA_EFFECT_WORDS.waveSoundTooBig, s.why === 'rate' ? SOUND_RATE_ADVICE : 'Use a shorter sound.')
+      return { message, nodeId, classType: 'AudioWaveform', engine: true, code: 'sound-rate' }
+    }
   }
   return null
 }
+
+/** R11.9a (row 21): Audio waveform's sound named outside the input folders (locally). */
+export const WAVE_SOUND_OUTSIDE_WORDS = 'This sound file isn’t in Sailor’s input folder. Load it again from the node.'

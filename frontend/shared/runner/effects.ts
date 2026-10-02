@@ -358,9 +358,17 @@ export const EFFECT_TEXT_WIDGETS: Readonly<Record<string, Readonly<Record<string
 
 /** Whether the runner reads an effect's colour text as Python does (nothing to read: yes). */
 export function effectTextIsPortable(classType: string, inputs: Record<string, unknown>): boolean {
+  return effectTextNotPortable(classType, inputs) === null
+}
+
+/** R11.9a: the first colour-text widget the runner can't read as Python does, or null (named in the plain refusal). */
+export function effectTextNotPortable(classType: string, inputs: Record<string, unknown>): string | null {
   const widgets = Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, classType) ? EFFECT_TEXT_WIDGETS[classType]! : {}
-  return Object.entries(widgets).every(([name, kind]) =>
-    kind === 'hex' ? hexTextIsPortable(inputs[name]) : kind === 'stops' ? stopsTextIsPortable(inputs[name]) : duotoneTextIsPortable(inputs[name]))
+  for (const [name, kind] of Object.entries(widgets)) {
+    const ok = kind === 'hex' ? hexTextIsPortable(inputs[name]) : kind === 'stops' ? stopsTextIsPortable(inputs[name]) : duotoneTextIsPortable(inputs[name])
+    if (!ok) return name
+  }
+  return null
 }
 
 // ── Ascii's characters (R2.6) ────────────────────────────────────────────────

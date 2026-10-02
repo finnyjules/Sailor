@@ -44,6 +44,19 @@ export function runnerFamilies(): ReadonlySet<RunnerFamily> {
   return new Set([...on].filter(f => !TOOL_FAMILIES.includes(f)))
 }
 
+/**
+ * R11.9a (row 24): the families switched on in the settings that answer as
+ * off here because what they need isn't installed (the video tools, the
+ * depth model): a workflow that needs one is refused plainly ("This isn't
+ * installed on this server."), never left to the engine.
+ */
+export function runnerFamiliesUninstalled(): ReadonlySet<RunnerFamily> {
+  if (!runnerEnabled()) return NO_FAMILIES
+  const asked = parseFamilies(process.env.NUXT_RUNNER_FAMILIES)
+  const on = runnerFamilies()
+  return new Set([...asked].filter(f => !on.has(f)))
+}
+
 export function webhookBaseUrl(): string | null {
   const v = process.env.NUXT_RUNNER_WEBHOOK_BASE_URL?.trim()
   if (!v) return null

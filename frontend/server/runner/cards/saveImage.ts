@@ -39,6 +39,12 @@
  * A list value (R1.6) is saved item by item, as ComfyUI runs the node once
  * per item. A loader's animation (Python's batch of frames) is refused at the
  * start of the take (engine.ts, cardPictureFiles) and here again.
+ *
+ * A clip's frames (R11.9a, row 15, ruling (q): a `frames` value, a kept FFV1
+ * batch) are saved one file per frame, as save_images saves a batch: each
+ * frame's rgb24 is exactly np.clip(255·x).astype(uint8) of PyAV's frame, so
+ * the bytes are Python's; `%batch_num%` and the counter move on per frame.
+ * The frames are decoded one at a time (never the whole batch in memory).
  */
 import { crc32 } from 'node:zlib'
 import sharp from 'sharp'
@@ -55,6 +61,9 @@ import { pixels } from '../pixels/core'
 import { SAVE_OUTSIDE } from '../results'
 import { filesOf } from '../values'
 import { loaderFileBehind } from './bakeReplay'
+import type { RunnerValue } from '../types'
+import { framesOf } from '../../media/values'
+import { mediaLease } from '../../media/run'
 import { PICTURE_NOT_MADE, decoded, sizes, type Wired } from './utilities'
 
 export { SAVE_OUTSIDE }
@@ -344,6 +353,69 @@ async function saveAll(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { fol
   return { values: {}, ui: { images: images.map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type })) } }
 }
 
+// ── A clip's frames (R11.9a, row 15) ─────────────────────────────────────────
+
+type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
+
+/** A clip's frames saved needs the run's media tools. */
+export const SAVE_FRAMES_NEEDS_RUN = 'Saving a clip’s frames only works when the workflow runs.'
+
+/** The clip's frames wired into `images`, or null. */
+function framesWiredIn(ctx: PlanContext): FramesValue | null {
+  const v = ctx.prompt[ctx.nodeId]!.inputs?.images
+  if (!isLink(v)) return null
+  const value = ctx.valueFrom?.(v)
+  return value?.kind === 'frames' ? value : null
+}
+
+/** save_images over a clip's frames: one file per frame, decoded one at a time, sized from the first (they are all one size). */
+function saveFrames(v: FramesValue, s: SaveSettings, o: { folder: 'output' | 'temp'; prefixAppend: string; now: Date }): NodePlan {
+  return {
+    kind: 'derive',
+    async derive(io) {
+      const media = io.media
+      if (!media) throw new Error(SAVE_FRAMES_NEEDS_RUN)
+      const text: [string, string][] = []
+      if (s.embed) {
+        text.push(['prompt', asciiJson(io.runPrompt)])
+        if (io.runWorkflow != null) text.push(['workflow', asciiJson(io.runWorkflow)])
+      }
+      const out = saveSize(v.w, v.h, s.scale, s.maxDimension)
+      if (out.w * out.h > CARD_MAX_PIXELS) throw new Error(SAVE_TOO_LARGE)
+      const { subfolder, filename } = saveImagePrefix(s.prefix + o.prefixAppend, out.w, out.h, o.now)
+      const images: OutputFile[] = []
+      await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
+        let i = 0
+        for await (const rgb of framesOf(v, media, lease)) {
+          if (io.signal.aborted) throw new Error('Stopped')
+          const rgba = new Uint8Array(v.w * v.h * 4)
+          for (let k = 0, j = 0; k < rgb.length; k += 3, j += 4) {
+            rgba[j] = rgb[k]!
+            rgba[j + 1] = rgb[k + 1]!
+            rgba[j + 2] = rgb[k + 2]!
+            rgba[j + 3] = 255
+          }
+          const p = await pixelsInWorker(io.signal, worker => worker.savePixels({ raw: true, source: 'rgb', w: v.w, h: v.h, data: rgba }, out.w, out.h, s.format === 'jpeg'))
+          const bytes = await encode(p, s, text)
+          const named = filename.replaceAll('%batch_num%', String(i))
+          try {
+            images.push(await io.saveAsset(bytes, {
+              prefix: named, ext: EXT[s.format], subfolder, folder: o.folder,
+              ...(named !== filename ? { counter: { prefix: filename, offset: i } } : {}),
+            }))
+          }
+          catch (e) {
+            if (e instanceof Error && (e.message === SAVE_OUTSIDE || e.message === 'The file store is not available')) throw e
+            throw new Error(SAVE_FAILED)
+          }
+          i++
+        }
+      })
+      return { values: {}, ui: { images: images.map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type })) } }
+    },
+  }
+}
+
 // ── An SVG (R11.4) ───────────────────────────────────────────────────────────
 
 /** The SVG wired into `images` (a Recraft SVG model's value), or null for pictures. */
@@ -412,6 +484,8 @@ export function planSaveImage(ctx: PlanContext): NodePlan {
   const svg = svgWiredIn(ctx)
   if (svg) return saveSvg(svg, pyStr(node.inputs?.filename_prefix ?? 'ComfyUI'), { folder: 'output', prefixAppend: '', now: new Date() })
   const settings = saveSettings(node.inputs ?? {})
+  const frames = framesWiredIn(ctx)
+  if (frames) return saveFrames(frames, settings, { folder: 'output', prefixAppend: '', now: new Date() })
   const batches = batchesOf(ctx)
   return {
     kind: 'derive',
@@ -435,8 +509,10 @@ export function planPreviewImage(ctx: PlanContext): NodePlan {
   const letters = previewImageLetters()
   const svg = svgWiredIn(ctx)
   if (svg) return saveSvg(svg, 'ComfyUI', { folder: 'temp', prefixAppend: `_temp_${letters}`, now: new Date() })
-  const batches = batchesOf(ctx)
   const settings: SaveSettings = { prefix: 'ComfyUI', format: 'png', quality: 90, lossless: false, compression: 1, scale: 1, maxDimension: 0, embed: true }
+  const frames = framesWiredIn(ctx)
+  if (frames) return saveFrames(frames, settings, { folder: 'temp', prefixAppend: `_temp_${letters}`, now: new Date() })
+  const batches = batchesOf(ctx)
   return {
     kind: 'derive',
     async derive(io) {

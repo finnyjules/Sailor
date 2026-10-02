@@ -222,9 +222,9 @@ export function mediaEffectSwitchedClasses(): Record<string, RunnerFamily> {
 // ── Words (rule 3) ───────────────────────────────────────────────────────────
 
 /**
- * Why a video effect is left to the engine before the run (rule 3: never a
- * refusal: the workflow goes to ComfyUI as a whole, RUNNER_NOT_ELIGIBLE), and
- * why one fails at its turn where the start pass could only bound it.
+ * Why a video effect can't run here, before the run (rule 3; R11.9a refuses it
+ * plainly with what to change, server/runner/stopGapWords.ts, never the
+ * engine), and why one fails at its turn where the start pass could only bound it.
  */
 export const MEDIA_EFFECT_WORDS = {
   unknownLength: 'The runner can’t tell before the run how long this video is',

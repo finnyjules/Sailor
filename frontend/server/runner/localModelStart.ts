@@ -181,7 +181,7 @@ export interface LocalModelStart {
    * tiled 2× pictures (Upscale (2×) over its service's largest), counted in `keptBytes` too.
    */
   keptByNode?: Record<string, number>
-  /** The first node whose count can't be known or is over the cap: the workflow goes to the engine. */
+  /** The first node whose count or size can't be known, or several stills into Slow motion (AI): refused plainly (R11.9a, engine.ts). */
   problem: { message: string; nodeId: string; classType: string } | null
   /**
    * R7.3 (fix round 1): a node Python itself would fail on, known before the hold (Object removal's

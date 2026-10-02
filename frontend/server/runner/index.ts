@@ -13,7 +13,7 @@ import { createMetering } from './metering'
 import { createRunEvents } from './events'
 import { createGenerationRecords } from './records'
 import { savedInputOwned } from './inputs'
-import { runnerBackup, runnerFamilies, webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
+import { runnerBackup, runnerFamilies, runnerFamiliesUninstalled, webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
 import { engineDirForType, uploadOwner, canonicalUploadKey } from '../utils/inputUploads'
 import { uploadToFalStorage } from '../utils/falStorage'
 import { getLiveLedger } from '../utils/ledgerLive'
@@ -84,6 +84,7 @@ export function getEngine(): Engine {
     }),
     hosted: isHosted,
     families: runnerFamilies,
+    uninstalled: runnerFamiliesUninstalled,
     backup: runnerBackup,
     webhookUrl: () => {
       const base = webhookBaseUrl()

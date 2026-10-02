@@ -440,7 +440,9 @@ export function requirementOf(family: RunnerFamily): RunnerFamily | undefined {
   return FAMILY_REQUIRES[family] ?? MEDIA_EFFECT_REQUIRES[family] ?? LOCAL_MODEL_REQUIRES[family] ?? LATE_FAMILY_REQUIRES[family]
 }
 
-const KNOWN: ReadonlySet<string> = new Set([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES, ...LATE_FAMILIES])
+/** R11.9a: every family parseFamilies knows (R7's and the late ones too): "would the runner take it with everything on". */
+export const EVERY_KNOWN_FAMILY: ReadonlySet<RunnerFamily> = new Set([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES, ...LATE_FAMILIES])
+const KNOWN: ReadonlySet<string> = EVERY_KNOWN_FAMILY
 
 /** No family switched on. */
 export const NO_FAMILIES: ReadonlySet<RunnerFamily> = new Set()

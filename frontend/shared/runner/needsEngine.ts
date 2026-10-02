@@ -13,6 +13,8 @@ import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
+import { switchedOffNodes } from './stopGaps'
+import { switchedOffWords } from './messages'
 import { isEditorOnlyClass, retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
@@ -48,24 +50,30 @@ function blockedNodes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): {
   if (pruned.failed) return { run: {}, ids: [] }
   const run = pruned.prompt
   const ids = Object.keys(run)
-  const blocked = ids.filter(id => !runnerTakesNode(run, id, families))
-  if (!blocked.length && !isRunnerEligible(run, families, { afterPruning: prunedAny(pruned) })) return { run, ids }
+  // R11.9a: a node the runner refuses in plain words (./stopGaps.ts) doesn't need the engine: the runner says why.
+  const lenient = { plainRefusals: true }
+  const blocked = ids.filter(id => !runnerTakesNode(run, id, families, lenient))
+  if (!blocked.length && !isRunnerEligible(run, families, { ...lenient, afterPruning: prunedAny(pruned) })) return { run, ids }
   return { run, ids: blocked }
 }
 
 /**
  * The plain reasons the shared rule gives for the nodes that need the engine
  * (nodesNeedingEngine's nodes), each once, in prompt order (R2.10: a Shader
- * effect whose picture is made in the same run). Empty with the runner off.
+ * effect whose picture is made in the same run; R11.9a, row 25: a node whose
+ * family is off, "“Name” is switched off right now.", named by `titleOf`).
+ * Empty with the runner off.
  */
 export function needsEngineReasons(
   prompt: ApiPrompt,
-  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily> },
+  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily>; titleOf?: (id: string) => string },
 ): string[] {
   if (!opts.runnerOn) return []
   const families = opts.families ?? NO_FAMILIES
   const { run, ids } = blockedNodes(prompt, families)
-  const reasons = ids.map(id => shaderEngineReason(run, id, families)).filter((r): r is string => !!r)
+  const off = new Set(switchedOffNodes(run, families))
+  const titleOf = opts.titleOf ?? ((id: string) => promptNodeTitle(run, id))
+  const reasons = ids.map(id => shaderEngineReason(run, id, families) ?? (off.has(id) ? switchedOffWords(titleOf(id)) : null)).filter((r): r is string => !!r)
   return [...new Set(reasons)]
 }
 

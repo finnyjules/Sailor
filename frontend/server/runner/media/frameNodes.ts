@@ -425,7 +425,8 @@ export async function framesSoundVerdict(access: FileAccess, file: OutputFile, o
  *     a file the build can't read leaves the workflow to the engine);
  *   - SaveVideoFrames' sound: one that isn't there is skipped at its turn, as
  *     Python skips it; otherwise its verdict (`soundOf`, framesSoundVerdict).
- * `engine: true`: leave the whole workflow to the engine (RUNNER_NOT_ELIGIBLE), don't refuse it.
+ * `engine: true`: once left the whole workflow to the engine; R11.9a (row 20) refuses it plainly
+ * instead, saying what to change (engine.ts prepareStart, server/runner/stopGapWords.ts).
  */
 export async function frameStartProblems(
   prompt: ApiPrompt, exists: (f: OutputFile) => Promise<boolean>,

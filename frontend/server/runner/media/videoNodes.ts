@@ -310,7 +310,8 @@ function cardFile(prompt: ApiPrompt, id: string, depth = 0): OutputFile | 'none'
  *     checked; whatever it can't do leaves the workflow to the engine;
  *   - (fix round 1) a Video card's file read by Get video components or
  *     Save video: one the build can't read leaves it to the engine too.
- * `engine: true`: leave the whole workflow to the engine (RUNNER_NOT_ELIGIBLE), don't refuse it.
+ * `engine: true`: once left the whole workflow to the engine; R11.9a (row 20) refuses it plainly
+ * instead, saying what to change (engine.ts prepareStart, server/runner/stopGapWords.ts).
  */
 export async function loadVideoStartProblems(
   prompt: ApiPrompt, exists: (f: OutputFile) => Promise<boolean>,

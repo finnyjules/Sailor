@@ -10,6 +10,9 @@ export const RUNNER_WORKER = -1
  * `data.reason` on the server's refusal of a workflow it does not take (its
  * families are off, or a node is not one the runner runs). The browser treats
  * it like the runner being off (a 404): the run goes to ComfyUI instead.
+ * R11.9a: only eligibility declines now (a family off, a class the runner
+ * doesn't run: `data.code` `switched-off` or `not-taken`); every start pass
+ * refuses plainly instead, with a `data.code` (RunnerReasonCode).
  */
 export const RUNNER_NOT_ELIGIBLE = 'not-eligible'
 
@@ -20,6 +23,140 @@ export const RUNNER_NOT_ELIGIBLE = 'not-eligible'
  * words (Karaoke, this computer: the engine as a stop-gap, R8 ruling (i)).
  */
 export const RUNNER_SOUND_TOO_LONG = 'sound-too-long'
+
+// ── Stop-gaps closed (R11.9a) ────────────────────────────────────────────────
+
+/**
+ * Why a workflow, or one node of it, doesn't run here: the `code` a refusal's
+ * data carries (R11.9a). Every exit that once left a workflow to the engine
+ * carries one. Only `switched-off` and `not-taken` still go to the engine
+ * (with RUNNER_NOT_ELIGIBLE) until R10; every other code is a plain refusal,
+ * before anything is held.
+ */
+export type RunnerReasonCode =
+  /** Row 25: the node's family is off (to the engine until R10.0 switches every family on). */
+  | 'switched-off'
+  /** A class the runner doesn't run at all (R10.2's local-engine set, or no rule row): to the engine until R10. */
+  | 'not-taken'
+  /** Row 24: what the node needs (the video tools, the depth model, the bundled font) isn't on this server. */
+  | 'not-installed'
+  /** Row 15: a clip's frames wired into a node that takes one picture. */
+  | 'clip-into-picture'
+  /** Row 16: typed click points SAM 3 can't be sent. */
+  | 'click-points'
+  /** Row 17: a setting the runner reads as typed, wired. */
+  | 'wired-setting'
+  /** Row 18: text Python reads its own way (colour text, NaN, a painter file's name, a moodboard's reading). */
+  | 'odd-text'
+  /** Row 19: letters outside the glyph atlas. */
+  | 'letters'
+  /** Row 20: a video file neither the sniffer nor the build reads, or a card export MP4 can't hold. */
+  | 'video-format'
+  /** Row 21: a LUT outside the folders or too large; a sound past the waveform's rate. */
+  | 'lut' | 'sound-rate'
+  /** Row 22: typed captions over the cap. */
+  | 'captions-too-long'
+  /** Row 23: past hosted work, held-memory or kept-room figures. */
+  | 'too-much-work'
+  /** R11.8: a made sound whose bound passes a reader's cap. */
+  | 'made-sound-too-long'
+  /** R11.8: a paid video model's sound read by a sound effect. */
+  | 'paid-video-sound'
+  /** R11.7 / R11.8: a clip or picture count (or a picture's size) that can't be known, or only bounded, past a cap. */
+  | 'unknown-length' | 'too-large'
+  /** R11.7: several still pictures into Slow motion (AI). */
+  | 'picture-batch'
+  /** R11.3's stop-gaps: a lip-sync medium given as a web address or a data: link, not a file in Sailor. */
+  | 'not-a-file'
+
+/** Row 25: a switched-off node, by its own title (null: none known). */
+export function switchedOffWords(title: string | null): string {
+  return title ? `“${title}” is switched off right now.` : 'This node is switched off right now.'
+}
+
+/** Row 24. */
+export const NOT_INSTALLED_WORDS = 'This isn’t installed on this server.'
+
+/** Row 15: a clip's frames into a node that takes one picture. */
+export const CLIP_INTO_PICTURE_WORDS = 'This takes one picture, not a clip’s frames. Save the frames with Save image or Preview image instead.'
+
+/** Row 17: a setting read as typed, wired (the words are the ruling's own). */
+export function wiredSettingWords(label: string): string {
+  return `The ${label} setting is wired. Type this setting in; it can’t be wired.`
+}
+
+/** Row 18: text Python reads its own way, naming the field. */
+export function oddTextWords(label: string): string {
+  return `The ${label} can’t be read here. Set it again on the node.`
+}
+
+/** Row 19. */
+export const LETTERS_WORDS = 'Some of these letters can’t be drawn here. Use plain letters, numbers and symbols.'
+
+/** Row 20: what to do with a video file the runner can't read. */
+export const VIDEO_FORMAT_ADVICE = 'Convert it to an MP4 (a sound to a WAV) and load it again.'
+/** Row 20: a card export of a stream an MP4 can't hold (ProRes…): the build has no encoder for it. */
+export const CARD_EXPORT_ADVICE = 'Convert it to an H.264 MP4 first, or switch off its export.'
+
+/** Row 21. */
+export const LUT_OUTSIDE_WORDS = 'This LUT isn’t in Sailor’s LUT folder. Put the file there and pick it again.'
+export const LUT_TOO_LARGE_ADVICE = 'Use a LUT file under 16 MB.'
+export const SOUND_RATE_ADVICE = 'Use a sound at 384 kHz or less.'
+
+/** Row 22. */
+export function captionsTooLongWords(max: number): string {
+  return `These captions are too long to draw here. Keep them under ${max.toLocaleString('en-US')} characters.`
+}
+
+/** Row 23: past a work, memory or kept-room figure. */
+export const TOO_MUCH_WORK_WORDS = 'That’s too much work for one run here. Use a shorter or smaller clip, or split the work over several runs.'
+
+/** R11.7: several still pictures into Slow motion (AI). */
+export const PICTURE_BATCH_ADVICE = 'Slow motion works on a clip. Wire in one picture, or a clip’s frames.'
+
+/** A length in words: "30 minutes", "1 hour", "45 seconds", "2 minutes 30 seconds". */
+export function lengthWords(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const r = s % 60
+  const part = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+  const parts = [h ? part(h, 'hour') : '', m ? part(m, 'minute') : '', r || (!h && !m) ? part(r, 'second') : ''].filter(Boolean)
+  return parts.join(' ')
+}
+
+/**
+ * R11.8: a made sound whose bound passes a reader's cap, naming the maker's
+ * setting to shorten with the figure: "This speech could run past 30 minutes,
+ * which is the most Whisper transcribe takes. Shorten the text to under N characters."
+ */
+export function madeSoundTooLongWords(o: {
+  maker: 'speech' | 'music' | 'clone' | 'speech-wired'
+  limitSeconds: number
+  reader: string
+  /** Characters (speech) or seconds (music, clone) the maker's setting should stay under. */
+  under: number
+}): string {
+  const what = o.maker === 'music' ? 'This music' : o.maker === 'clone' ? 'This cloned voice' : 'This speech'
+  const lead = `${what} could run past ${lengthWords(o.limitSeconds)}, which is the most ${o.reader} takes here.`
+  const n = Math.max(0, Math.floor(o.under)).toLocaleString('en-US')
+  const fix = o.maker === 'speech' ? `Shorten the text to under ${n} characters.`
+    : o.maker === 'speech-wired' ? `Type the text in, under ${n} characters, instead of wiring it.`
+      : o.maker === 'music' ? `Set its length to under ${n} seconds.`
+        : `Use a sound under ${n} seconds to clone.`
+  return `${lead} ${fix}`
+}
+
+/** R11.8: a paid video model's sound read by a sound effect, naming the model and the limit. */
+export function paidVideoSoundWords(model: string, limitSeconds: number): string {
+  return `The sound of a video from ${model} can’t be measured before the run, and a sound effect here takes at most ${lengthWords(limitSeconds)} of sound. Save the video, then load it with Load video.`
+}
+
+/** The first sentence of `words` with a full stop, then `advice`. */
+export function withAdvice(words: string, advice: string): string {
+  const w = words.trim()
+  return `${/[.!?…]$/.test(w) ? w : `${w}.`} ${advice}`
+}
 
 export function isRunnerPromptId(id: unknown): boolean {
   return typeof id === 'string' && id.startsWith('run_')
