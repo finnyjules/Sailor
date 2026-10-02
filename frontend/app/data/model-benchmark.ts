@@ -30,6 +30,11 @@ export const BENCHMARK_PROMPTS: readonly BenchmarkPrompt[] = [
   { id: 'laughing-man', label: 'Older man laughing', prompt: 'An older man laughing at a café table, both hands around a coffee cup, warm afternoon light.' },
   { id: 'fox', label: 'Watercolour fox', prompt: 'A fox in a watercolour children\'s-book illustration, sitting in a meadow of wildflowers.' },
   { id: 'anime', label: 'Anime', prompt: 'An anime girl with short silver hair waiting on a train platform at sunset, wind in her hair, cel-shaded in a 90s anime style.' },
+  { id: 'fashion', label: 'Fashion editorial', prompt: 'A model in an oversized red wool coat walking through a minimalist concrete courtyard, high-fashion editorial photo, hard midday shadows.' },
+  { id: 'mountains', label: 'Mountain landscape', prompt: 'A vast alpine valley at golden hour, a river winding through pine forest, low clouds on the peaks, wide landscape photo.' },
+  { id: 'interior', label: 'Interior', prompt: 'A sunlit Scandinavian living room with a linen sofa, oak floor, a large window and plants, architectural interior photo.' },
+  { id: 'ramen', label: 'Food', prompt: 'A bowl of ramen on a dark wooden table, steam rising, soft side light, overhead food photo.' },
+  { id: 'street-bw', label: 'Black-and-white film', prompt: 'A street photographer\'s black-and-white shot of a cyclist passing a rainy Paris café, 35 mm film grain.' },
 ]
 
 /** Every benchmark picture is square, seed 1 where the model takes one, default settings otherwise. */
