@@ -233,13 +233,14 @@ describe('prices (ruling (a))', () => {
       unit: 'per_thousand_chars', perThousand: 0.10,
       service: 'replicate', source: 'https://replicate.com/minimax/speech-02-hd', read: '2026-09-27', confidence: 'verified',
     })
-    // LC1 (2026-10-01): lowered after the owed live checks measured 6–11× under the page-run card, verified.
+    // LC1 fix round 1 (ruling): the page-run card stays — it covers the page's billed run that loads its version (8 s, $0.0929).
     expect(PAID_RATES[MUSICGEN_SLUG]).toMatchObject({
-      unit: 'gpu_per_output_second', perSecond: 0.004, minUsd: 0.01, confidence: 'verified', read: '2026-10-01', source: 'https://replicate.com/meta/musicgen',
+      unit: 'gpu_per_output_second', perSecond: 0.012, minUsd: 0.042, confidence: 'estimate', read: '2026-09-27', source: 'https://replicate.com/meta/musicgen',
     })
     for (const slug of [MINIMAX_SPEECH_SLUG, MUSICGEN_SLUG]) expect(otherCardFor(slug), slug).toBeNull()
-    expect(paidCallUsd({ endpoint: MUSICGEN_SLUG, outputSeconds: 1 })).toBe(0.01)
-    expect(paidCallUsd({ endpoint: MUSICGEN_SLUG, outputSeconds: 30 })).toBe(0.12)
+    expect(paidCallUsd({ endpoint: MUSICGEN_SLUG, outputSeconds: 1 })).toBe(0.042)
+    expect(paidCallUsd({ endpoint: MUSICGEN_SLUG, outputSeconds: 8 })).toBeGreaterThanOrEqual(0.0929)
+    expect(paidCallUsd({ endpoint: MUSICGEN_SLUG, outputSeconds: 30 })).toBe(0.36)
     expect(paidCallUsd({ endpoint: MUSICGEN_SLUG })).toBeNull()
     expect(paidCallUsd({ endpoint: MINIMAX_SPEECH_SLUG, chars: 20 })).toBe(0.002)
   })
@@ -253,16 +254,16 @@ describe('prices (ruling (a))', () => {
     expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
   })
 
-  it('music by the seconds asked for, on both paths: 1 s 2, 8 s 7, 30 s 24; wired 30 s (LC1 card)', () => {
+  it('music by the seconds asked for, on both paths: 1 s 9, 8 s 20, 30 s 54; wired 30 s', () => {
     const music = (d: unknown) => ({ model: 'MusicGen', prompt: 'x', duration: d, model_version: 'large', temperature: 1, top_p: 0, seed: 0 })
-    const want: [unknown, number, number][] = [[1, 0.01, 2], [2, 0.01, 2], [3, 0.012, 3], [8, 0.032, 7], [30, 0.12, 18], [['p', 0], 0.12, 18]]
+    const want: [unknown, number, number][] = [[1, 0.042, 9], [3, 0.042, 9], [4, 0.048, 10], [8, 0.096, 20], [30, 0.36, 54], [['p', 0], 0.36, 54]]
     for (const ct of ['GenerateMusicNode', 'MusicGenRemoteNode']) {
       for (const [d, usd, credits] of want) {
         expect(priceNode(ct, music(d)), `${ct} ${String(d)}`).toEqual({ usd, credits })
         expect(priceGraph({ 1: { class_type: ct, inputs: music(d) } }).nodes!['1']).toBe(credits)
       }
       // A bare node: its default 8 s.
-      expect(priceNode(ct, {})).toEqual({ usd: 0.032, credits: 7 })
+      expect(priceNode(ct, {})).toEqual({ usd: 0.096, credits: 20 })
     }
   })
 

@@ -2,8 +2,8 @@
  * Step 3, R8.4: Face swap through useAppRun (lib/runner/faceSwapApp.ts, used
  * by components/apps/FaceSwapApp.vue).
  *
- * - Fake runner events: the price shows once both pictures and a gender are
- *   chosen, before the run; the swapped picture lands in a take, by node id;
+ * - Fake runner events: the price shows once both pictures are chosen (no
+ *   gender since LC1: fal's face swap takes none), before the run; the swapped picture lands in a take, by node id;
  *   Stop; a refusal; a decline ("Face swap is switched off right now." in
  *   both places, nothing sent anywhere: there is no engine fallback).
  * - Through the kit (fake fal, ComfyUI off): the app's exact prompt makes
@@ -64,11 +64,11 @@ function setup(o: { hosted?: boolean, deps?: Partial<AppRunDeps>, choice?: FaceS
 }
 
 describe('the prompt', () => {
-  it('is the app\'s workflow once both pictures and a gender are chosen; runner-eligible with its families on, in both places', () => {
+  it('is the app\'s workflow once both pictures are chosen (no gender needed, LC1); runner-eligible with its families on, in both places', () => {
     expect(faceSwapPromptOf(CHOSEN)).toEqual(PROMPT)
     expect(faceSwapPromptOf({ ...CHOSEN, face: null })).toBeNull()
     expect(faceSwapPromptOf({ ...CHOSEN, target: null })).toBeNull()
-    expect(faceSwapPromptOf({ ...CHOSEN, gender: FACE_SWAP_GENDER_DEFAULT })).toBeNull()
+    expect(faceSwapPromptOf({ ...CHOSEN, gender: FACE_SWAP_GENDER_DEFAULT })).not.toBeNull()
     for (const hosted of [true, false]) {
       expect(isRunnerEligible(PROMPT, ON, { hosted })).toBe(true)
       expect(isRunnerEligible(PROMPT, new Set<RunnerFamily>(['cards']), { hosted })).toBe(false)
@@ -78,8 +78,8 @@ describe('the prompt', () => {
 })
 
 describe('the app, fed fake runner events', () => {
-  it('no price until a gender is chosen; then the price shows before the run, and the picture lands in a take by node id', async () => {
-    const { deps, w, choice, takes, s } = setup({ choice: { ...CHOSEN, gender: FACE_SWAP_GENDER_DEFAULT } })
+  it('no price until both pictures are chosen; then the price shows before the run, and the picture lands in a take by node id', async () => {
+    const { deps, w, choice, takes, s } = setup({ choice: { ...CHOSEN, target: null } })
     await s.quote()
     expect(deps.postQuote).not.toHaveBeenCalled()
     expect(s.priceText.value).toBeNull()

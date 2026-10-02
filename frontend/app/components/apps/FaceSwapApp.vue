@@ -9,15 +9,8 @@
  */
 import { ArrowRight, Download, Image as ImageIcon, Loader2, RefreshCcw, Square, Upload, X } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
-import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
-import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import { useFaceSwapRun } from '~/lib/runner/faceSwapApp'
-import {
-  FACE_SWAP_GENDER_DEFAULT,
-  FACE_SWAP_GENDER_OPTIONS,
-  FACE_SWAP_HAIR_DEFAULT,
-  FACE_SWAP_HAIR_OPTIONS,
-} from '#shared/runner/faceSwap'
+import { FACE_SWAP_GENDER_DEFAULT, FACE_SWAP_HAIR_DEFAULT } from '#shared/runner/faceSwap'
 
 interface UploadedFile {
   file: File
@@ -74,47 +67,18 @@ function clearSlot(role: 'source' | 'target') {
   if (!swap.running.value) swap.reset()
 }
 
-// ----- Face's gender + hair choice ----------------------------------------
-
-const GENDER_STORAGE_KEY = 'sailor.faceSwap.gender'
-const HAIR_STORAGE_KEY = 'sailor.faceSwap.hair'
-
-function readSavedGender(): typeof FACE_SWAP_GENDER_OPTIONS[number] {
-  try {
-    const saved = localStorage.getItem(GENDER_STORAGE_KEY)
-    if (saved && (FACE_SWAP_GENDER_OPTIONS as readonly string[]).includes(saved)) return saved as typeof FACE_SWAP_GENDER_OPTIONS[number]
-  } catch { /* localStorage unavailable — fall back to the default */ }
-  return FACE_SWAP_GENDER_DEFAULT
-}
-
-function readSavedHair(): typeof FACE_SWAP_HAIR_OPTIONS[number] {
-  try {
-    const saved = localStorage.getItem(HAIR_STORAGE_KEY)
-    if (saved && (FACE_SWAP_HAIR_OPTIONS as readonly string[]).includes(saved)) return saved as typeof FACE_SWAP_HAIR_OPTIONS[number]
-  } catch { /* localStorage unavailable — fall back to the default */ }
-  return FACE_SWAP_HAIR_DEFAULT
-}
-
-const gender = ref<typeof FACE_SWAP_GENDER_OPTIONS[number]>(readSavedGender())
-const keepHairFrom = ref<typeof FACE_SWAP_HAIR_OPTIONS[number]>(readSavedHair())
-
-watch(gender, (v) => {
-  try { localStorage.setItem(GENDER_STORAGE_KEY, v) } catch { /* best effort only */ }
-})
-
-watch(keepHairFrom, (v) => {
-  try { localStorage.setItem(HAIR_STORAGE_KEY, v) } catch { /* best effort only */ }
-})
+// fal's face swap (LC1) takes only the two pictures: the node's Gender and
+// "Keep hair from" are sent at their defaults, unused, so the app asks for neither.
 
 // ----- Price, run and Stop (Sailor runner, useAppRun) ---------------------
 
 const swap = useFaceSwapRun({
-  choice: computed(() => ({ face: sourceFace.value, target: targetImage.value, gender: gender.value, keepHairFrom: keepHairFrom.value })),
+  choice: computed(() => ({ face: sourceFace.value, target: targetImage.value, gender: FACE_SWAP_GENDER_DEFAULT, keepHairFrom: FACE_SWAP_HAIR_DEFAULT })),
   addTake,
 })
 const { status, priceText, blocked, quoting, stopError } = swap
-// The price follows the exact prompt: both pictures, the gender and the hair choice.
-watch(() => [sourceFace.value?.filename, targetImage.value?.filename, gender.value, keepHairFrom.value], () => { void swap.quote() }, { immediate: true })
+// The price follows the exact prompt: both pictures.
+watch(() => [sourceFace.value?.filename, targetImage.value?.filename], () => { void swap.quote() }, { immediate: true })
 
 const canRun = computed(() => swap.canRun.value && !uploading.value)
 const errorMessage = computed(() => uploadError.value ?? swap.errorMessage.value ?? stopError.value ?? blocked.value)
@@ -266,22 +230,6 @@ function download() {
         </div>
       </div>
 
-      <!-- Face's gender + hair choice -->
-      <div class="grid grid-cols-2 gap-5 mb-8">
-        <div>
-          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em] mb-2 block">Face's gender</label>
-          <StudioSelect
-            v-model="gender"
-            :options="[...FACE_SWAP_GENDER_OPTIONS]"
-            :option-labels="['Choose…', 'Male', 'Female', 'Non-binary']"
-          />
-        </div>
-        <div>
-          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em] mb-2 block" title="Whose hair shows in the result">Keep hair from</label>
-          <StudioSegmented v-model="keepHairFrom" :options="[...FACE_SWAP_HAIR_OPTIONS]" />
-        </div>
-      </div>
-
       <!-- Run -->
       <div class="flex items-center justify-between mb-12">
         <p v-if="status === 'running' && !stopError" class="text-[12px] text-white/55 flex items-center gap-2">
@@ -296,7 +244,7 @@ function download() {
           {{ errorMessage }}
         </p>
         <span v-else class="text-[12px] text-white/35">
-          {{ !sourceFace || !targetImage ? 'Add both photos above to start.' : gender === FACE_SWAP_GENDER_DEFAULT ? 'Choose the face’s gender.' : 'Ready to swap.' }}
+          {{ !sourceFace || !targetImage ? 'Add both photos above to start.' : 'Ready to swap.' }}
         </span>
         <div class="flex items-center gap-3">
           <span

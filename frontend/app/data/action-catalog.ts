@@ -89,7 +89,7 @@ export const ACTION_CATALOG: Record<string, ActionEntry> = {
   TranslateTextNode:     { useCase: 'Translate text',                 model: 'Gemini 3 Flash',                           intent: 'edit' },
   RewriteToneNode:       { useCase: 'Rewrite in a tone',              model: 'Claude 4.5 Haiku',                         intent: 'edit' },
   SummarizeTextNode:     { useCase: 'Summarize text',                 model: 'Gemini 3 Flash',                           intent: 'analyze' },
-  ReasonStepByStepNode:  { useCase: 'Think step by step',             model: 'DeepSeek R1',                              intent: 'analyze' },
+  ReasonStepByStepNode:  { useCase: 'Think step by step',             model: 'GPT-5 / Claude',                           intent: 'analyze' },
 }
 
 // Per-model classes still registered server-side for saved-workflow

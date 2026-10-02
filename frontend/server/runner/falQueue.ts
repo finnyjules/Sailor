@@ -219,10 +219,18 @@ export function percentFromLogs(logs: { message: string }[]): number | null {
   return null
 }
 
+/**
+ * A fal picture answer's files: its `images` list, else its one `image`
+ * (LC1 fix round 1: fal-ai/face-swap, Easel's face swap and Topaz's image
+ * upscale answer `{ image: { url } }`; read only as `images`, every such call
+ * was billed and then failed with no file).
+ */
 export function falImageUrls(result: unknown): string[] {
-  const images = (result as { images?: Array<{ url?: unknown }> })?.images
-  if (!Array.isArray(images)) return []
-  return images.map(i => i?.url).filter((u): u is string => typeof u === 'string' && u.length > 0)
+  const r = result as { images?: Array<{ url?: unknown }>; image?: { url?: unknown } } | null
+  const images = r?.images
+  if (Array.isArray(images)) return images.map(i => i?.url).filter((u): u is string => typeof u === 'string' && u.length > 0)
+  const one = r?.image?.url
+  return typeof one === 'string' && one.length > 0 ? [one] : []
 }
 
 export function falVideoUrl(result: unknown): string | null {

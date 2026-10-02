@@ -11,7 +11,7 @@
  *  4. The models with no twin, or a twin that can't carry every setting, have
  *     no backup (Flux 2 Pro and Max: none for a webp picture; S3b).
  */
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import { planNode, type NodePlan, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, RUNNER_SVG_IMAGE_MODELS } from '~~/server/runner/generators/image'
@@ -39,6 +39,13 @@ import { effectiveImageSettings } from '#shared/pricing/imageSettings'
 import { priceGraph } from '~~/server/utils/priceBook'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
+import { DEEPSEEK_R1_IS_DOWN } from '#shared/runner/llm'
+import { MULTI_LORA_IS_DOWN } from '#shared/runner/lora'
+
+// LC1 fix round 1: the providers that fail whatever is sent are refused before the hold; this spec
+// checks the requests themselves, so it turns those refusals off (runner-live-check-fixes checks them).
+beforeAll(() => { DEEPSEEK_R1_IS_DOWN.on = false; MULTI_LORA_IS_DOWN.on = false })
+afterAll(() => { DEEPSEEK_R1_IS_DOWN.on = true; MULTI_LORA_IS_DOWN.on = true })
 
 type Provider = 'fal' | 'replicate'
 type ProviderPlan = Extract<NodePlan, { kind: 'provider' }>

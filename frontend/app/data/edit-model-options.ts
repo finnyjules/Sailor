@@ -99,6 +99,17 @@ export const EDIT_MODEL_MENUS: Readonly<Record<string, EditModelMenu>> = {
   // studio's own. sync-3 (sync.so) is runner-only (model line-up F22): no
   // Python builder; offered while its switch is on. The node reads
   // `model_options.engine` over this widget: shared/runner/lipSync.ts.
+  // _REASON_MODELS: Think step by step. DeepSeek R1 (Python's default) fails at its
+  // provider on every call (LC1 fix round 1, shared/runner/llm.ts DEEPSEEK_R1_DOWN):
+  // hidden, never removed; a new node defaults to GPT-5.
+  'ReasonStepByStepNode.model': {
+    options: [
+      { value: 'DeepSeek R1', label: 'DeepSeek R1', hidden: true },
+      { value: 'GPT-5', label: 'GPT-5' },
+      { value: 'Claude 4.5 Sonnet', label: 'Claude 4.5 Sonnet' },
+    ],
+    preference: ['GPT-5'],
+  },
   'LipSyncNode.engine': {
     options: [
       { value: 'auto', label: 'Auto' },

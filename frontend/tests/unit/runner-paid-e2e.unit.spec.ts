@@ -48,7 +48,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { gunzipSync } from 'node:zlib'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, eventHandler, toWebHandler } from 'h3'
 import sharp from 'sharp'
 import { __setEngineForTests } from '~~/server/runner/index'
@@ -84,6 +84,13 @@ import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
 import type { PaidCase, PyCall } from './__runner__/paidParity'
+import { DEEPSEEK_R1_IS_DOWN } from '#shared/runner/llm'
+import { MULTI_LORA_IS_DOWN } from '#shared/runner/lora'
+
+// LC1 fix round 1: the providers that fail whatever is sent are refused before the hold; this spec
+// checks the requests themselves, so it turns those refusals off (runner-live-check-fixes checks them).
+beforeAll(() => { DEEPSEEK_R1_IS_DOWN.on = false; MULTI_LORA_IS_DOWN.on = false })
+afterAll(() => { DEEPSEEK_R1_IS_DOWN.on = true; MULTI_LORA_IS_DOWN.on = true })
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
 

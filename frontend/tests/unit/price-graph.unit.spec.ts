@@ -769,9 +769,9 @@ describe('an estimate never lowers the ComfyUI path (R3.9 fix round 2)', () => {
       // Separate background and foreground (cut-out estimate + LaMa estimate: 2, or Bria: 9; flat 2).
       ['SplitPhotoLayersNode', { image: L, background_fill: 'LaMa (fast)', mask_grow: 12 }, 2],
       ['SplitPhotoLayersNode', { image: L, background_fill: 'Bria Eraser (quality)', mask_grow: 12 }, 9],
-      // Music and its twin (LC1: verified, $0.004/s at least $0.01: 2–18, under the flat 4 at 1 s: not floored).
-      ['GenerateMusicNode', { model: 'MusicGen', prompt: 'x', duration: 1 }, 2],
-      ['MusicGenRemoteNode', { prompt: 'x', duration: 30 }, 18],
+      // Music and its twin (estimate: 9–54; flat 4; LC1 fix round 1 kept the page-run card).
+      ['GenerateMusicNode', { model: 'MusicGen', prompt: 'x', duration: 1 }, 9],
+      ['MusicGenRemoteNode', { prompt: 'x', duration: 30 }, 54],
       // 3D: every card verified by LC1, so at its card (no floor); Rodin 60.
       ['Generate3DNode', { model: 'Hunyuan3D 2', image: L }, 20],
       ['Hunyuan3DRemoteNode', { image: L }, 20],

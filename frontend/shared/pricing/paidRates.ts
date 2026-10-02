@@ -211,13 +211,15 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // 66.37 s, a model download included) is $0.0929, $0.0116 a second of music: written here rounded
   // up to $0.012 a second, and never below the page's "approximately $0.042 to run" (its p50). An
   // estimate until the live check measures it (the page gives one run, at one length and one version).
-  // MEASURED 2026-10-01 (owed live checks, tier 1): 1 s of large in 2.8 s of A100-80 ($0.0039); 8 s of
-  // stereo-melody-large in 12.1 s ($0.017): about 1.33 GPU-s ($0.0019) a second of music. The page-run card
-  // ($0.012/s, at least $0.042) was 6–11× the bill: lowered to $0.004/s, at least $0.01 (about 2.5× measured), verified.
+  // Owed live checks (2026-10-01): 1 s of large in 2.8 s of A100-80 ($0.0039), 8 s of stereo-melody-large in
+  // 12.1 s ($0.017) — both warm runs. LC1 lowered the card to $0.004/s (at least $0.01); the review found it
+  // below the page's own billed run, which loads the version asked for inside predict (8 s of stereo-large
+  // in 66.37 s, $0.0929). LC1 fix round 1 (ruling): the page-run card put back, an estimate until a
+  // version-switch run is measured — the money rule wins.
   'meta/musicgen': {
-    unit: 'gpu_per_output_second', perSecond: 0.004, minUsd: 0.01,
-    note: 'A100 (80GB) at $0.0014/s; live check 2026-10-01: 1 s large in 2.8 s ($0.0039), 8 s stereo-melody-large in 12.1 s ($0.017), about 1.33 GPU-s a second of music; carded at $0.004/s, at least $0.01 (about 2.5× measured)',
-    service: 'replicate', source: 'https://replicate.com/meta/musicgen', read: '2026-10-01', confidence: 'verified',
+    unit: 'gpu_per_output_second', perSecond: 0.012, minUsd: 0.042,
+    note: 'A100 (80GB) at $0.0014/s; page run: 8 s of stereo-large in 66.37 s ($0.0929, $0.0116/s), rounded up to $0.012/s; at least the page\'s approximately $0.042 to run (read 2026-09-27); live checks 2026-10-01 (warm): 2.8 s for 1 s, 12.1 s for 8 s',
+    service: 'replicate', source: 'https://replicate.com/meta/musicgen', read: '2026-09-27', confidence: 'estimate',
   },
   // Generate speech (and its twin) on MiniMax Speech-02 HD: the page's billing table, "$0.10 per
   // thousand input tokens" (`token_input_count`; "or 10,000 tokens for $1"), and its schema's "Every

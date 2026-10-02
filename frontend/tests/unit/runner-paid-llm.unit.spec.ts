@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createFakeReplicate, makeKit } from './__runner__/kit'
 import { normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -32,6 +32,12 @@ import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/run
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { answerOutput, answerUsage } from '~~/server/runner/generators/llm'
 import { requestProblems } from '~~/server/runner/requestRules'
+import { DEEPSEEK_R1_IS_DOWN } from '#shared/runner/llm'
+
+// LC1 fix round 1: the providers that fail whatever is sent are refused before the hold; this spec
+// checks the requests themselves, so it turns those refusals off (runner-live-check-fixes checks them).
+beforeAll(() => { DEEPSEEK_R1_IS_DOWN.on = false })
+afterAll(() => { DEEPSEEK_R1_IS_DOWN.on = true })
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-llm.json'), 'utf8')) as {
   cases: PaidCase[]

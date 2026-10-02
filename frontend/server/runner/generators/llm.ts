@@ -79,11 +79,14 @@ export function answerUsage(result: unknown): { inputTokens: number; outputToken
   if (!metrics || typeof metrics !== 'object') return null
   const m = metrics as Record<string, unknown>
   const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
-  // Claude and MiniMax report `input_token_count`; Gemini and GPT-5 report only
-  // `token_input_count` (owed live checks 2026-10-01, B1): either name, per count.
-  const i = ok(m.input_token_count) ? m.input_token_count : m.token_input_count
-  const o = ok(m.output_token_count) ? m.output_token_count : m.token_output_count
-  return ok(i) && ok(o) ? { inputTokens: i, outputTokens: o } : null
+  // Claude and MiniMax report both `input_token_count` and `token_input_count`; Gemini and
+  // GPT-5 only `token_input_count` (owed live checks 2026-10-01, B1). Replicate's billing
+  // table names the `token_*` form. Per count: the larger of the two where both are valid
+  // (never below what was billed), else whichever is (LC1 fix round 1).
+  const pick = (a: unknown, b: unknown): number | null => (ok(a) && ok(b) ? Math.max(a, b) : ok(a) ? a : ok(b) ? b : null)
+  const i = pick(m.input_token_count, m.token_input_count)
+  const o = pick(m.output_token_count, m.token_output_count)
+  return i !== null && o !== null ? { inputTokens: i, outputTokens: o } : null
 }
 
 /** The node's plan: one Replicate call whose answer is the node's text, or "" with no call. */

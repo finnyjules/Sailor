@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeReplicate, makeKit } from './__runner__/kit'
 import { normalizeSent, readerFor, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
@@ -43,6 +43,12 @@ import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { hostedRequestProblems, requestProblems } from '~~/server/runner/requestRules'
 import * as safeFetchModule from '~~/server/templates/safeFetch'
 import { checkPayload, type ProviderSchemaFixture } from './helpers/providerSchema'
+import { MULTI_LORA_IS_DOWN } from '#shared/runner/lora'
+
+// LC1 fix round 1: the providers that fail whatever is sent are refused before the hold; this spec
+// checks the requests themselves, so it turns those refusals off (runner-live-check-fixes checks them).
+beforeAll(() => { MULTI_LORA_IS_DOWN.on = false })
+afterAll(() => { MULTI_LORA_IS_DOWN.on = true })
 
 vi.mock('~~/server/templates/safeFetch', async (importOriginal) => {
   const mod = await importOriginal<typeof import('~~/server/templates/safeFetch')>()

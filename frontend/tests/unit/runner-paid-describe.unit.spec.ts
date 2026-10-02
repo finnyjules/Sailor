@@ -416,6 +416,24 @@ describe('Describe a video\'s video (rulings (r), (s))', () => {
     expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[hold, used]])
   })
 
+  it('hosted: Gemini\'s own metric names (token_input_count / token_output_count only, as the live check got) are charged by tokens, not the hold (LC1 B1)', async () => {
+    // The live check's prediction: 891 in, 508 out, under the `token_*` names alone.
+    const gemini = '{"id": "p", "status": "succeeded", "output": ["A ", "dog runs."], "metrics": {"predict_time": 3.2, "token_input_count": 891, "token_output_count": 508}}'
+    const replicate = createFakeReplicate({ bodyText: () => gemini })
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON } })
+    writeFileSync(join(k.root, 'input', 'clip.mp4'), await mp4(3))
+    const p: ApiPrompt = { n: node('/view?filename=clip.mp4&type=input') }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    expect(ofType(k.seen, 'execution_error')).toEqual([])
+    const hold = (priceNode('DescribeVideoNode', p.n!.inputs, { inputSeconds: { video: 3 } }) as { credits: number }).credits
+    const used = creditsForUsd(891 * 0.3e-6 + 508 * 2.5e-6)
+    expect(used).toBe(1)
+    expect(hold).toBeGreaterThan(20)
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[hold, used]])
+    expect((await k.store.get(runId))!.takes[0]!.nodes.n!.credits).toBe(used)
+  })
+
   it('refused before the hold, hosted: a web address, no address, too long, not a video, not the caller\'s own', async () => {
     const cases: [string, Buffer | null, string, boolean?][] = [
       ['https://example.test/a.mp4', null, DESCRIBE_VIDEO_UPLOAD_ONLY],

@@ -240,6 +240,15 @@ export const LORA_WIRED_HOSTED = 'A LoRA can’t come from a wire here. Paste a 
 export const RESTYLE_LORA_BY_NAME_HOSTED = 'Your own LoRAs can’t be used here yet. Set the LoRA to none, and paste a public LoRA link from HuggingFace or CivitAI, or a .safetensors link.'
 /** Python raises "No LoRAs resolved…" (:909-914) before any call: the runner's plain words for it. */
 export const MULTI_LORA_NEEDS_LORA = 'Flux Dev + LoRAs needs at least one LoRA. Pick one, or paste a HuggingFace, CivitAI or .safetensors link.'
+/**
+ * LC1 fix round 1: lucataco/flux-dev-multi-lora crashes in its own code after
+ * loading the LoRAs ("Cannot copy out of meta tensor", predict.py:311
+ * `pipe.to("cuda")`, prediction vy2s2cd219rny0d0zbfbdmp974, 2026-10-02), billed
+ * each time. Refused before the hold until a live check shows it working (parked).
+ */
+export const MULTI_LORA_PROVIDER_DOWN = 'Flux Dev + LoRAs isn’t working at its provider right now. Use Flux Dev + LoRA with one LoRA instead.'
+/** Whether Flux Dev + LoRAs is refused (true until a live check shows it working). The request specs turn it off to check its request. */
+export const MULTI_LORA_IS_DOWN = { on: true }
 
 /**
  * A LoRA link hosted Sailor lets through (ruling (i)): read as the node
@@ -325,6 +334,8 @@ export function loraRequestProblem(classType: string, inputs: Record<string, unk
   // Restyle's Flux call is Flux Dev + LoRA's plan (R3.14): its `flux_guidance`, when the prompt shows flux-dev-lora.
   if (classType === RESTYLE_LORA_CLASS) return fluxDevLoraSure(inputs) ? fluxLoraGuidanceProblem(inputs, RESTYLE_GUIDANCE) : null
   if (classType !== FLUX_MULTI_LORA_CLASS) return null
+  // LC1 fix round 1 (parked): the model fails at its provider whatever is sent.
+  if (MULTI_LORA_IS_DOWN.on) return { input: MULTI_LORA_SLOTS[0].name, message: MULTI_LORA_PROVIDER_DOWN }
   for (const s of MULTI_LORA_SLOTS) {
     if (isLink(inputs[s.name]) || isLink(inputs[s.url])) return null
     if (pyStrip(str(inputs[s.url])) || namesLora(inputs[s.name])) return null

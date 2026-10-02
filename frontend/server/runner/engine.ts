@@ -1288,10 +1288,11 @@ export function createEngine(deps: EngineDeps) {
       // A predicted size (fix round 1) was held with a margin: refused only
       // above it; inside it, charged at the real size (never above the hold).
       const held = resuming ? undefined : take.measured?.[id]
-      if (held?.pixels !== undefined) {
-        // An unread size: hosted is refused above already; locally (B7) not a refusal — the charge stays capped at the hold below.
+      // Hosted only: locally the start sizes pictures for the quote alone (LC1 B7, fix round 1), so a
+      // working local graph never fails here; its charge stays capped at the hold below.
+      if (held?.pixels !== undefined && deps.hosted()) {
         const over = held.predicted
-          ? (inputPixels ?? (deps.hosted() ? Number.POSITIVE_INFINITY : 0)) > held.pixels
+          ? (inputPixels ?? Number.POSITIVE_INFINITY) > held.pixels
           : nodeCredits(take.prompt[id]!, inputPixels, families) > nodeCredits(take.prompt[id]!, held.pixels, families)
         if (over) throw new Error(held.predicted ? pictureOverMarginWords(take.prompt[id]!.class_type) : pictureChangedWords(take.prompt[id]!.class_type))
       }
@@ -1696,7 +1697,8 @@ export function createEngine(deps: EngineDeps) {
       // A speech text a card decides before the run is priced at its length (R3.8 fix round 1), as the hold was.
       if (!resuming) rec.credits = nodeCredits(withStaticSpeechText(take.prompt)[id]!, inputPixels, families, inputSeconds)
       // A predicted size (fix round 1): the real size's price, never above what was held for it.
-      if (!resuming && held?.predicted && held.pixels !== undefined) rec.credits = Math.min(rec.credits, nodeCredits(take.prompt[id]!, held.pixels, families))
+      // Locally (LC1 B7) any size the start held: never refused above, so capped here instead.
+      if (!resuming && (held?.predicted || !deps.hosted()) && held?.pixels !== undefined) rec.credits = Math.min(rec.credits, nodeCredits(take.prompt[id]!, held.pixels, families))
       const fp = resuming
         ? rec.fingerprint
         // Reused with an explicit seed; an LLM text node's request by itself (ruling (d)).
@@ -2583,8 +2585,8 @@ export function createEngine(deps: EngineDeps) {
     // one the price can't cover is refused now; the others' hold is priced on
     // it, and their turn refuses a picture that has grown since. Locally too
     // (LC1, B7: a free header read; without it a local quote priced the 18.9 MP
-    // input cap, 4–32× too high), but nothing is refused here: the node's turn
-    // keeps its own checks.
+    // input cap, 4–32× too high), for the quote only: nothing is refused here,
+    // and the node's turn refuses no picture that differs from it (fix round 1).
     {
       const hosted = deps.hosted()
       for (const [index, p] of prompts.entries()) {

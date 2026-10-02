@@ -2,8 +2,9 @@
  * Face swap (step 3, R8.4): Load image ×2 → Face swap, run on the Sailor
  * runner through useAppRun, with its price before the run and a Stop button.
  *
- * - The price is quoted once both pictures and a gender are chosen, and shown
- *   next to the run button (the node badge's format).
+ * - The price is quoted once both pictures are chosen, and shown next to the
+ *   run button (the node badge's format). fal's face swap (LC1) takes no
+ *   gender or hair choice, so the app asks for neither.
  * - The swapped picture is taken from the Face swap node by id
  *   (FACE_SWAP_NODE), never by file name.
  * - Stop ends the run (useAppRun.stop); closing the app stops it too.
@@ -13,7 +14,7 @@
  */
 import { computed, ref, type Ref } from 'vue'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { FACE_SWAP_GENDER_DEFAULT } from '#shared/runner/faceSwap'
+import { FACE_SWAP_GENDER_DEFAULT, FACE_SWAP_HAIR_DEFAULT } from '#shared/runner/faceSwap'
 import { AppRunCancelled, AppRunDeclined, useAppRun } from '~/composables/useAppRun'
 import type { AppTakeInput } from '~/composables/useAppTakes'
 import { buildFaceSwapPrompt, type AwaitOutputsOptions, type RunnerImage } from '~/lib/runner/awaitRunnerResult'
@@ -37,10 +38,10 @@ export interface FaceSwapChoice {
   keepHairFrom: string
 }
 
-/** The app's exact prompt, or null until both pictures and a gender are chosen. */
+/** The app's exact prompt, or null until both pictures are chosen (a gender is no longer needed, LC1). */
 export function faceSwapPromptOf(c: FaceSwapChoice): ApiPrompt | null {
-  if (!c.face || !c.target || !c.gender || c.gender === FACE_SWAP_GENDER_DEFAULT) return null
-  return buildFaceSwapPrompt({ face: c.face.filename, target: c.target.filename, gender: c.gender, keepHairFrom: c.keepHairFrom })
+  if (!c.face || !c.target) return null
+  return buildFaceSwapPrompt({ face: c.face.filename, target: c.target.filename, gender: c.gender || FACE_SWAP_GENDER_DEFAULT, keepHairFrom: c.keepHairFrom || FACE_SWAP_HAIR_DEFAULT })
 }
 
 export function faceSwapViewUrl(f: RunnerImage, now = Date.now()): string {

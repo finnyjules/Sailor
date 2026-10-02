@@ -680,6 +680,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     upgrade: { family: 'face-swap', label: 'Face swap' },
     mustLink: ['source_face', 'target_frames'],
     imageInputs: ['source_face', 'target_frames'],
+    // Gender and "Keep hair from" are not sent since LC1 (fal's face swap takes neither) and refuse
+    // nothing; their saved values stay, so old projects load. A wire into either stays the engine's.
     mustNotLink: ['gender', 'keep_hair_from'],
   },
   // ── person-swap-video: Person swap (video) on fal's Pixverse Swap (the video half of FaceSwap) ──

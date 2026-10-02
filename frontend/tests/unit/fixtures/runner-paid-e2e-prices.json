@@ -89,14 +89,14 @@
   {
    "class": "GenerateMusicNode",
    "old": 4,
-   "new": 7,
+   "new": 20,
    "source": "defaults",
    "nodes": 1
   },
   {
    "class": "GenerateMusicNode",
    "old": 4,
-   "new": 7,
+   "new": 20,
    "source": "saved projects",
    "nodes": 6
   },
@@ -152,7 +152,7 @@
   {
    "class": "MusicGenRemoteNode",
    "old": 4,
-   "new": 7,
+   "new": 20,
    "source": "defaults",
    "nodes": 1
   },

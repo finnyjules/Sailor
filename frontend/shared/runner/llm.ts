@@ -106,6 +106,17 @@ export const IMPROVE_PROMPT_SYSTEM_BASE
 export const CHAT_NEEDS_QUESTION = 'Chat with an LLM needs a question.'
 export const IMPROVE_NEEDS_IDEA = 'Improve a prompt needs an idea to work on.'
 export const LLM_UNKNOWN_MODEL = 'This model isn’t one Sailor knows. Pick another model.'
+/**
+ * LC1 fix round 1: every DeepSeek R1 call fails at Replicate's provider
+ * (Novita's 400 "text content parts must carry a string \"text\" (got null)"),
+ * with Python's OpenAI shape and with R1's own schema shape alike (predictions
+ * 2026-10-01 and 84b22g3dcnrmy0d0zbfbdjff24, 2026-10-02: the input exactly the
+ * published schema's). Refused before the hold, and hidden from the menu
+ * (app/data/edit-model-options.ts), until a live check shows it working.
+ */
+export const DEEPSEEK_R1_DOWN = 'DeepSeek R1 isn’t working at its provider right now. Pick another model.'
+/** Whether R1 is refused (true until a live check shows it working). The request specs turn it off to check R1's request. */
+export const DEEPSEEK_R1_IS_DOWN = { on: true }
 
 /** One call: the Replicate slug and the input Python sends it. */
 export interface LlmRequest { slug: string; input: Record<string, unknown> }
@@ -342,6 +353,7 @@ export function llmRequestProblem(classType: string, inputs: Record<string, unkn
     if (blankTyped(inputs.prompt)) return { input: 'prompt', message: CHAT_NEEDS_QUESTION }
   }
   if (classType === 'ImprovePromptNode' && blankTyped(inputs.idea)) return { input: 'idea', message: IMPROVE_NEEDS_IDEA }
+  if (DEEPSEEK_R1_IS_DOWN.on && classType === 'ReasonStepByStepNode' && inputs.model === 'DeepSeek R1') return { input: 'model', message: DEEPSEEK_R1_DOWN }
   return null
 }
 
