@@ -236,19 +236,29 @@ export const EDIT_RATES: Record<string, EditRate> = {
     beyondPerPixel: 1.36 / 512e6,
     ...verified('fal', fal('fal-ai/topaz/upscale/image')),
   },
-  // Face swap on Easel (family face-swap): "$0.05 per generations" (llms.txt, read 2026-09-26).
+  // Face swap on Easel: "$0.05 per generations" (llms.txt, read 2026-09-26). No longer called (LC1): kept
+  // for the way back should fal's face swap below go away.
   'easel-ai/advanced-face-swap': { unit: 'per_image', usd: 0.05, ...verified('fal', fal('easel-ai/advanced-face-swap')) },
+  // Face swap on fal's face swap (family face-swap, LC1 ruling (b)): fal's pricing API, `unit_price` 0.001,
+  // `unit` images (re-read 2026-10-01; first read 2026-09-26). The app is hidden from fal's gallery, so its
+  // page and llms.txt give no price. One picture a call. The live check (rerun `faceswap-fal`) is owed.
+  'fal-ai/face-swap': { unit: 'per_image', usd: 0.001, service: 'fal', source: 'https://api.fal.ai/v1/models/pricing?endpoint_id=fal-ai/face-swap', read: '2026-10-01', confidence: 'verified' },
   // ── Restyle with a style LoRA (RestyleWithLoRANode, ComfyUI path) ───────
   // Moondream 2, billed by GPU time (L40S, $0.000975/s): "costs approximately
-  // $0.0010 to run" (read 2026-09-28; was $0.0020 on 2026-09-24). Still an
-  // estimate until a live call measures it. The node captions once and
-  // classifies up to four times; each call is 1 credit either way (the minimum).
-  'lucataco/moondream2': { unit: 'per_image', usd: 0.001, ...estimate(rep('lucataco/moondream2')), read: '2026-09-28' },
+  // $0.0010 to run" (read 2026-09-28; was $0.0020 on 2026-09-24). The owed live
+  // check (2026-10-01) measured 1.26 s = $0.00123 (Describe an image) and 1.04 s
+  // = $0.00101 (Restyle's first call), above the $0.001 card (money-rule break
+  // #4): raised to $0.0025 (2.56 s, about 2× measured). MEASURED 2026-10-01: the
+  // ceiling is above it, so verified. The node captions once and classifies up
+  // to four times; each call is 1 credit either way (the minimum).
+  'lucataco/moondream2': { unit: 'per_image', usd: 0.0025, ...verified('replicate', rep('lucataco/moondream2')), read: '2026-10-01' },
   // "$0.032 per output image" — but the node runs the user's own trained
   // model instead when the LoRA has one (billed by GPU time; the LoRA
   // category's observed median is ~$0.04, priceBook.ts LORA_RENDER_CREDITS),
-  // and the price can't see which. So the dearer $0.04.
-  'black-forest-labs/flux-dev-lora': { unit: 'per_image', usd: 0.04, ...estimate(rep('black-forest-labs/flux-dev-lora')) },
+  // and the price can't see which. So the dearer $0.04. MEASURED 2026-10-01
+  // (owed live checks, tier 1): public link $0.032 a picture, trained model 7.7 s
+  // of H100 = $0.012; the $0.04 is above both, so verified.
+  'black-forest-labs/flux-dev-lora': { unit: 'per_image', usd: 0.04, ...verified('replicate', rep('black-forest-labs/flux-dev-lora')), read: '2026-10-01' },
   // Billed by GPU time (L40S), "approximately $0.031 to run" for a typical
   // ~1 MP picture. Enhance detail runs it in place, so it is priced per output
   // megapixel, never below the $0.10 charged before.

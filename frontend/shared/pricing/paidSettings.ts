@@ -32,7 +32,7 @@ import { isLink } from '../runner/graph'
 import { paidCallUsd } from './paidRates'
 import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
-  BRAINSTORM_MAX_TOKENS, LLM_MODEL_SLUGS, LLM_NO_CALL_INPUT, LLM_TEXT_INPUTS, REASON_MAX_TOKENS, REWRITE_MAX_TOKENS,
+  BRAINSTORM_MAX_TOKENS, DEEPSEEK_R1_SLUG, DEEPSEEK_SYSTEM_JOIN, LLM_MODEL_SLUGS, sentMaxTokens, LLM_NO_CALL_INPUT, LLM_TEXT_INPUTS, REASON_MAX_TOKENS, REWRITE_MAX_TOKENS,
   SUMMARIZE_LENGTHS, SUMMARIZE_MAX_TOKENS, TRANSLATE_MAX_TOKENS, brainstormCount, brainstormSystem, improvePromptSystem, isBlank,
   reasonSystem, rewriteSystem, summarizeSystem, translateSystem, type LlmTextClass,
 } from '../runner/llm'
@@ -205,12 +205,18 @@ function llmPlanner(classType: LlmTextClass): PaidPlanner {
     const linkedTexts = names.filter(n => isLink(inputs[n])).length
     const texts = names.filter(n => !isLink(inputs[n])).map(n => text(inputs[n]))
     const { answerUsage, ...rest } = opts
-    const t = tokenCeiling({ texts, linkedTexts, fixed: shape.fixed, maxAnswerTokens: shape.maxAnswerTokens }, rest)
-    // The dearest endpoint at this ceiling (one, unless `model` is wired). An unpriced one prices at null: refused later.
-    const usd = (endpoint: string) => paidCallUsd({ endpoint, ...t }) ?? Number.POSITIVE_INFINITY
+    // Each endpoint's ceiling as its request is sent (LC1): a Claude answer limit at
+    // least 1024 (B2), and R1's system text joined to the prompt (B3), both as llmInput sends them.
+    const ceilingFor = (endpoint: string) => tokenCeiling({
+      texts, linkedTexts,
+      fixed: endpoint === DEEPSEEK_R1_SLUG ? [...shape.fixed, DEEPSEEK_SYSTEM_JOIN] : shape.fixed,
+      maxAnswerTokens: sentMaxTokens(endpoint, shape.maxAnswerTokens),
+    }, rest)
+    // The dearest endpoint at its ceiling (one, unless `model` is wired). An unpriced one prices at null: refused later.
+    const usd = (endpoint: string) => paidCallUsd({ endpoint, ...ceilingFor(endpoint) }) ?? Number.POSITIVE_INFINITY
     const endpoint = shape.endpoints.reduce((a, b) => (usd(b) > usd(a) ? b : a))
     if (answerUsage) return { steps: [{ call: { endpoint, inputTokens: answerUsage.inputTokens, outputTokens: answerUsage.outputTokens }, times: 1 }] }
-    return { steps: [{ call: { endpoint, ...t }, times: 1 }] }
+    return { steps: [{ call: { endpoint, ...ceilingFor(endpoint) }, times: 1 }] }
   }
 }
 

@@ -554,6 +554,17 @@ const SOUND_READERS = ['SaveAudio', 'SaveAudioMP3', 'PreviewAudio'] as const
 export const VIDEO_OUTPUTS: readonly (readonly [string, number])[] = [['LoadVideo', 0], ['CreateVideo', 0], ['Video', 0]]
 
 /**
+ * The paid video makers' VIDEO outputs (LC1, B9): Generate a video, Film a
+ * shot, Lip-sync a character and Sync lips to audio (and its twin). Each hands
+ * on the file it downloaded, which Save video encodes as the Video card's
+ * export does (videoNodes.ts saveVideoFile). Before LC1 one wired straight into
+ * Save video left the whole workflow to the engine (owed live checks 2026-10-01).
+ */
+export const PAID_VIDEO_OUTPUTS: readonly (readonly [string, number])[] = [
+  ['GenerateVideoNode', 0], ['FilmShotNode', 0], ['LipSyncNode', 0], ['LipsyncNode', 0], ['LipsyncRemoteNode', 0],
+]
+
+/**
  * The classes that read a made video (R5.4: Create video's `video` value,
  * encoded only when saved or shown). A Video card showing one may feed
  * these only: anything else would be handed a video it can't read, so the
@@ -663,7 +674,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     imageInputs: ['image'],
     mustNotLink: ['strength', 'creativity', 'upscale'],
   },
-  // ── face-swap: Face swap on Easel (replaces InsightFace inswapper) ──
+  // ── face-swap: Face swap on fal's face swap (replaces InsightFace inswapper; Easel before LC1) ──
   // The Face Swap mini app needs both `cards` and `face-swap` on (its pictures come in through LoadImage nodes, taken only with `cards`).
   FaceSwap: {
     upgrade: { family: 'face-swap', label: 'Face swap' },
@@ -1048,7 +1059,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   SaveVideo: {
     family: 'media-video', local: 'render', mustLink: ['video'], required: ['video'],
     valueInputs: { video: ['files', 'video'] },
-    linkSources: { video: VIDEO_OUTPUTS },
+    // LC1 (B9): a paid video maker's video too, as the Video card takes it.
+    linkSources: { video: [...VIDEO_OUTPUTS, ...PAID_VIDEO_OUTPUTS] },
     widgets: {
       filename_prefix: { type: 'STRING', required: true },
       format: { type: 'COMBO', required: true, options: ['auto', 'mp4'] },

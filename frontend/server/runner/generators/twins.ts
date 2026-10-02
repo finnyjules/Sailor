@@ -163,9 +163,9 @@
  *                                                  Replicate has no Bria Product Shot; bria/generate-background is
  *                                                  another model, with no placement or shot size (briaProductShot.ts)
  *
- * Face swap, Easel advanced face swap
+ * Face swap, fal face swap (LC1; Easel's advanced face swap before, easelFaceSwap.ts)
  *                           fal        —           runner-only (family face-swap, moves the whole node): Replicate
- *                                                  has no Easel face swap (easelFaceSwap.ts)
+ *                                                  has no such face swap (falFaceSwap.ts)
  *
  * ── Lip-sync ───────────────────────────────────────────────────────────────
  * Lip-sync a character, sync-3
@@ -333,7 +333,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'LipSyncNode:kling': r('replicate', null, 'fal\'s Kling lip-sync isn\'t carded; its schema isn\'t saved, so its settings aren\'t known to match'),
   'EnhanceVideoNode+topaz-video': r('fal', null, 'Replicate\'s Topaz video upscale bills an unspecified unit: its price can\'t be verified'),
   'FixFacesNode+fix-faces': r('fal', null, 'Replicate\'s Topaz is another app with its own settings and no face-enhancement strength'),
-  'FaceSwap+face-swap': r('fal', null, 'Replicate has no Easel face swap'),
+  'FaceSwap+face-swap': r('fal', null, 'Replicate has no fal or Easel face swap'),
   'PersonSwapVideo+person-swap-video': r('fal', null, 'Replicate has no Pixverse Swap'),
   // R3.3, the LLM text nodes (family llm-text): Replicate, as Python.
   ...Object.fromEntries([

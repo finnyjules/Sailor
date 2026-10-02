@@ -228,8 +228,9 @@ describe('a quote refuses as the start would, before anything', () => {
   it('a refusal in plain words (the route answers { refused })', async () => {
     const { k, kept } = kitFor(face, true)
     const s = spies(k, kept)
-    const noGender = { ...face.prompt, 3: { ...face.prompt[3]!, inputs: { ...face.prompt[3]!.inputs, gender: 'Not chosen' } } }
-    const err = await k.engine.quoteRun({ userId: k.userId, takes: [noGender], ...START }).then(() => null, (e: unknown) => e)
+    // LC1: fal's face swap takes no gender (Easel's missing gender was the refusal here): a picture that isn't one.
+    for (const dir of ['input', join('input', 'user_1')]) writeFileSync(join(k.root, dir, 'target.png'), new TextEncoder().encode('not a picture'))
+    const err = await k.engine.quoteRun({ userId: k.userId, takes: [face.prompt], ...START }).then(() => null, (e: unknown) => e)
     const answer = quoteAnswerOf(err)
     expect(answer).toHaveProperty('refused')
     expect((answer as { refused: string }).refused).not.toMatch(/FaceSwap|gender_0|class/)

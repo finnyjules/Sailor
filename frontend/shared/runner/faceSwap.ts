@@ -1,7 +1,9 @@
 /**
- * Face swap (FaceSwap) on Easel's advanced face swap, fal (family face-swap).
- * Replaces InsightFace inswapper (non-commercial). The node's settings as the
- * request sends them; one reading for the builder and the pre-hold check.
+ * Face swap (FaceSwap) on fal's face swap (family face-swap; LC1, 2026-10-01:
+ * Easel's advanced face swap answered 503 three times, so ruling (b) moved the
+ * family to `fal-ai/face-swap`, Easel kept as the way back). Replaces
+ * InsightFace inswapper (non-commercial). The node's settings as Easel's
+ * request sends them; fal's face swap takes only the two pictures.
  *
  * Fix round 1 (controller ruling, sentence-case / no-identifiers): the
  * node's own combo values are human-readable sentence case, the same as
@@ -14,6 +16,8 @@
 type Inputs = Record<string, unknown>
 
 export const EASEL_FACE_SWAP_APP = 'easel-ai/advanced-face-swap'
+/** The app Face swap calls (LC1, ruling (b)): fal's face swap, $0.001 a picture. */
+export const FAL_FACE_SWAP_APP = 'fal-ai/face-swap'
 
 /** The node's Gender combo, sentence case. */
 export const FACE_SWAP_GENDER_OPTIONS = ['Not chosen', 'Male', 'Female', 'Non-binary'] as const

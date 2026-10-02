@@ -52,7 +52,7 @@ import { KREA_2_FAL_APPS, KREA_2_REPLICATE_SLUGS } from '~~/server/runner/genera
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 import { BRIA_PRODUCT_SHOT_APP } from '~~/server/runner/generators/briaProductShot'
 import { TOPAZ_IMAGE_APP } from '~~/server/runner/generators/topazImage'
-import { EASEL_FACE_SWAP_APP } from '#shared/runner/faceSwap'
+import { EASEL_FACE_SWAP_APP, FAL_FACE_SWAP_APP } from '#shared/runner/faceSwap'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -341,8 +341,11 @@ function runnerEndpoints(): string[] {
   out.add(`fal ${PIXVERSE_SWAP_ENDPOINT}`)
   // Fix faces on fal's Topaz image upscale with face enhancement, no backup (topazImage.ts; its grid is runner-fix-faces.unit.spec.ts).
   out.add(`fal ${TOPAZ_IMAGE_APP}`)
-  // Face swap on Easel's advanced face swap, no backup (easelFaceSwap.ts; its grid is runner-face-swap.unit.spec.ts).
+  // Face swap on Easel's advanced face swap, no backup (easelFaceSwap.ts; its grid is runner-face-swap.unit.spec.ts):
+  // not called since LC1, kept written as the way back should fal's face swap go away.
   out.add(`fal ${EASEL_FACE_SWAP_APP}`)
+  // LC1: Face swap on fal's face swap, no backup (falFaceSwap.ts; its grid is runner-face-swap.unit.spec.ts).
+  out.add(`fal ${FAL_FACE_SWAP_APP}`)
   // R7.1: Background remove on Replicate's 851-labs remover (generators/localModels.ts; its grid is runner-local-cutout.unit.spec.ts).
   out.add('replicate 851-labs/background-remover')
   // R7.2: Upscale (2×) on Replicate's Real-ESRGAN (generators/localModels.ts; its grid is runner-local-upscale.unit.spec.ts).

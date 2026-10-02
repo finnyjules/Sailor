@@ -33,13 +33,28 @@ import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph
 import { graphInputSizes } from '~~/server/utils/graphInputPixels'
 import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/runner/metering'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
-import { firstOutputUrl } from '~~/server/runner/generators/repair'
+import { RESTORE_MAX_SAFETY, firstOutputUrl } from '~~/server/runner/generators/repair'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { ENHANCE_DETAIL_TOO_LARGE, UPSCALE_TOO_LARGE, pictureChangedWords, pictureOverMarginWords, requestProblems, unsizedInputWords } from '~~/server/runner/requestRules'
 import { predictedHoldPixels, startPictureSizes } from '~~/server/runner/repairSizes'
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-repair.json'), 'utf8')) as { cases: PaidCase[] }
-const CASES = FIXTURE.cases
+/**
+ * LC1 (B4, the owed live checks 2026-10-01): restore-image refuses a
+ * `safety_tolerance` above 2 with a 422 (the node offers 1–6), so the runner
+ * sends at most RESTORE_MAX_SAFETY — stricter, so safe. Python sends the level
+ * as it is: each case's recorded call is held to the runner's figure.
+ */
+function runnerCall(call: PaidCase['calls'][number]): PaidCase['calls'][number] {
+  const level = call.payload.safety_tolerance
+  if (call.endpoint !== 'flux-kontext-apps/restore-image' || typeof level !== 'number' || level <= RESTORE_MAX_SAFETY) return call
+  return {
+    ...call,
+    payload: { ...call.payload, safety_tolerance: RESTORE_MAX_SAFETY },
+    payload_json: call.payload_json!.replace(/"safety_tolerance": \d+/, `"safety_tolerance": ${RESTORE_MAX_SAFETY}`),
+  }
+}
+const CASES = FIXTURE.cases.map(c => ({ ...c, calls: c.calls.map(runnerCall) }))
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'image-repair'])
 const OUT = 'https://r.test/repaired.png'
@@ -227,7 +242,8 @@ describe('every fixture case: what Python sends and returns', () => {
     const sup = CASES.find(c => c.name === 'restore twin · safety superscript')!
     expect(sup.error?.type).toBe('ValueError')
     expect(sup.calls).toEqual([])
-    expect(CASES.find(c => c.name === 'restore twin · safety arabic-indic')!.calls[0]!.payload.safety_tolerance).toBe(3)
+    // Python's own call (the fixture's): ٣ read as 3.
+    expect(FIXTURE.cases.find(c => c.name === 'restore twin · safety arabic-indic')!.calls[0]!.payload.safety_tolerance).toBe(3)
   })
 
   it('whole-number FLOAT settings are the only wire difference (R3.3 ruling 1)', () => {
@@ -235,8 +251,10 @@ describe('every fixture case: what Python sends and returns', () => {
     for (const name of wholeFloat) expect(CASES.find(c => c.name === name)!.class_type, name).toMatch(/^(UpscaleImageNode|EnhanceDetailNode)$/)
   })
 
-  it('every payload fits its published schema but Restore at safety 6 (the node offers 1–6, Replicate 0–2: the live check decides)', () => {
-    expect(offSchema).toEqual(['restore · safety 6: safety_tolerance: 6 is above the maximum 2'])
+  it('every payload fits its published schema: Restore at safety 6 is sent at 2 (LC1, B4: the live check\'s 422)', () => {
+    expect(offSchema).toEqual([])
+    expect(FIXTURE.cases.find(c => c.name === 'restore · safety 6')!.calls[0]!.payload.safety_tolerance).toBe(6)
+    expect(CASES.find(c => c.name === 'restore · safety 6')!.calls[0]!.payload.safety_tolerance).toBe(2)
   })
 })
 
@@ -463,14 +481,14 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     expect(run.takes[0]!.measured).toEqual({ n: { seconds: {}, sha: {}, pixels: 2000 * 1500 } })
   })
 
-  it('local: nothing is sized before the run (nothing is held); the turn measures and charges as before', async () => {
+  it('local: sized before the run too (LC1, B7: a free header read, so the quote isn\'t the cap\'s); the turn measures and charges as before', async () => {
     const k = makeKit({ deps: { families: () => ON } })
     writeFileSync(join(k.root, 'input', 'a.png'), await png(8, 6))
     const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l'), ...readerFor('UpscaleImageNode', 'n') }
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
-    expect(run.takes[0]!.measured).toBeUndefined()
+    expect(run.takes[0]!.measured).toEqual({ n: { seconds: {}, sha: {}, pixels: 48 } })
     expect(run.takes[0]!.nodes.n!.credits).toBe((priceNode('UpscaleImageNode', p.n!.inputs, { inputPixels: 48 }) as { credits: number }).credits)
   })
 

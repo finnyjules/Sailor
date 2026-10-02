@@ -45,6 +45,13 @@
    "nodes": 1
   },
   {
+   "class": "FaceSwap",
+   "old": 10,
+   "new": 1,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
    "class": "FluxMultiLoRARemoteNode",
    "old": 8,
    "new": 10,
@@ -66,16 +73,30 @@
    "nodes": 12
   },
   {
+   "class": "Generate3DNode",
+   "old": 45,
+   "new": 20,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "Generate3DNode",
+   "old": 45,
+   "new": 20,
+   "source": "saved projects",
+   "nodes": 3
+  },
+  {
    "class": "GenerateMusicNode",
    "old": 4,
-   "new": 20,
+   "new": 7,
    "source": "defaults",
    "nodes": 1
   },
   {
    "class": "GenerateMusicNode",
    "old": 4,
-   "new": 20,
+   "new": 7,
    "source": "saved projects",
    "nodes": 6
   },
@@ -89,8 +110,29 @@
   {
    "class": "Hunyuan3DMultiViewNode",
    "old": 45,
+   "new": 12,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "Hunyuan3DMultiViewNode",
+   "old": 45,
    "new": 60,
    "source": "saved projects",
+   "nodes": 1
+  },
+  {
+   "class": "Hunyuan3DRemoteNode",
+   "old": 45,
+   "new": 20,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "IdentifySpeakersNode",
+   "old": 10,
+   "new": 1,
+   "source": "defaults",
    "nodes": 1
   },
   {
@@ -110,7 +152,7 @@
   {
    "class": "MusicGenRemoteNode",
    "old": 4,
-   "new": 20,
+   "new": 7,
    "source": "defaults",
    "nodes": 1
   },

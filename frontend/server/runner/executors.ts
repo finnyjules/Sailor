@@ -44,7 +44,7 @@
  * moves the whole node while it is on;
  * FixFacesNode on fal's Topaz image upscale with face enhancement, family
  * fix-faces, which moves the whole node while it is on;
- * FaceSwap on Easel's advanced face swap, family face-swap, which moves the
+ * FaceSwap on fal's face swap, family face-swap, which moves the
  * whole node while it is on;
  * PersonSwapVideo on fal's Pixverse Swap, family person-swap-video, which
  * moves the whole node while it is on; the sound nodes, family
@@ -111,7 +111,7 @@ import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProE
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
 import { topazFixFaces } from './generators/topazImage'
-import { easelFaceSwap } from './generators/easelFaceSwap'
+import { falFaceSwap } from './generators/falFaceSwap'
 import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
 import { planLipSyncEngine } from './generators/lipSync'
 import { topazVideoNodeProblem, topazVideoSource, topazVideoUpscale } from './generators/topazVideo'
@@ -1106,14 +1106,15 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return stillCall(topazFixFaces({ image, inputs }), 'fix_faces')
     }
 
-    // ── face-swap: Face swap on Easel, no backup (easelFaceSwap.ts). Easel takes
-    // one picture: a batch of several (video frames) is refused before anything
-    // is handed off (the hold is released), pointing at Person swap (video). ──
+    // ── face-swap: Face swap on fal's face swap, no backup (falFaceSwap.ts; LC1:
+    // Easel, easelFaceSwap.ts, answered 503 three times). It takes one picture:
+    // a batch of several (video frames) is refused before anything is handed
+    // off (the hold is released), pointing at Person swap (video). ──
     case 'FaceSwap': {
       if (linked('target_frames').length > 1) throw new Error(FACE_SWAP_ONE_PICTURE)
       const face = await pictureUrl('source_face', 'There is no face picture')
       const target = await pictureUrl('target_frames', 'There is no picture to put the face in')
-      return stillCall(easelFaceSwap({ face, target, inputs }), 'face_swap')
+      return stillCall(falFaceSwap({ face, target }), 'face_swap')
     }
 
     // ── restyle family (nodes_replicate.py RestyleFromImageNode :3070) ──

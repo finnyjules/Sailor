@@ -357,10 +357,13 @@ export function seedreamImagesMade(answer: PyJson): number {
 
 /**
  * A Seedream call's price basis as answered: the pictures that came back, at
- * the rate their area takes (the base picture's size; not known, the dearer
- * rate). Null when the answer can't be read (the call is charged its hold).
+ * the rate their area takes (the base picture's size; an answer with no size —
+ * fal gives `width`/`height` null, owed live checks 2026-10-01, B6 — the area
+ * the call asked for, `askedPixels`, as seedreamCallCeiling prices it; neither
+ * known, the dearer rate). Null when the answer can't be read (the call is
+ * charged its hold).
  */
-export function seedreamAnsweredUsd(result: unknown, raw: string | null): number | null {
+export function seedreamAnsweredUsd(result: unknown, raw: string | null, askedPixels: number | null = null): number | null {
   let answer: PyJson
   try { answer = answerJson(result, raw) }
   catch { return null }
@@ -372,7 +375,7 @@ export function seedreamAnsweredUsd(result: unknown, raw: string | null): number
     pixels = Number.isFinite(px) && px > 0 ? px : null
   }
   catch { pixels = null }
-  return paidCallUsd(seedreamCallAnswered(seedreamImagesMade(answer), pixels))
+  return paidCallUsd(seedreamCallAnswered(seedreamImagesMade(answer), pixels ?? askedPixels))
 }
 
 // ── The plans ──
@@ -411,12 +414,14 @@ function seedreamPlan(ctx: PlanContext, inputs: Record<string, unknown>, image: 
   // Held at the most the call can make, priced from the node as sent (never a wired value).
   const usd = paidCallUsd(seedreamCallCeiling(ctx.priceInputs ?? inputs))
   if (usd == null) throw new Error('Layerize an image has no price yet')
+  // The area the request asks for (the size sent), for an answer that gives none (B6).
+  const askedPixels = seedreamCallCeiling(inputs).outputPixels ?? null
   return {
     kind: 'pipeline', prefix: 'seedream_layerize',
     run: async (io) => {
       const r = await io.call({
         key: 'layerize', provider: 'fal', endpoint: SEEDREAM_LAYERIZE_APP, payload, media: 'value', usd,
-        usdOf: seedreamAnsweredUsd,
+        usdOf: (result, raw) => seedreamAnsweredUsd(result, raw, askedPixels),
       })
       const answer = answerJson(r.result, r.raw)
       const { layers, width, height } = parseSeedreamLayers(answer)

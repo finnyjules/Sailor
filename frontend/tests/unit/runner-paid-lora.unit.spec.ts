@@ -36,7 +36,7 @@ import { __setInputUploadsEngineRootForTests } from '~~/server/utils/inputUpload
 import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/runner/metering'
 import { planNode, type NodePlan, type PipelineIO } from '~~/server/runner/executors'
 import {
-  LORA_NO_PICTURE, __setHuggingFaceLookupForTests, multiLoraSlots, runnerLoraLink, __setMultiLoraRotationForTests, autodetectHuggingface, loraWeightsLoaded, multiLoraRotation,
+  LORA_NO_PICTURE, __setHuggingFaceLookupForTests, multiLoraHfRef, multiLoraSlots, runnerLoraLink, __setMultiLoraRotationForTests, autodetectHuggingface, loraWeightsLoaded, multiLoraRotation,
 } from '~~/server/runner/generators/lora'
 import { LORA_NOT_LISTED, LORA_SIDECAR_MAX_BYTES, LORA_SIDECAR_TOO_LARGE, LORA_SIDECAR_UNREADABLE, loraStartProblem, readLoraSidecar } from '~~/server/runner/loraFiles'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
@@ -65,8 +65,44 @@ interface Catalogue {
  */
 interface RunnerDeviation { calls: PaidCase['calls']; gets: NonNullable<PaidCase['gets']>; error: PaidCase['error'] | null; rotate_after: number; reason: string }
 type LoraCase = PaidCase & { rotate?: number; runner?: RunnerDeviation }
-/** What the runner is held to: Python's case, or its deviation where the fixture records one. */
-const ran = (c: LoraCase): LoraCase => (c.runner ? { ...c, calls: c.runner.calls, gets: c.runner.gets, error: c.runner.error ?? undefined } : c)
+/** What the runner is held to: Python's case, or its deviation where the fixture records one (and LC1's B5, multiSentBare). */
+const ran = (c: LoraCase): LoraCase => multiSentBare(c.runner ? { ...c, calls: c.runner.calls, gets: c.runner.gets, error: c.runner.error ?? undefined } : c)
+
+/**
+ * LC1 (B5, the owed live checks): the multi-LoRA node sends a Hugging Face
+ * reference bare (multiLoraHfRef: `huggingface.co/` and `https://huggingface.co/`
+ * stripped), which lucataco/flux-dev-multi-lora takes and Python's prefixed
+ * form it refused. Two slots naming the same LoRA then collapse onto the
+ * first slot, at the higher scale, as multiloraCollect does: worked out here
+ * in slot order (a call sent reversed — the first when the toggle turned to
+ * 1, i.e. the case's `rotate` 0, and the retry otherwise — is put back first).
+ */
+function multiSentBare(c: LoraCase): LoraCase {
+  if (c.class_type !== 'FluxMultiLoRARemoteNode') return c
+  const calls = c.calls.map((call, i) => {
+    const refs = call.payload.hf_loras as string[]
+    const scales = call.payload.lora_scales as number[]
+    const py = parsePyJson(call.payload_json!) as { obj: [string, PyJson][] }
+    const pyScales = py.obj.find(([k]) => k === 'lora_scales')![1] as PyJson[]
+    const reversed = refs.length >= 2 && (i === 0) === (c.rotate === 0)
+    const slots = refs.map((_, j) => j)
+    if (reversed) slots.reverse()
+    const kept: { first: number, top: number }[] = []
+    const at = new Map<string, number>()
+    for (const j of slots) {
+      const key = multiLoraHfRef(refs[j]!)
+      const k = at.get(key)
+      if (k === undefined) { at.set(key, kept.length); kept.push({ first: j, top: j }) }
+      else if (scales[j]! > scales[kept[k]!.top]!) kept[k]!.top = j
+    }
+    if (reversed) kept.reverse()
+    const hf = kept.map(k => multiLoraHfRef(refs[k.first]!))
+    const payload = { ...call.payload, hf_loras: hf, lora_scales: kept.map(k => scales[k.top]!) }
+    const obj = py.obj.map(([k, v]) => [k, k === 'hf_loras' ? hf : k === 'lora_scales' ? kept.map(x => pyScales[x.top]!) : v] as [string, PyJson])
+    return { ...call, payload, payload_json: pyJsonDumps({ obj }) }
+  })
+  return { ...c, calls }
+}
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-lora.json'), 'utf8')) as { cases: LoraCase[]; loras: Record<string, string | null>; catalogue: Catalogue }
 const CASES = FIXTURE.cases
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
@@ -565,7 +601,8 @@ describe('prices (ruling (a))', () => {
   const multi = (w: Record<string, unknown> = {}) => ({ ...caseNamed('multi · two slots · rotate 0 · loaded').widgets, ...w })
 
   it('the cards: flux-dev-lora keeps its edit card; flux-dev-multi-lora is a GPU-time estimate read from its page', () => {
-    expect(EDIT_RATES[FLUX_DEV_LORA_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.04, confidence: 'estimate' })
+    // LC1: verified by the owed live checks (public link $0.032 a picture, trained model 7.7 s of H100 = $0.012).
+    expect(EDIT_RATES[FLUX_DEV_LORA_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.04, confidence: 'verified' })
     expect(PAID_RATES[FLUX_DEV_LORA_SLUG]).toBeUndefined()
     expect(PAID_RATES[FLUX_MULTI_LORA_SLUG]).toMatchObject({
       unit: 'gpu_ceiling', usd: 0.043, perSteps: 28, service: 'replicate', source: 'https://replicate.com/lucataco/flux-dev-multi-lora', read: '2026-09-27', confidence: 'estimate',
@@ -650,7 +687,8 @@ describe('the HuggingFace look-up (ruling (h))', () => {
     const inputs = { ...caseNamed('multi · bare refs').widgets, lora_a_url: 'alice/hf-lora', lora_b_url: ' alice/hf-lora ', lora_c_url: '', lora_d_url: 'alice/hf-lora/other' }
     const got = await multiLoraSlots(inputs, async () => null, { hosted: false })
     expect(asked).toBe(1)
-    expect(got.loras).toEqual(['huggingface.co/alice/hf-lora', 'huggingface.co/alice/hf-lora/other'])
+    // Sent bare (LC1, B5: multiLoraHfRef).
+    expect(got.loras).toEqual(['alice/hf-lora', 'alice/hf-lora/other'])
     // Priced as the run stacks it: the two identical links are one LoRA.
     expect(multiLoraCount(inputs)).toBe(2)
     // A new node run asks again.

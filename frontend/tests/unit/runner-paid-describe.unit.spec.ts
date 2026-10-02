@@ -279,10 +279,11 @@ describe('prices (rulings (a), (c), (s))', () => {
       unit: 'per_token', inputPerMillion: 0.3, outputPerMillion: 2.5,
       service: 'replicate', source: 'https://replicate.com/google/gemini-2.5-flash', read: '2026-09-27', confidence: 'verified',
     })
-    expect(PAID_RATES['bytedance/dolphin']).toMatchObject({ unit: 'gpu_ceiling', usd: 0.006, confidence: 'estimate', read: '2026-09-27', source: 'https://replicate.com/bytedance/dolphin' })
-    expect(PAID_RATES['zsxkib/yolo-world']).toMatchObject({ unit: 'gpu_ceiling', usd: 0.001, confidence: 'estimate', read: '2026-09-27', source: 'https://replicate.com/zsxkib/yolo-world' })
+    // LC1 (2026-10-01): Dolphin kept and verified; YOLO-World and Moondream 2 raised to $0.0025 (money-rule breaks #3, #4), verified.
+    expect(PAID_RATES['bytedance/dolphin']).toMatchObject({ unit: 'gpu_ceiling', usd: 0.006, confidence: 'verified', read: '2026-10-01', source: 'https://replicate.com/bytedance/dolphin' })
+    expect(PAID_RATES['zsxkib/yolo-world']).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0025, confidence: 'verified', read: '2026-10-01', source: 'https://replicate.com/zsxkib/yolo-world' })
     expect(PAID_RATES['lucataco/moondream2']).toBeUndefined()
-    expect(EDIT_RATES['lucataco/moondream2']).toMatchObject({ unit: 'per_image', usd: 0.001, read: '2026-09-28', confidence: 'estimate' })
+    expect(EDIT_RATES['lucataco/moondream2']).toMatchObject({ unit: 'per_image', usd: 0.0025, read: '2026-10-01', confidence: 'verified' })
     for (const slug of ['google/gemini-2.5-flash', 'bytedance/dolphin', 'zsxkib/yolo-world']) expect(otherCardFor(slug), slug).toBeNull()
   })
 
@@ -296,8 +297,8 @@ describe('prices (rulings (a), (c), (s))', () => {
 
   it('per call: Describe an image 1, Extract text 2, Find objects 1, on both paths', () => {
     const want: Record<string, { usd: number; credits: number }> = {
-      DescribeImageNode: { usd: 0.001, credits: 1 }, DescribeImageRemoteNode: { usd: 0.001, credits: 1 },
-      ExtractTextNode: { usd: 0.006, credits: 2 }, FindObjectsNode: { usd: 0.001, credits: 1 },
+      DescribeImageNode: { usd: 0.0025, credits: 1 }, DescribeImageRemoteNode: { usd: 0.0025, credits: 1 },
+      ExtractTextNode: { usd: 0.006, credits: 2 }, FindObjectsNode: { usd: 0.0025, credits: 1 },
     }
     for (const [c, p] of Object.entries(want)) {
       expect(priceNode(c, inputs(c as DescribeClass)), c).toEqual(p)

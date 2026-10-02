@@ -20,7 +20,8 @@
  *    live call measures it, and an estimate blocks the family's switch-on.
  *    With `perSteps` (R3.9 fix round 2, Hunyuan3D-2mv), the ceiling is the
  *    page's figure at that many steps, scaled up in proportion for more
- *    (`call.steps`), never down;
+ *    (`call.steps`), never down. With `fromSteps` (LC1, Hunyuan3D-2mv after
+ *    its live check), `fromSteps.usd` flat from that many steps, `usd` below;
  *  - `gpu_per_output_second`: a model billed by GPU time whose run grows
  *    with the length it makes (R3.8, MusicGen): dollars per second asked
  *    for, at least `minUsd` a call (`note` says how both were reached).
@@ -72,7 +73,7 @@ export type PaidRate =
   | (RateMeta & { unit: 'per_input_second', perSecond: number, minSeconds?: number, note?: string })
   | (RateMeta & { unit: 'per_output_second', perSecond: number })
   | (RateMeta & { unit: 'per_thousand_chars', perThousand: number })
-  | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string, perSteps?: number })
+  | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string, perSteps?: number, fromSteps?: { steps: number, usd: number } })
   | (RateMeta & { unit: 'gpu_per_output_second', perSecond: number, minUsd: number, note: string })
   | (RateMeta & { unit: 'per_output_image', perImage: number, large?: { fromPixels: number, perImage: number } })
   | (RateMeta & { unit: 'gpu_per_output_megapixel_frame', baseUsd: number, perMegapixelFrame: number, note: string })
@@ -133,16 +134,19 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // page says "approximately $0.0052 to run", written here rounded up to the
   // next tenth of a cent. An estimate until the live check measures it.
   'bytedance/dolphin': {
-    unit: 'gpu_ceiling', usd: 0.006, note: 'T4 at $0.000225/s; page: approximately $0.0052 to run (read 2026-09-27), rounded up to the next $0.001',
-    service: 'replicate', source: 'https://replicate.com/bytedance/dolphin', read: '2026-09-27', confidence: 'estimate',
+    // MEASURED 2026-10-01 (owed live checks, tier 1): 5.0 s on T4 = $0.0011; the $0.006 ceiling is above it, so the card is verified.
+    unit: 'gpu_ceiling', usd: 0.006, note: 'T4 at $0.000225/s; page: approximately $0.0052 to run (read 2026-09-27), rounded up to the next $0.001; live check 2026-10-01: 5.0 s = $0.0011',
+    service: 'replicate', source: 'https://replicate.com/bytedance/dolphin', read: '2026-10-01', confidence: 'verified',
   },
   // Find objects on YOLO-World, billed by GPU time (Nvidia L40S,
-  // $0.000975/s): "approximately $0.00098 to run", rounded up the same way.
+  // $0.000975/s): "approximately $0.00098 to run" (read 2026-09-27), carded at $0.001. The owed live check
+  // (2026-10-01) measured 1.24 s on L40S = $0.00121, above that card (money-rule break #3): raised to
+  // $0.0025 (2.56 s, about 2× measured). MEASURED 2026-10-01: the $0.0025 ceiling is above it, so verified.
   'zsxkib/yolo-world': {
-    unit: 'gpu_ceiling', usd: 0.001, note: 'L40S at $0.000975/s; page: approximately $0.00098 to run (read 2026-09-27), rounded up to the next $0.001',
-    service: 'replicate', source: 'https://replicate.com/zsxkib/yolo-world', read: '2026-09-27', confidence: 'estimate',
+    unit: 'gpu_ceiling', usd: 0.0025, note: 'L40S at $0.000975/s; page: approximately $0.00098 to run (read 2026-09-27); live check 2026-10-01: 1.24 s = $0.00121; ceiling 2.56 s (about 2× measured)',
+    service: 'replicate', source: 'https://replicate.com/zsxkib/yolo-world', read: '2026-10-01', confidence: 'verified',
   },
-  // (Describe an image's moondream2 is priced by its edit card, editRates.ts: $0.002, an estimate.)
+  // (Describe an image's moondream2 is priced by its edit card, editRates.ts: $0.0025, verified 2026-10-01.)
   // R3.5, restore and remove background (Upscale and Enhance detail keep their edit cards, editRates.ts).
   // Restore an old photo (and its twin): the page's billing table, "$0.04 per output image"
   // (`image_output_count`; "or 25 images for $1").
@@ -162,10 +166,10 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // R3.6, layers from one call, and outpaint (read 2026-09-27, plain GETs of the public pages).
   // Separate text from image: the page's billing table, "$0.09 per output image"
   // (`image_output_count`; "or around 11 images for $1"). The answer is one picture and a JSON
-  // file: an estimate until the live check shows the JSON isn't billed as a second picture.
+  // file. MEASURED 2026-10-01 (owed live checks, tier 1): `image_output_count` 1, the JSON is not billed: verified.
   'ideogram-ai/layerize': {
     unit: 'per_call', usd: 0.09,
-    service: 'replicate', source: 'https://replicate.com/ideogram-ai/layerize', read: '2026-09-27', confidence: 'estimate',
+    service: 'replicate', source: 'https://replicate.com/ideogram-ai/layerize', read: '2026-10-01', confidence: 'verified',
   },
   // Layerize an image: fal's page, "$0.03375 per generated layer for total pixel area under
   // 1536x1536 … $0.0675 per generated layer" over it (`billing_unit: images`, price 0.03375); the
@@ -207,10 +211,13 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // 66.37 s, a model download included) is $0.0929, $0.0116 a second of music: written here rounded
   // up to $0.012 a second, and never below the page's "approximately $0.042 to run" (its p50). An
   // estimate until the live check measures it (the page gives one run, at one length and one version).
+  // MEASURED 2026-10-01 (owed live checks, tier 1): 1 s of large in 2.8 s of A100-80 ($0.0039); 8 s of
+  // stereo-melody-large in 12.1 s ($0.017): about 1.33 GPU-s ($0.0019) a second of music. The page-run card
+  // ($0.012/s, at least $0.042) was 6–11× the bill: lowered to $0.004/s, at least $0.01 (about 2.5× measured), verified.
   'meta/musicgen': {
-    unit: 'gpu_per_output_second', perSecond: 0.012, minUsd: 0.042,
-    note: 'A100 (80GB) at $0.0014/s; page run: 8 s of stereo-large in 66.37 s ($0.0929, $0.0116/s), rounded up to $0.012/s; at least the page\'s approximately $0.042 to run (read 2026-09-27)',
-    service: 'replicate', source: 'https://replicate.com/meta/musicgen', read: '2026-09-27', confidence: 'estimate',
+    unit: 'gpu_per_output_second', perSecond: 0.004, minUsd: 0.01,
+    note: 'A100 (80GB) at $0.0014/s; live check 2026-10-01: 1 s large in 2.8 s ($0.0039), 8 s stereo-melody-large in 12.1 s ($0.017), about 1.33 GPU-s a second of music; carded at $0.004/s, at least $0.01 (about 2.5× measured)',
+    service: 'replicate', source: 'https://replicate.com/meta/musicgen', read: '2026-10-01', confidence: 'verified',
   },
   // Generate speech (and its twin) on MiniMax Speech-02 HD: the page's billing table, "$0.10 per
   // thousand input tokens" (`token_input_count`; "or 10,000 tokens for $1"), and its schema's "Every
@@ -223,19 +230,25 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // Generate a 3D model (and its twin) on Hunyuan3D 2, billed by GPU time (Nvidia L40S, "$0.000975 per
   // second", no billing table): the page says "approximately $0.092 to run" and "typically complete within
   // 95 seconds" ($0.0926), written here rounded up to $0.10. An estimate until the live check measures it
-  // (the page's figure is for one run at its defaults; a 512 mesh may take longer).
+  // (the page's figure is for one run at its defaults; a 512 mesh may take longer). The owed live check
+  // (2026-10-01) measured 114.7 s on L40S = $0.1118 at steps 50, octree 512 — above the $0.10 card
+  // (money-rule break #2): raised to $0.13 (133 s, about 1.16× measured at the dearest settings).
+  // MEASURED 2026-10-01: the $0.13 ceiling is above it, so verified.
   'tencent/hunyuan3d-2': {
-    unit: 'gpu_ceiling', usd: 0.10, note: 'L40S at $0.000975/s; page: approximately $0.092 to run, typically within 95 s ($0.0926) (read 2026-09-27), rounded up to $0.10',
-    service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2', read: '2026-09-27', confidence: 'estimate',
+    unit: 'gpu_ceiling', usd: 0.13, note: 'L40S at $0.000975/s; page: approximately $0.092 to run, typically within 95 s (read 2026-09-27); live check 2026-10-01: 114.7 s at steps 50, octree 512 = $0.1118; ceiling 133 s (about 1.16× measured)',
+    service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2', read: '2026-10-01', confidence: 'verified',
   },
   // Multi-View on Hunyuan3D-2mv, billed by GPU time (Nvidia L40S, $0.000975/s): "approximately $0.099 to
   // run", "typically complete within 102 seconds" ($0.0995), rounded up to $0.10, at the page's own default
   // of 30 steps (its example run: 30 steps, octree 256). The node sends 20–100 (default 50): the ceiling is
   // scaled with the steps as if the whole run grew with them (R3.9 fix round 2) — an upper bound, since the
-  // page's example spent only 14 s of GPU at 30 steps. An estimate.
+  // page's example spent only 14 s of GPU at 30 steps. The owed live check (2026-10-01) measured 62 s on
+  // L40S = $0.061 at 100 steps, octree 512: the steps scaling ($0.34 at 100) was about 5.6× generous. Now
+  // $0.10 flat below 50 steps and $0.13 from 50 steps (`fromSteps`; the Hunyuan3D 2 figure at its dearest
+  // settings, about 2.1× measured). MEASURED 2026-10-01: both ceilings are above it, so verified.
   'tencent/hunyuan3d-2mv': {
-    unit: 'gpu_ceiling', usd: 0.10, perSteps: 30, note: 'L40S at $0.000975/s; page: approximately $0.099 to run, typically within 102 s ($0.0995), at its default 30 steps (read 2026-09-27), rounded up to $0.10; × steps/30 above 30 steps, rounded up to the cent',
-    service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2mv', read: '2026-09-27', confidence: 'estimate',
+    unit: 'gpu_ceiling', usd: 0.10, fromSteps: { steps: 50, usd: 0.13 }, note: 'L40S at $0.000975/s; page: approximately $0.099 to run, typically within 102 s (read 2026-09-27), rounded up to $0.10; live check 2026-10-01: 62 s at 100 steps, octree 512 = $0.061; $0.13 from 50 steps',
+    service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2mv', read: '2026-10-01', confidence: 'verified',
   },
   // Multi-View on TRELLIS, billed by GPU time (Nvidia A100 80GB, $0.0014/s). The page's "approximately
   // $0.037 to run" is at its schema defaults, which make no GLB (`generate_model: false`); Sailor sends
@@ -244,7 +257,8 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // rounded up to $0.06. An estimate.
   'firtoz/trellis': {
     unit: 'gpu_ceiling', usd: 0.06, note: 'A100 (80GB) at $0.0014/s; page example with generate_model true (texture 2048, 38 steps, PLY, colour video): 36.77 s = $0.0515 (read 2026-09-27), rounded up to $0.06',
-    service: 'replicate', source: 'https://replicate.com/firtoz/trellis', read: '2026-09-27', confidence: 'estimate',
+    // MEASURED 2026-10-01 (owed live checks, tier 1): 16.7 s on A100-80 = $0.023; the $0.06 ceiling is above it, so verified.
+    service: 'replicate', source: 'https://replicate.com/firtoz/trellis', read: '2026-10-01', confidence: 'verified',
   },
   // Multi-View on Rodin: the page's billing table, "$0.40 per output" (`generic_output_count`; "or 25
   // outputs for $10"), one tier whatever the quality.
@@ -307,15 +321,20 @@ export const PAID_RATES: Record<string, PaidRate> = {
   'thomasmol/whisper-diarization': {
     unit: 'per_input_second', perSecond: 0.00005, minSeconds: 36,
     note: 'L40S at $0.000975/s; page example: 1,184.79 s of speech in 52.01 s predict ($0.0000428/s of sound), rounded up to $0.00005/s; at least the page\'s approximately $0.0018 to run (36 s)',
-    service: 'replicate', source: 'https://replicate.com/thomasmol/whisper-diarization', read: '2026-09-30', confidence: 'estimate',
+    // MEASURED 2026-10-01 (owed live checks, tier 1): 1.1 s on L40S = $0.0011 for 10 s of sound; the $0.0018 minimum is above it, so verified.
+    service: 'replicate', source: 'https://replicate.com/thomasmol/whisper-diarization', read: '2026-10-01', confidence: 'verified',
   },
   // Clone a singing voice on realistic-voice-cloning, billed by GPU time (Nvidia T4, "$0.000225 per second",
   // no billing table): "approximately $0.042 to run", "typically complete within 4 minutes" (its p50; the
   // page's one example is a cached 2.8 s run and says nothing of length). Carded as that p50 for the node's
-  // longest sound, 60 s: $0.0007 a second of sound sent. An estimate until the live check measures it.
+  // longest sound, 60 s: $0.0007 a second of sound sent. The owed live check (2026-10-01) measured 49.6 s
+  // of T4 for 10 s of sound ($0.0112, above the $0.007 hold: money-rule break #1): a large fixed start (the
+  // preset model loads) that a per-second card with no minimum can't cover. Now at least 36 s of sound
+  // ($0.0252, about 2.2× measured); the 60 s cap stays $0.042. Still an estimate until a second run shows
+  // whether the 49.6 s was a one-off load.
   'zsxkib/realistic-voice-cloning': {
-    unit: 'per_input_second', perSecond: 0.0007,
-    note: 'T4 at $0.000225/s; page: approximately $0.042 to run (p50), typically within 4 minutes; taken as the price of the 60 s the node sends at most: $0.0007/s',
+    unit: 'per_input_second', perSecond: 0.0007, minSeconds: 36,
+    note: 'T4 at $0.000225/s; page: approximately $0.042 to run (p50), typically within 4 minutes; taken as the price of the 60 s the node sends at most: $0.0007/s; live check 2026-10-01: 49.6 s for 10 s of sound = $0.0112, so at least 36 s ($0.0252)',
     service: 'replicate', source: 'https://replicate.com/zsxkib/realistic-voice-cloning', read: '2026-09-30', confidence: 'estimate',
   },
   // R7.4, Mask by text and Mask extractor on fal's SAM 3 (read 2026-09-30, plain GETs of the public
@@ -370,6 +389,11 @@ function paidCardUsd(rate: PaidRate, call: PaidCall): number | null {
     case 'per_call':
       return rate.usd
     case 'gpu_ceiling': {
+      if (rate.fromSteps !== undefined) {
+        // A dearer flat ceiling from that many steps (LC1, Hunyuan3D-2mv); no count, no price.
+        const s = count(call.steps)
+        return s === undefined ? null : s >= rate.fromSteps.steps ? rate.fromSteps.usd : rate.usd
+      }
       if (rate.perSteps === undefined) return rate.usd
       // Scaled with the steps sent, rounded up to the cent; no count, no price (the planner always gives one).
       const s = count(call.steps)

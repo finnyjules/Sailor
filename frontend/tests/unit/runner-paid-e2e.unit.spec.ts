@@ -57,7 +57,7 @@ import { _resetRateLimits } from '~~/server/lib/rateLimit'
 import { BASE_RENDER_CREDITS, priceGraph } from '~~/server/utils/priceBook'
 import { createFileKeptBytes, type KeptBytes } from '~~/server/runner/keptBytes'
 import { __setInputUploadsEngineRootForTests } from '~~/server/utils/inputUploads'
-import { __setHuggingFaceLookupForTests, __setMultiLoraRotationForTests, multiLoraRotation } from '~~/server/runner/generators/lora'
+import { __setHuggingFaceLookupForTests, __setMultiLoraRotationForTests, multiLoraHfRef, multiLoraRotation } from '~~/server/runner/generators/lora'
 import { answerUsage } from '~~/server/runner/generators/llm'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { MODERATION_BLOCKED_MESSAGE } from '~~/server/utils/moderation'
@@ -112,7 +112,22 @@ const [SUMMARIZE, GENERATE] = FX.summarize_generate.steps as [E2EStep, E2EStep]
 const [SPLIT] = FX.split_frame.steps as [E2EStep]
 const [UPSCALE, REMOVE] = FX.upscale_remove_save.steps as [E2EStep, E2EStep]
 const RESTYLE = FX.restyle_second
-const MULTI = FX.multi_lora_image
+/**
+ * LC1 (B5, the owed live checks): the multi-LoRA node sends a Hugging Face
+ * reference bare (multiLoraHfRef), which the model takes and Python's
+ * `huggingface.co/` form it refused. This flow's two LoRAs stay two.
+ */
+const MULTI = ((c: typeof FX.multi_lora_image) => ({
+  ...c,
+  calls: c.calls.map((call) => {
+    const refs = call.payload.hf_loras as string[]
+    const bare = refs.map(multiLoraHfRef)
+    if (new Set(bare).size !== new Set(refs).size) throw new Error('two LoRAs collapsed: not this flow')
+    let json = call.payload_json!
+    for (const r of refs) json = json.replace(JSON.stringify(r), JSON.stringify(multiLoraHfRef(r)))
+    return { ...call, payload: { ...call.payload, hf_loras: bare }, payload_json: json }
+  }),
+}))(FX.multi_lora_image)
 
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'))
 const sha = (b: Uint8Array | Buffer) => createHash('sha256').update(b).digest('hex')
@@ -1012,7 +1027,8 @@ describe('R3.18 · every R3 family off', () => {
     // The classes stage R3's tasks moved: every paid class (R3.3–R3.16), the pre-R3 flat rows they replaced, the
     // engine pickers R3.5 re-priced (a wired engine) and R3.15's two nano classes (priced on the edit cards:
     // Pose 10 → 14 a call, 0 with no call; Lens 14).
-    const MOVED = new Set<string>([...PAID_NODE_CLASSES, ...Object.keys(PRE_R3_FLAT), 'UpscaleImageNode', 'EnhanceDetailNode', ...NANO_EXTRAS_CLASSES])
+    // LC1 (2026-10-01): Face swap moved from Easel ($0.05) to fal's face swap ($0.001), the user's ruling (b).
+    const MOVED = new Set<string>([...PAID_NODE_CLASSES, ...Object.keys(PRE_R3_FLAT), 'UpscaleImageNode', 'EnhanceDetailNode', ...NANO_EXTRAS_CLASSES, 'FaceSwap'])
     const rows = new Map<string, { class: string; old: number | null; new: number | null; source: string; nodes: number }>()
     const add = (ct: string, a: number | null, b: number | null, source: string) => {
       if (a === b) return

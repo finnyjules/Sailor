@@ -203,16 +203,25 @@ export function enhanceInput(inputs: Record<string, unknown>, image: string): Re
 }
 
 /**
+ * The most `safety_tolerance` flux-kontext-apps/restore-image takes: above it
+ * the call is refused with a 422 (owed live checks 2026-10-01, B4), though the
+ * node's widget offers 1–6. A level above it is sent as 2 — stricter, so safe.
+ * Python sends the level as it is (nodes_replicate.py :4407, the twin :2088).
+ */
+export const RESTORE_MAX_SAFETY = 2
+
+/**
  * Restore an old photo (:4406-4414): the picture, the safety level as its INT
- * widget has it, the format. The hidden twin (:2082-2090) takes its level as
- * text: `int(s)` when every character is a digit, else 2 (restoreTwinSafety).
+ * widget has it (at most RESTORE_MAX_SAFETY), the format. The hidden twin
+ * (:2082-2090) takes its level as text: `int(s)` when every character is a
+ * digit, else 2 (restoreTwinSafety), at most RESTORE_MAX_SAFETY likewise.
  */
 export function restorePhotoInput(classType: 'RestorePhotoNode' | 'RestorePhotoRemoteNode', inputs: Record<string, unknown>, image: string): Record<string, unknown> {
   const safety = classType === 'RestorePhotoRemoteNode'
     ? restoreTwinSafety(str(inputs, 'safety_tolerance', '2'))
     : int(inputs, 'safety_tolerance', 2)
   if (typeof safety !== 'number') throw new Error(safety.refused)
-  return { input_image: image, safety_tolerance: safety, output_format: combo(inputs, 'output_format', 'png') }
+  return { input_image: image, safety_tolerance: Math.min(safety, RESTORE_MAX_SAFETY), output_format: combo(inputs, 'output_format', 'png') }
 }
 
 /** Remove background (:4373-4375) and its twin (:2051-2053): the picture alone. */

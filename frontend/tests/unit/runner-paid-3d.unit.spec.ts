@@ -273,21 +273,22 @@ describe('every fixture case through the engine (cards and gen-3d on)', () => {
 })
 
 describe('prices (ruling (a))', () => {
-  it('a card per endpoint, read from its page, in no other card; the GPU-time ones are estimates', () => {
+  it('a card per endpoint, read from its page, in no other card; the GPU-time ones verified by LC1\'s live checks', () => {
     expect(PAID_RATES[RODIN_SLUG]).toEqual({
       unit: 'per_call', usd: 0.40, service: 'replicate', source: 'https://replicate.com/hyper3d/rodin', read: '2026-09-27', confidence: 'verified',
     })
-    for (const [slug, usd] of [[HUNYUAN3D_SLUG, 0.10], [HUNYUAN3D_MV_SLUG, 0.10], [TRELLIS_SLUG, 0.06]] as const) {
-      expect(PAID_RATES[slug], slug).toMatchObject({ unit: 'gpu_ceiling', usd, confidence: 'estimate', read: '2026-09-27', source: `https://replicate.com/${slug}` })
+    // LC1 (2026-10-01): Hunyuan3D 2 raised to $0.13 (114.7 s measured, money-rule break #2); TRELLIS and 2mv kept.
+    for (const [slug, usd] of [[HUNYUAN3D_SLUG, 0.13], [HUNYUAN3D_MV_SLUG, 0.10], [TRELLIS_SLUG, 0.06]] as const) {
+      expect(PAID_RATES[slug], slug).toMatchObject({ unit: 'gpu_ceiling', usd, confidence: 'verified', read: '2026-10-01', source: `https://replicate.com/${slug}` })
     }
     for (const slug of [HUNYUAN3D_SLUG, HUNYUAN3D_MV_SLUG, RODIN_SLUG, TRELLIS_SLUG]) expect(otherCardFor(slug), slug).toBeNull()
-    expect(paidCallUsd({ endpoint: HUNYUAN3D_SLUG })).toBe(0.1)
+    expect(paidCallUsd({ endpoint: HUNYUAN3D_SLUG })).toBe(0.13)
     expect(paidCallUsd({ endpoint: RODIN_SLUG })).toBe(0.4)
     expect(paidCallUsd({ endpoint: TRELLIS_SLUG })).toBe(0.06)
-    // Fix round 2: Hunyuan3D-2mv's figure is at the page's 30 steps, scaled up with more, never down; no count, no price.
-    expect(PAID_RATES[HUNYUAN3D_MV_SLUG]).toMatchObject({ perSteps: 30 })
+    // LC1: Hunyuan3D-2mv $0.10 below 50 steps, $0.13 from 50 (the steps scaling was 5.6× generous); no count, no price.
+    expect(PAID_RATES[HUNYUAN3D_MV_SLUG]).toMatchObject({ fromSteps: { steps: 50, usd: 0.13 } })
     expect(paidCallUsd({ endpoint: HUNYUAN3D_MV_SLUG })).toBeNull()
-    for (const [steps, usd] of [[20, 0.1], [30, 0.1], [31, 0.11], [50, 0.17], [100, 0.34]] as const) expect(paidCallUsd({ endpoint: HUNYUAN3D_MV_SLUG, steps }), String(steps)).toBe(usd)
+    for (const [steps, usd] of [[20, 0.1], [30, 0.1], [31, 0.1], [50, 0.13], [100, 0.13]] as const) expect(paidCallUsd({ endpoint: HUNYUAN3D_MV_SLUG, steps }), String(steps)).toBe(usd)
   })
 
   it('priced by their calls with no flat row; the price book moved on', () => {
@@ -299,13 +300,13 @@ describe('prices (ruling (a))', () => {
     expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
   })
 
-  it('the runner pays the card: Hunyuan3D 2 20; Multi-View by its engine — TRELLIS 12, Hunyuan3D-2mv by its steps (20 at 20–30, 26 at 50, 51 at 100), Rodin 60; a wired engine at the dearest', () => {
-    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) expect(priceNode(ct, sample(ct as Gen3dClass).widgets)).toEqual({ usd: 0.1, credits: 20 })
+  it('the runner pays the card: Hunyuan3D 2 20; Multi-View by its engine — TRELLIS 12, Hunyuan3D-2mv by its steps (20 at 20–100, LC1), Rodin 60; a wired engine at the dearest', () => {
+    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) expect(priceNode(ct, sample(ct as Gen3dClass).widgets)).toEqual({ usd: 0.13, credits: 20 })
     const mv = sample('Hunyuan3DMultiViewNode').widgets
     const want: [unknown, unknown, number][] = [
       ['TRELLIS (textured)', 50, 12], ['Rodin (textured · quad mesh)', 50, 60],
-      ['Hunyuan3D-2mv (geometry only)', 20, 20], ['Hunyuan3D-2mv (geometry only)', 30, 20], ['Hunyuan3D-2mv (geometry only)', 50, 26],
-      ['Hunyuan3D-2mv (geometry only)', 100, 51], ['Hunyuan3D-2mv (geometry only)', ['s', 0], 51],
+      ['Hunyuan3D-2mv (geometry only)', 20, 20], ['Hunyuan3D-2mv (geometry only)', 30, 20], ['Hunyuan3D-2mv (geometry only)', 50, 20],
+      ['Hunyuan3D-2mv (geometry only)', 100, 20], ['Hunyuan3D-2mv (geometry only)', ['s', 0], 20],
       [['e', 0], 50, 60], [['e', 0], 100, 60],
     ]
     for (const [engine, steps, credits] of want) {
@@ -319,17 +320,17 @@ describe('prices (ruling (a))', () => {
     expect(priceNode('Hunyuan3DMultiViewNode', {})).toEqual({ usd: 0.06, credits: 12 })
   })
 
-  it('the ComfyUI path (priceGraph, the hosted meter) and the badge: an estimate never below the flat 45 before R3 (fix round 2); Rodin (verified) 60', async () => {
+  it('the ComfyUI path (priceGraph, the hosted meter) and the badge: each at its card, every card verified by LC1 (no estimate floor); Rodin 60', async () => {
     const { nodeCreditEstimate } = await import('~/lib/nodeCreditEstimate')
     const graph = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
     for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) {
-      expect(graph(ct, sample(ct as Gen3dClass).widgets), ct).toBe(45)
-      expect(nodeCreditEstimate(ct, sample(ct as Gen3dClass).widgets), ct).toBe(45 + BASE_RENDER_CREDITS)
+      expect(graph(ct, sample(ct as Gen3dClass).widgets), ct).toBe(20)
+      expect(nodeCreditEstimate(ct, sample(ct as Gen3dClass).widgets), ct).toBe(20 + BASE_RENDER_CREDITS)
     }
     const mv = sample('Hunyuan3DMultiViewNode').widgets
     const want: [unknown, unknown, number][] = [
-      ['TRELLIS (textured)', 50, 45], ['Rodin (textured · quad mesh)', 50, 60], ['Hunyuan3D-2mv (geometry only)', 50, 45],
-      ['Hunyuan3D-2mv (geometry only)', 100, 51], [['e', 0], 50, 60],
+      ['TRELLIS (textured)', 50, 12], ['Rodin (textured · quad mesh)', 50, 60], ['Hunyuan3D-2mv (geometry only)', 50, 20],
+      ['Hunyuan3D-2mv (geometry only)', 100, 20], [['e', 0], 50, 60],
     ]
     for (const [engine, steps, credits] of want) {
       expect(graph('Hunyuan3DMultiViewNode', { ...mv, engine, steps }), `${String(engine)} ${String(steps)}`).toBe(credits)

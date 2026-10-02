@@ -366,8 +366,9 @@ describe('every fixture case through the engine (cards, media-sound and sound-in
 describe('prices (ruling (a))', () => {
   it('a card per endpoint, read from its page; Sync lips keeps its clip card', () => {
     expect(PAID_RATES[WIZPER_APP]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0001, service: 'fal', confidence: 'verified', read: '2026-09-30', source: 'https://fal.ai/models/fal-ai/wizper' })
-    expect(PAID_RATES[DIARIZATION_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.00005, minSeconds: 36, confidence: 'estimate', source: 'https://replicate.com/thomasmol/whisper-diarization' })
-    expect(PAID_RATES[RVC_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0007, confidence: 'estimate', source: 'https://replicate.com/zsxkib/realistic-voice-cloning' })
+    // LC1 (2026-10-01): diarization verified by the owed live checks; RVC at least 36 s (money-rule break #1), still an estimate.
+    expect(PAID_RATES[DIARIZATION_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.00005, minSeconds: 36, confidence: 'verified', source: 'https://replicate.com/thomasmol/whisper-diarization' })
+    expect(PAID_RATES[RVC_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0007, minSeconds: 36, confidence: 'estimate', source: 'https://replicate.com/zsxkib/realistic-voice-cloning' })
     for (const e of [WIZPER_APP, DIARIZATION_SLUG, RVC_SLUG]) expect(otherCardFor(e), e).toBeNull()
     expect(otherCardFor(LIPSYNC_2_PRO_SLUG)).toBe('clip')
     expect(PAID_RATES[LIPSYNC_2_PRO_SLUG]).toBeUndefined()
@@ -399,13 +400,14 @@ describe('prices (ruling (a))', () => {
     const lipsync = sample('LipsyncNode')
     expect([credits(transcribe, 10), credits(transcribe, 60), credits(transcribe, 75), credits(transcribe)]).toEqual([1, 2, 2, 2])
     expect([credits(speakers, 10), credits(speakers, 60), credits(speakers)]).toEqual([1, 1, 1])
-    expect([credits(clone, 10), credits(clone, 60), credits(clone, 75), credits(clone)]).toEqual([2, 9, 9, 9])
+    expect([credits(clone, 10), credits(clone, 60), credits(clone, 75), credits(clone)]).toEqual([6, 9, 9, 9])
     expect([credits(lipsync, 2), credits(lipsync, 60), credits(lipsync)]).toEqual([25, 750, 750])
     // The ComfyUI path (priceGraph, nothing measured): the 60 s ceiling, never below the flat row
     // before R3 while the card is an estimate (R3.9 fix round 2): Identify speakers stays 10.
     const onPath = (c: PaidCase, families?: ReadonlySet<RunnerFamily>) =>
       priceGraph({ n: node(c) }, families ? { families } : {}).breakdown.filter(b => b.action !== 'base_render').reduce((s, b) => s + b.credits, 0)
-    for (const [c, comfy, runner] of [[transcribe, 2, 2], [sample('WhisperRemoteNode'), 2, 2], [speakers, 10, 1], [clone, 9, 9]] as const) {
+    // LC1: Identify speakers' card verified, so no longer floored at its flat 10.
+    for (const [c, comfy, runner] of [[transcribe, 2, 2], [sample('WhisperRemoteNode'), 2, 2], [speakers, 1, 1], [clone, 9, 9]] as const) {
       expect(onPath(c), c.class_type).toBe(comfy)
       // The runner (its family on) pays the card.
       expect(onPath(c, ON), c.class_type).toBe(runner)

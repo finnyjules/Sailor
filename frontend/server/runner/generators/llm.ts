@@ -13,9 +13,11 @@
  *  - A blank question (Chat) or idea (Improve a prompt) is refused in plain
  *    words: before the hold when typed (requestRules.ts), here when a wire
  *    brought it. A Claude answer limit under Replicate's published 1024 is
- *    sent as Python sends it (ruling 3: the live check decides).
+ *    sent as 1024 (LC1, B2: the live check's 422), and DeepSeek R1 gets its
+ *    own input shape (B3); both in #shared/runner/llm llmInput.
  *  - The charge is the token counts the prediction reports
- *    (`metrics.input_token_count` / `output_token_count`, as Replicate bills
+ *    (`metrics.input_token_count` / `output_token_count`, or Gemini's and
+ *    GPT-5's `token_input_count` / `token_output_count`, as Replicate bills
  *    them) through the endpoint's card, capped by the ceiling of the inputs
  *    the hold was priced from (`ctx.priceInputs`: wires left as wires, never
  *    the value a wire brought) and never above the hold; no counts, the hold
@@ -76,9 +78,11 @@ export function answerUsage(result: unknown): { inputTokens: number; outputToken
   const metrics = result && typeof result === 'object' ? (result as Record<string, unknown>).metrics : undefined
   if (!metrics || typeof metrics !== 'object') return null
   const m = metrics as Record<string, unknown>
-  const i = m.input_token_count
-  const o = m.output_token_count
   const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+  // Claude and MiniMax report `input_token_count`; Gemini and GPT-5 report only
+  // `token_input_count` (owed live checks 2026-10-01, B1): either name, per count.
+  const i = ok(m.input_token_count) ? m.input_token_count : m.token_input_count
+  const o = ok(m.output_token_count) ? m.output_token_count : m.token_output_count
   return ok(i) && ok(o) ? { inputTokens: i, outputTokens: o } : null
 }
 

@@ -22,16 +22,22 @@ import { pyFloatOf, pyIntOf, pyIsDigit, pyLstrip, pySplitlines, pyStrip, pyTruth
 import { pyStr, type PyJson } from './pyJson'
 import { isLink } from './graph'
 
-/** `_LLM_MODEL_SLUGS` (:5710-5719): each alias's Replicate slug and the shape of its input. */
-export const LLM_MODEL_SLUGS: Readonly<Record<string, readonly [slug: string, family: 'openai' | 'anthropic' | 'google']>> = {
+/**
+ * `_LLM_MODEL_SLUGS` (:5710-5719): each alias's Replicate slug and the shape of its input.
+ * DeepSeek R1 has its own shape (LC1, B3): Python lists it as `'openai'`, but R1's
+ * Replicate schema takes only `prompt`, `max_tokens`, `temperature`, `top_p` and the
+ * two penalties, and the OpenAI shape failed live (Novita's 400 on a null text part).
+ */
+export type LlmFamily = 'openai' | 'anthropic' | 'google' | 'deepseek'
+export const LLM_MODEL_SLUGS: Readonly<Record<string, readonly [slug: string, family: LlmFamily]>> = {
   'GPT-5': ['openai/gpt-5', 'openai'],
   'GPT-5 mini': ['openai/gpt-5-mini', 'openai'],
   'GPT-5 nano': ['openai/gpt-5-nano', 'openai'],
   'Claude 4.5 Sonnet': ['anthropic/claude-4.5-sonnet', 'anthropic'],
   'Claude 4.5 Haiku': ['anthropic/claude-4.5-haiku', 'anthropic'],
   'Gemini 3 Flash': ['google/gemini-3-flash', 'google'],
-  // DeepSeek's Replicate wrapper takes OpenAI-shaped inputs (Python's comment).
-  'DeepSeek R1': ['deepseek-ai/deepseek-r1', 'openai'],
+  // Python: "DeepSeek's Replicate wrapper takes OpenAI-shaped inputs" — it doesn't (LC1, B3).
+  'DeepSeek R1': ['deepseek-ai/deepseek-r1', 'deepseek'],
 }
 
 /** The seven Replicate endpoints these nodes call. */
@@ -133,7 +139,31 @@ function intOf(v: unknown, def: number): number {
 const own = <T>(o: Readonly<Record<string, T>>, k: unknown): T | undefined =>
   (typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined)
 
-/** `_run_llm`'s three input shapes (:5737-5746); the system key only when the system text is non-empty (Python truthiness). */
+/**
+ * Replicate's Claude 4.5 Haiku and Sonnet refuse a `max_tokens` under 1024 with a
+ * 422 (owed live checks 2026-10-01, B2: Summarize's 400 and Chat's 64 both failed).
+ */
+export const CLAUDE_MIN_MAX_TOKENS = 1024
+export const DEEPSEEK_R1_SLUG = 'deepseek-ai/deepseek-r1'
+/** What R1's own shape puts between the system text and the question (LC1, B3). */
+export const DEEPSEEK_SYSTEM_JOIN = '\n\n'
+
+/**
+ * The answer limit a call sends for the limit a node asks: a Claude endpoint at
+ * least CLAUDE_MIN_MAX_TOKENS (B2), every other as asked. The price's token
+ * ceiling (paidSettings.ts) reads the same figure, so the hold bounds what is sent.
+ */
+export function sentMaxTokens(slug: string, maxTokens: number): number {
+  return slug.startsWith('anthropic/') ? Math.max(CLAUDE_MIN_MAX_TOKENS, maxTokens) : maxTokens
+}
+
+/**
+ * `_run_llm`'s input shapes (:5737-5746); the system key only when the system text is
+ * non-empty (Python truthiness). Two deliberate deviations from Python (LC1): a Claude
+ * `max_tokens` is at least 1024 (B2), and R1 gets its own shape, the system text folded
+ * into the prompt and `max_tokens` the true bound (B3; Python sends R1 the OpenAI shape,
+ * whose `max_completion_tokens` and `system_prompt` R1's schema doesn't have).
+ */
 export function llmInput(model: string, prompt: string, o: { system: string; temperature: number; maxTokens: number }): LlmRequest {
   const row = own(LLM_MODEL_SLUGS, model)
   if (!row) throw new Error(LLM_UNKNOWN_MODEL)
@@ -143,8 +173,11 @@ export function llmInput(model: string, prompt: string, o: { system: string; tem
     input = { prompt, temperature: o.temperature, max_completion_tokens: o.maxTokens }
     if (o.system) input.system_prompt = o.system
   }
+  else if (family === 'deepseek') {
+    input = { prompt: o.system ? o.system + DEEPSEEK_SYSTEM_JOIN + prompt : prompt, temperature: o.temperature, max_tokens: o.maxTokens }
+  }
   else if (family === 'anthropic') {
-    input = { prompt, temperature: o.temperature, max_tokens: o.maxTokens }
+    input = { prompt, temperature: o.temperature, max_tokens: sentMaxTokens(slug, o.maxTokens) }
     if (o.system) input.system_prompt = o.system
   }
   else {
@@ -298,8 +331,8 @@ export const LLM_NO_CALL_INPUT: Readonly<Partial<Record<LlmTextClass, string>>> 
  * pays for an empty answer: the line-up's empty-prompt precedent), a model
  * Sailor doesn't know. A wired text isn't judged here (its value is judged
  * at the node's turn). A Claude answer limit under Replicate's published
- * minimum (1024) is sent as Python sends it (R3.3 ruling 3: the live check
- * decides), so Summarize on Claude 4.5 Haiku sends its 400.
+ * minimum (1024) is raised to 1024 when sent (llmInput; the live check
+ * answered R3.3 ruling 3 with a 422), so it needs no refusal.
  */
 export function llmRequestProblem(classType: string, inputs: Record<string, unknown>): { input: string; message: string } | null {
   const blankTyped = (v: unknown) => !isLink(v) && isBlank(v)

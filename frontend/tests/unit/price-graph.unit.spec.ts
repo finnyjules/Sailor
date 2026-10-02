@@ -710,16 +710,19 @@ describe('Separate background and foreground on the ComfyUI path (R3.7)', () => 
 describe('3D models on the ComfyUI path (R3.9)', () => {
   const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
   // Fix round 2 (estimate floor): an estimate card never lowers the ComfyUI path below the flat 45 before R3.
-  it('each class, by its engine: the estimates at the flat 45 before R3, Rodin (verified) at its card', () => {
-    expect(at('Generate3DNode', { model: 'Hunyuan3D 2', image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 })).toBe(45)
-    expect(at('Hunyuan3DRemoteNode', { image: ['2', 0], steps: 20 })).toBe(45)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'TRELLIS (textured)' })).toBe(45)
+  // LC1: the owed live checks verified every 3D card (Hunyuan3D 2 $0.13: 20; TRELLIS $0.06: 12; Hunyuan3D-2mv
+  // $0.10, $0.13 from 50 steps: 20): no estimate is read, so none is floored.
+  it('each class, by its engine: every card verified (LC1), each at its card; Rodin 60', () => {
+    expect(at('Generate3DNode', { model: 'Hunyuan3D 2', image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 })).toBe(20)
+    expect(at('Hunyuan3DRemoteNode', { image: ['2', 0], steps: 20 })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'TRELLIS (textured)' })).toBe(12)
     expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Rodin (textured · quad mesh)', rodin_quality: 'high' })).toBe(60)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)' })).toBe(45)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: 100 })).toBe(51)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: ['9', 0] })).toBe(51)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)' })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: 30 })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: 100 })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: ['9', 0] })).toBe(20)
     expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: ['9', 0] })).toBe(60)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0] })).toBe(45)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0] })).toBe(12)
   })
 
   // R3.9 fix round 1: Hunyuan3D 2 answers `{mesh}`, which Python can't read, so the ComfyUI path's
@@ -753,27 +756,27 @@ describe('an estimate never lowers the ComfyUI path (R3.9 fix round 2)', () => {
   })
   it('the estimate-priced classes, each at max(estimate, old flat)', () => {
     const want: [string, Record<string, unknown>, number][] = [
-      // Extract text (Dolphin, estimate $0.006: 2; flat 1), Find objects (YOLO-World: 1; flat 1).
+      // Extract text (Dolphin, $0.006 verified by LC1: 2; flat 1), Find objects (YOLO-World, $0.0025 verified by LC1: 1; flat 1).
       ['ExtractTextNode', { model: 'ByteDance Dolphin', image: L }, 2],
       ['FindObjectsNode', { model: 'YOLO-World', image: L, query: 'cat', confidence: 0.25 }, 1],
       // Remove background and its twin (estimate: 1; flat 1).
       ['RemoveBackgroundNode', { model: '851-labs/bg-remover', image: L }, 1],
       ['RemoveBackgroundRemoteNode', { image: L }, 1],
-      // Layerize (estimate: 18; flat 16), Seedream layerize (estimate: 87 / 173; flat 51).
+      // Layerize (verified by LC1: 18; flat 16), Seedream layerize (estimate: 87 / 173; flat 51).
       ['LayerizeGraphicNode', { model: 'Ideogram Layerize', image: L, prompt: '', seed: 0 }, 18],
       ['SeedreamLayerizeNode', { image: L, prompt: '', image_size: 'auto_1K' }, 87],
       ['SeedreamLayerizeNode', { image: L, prompt: '', image_size: 'auto' }, 173],
       // Separate background and foreground (cut-out estimate + LaMa estimate: 2, or Bria: 9; flat 2).
       ['SplitPhotoLayersNode', { image: L, background_fill: 'LaMa (fast)', mask_grow: 12 }, 2],
       ['SplitPhotoLayersNode', { image: L, background_fill: 'Bria Eraser (quality)', mask_grow: 12 }, 9],
-      // Music and its twin (estimate: 9–54; flat 4).
-      ['GenerateMusicNode', { model: 'MusicGen', prompt: 'x', duration: 1 }, 9],
-      ['MusicGenRemoteNode', { prompt: 'x', duration: 30 }, 54],
-      // 3D: below the flat 45, raised to it (Rodin, verified, stays 60).
-      ['Generate3DNode', { model: 'Hunyuan3D 2', image: L }, 45],
-      ['Hunyuan3DRemoteNode', { image: L }, 45],
-      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'TRELLIS (textured)' }, 45],
-      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'Hunyuan3D-2mv (geometry only)', steps: 50 }, 45],
+      // Music and its twin (LC1: verified, $0.004/s at least $0.01: 2–18, under the flat 4 at 1 s: not floored).
+      ['GenerateMusicNode', { model: 'MusicGen', prompt: 'x', duration: 1 }, 2],
+      ['MusicGenRemoteNode', { prompt: 'x', duration: 30 }, 18],
+      // 3D: every card verified by LC1, so at its card (no floor); Rodin 60.
+      ['Generate3DNode', { model: 'Hunyuan3D 2', image: L }, 20],
+      ['Hunyuan3DRemoteNode', { image: L }, 20],
+      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'TRELLIS (textured)' }, 12],
+      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'Hunyuan3D-2mv (geometry only)', steps: 50 }, 20],
       ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'Rodin (textured · quad mesh)' }, 60],
     ]
     for (const [ct, inputs, credits] of want) expect(at(ct, inputs), `${ct} ${JSON.stringify(inputs)}`).toBe(credits)
@@ -804,14 +807,16 @@ describe('sound in on the ComfyUI path (R3.10)', () => {
   it('each class at the 60 s ceiling, floored at its flat row while its card is an estimate', () => {
     expect(at('TranscribeAudioNode', { model: 'Whisper', audio: A, language: 'auto', translate: false })).toBe(2)
     expect(at('WhisperRemoteNode', { audio: A, language: 'en', translate: true })).toBe(2)
-    expect(at('IdentifySpeakersNode', { model: 'Whisper Diarization', audio: A, num_speakers: 0, language: 'auto' })).toBe(10)
+    // LC1: its card verified, so no longer floored at the flat 10: 60 s × $0.00005 = $0.003, 1 credit.
+    expect(at('IdentifySpeakersNode', { model: 'Whisper Diarization', audio: A, num_speakers: 0, language: 'auto' })).toBe(1)
     expect(at('CloneSingingVoiceNode', { model: 'Realistic Voice Cloning (RVC)', audio: A, rvc_model: 'Guitar', custom_rvc_model_url: '', pitch_change: 'no-change', pitch_shift_semitones: 0, pitch_detection_algorithm: 'rmvpe', output_format: 'wav' })).toBe(9)
     expect(at('LipsyncNode', { model: 'sync.so 2-pro', video_url: 'https://x.test/a.mp4', audio: A, sync_mode: 'cut_off' })).toBe(750)
   })
   it('measured seconds price below the ceiling (the runner\'s measured sound; its family on pays the card)', () => {
     const on = new Set(['cards', 'sound-in'] as const)
     const p = (ct: string, audio: number) => priceGraph({ 1: { class_type: ct, inputs: { audio: A } } }, { inputSeconds: { 1: { audio } }, families: on as never }).nodes!['1']
-    expect([p('TranscribeAudioNode', 10), p('IdentifySpeakersNode', 10), p('CloneSingingVoiceNode', 10)]).toEqual([1, 1, 2])
+    // RVC at least 36 s since LC1 (money-rule break #1): $0.0252, 6 credits.
+    expect([p('TranscribeAudioNode', 10), p('IdentifySpeakersNode', 10), p('CloneSingingVoiceNode', 10)]).toEqual([1, 1, 6])
   })
 })
 

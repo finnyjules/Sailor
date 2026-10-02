@@ -92,7 +92,7 @@ export type RunnerFamily =
    */
   | 'fix-faces'
   /**
-   * Face swap on Easel's advanced face swap, fal, no backup. Moves the whole
+   * Face swap on fal's face swap (Easel's advanced face swap before LC1), no backup. Moves the whole
    * FaceSwap node (Ruling 10). Off, the node goes to ComfyUI, whose
    * definition-only Python node fails plainly: InsightFace / inswapper was
    * removed (non-commercial licence), so there is no ComfyUI path any more.

@@ -644,15 +644,16 @@ describe('prices (ruling (a))', () => {
   const at = (resolution: unknown) => ({ ...caseNamed('target · photo').widgets, resolution })
 
   it('the cards, re-read 2026-09-28: Moondream and flux-dev-lora on their edit cards; Nano Banana 2 on fal\'s, its fallbacks covered at cost', () => {
-    expect(EDIT_RATES[MOONDREAM_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.001, read: '2026-09-28', source: 'https://replicate.com/lucataco/moondream2', confidence: 'estimate' })
-    expect(EDIT_RATES[FLUX_DEV_LORA_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.04, confidence: 'estimate' })
+    // LC1 (2026-10-01): Moondream raised to $0.0025 (money-rule break #4) and both verified by the owed live checks.
+    expect(EDIT_RATES[MOONDREAM_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.0025, read: '2026-10-01', source: 'https://replicate.com/lucataco/moondream2', confidence: 'verified' })
+    expect(EDIT_RATES[FLUX_DEV_LORA_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.04, confidence: 'verified' })
     expect(EDIT_RATES[NANO_BANANA_2_FAL_EDIT]).toMatchObject({ unit: 'by_resolution', byTier: { '0.5K': 0.06, '1K': 0.08, '2K': 0.12, '4K': 0.16 }, confidence: 'verified' })
     const c = restyleLoraCalls(at('1K'))
     expect([c.moondream.times, c.stylize.times, c.nanoBanana.times]).toEqual([5, 1, 3])
     expect(c.nanoBanana.call.fallbacks!.map(f => f.endpoint)).toEqual(['fal-ai/nano-banana-pro/edit', 'google/nano-banana-2'])
     // The steps are editSteps' (one list of calls).
     expect(editSteps(RESTYLE_LORA_CLASS, at('2K'))!.map(s => [s.call.endpoint, s.times])).toEqual([[MOONDREAM_SLUG, 5], [FLUX_DEV_LORA_SLUG, 1], [NANO_BANANA_2_FAL_EDIT, 3]])
-    expect([paidCallUsd(c.moondream.call), paidCallUsd(c.stylize.call), paidCallUsd(c.nanoBanana.call)]).toEqual([0.001, 0.04, 0.08])
+    expect([paidCallUsd(c.moondream.call), paidCallUsd(c.stylize.call), paidCallUsd(c.nanoBanana.call)]).toEqual([0.0025, 0.04, 0.08])
     expect(paidCallUsd(restyleLoraCalls(at('4K')).nanoBanana.call)).toBe(0.2)
   })
 
@@ -693,7 +694,7 @@ describe('prices (ruling (a))', () => {
       card.usd = 0.002
       expect(sweep()).toEqual(now)
     }
-    finally { card.usd = 0.001 }
+    finally { card.usd = 0.0025 }
     expect(now).toEqual([61, 67, 103, 103, 1, 1])
   })
 
@@ -750,7 +751,7 @@ describe('every paid class shows the dollars its credits came from (fix round 1:
     expect(priceNode('SplitPhotoLayersNode', { image: L, background_fill: 'LaMa (fast)' })).toEqual({ usd: 0.01, credits: 2 })
     expect(creditsForUsd((priceNode(RESTYLE_LORA_CLASS, { resolution: '1K' }) as { usd: number }).usd)).toBe(61)
     // One call, or calls that mark up alike: the summed basis, as before.
-    expect(priceNode('DescribeImageNode', { model: 'Moondream 2', image: L, prompt: 'hi' })).toEqual({ usd: 0.001, credits: 1 })
+    expect(priceNode('DescribeImageNode', { model: 'Moondream 2', image: L, prompt: 'hi' })).toEqual({ usd: 0.0025, credits: 1 })
     // The inverse holds for every credit figure.
     for (let c = 1; c <= 20_000; c++) if (creditsForUsd(shownUsd(1e9, c)) !== c) throw new Error(`shownUsd breaks at ${c}`)
   })

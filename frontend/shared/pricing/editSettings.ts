@@ -47,7 +47,7 @@
 import { pyFloatOf } from '../runner/pyText'
 import { NO_FAMILIES, type RunnerFamily } from '../runner/families'
 import { classUpgradeOn } from '../runner/eligibility'
-import { EASEL_FACE_SWAP_APP } from '../runner/faceSwap'
+import { FAL_FACE_SWAP_APP } from '../runner/faceSwap'
 import type { EditCall, EditStep } from './editRates'
 import { effectiveImageSettings } from './imageSettings'
 
@@ -299,8 +299,8 @@ const FIXED: Record<string, (inputs: NodeInputs) => EditCall> = {
   PoseMannequin: nanoAction,
   RotateCameraNode: () => call('qwen/qwen-image-edit-plus'),
   ProductShotNode: () => call('catacolabs/sdxl-ad-inpaint'),
-  // Face swap on Easel (family face-swap): one flat price a picture.
-  FaceSwap: () => call(EASEL_FACE_SWAP_APP),
+  // Face swap on fal's face swap (family face-swap, LC1): one flat price a picture.
+  FaceSwap: () => call(FAL_FACE_SWAP_APP),
 }
 
 // ── Upscale and Enhance detail (ComfyUI path, nodes_replicate.py) ─────────

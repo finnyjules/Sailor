@@ -1,0 +1,173 @@
+{
+  "endpoint": "fal-ai/face-swap",
+  "fetchedAt": "2026-10-02",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/face-swap",
+    "pricing": "https://api.fal.ai/v1/models/pricing?endpoint_id=fal-ai/face-swap"
+  },
+  "input": {
+    "$ref": "#/components/schemas/FaceSwapInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/FaceSwapOutput"
+  },
+  "components": {
+    "schemas": {
+      "FaceSwapInput": {
+        "properties": {
+          "base_image_url": {
+            "description": "\n            The URL to the base image/gif/video where you want to perform the face swap.\n        ",
+            "type": "string",
+            "examples": [
+              "https://storage.googleapis.com/falserverless/model_tests/face_swap/tony.jpg"
+            ],
+            "title": "Base Image Url"
+          },
+          "swap_image_url": {
+            "description": "\n            The URL to the image/gif/video containing the face that will be used for the face swap.\n        ",
+            "type": "string",
+            "examples": [
+              "https://storage.googleapis.com/falserverless/model_tests/face_swap/elon.jpg"
+            ],
+            "title": "Swap Image Url"
+          }
+        },
+        "type": "object",
+        "x-fal-order-properties": [
+          "base_image_url",
+          "swap_image_url"
+        ],
+        "required": [
+          "base_image_url",
+          "swap_image_url"
+        ],
+        "title": "FaceSwapInput"
+      },
+      "FaceSwapOutput": {
+        "properties": {
+          "image": {
+            "examples": [
+              {
+                "width": 1200,
+                "height": 674,
+                "content_type": "image/jpeg",
+                "url": "https://storage.googleapis.com/falserverless/model_tests/face_swap/result.jpeg",
+                "file_size": 120174,
+                "file_name": "de28e99e30754e889cbdf749925e35a0.jpg"
+              }
+            ],
+            "$ref": "#/components/schemas/Image",
+            "description": "\n            The image information of the face-swapped image.\n            If no face is found in either the 'base_image' or 'swap_image', the\n            'base_image' is returned as the result.\n        "
+          }
+        },
+        "type": "object",
+        "x-fal-order-properties": [
+          "image"
+        ],
+        "required": [
+          "image"
+        ],
+        "title": "FaceSwapOutput"
+      },
+      "Image": {
+        "title": "Image",
+        "properties": {
+          "width": {
+            "description": "The width of the image in pixels.",
+            "examples": [
+              1024
+            ],
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "description": "The height of the image in pixels.",
+            "examples": [
+              1024
+            ],
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "content_type": {
+            "description": "The mime type of the file.",
+            "examples": [
+              "image/png"
+            ],
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "url": {
+            "description": "The URL where the file can be downloaded from.",
+            "type": "string",
+            "title": "Url"
+          },
+          "file_size": {
+            "description": "The size of the file in bytes.",
+            "examples": [
+              4404019
+            ],
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "file_name": {
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          }
+        },
+        "type": "object",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ],
+        "required": [
+          "url"
+        ],
+        "description": "Represents an image file."
+      }
+    }
+  },
+  "pricingText": "fal pricing API (read 2026-10-01; the app is hidden from fal's gallery and has no llms.txt): {\"endpoint_id\": \"fal-ai/face-swap\", \"unit_price\": 0.001, \"unit\": \"images\", \"currency\": \"USD\"}"
+}

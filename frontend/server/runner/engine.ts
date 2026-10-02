@@ -1289,8 +1289,9 @@ export function createEngine(deps: EngineDeps) {
       // above it; inside it, charged at the real size (never above the hold).
       const held = resuming ? undefined : take.measured?.[id]
       if (held?.pixels !== undefined) {
+        // An unread size: hosted is refused above already; locally (B7) not a refusal — the charge stays capped at the hold below.
         const over = held.predicted
-          ? (inputPixels ?? Number.POSITIVE_INFINITY) > held.pixels
+          ? (inputPixels ?? (deps.hosted() ? Number.POSITIVE_INFINITY : 0)) > held.pixels
           : nodeCredits(take.prompt[id]!, inputPixels, families) > nodeCredits(take.prompt[id]!, held.pixels, families)
         if (over) throw new Error(held.predicted ? pictureOverMarginWords(take.prompt[id]!.class_type) : pictureChangedWords(take.prompt[id]!.class_type))
       }
@@ -2577,15 +2578,26 @@ export function createEngine(deps: EngineDeps) {
         }
       }
     }
-    // Upscale and Enhance detail (R3.5), hosted: the size of each one's picture,
-    // by the hosted gate's own walk (repairSizes.ts), before anything is held.
-    // One the price can't cover is refused now; the others' hold is priced on
-    // it, and their turn refuses a picture that has grown since.
-    if (deps.hosted()) {
+    // Upscale and Enhance detail (R3.5): the size of each one's picture, by the
+    // hosted gate's own walk (repairSizes.ts), before anything is held. Hosted,
+    // one the price can't cover is refused now; the others' hold is priced on
+    // it, and their turn refuses a picture that has grown since. Locally too
+    // (LC1, B7: a free header read; without it a local quote priced the 18.9 MP
+    // input cap, 4–32× too high), but nothing is refused here: the node's turn
+    // keeps its own checks.
+    {
+      const hosted = deps.hosted()
       for (const [index, p] of prompts.entries()) {
-        const sized = await startPictureSizes(p, f => files.read(f))
-        if (sized.problem) throw refuse(sized.problem.message, 400, { nodeId: sized.problem.nodeId, classType: sized.problem.classType })
+        let sized: Awaited<ReturnType<typeof startPictureSizes>>
+        try { sized = await startPictureSizes(p, f => files.read(f)) }
+        catch (e) {
+          if (hosted) throw e
+          continue // Locally a walk that fails leaves the cap's price, as before.
+        }
+        if (sized.problem && hosted) throw refuse(sized.problem.message, 400, { nodeId: sized.problem.nodeId, classType: sized.problem.classType })
         for (const [nodeId, pixels] of Object.entries(sized.pixels)) {
+          // Locally, a node the walk found a problem with keeps the cap's price.
+          if (!hosted && sized.problem?.nodeId === nodeId) continue
           // A predicted size (not read from a file) is held with a margin (fix round 1).
           measured[index]![nodeId] = sized.predicted.includes(nodeId)
             ? { seconds: {}, sha: {}, pixels: predictedHoldPixels(pixels), predicted: true }

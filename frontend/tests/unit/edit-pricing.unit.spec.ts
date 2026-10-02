@@ -126,19 +126,25 @@ const only = (ct: string, inputs: Record<string, unknown>): EditCall => {
 
 /** Billed by GPU time: no published per-unit figure. */
 // R7.11: Real-ESRGAN too (its live check measured GPU-time billing over the old $0.002 a picture).
-const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'lucataco/moondream2', 'philz1337x/clarity-upscaler']
+// LC1: flux-dev-lora and Moondream 2 verified by the owed live checks (2026-10-01).
+const ESTIMATES = ['catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'philz1337x/clarity-upscaler']
+/** Cards re-read or re-carded on 2026-10-01: Real-ESRGAN (R7.11), and LC1's (Moondream 2, flux-dev-lora, fal's face swap). */
+const READ_10_01 = ['nightmareai/real-esrgan', 'lucataco/moondream2', 'black-forest-labs/flux-dev-lora', 'fal-ai/face-swap']
 
 describe('edit rate cards', () => {
   it('every card carries a source, the date read and a confidence; only GPU-time models are estimates', () => {
     for (const [endpoint, r] of Object.entries(EDIT_RATES)) {
       // fal: the llms.txt; a token-billed card (GPT Image 2.5, Task F2) its model page, where the per-size table is.
+      // LC1: fal's face swap is hidden from fal's gallery (no llms.txt price): fal's pricing API.
       expect(r.source, endpoint).toMatch(r.unit === 'by_quality'
         ? /^https:\/\/(fal\.ai\/models\/.+|replicate\.com\/.+)$/
-        : /^https:\/\/(fal\.ai\/models\/.+\/llms\.txt|replicate\.com\/.+)$/)
+        : endpoint === 'fal-ai/face-swap'
+          ? /^https:\/\/api\.fal\.ai\/v1\/models\/pricing\?endpoint_id=fal-ai\/face-swap$/
+          : /^https:\/\/(fal\.ai\/models\/.+\/llms\.txt|replicate\.com\/.+)$/)
       expect(r.source, endpoint).toContain(endpoint)
       // Moondream re-read with R3.14 fix round 1 (its page's price had halved).
       // Real-ESRGAN re-carded from R7.11's live check (2026-10-01).
-      expect(r.read, endpoint).toBe(endpoint === 'lucataco/moondream2' ? '2026-09-28' : endpoint === 'nightmareai/real-esrgan' ? '2026-10-01' : '2026-09-24')
+      expect(r.read, endpoint).toBe(READ_10_01.includes(endpoint) ? '2026-10-01' : '2026-09-24')
       expect(r.service, endpoint).toBe(r.source.includes('fal.ai') ? 'fal' : 'replicate')
     }
     const est = Object.entries(EDIT_RATES).filter(([, r]) => r.confidence === 'estimate').map(([k]) => k).sort()

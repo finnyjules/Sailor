@@ -17,9 +17,9 @@ import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import { pyIsDigit, pySplitlines } from '#shared/runner/pyText'
-import { parsePyJson } from '#shared/runner/pyJson'
+import { parsePyJson, pyJsonDumps, type PyJson } from '#shared/runner/pyJson'
 import {
-  CHAT_LLM_MODELS, REASON_MODELS, REWRITE_MODELS, SUMMARIZE_MODELS, rewriteSystem,
+  CHAT_LLM_MODELS, CLAUDE_MIN_MAX_TOKENS, REASON_MODELS, REWRITE_MODELS, SUMMARIZE_MODELS, rewriteSystem,
   CHAT_NEEDS_QUESTION, IMPROVE_NEEDS_IDEA, LLM_BUILDERS, LLM_ENDPOINTS, LLM_TEXT_CLASSES,
   REWRITE_TONES, TONE_GUIDANCE, brainstormCount, brainstormLines, llmRequestProblem, llmText, type LlmTextClass,
 } from '#shared/runner/llm'
@@ -37,7 +37,37 @@ const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid
   cases: PaidCase[]
   isdigit_ranges: [number, number][]
 }
-const CASES = FIXTURE.cases
+/**
+ * LC1 (the owed live checks, 2026-10-01): the runner's two deliberate
+ * deviations from Python's request, applied to each case's recorded call —
+ *  - B2: Replicate's Claude refuses a `max_tokens` under 1024 (a 422), so a
+ *    Claude call sends at least CLAUDE_MIN_MAX_TOKENS;
+ *  - B3: DeepSeek R1's schema has no `system_prompt` or
+ *    `max_completion_tokens` (Python's OpenAI shape failed: Novita's 400), so
+ *    R1 is sent `{prompt: system + "\n\n" + prompt, temperature, max_tokens}`.
+ * Everything else is Python's request byte for byte.
+ */
+function runnerCall(call: PaidCase['calls'][number]): PaidCase['calls'][number] {
+  const py = parsePyJson(call.payload_json!) as { obj: [string, PyJson][] }
+  const get = (k: string) => py.obj.find(([n]) => n === k)?.[1]
+  if (call.endpoint.startsWith('anthropic/')) {
+    const max = call.payload.max_tokens as number
+    if (max >= CLAUDE_MIN_MAX_TOKENS) return call
+    const obj = py.obj.map(([k, v]) => [k, k === 'max_tokens' ? { int: String(CLAUDE_MIN_MAX_TOKENS) } : v] as [string, PyJson])
+    return { ...call, payload: { ...call.payload, max_tokens: CLAUDE_MIN_MAX_TOKENS }, payload_json: pyJsonDumps({ obj }) }
+  }
+  if (call.endpoint === 'deepseek-ai/deepseek-r1') {
+    const system = call.payload.system_prompt as string | undefined
+    const prompt = system ? `${system}\n\n${call.payload.prompt as string}` : call.payload.prompt as string
+    const payload = { prompt, temperature: call.payload.temperature, max_tokens: call.payload.max_completion_tokens }
+    // Keys sorted, as the fixture's json.dumps(sort_keys=True) writes them.
+    const obj: [string, PyJson][] = [['max_tokens', get('max_completion_tokens')!], ['prompt', prompt], ['temperature', get('temperature')!]]
+    return { ...call, payload, payload_json: pyJsonDumps({ obj }) }
+  }
+  return call
+}
+/** Each case as the runner is held to it: Python's, with LC1's deviations (runnerCall). */
+const CASES = FIXTURE.cases.map(c => ({ ...c, calls: c.calls.map(runnerCall) }))
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'llm-text'])
 const cls = (c: PaidCase) => c.class_type as LlmTextClass
@@ -263,12 +293,12 @@ const PUBLISHED: Record<string, { keys: string[]; min?: Record<string, number>; 
   },
   'deepseek-ai/deepseek-r1': { keys: ['top_p', 'prompt', 'max_tokens', 'temperature', 'presence_penalty', 'frequency_penalty'] },
 }
-/** What Python sends that the schema doesn't declare (reported for a ruling; Replicate drops unknown keys). */
+/** What Python sends that the schema doesn't declare (reported for a ruling; Replicate drops unknown keys). R1's own shape since LC1 (B3): none. */
 const UNDECLARED: Record<string, string[]> = {
   'openai/gpt-5': ['temperature'], 'openai/gpt-5-mini': ['temperature'], 'openai/gpt-5-nano': ['temperature'],
   'anthropic/claude-4.5-sonnet': ['temperature'], 'anthropic/claude-4.5-haiku': ['temperature'],
   'google/gemini-3-flash': [],
-  'deepseek-ai/deepseek-r1': ['max_completion_tokens', 'system_prompt'],
+  'deepseek-ai/deepseek-r1': [],
 }
 
 describe('the requests against Replicate\'s published inputs', () => {
@@ -281,21 +311,22 @@ describe('the requests against Replicate\'s published inputs', () => {
       const pub = PUBLISHED[b.slug]!
       for (const [k, v] of Object.entries(b.input)) {
         if (!pub.keys.includes(k)) (seen[b.slug] ??= new Set()).add(k)
-        // Ruling 3: a Claude limit under the published 1024 is sent as Python sends it; the live check decides.
+        // LC1 (B2): a Claude limit under the published 1024 is sent as 1024 (the live check's 422 answered ruling 3).
         if (pub.min?.[k] !== undefined && (v as number) < pub.min[k]!) underMin.push(`${b.slug} ${k}=${v as number}`)
         if (pub.max?.[k] !== undefined) expect(v as number, `${c.name} ${k}`).toBeLessThanOrEqual(pub.max[k]!)
       }
     }
     for (const slug of LLM_ENDPOINTS) expect([...(seen[slug] ?? [])].sort(), slug).toEqual([...UNDECLARED[slug]!].sort())
-    // Only Claude's max_tokens: Summarize's 400 on Haiku, and Chat's small limits on Sonnet.
-    expect([...new Set(underMin)].sort()).toEqual(['anthropic/claude-4.5-haiku max_tokens=400', 'anthropic/claude-4.5-sonnet max_tokens=1'])
+    // Nothing under a published minimum any more (LC1, B2).
+    expect([...new Set(underMin)].sort()).toEqual([])
   })
 
-  it('Summarize on Claude 4.5 Haiku and Chat on Claude under 1024 are sent as Python sends them (ruling 3)', async () => {
+  it('Summarize on Claude 4.5 Haiku and Chat on Claude under 1024 are sent at 1024 (LC1, B2: Python\'s 400 and 64 got a 422)', async () => {
     const haiku = CASES.find(c => c.name === 'summarize · Claude 4.5 Haiku · one line')!
     expect(llmRequestProblem(haiku.class_type, haiku.widgets)).toBeNull()
     const plan = await planOf(haiku.class_type, haiku.widgets) as Extract<NodePlan, { kind: 'provider' }>
-    expect(plan.payload.max_tokens).toBe(400)
+    expect(plan.payload.max_tokens).toBe(1024)
+    expect(FIXTURE.cases.find(c => c.name === haiku.name)!.calls[0]!.payload.max_tokens).toBe(400)
     expect(plan.payload).toEqual(haiku.calls[0]!.payload)
     const sonnet = CASES.find(c => c.name.startsWith('chat · Claude 4.5 Sonnet · system off · t1.0 · max 1'))!
     expect(requestProblems({ n: { class_type: sonnet.class_type, inputs: sonnet.widgets } }, { runner: true })).toEqual([])

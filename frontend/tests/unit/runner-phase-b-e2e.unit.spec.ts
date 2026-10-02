@@ -527,13 +527,14 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'luma/ray-3.2',
     body: { prompt: 'a fox runs through snow', duration: 5, resolution: '720p', aspect_ratio: '16:9', loop: false },
   },
-  // Face swap on Easel's advanced face swap (family face-swap), no backup: the
-  // whole FaceSwap node runs only in the runner (there is no ComfyUI path any
-  // more — InsightFace / inswapper was removed, non-commercial licence). The
-  // body is written from its saved schema (runner-face-swap.unit.spec.ts).
+  // Face swap on fal's face swap (family face-swap; LC1: Easel's answered 503
+  // three times), no backup: the whole FaceSwap node runs only in the runner
+  // (there is no ComfyUI path any more — InsightFace / inswapper was removed,
+  // non-commercial licence). The body is written from its saved schema
+  // (runner-face-swap.unit.spec.ts).
   {
     family: 'face-swap',
-    label: 'FaceSwap on Easel',
+    label: 'FaceSwap on fal',
     prompt: {
       11: imageCard('face.png'),
       12: imageCard('target.png'),
@@ -542,14 +543,8 @@ const FLOWS: FamilyFlow[] = [
     },
     files: ['face.png', 'target.png'],
     provider: 'fal',
-    endpoint: 'easel-ai/advanced-face-swap',
-    body: {
-      face_image_0: { url: storageUrl('face') },
-      gender_0: 'female',
-      target_image: { url: storageUrl('target') },
-      workflow_type: 'target_hair',
-      upscale: true,
-    },
+    endpoint: 'fal-ai/face-swap',
+    body: { base_image_url: storageUrl('target'), swap_image_url: storageUrl('face') },
   },
   // Fix faces on fal's Topaz image upscale with face enhancement (family
   // fix-faces), no backup: the whole FixFacesNode runs only in the runner

@@ -1,6 +1,9 @@
 /**
  * Task 2 (non-commercial face models replacement): Face swap on Easel, family
  * `face-swap` (server/runner/generators/easelFaceSwap.ts): fal, no backup.
+ * LC1 (2026-10-01, ruling (b)): Easel answered 503 on three live checks, so
+ * the family now calls fal's face swap (falFaceSwap.ts, $0.001 a picture);
+ * Easel's request stays written and tested as the way back.
  *
  * FaceSwapNode moves the whole node class (eligibility.ts RunnerNodeRule.upgrade),
  * the same pattern as Fix faces on Topaz (Task 1): while the family is on, every
@@ -18,7 +21,7 @@ import { RUNNER_NODE_RULES, classUpgradeOn, runnerTakesNode } from '#shared/runn
 import { EDIT_RATES, editMaxUsd } from '#shared/pricing/editRates'
 import { editCalls } from '#shared/pricing/editSettings'
 import {
-  FACE_SWAP_NEEDS_GENDER, FACE_SWAP_ONE_PICTURE, faceSwapGender, faceSwapWorkflow, EASEL_FACE_SWAP_APP,
+  FACE_SWAP_NEEDS_GENDER, FACE_SWAP_ONE_PICTURE, faceSwapGender, faceSwapWorkflow, EASEL_FACE_SWAP_APP, FAL_FACE_SWAP_APP,
   FACE_SWAP_GENDER_OPTIONS, FACE_SWAP_GENDER_DEFAULT, FACE_SWAP_HAIR_OPTIONS, FACE_SWAP_HAIR_DEFAULT,
 } from '#shared/runner/faceSwap'
 import { easelFaceSwap } from '~~/server/runner/generators/easelFaceSwap'
@@ -77,10 +80,11 @@ describe('Face swap on Easel (face-swap)', () => {
     expect(() => easelFaceSwap({ face: 'a', target: 'b', inputs: {} })).toThrow(FACE_SWAP_NEEDS_GENDER)
   })
 
-  it('is priced flat at $0.05 at cost', () => {
+  it('is priced flat at fal\'s face swap\'s $0.001 (LC1); Easel\'s $0.05 card is kept for the way back', () => {
     const c = editCalls('FaceSwap', { gender: 'Male' })
     if ('refused' in c) throw new Error(c.refused)
-    expect(c.calls[0]!.endpoint).toBe(EASEL_FACE_SWAP_APP)
+    expect(c.calls[0]!.endpoint).toBe(FAL_FACE_SWAP_APP)
+    expect(EDIT_RATES[FAL_FACE_SWAP_APP]).toMatchObject({ unit: 'per_image', usd: 0.001, service: 'fal' })
     expect(EDIT_RATES[EASEL_FACE_SWAP_APP]).toMatchObject({ unit: 'per_image', usd: 0.05, service: 'fal' })
     expect(editMaxUsd(c.calls[0]!)).toBeGreaterThan(0)
   })
@@ -99,19 +103,13 @@ describe('Face swap on Easel (face-swap)', () => {
     expect(runnerTakesNode(prompt, '3', new Set(['cards']))).toBe(false)
   })
 
-  it('refuses a missing gender before the hold', () => {
+  it('no longer refuses a missing gender (LC1: fal\'s face swap takes none; Easel needed one)', () => {
     const prompt = {
       1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
       2: { class_type: 'LoadImage', inputs: { image: 'b.png' } },
       3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: FACE_SWAP_GENDER_DEFAULT, keep_hair_from: 'The picture' } },
     }
-    const problems = requestProblems(prompt, { runner: true })
-    expect(problems).toContainEqual({ nodeId: '3', classType: 'FaceSwap', input: 'gender', message: FACE_SWAP_NEEDS_GENDER })
-    const linked = {
-      ...prompt,
-      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: ['1', 0], keep_hair_from: 'The picture' } },
-    }
-    expect(requestProblems(linked, { runner: true })).toEqual([])
+    expect(requestProblems(prompt, { runner: true })).toEqual([])
   })
 })
 
@@ -169,14 +167,9 @@ describe('the runner engine', () => {
       await k.engine.settled(runId)
       expect(k.replicate.client.submit).not.toHaveBeenCalled()
       const submitted = k.fal.submitted()
-      expect(submitted.map(r => r.endpoint)).toEqual([EASEL_FACE_SWAP_APP])
-      expect(submitted[0]!.payload).toEqual({
-        face_image_0: { url: 'https://fal.storage/face.png' },
-        gender_0: 'female',
-        target_image: { url: 'https://fal.storage/target.png' },
-        workflow_type: 'user_hair',
-        upscale: true,
-      })
+      expect(submitted.map(r => r.endpoint)).toEqual([FAL_FACE_SWAP_APP])
+      // LC1: fal's face swap takes the two pictures only (no gender, no hair choice).
+      expect(submitted[0]!.payload).toEqual({ base_image_url: 'https://fal.storage/target.png', swap_image_url: 'https://fal.storage/face.png' })
       expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['settled'])
       expect((await k.store.get(runId))!.status).toBe('done')
     })

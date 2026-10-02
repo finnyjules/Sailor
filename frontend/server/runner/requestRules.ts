@@ -186,7 +186,6 @@ import { gen3dComfyPathProblem, gen3dRequestProblem } from '#shared/runner/gen3d
 import { imageExtrasRequestProblem } from '#shared/runner/imageExtras'
 import { hostedLoraProblem, loraRequestProblem } from '#shared/runner/lora'
 import { isLlmTextClass } from './generators/llm'
-import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -1020,11 +1019,8 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const p = pixverseSwapNodeProblem(prompt, nodeId)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
-    // Face swap on Easel (family face-swap), on a runner run: Easel requires a
-    // gender (no default), read before anything is held.
-    else if (ct === 'FaceSwap' && opts.runner) {
-      if (!isLink(inputs.gender) && faceSwapGender(inputs) == null) out.push({ nodeId, classType: ct, input: 'gender', message: FACE_SWAP_NEEDS_GENDER })
-    }
+    // (Face swap: Easel required a gender, refused here when not picked. fal's face swap,
+    // which the family calls since LC1, takes none, so nothing is refused for it.)
     // A shot-directed Film a shot on a runner run (Task 4: runnerTakesNode takes no other Film a
     // shot, and this gate runs only on prompts the runner takes). The runner plans it exactly as
     // Generate a video (executors.ts planVideoGeneration), with `image_url` its first frame, so it

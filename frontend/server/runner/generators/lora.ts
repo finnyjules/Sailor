@@ -249,11 +249,32 @@ export function multiLoraPrompt(inputs: Record<string, unknown>): string {
   return style ? pyStrip(`${style} ${prompt}`) : prompt
 }
 
+const HF_PREFIX_RE = /^(?:https?:\/\/)?(?:www\.)?huggingface\.co\//i
+const WEIGHTS_FILE_RE = /\.(?:safetensors|tar)(?:[?#].*)?$/i
+
+/**
+ * A Hugging Face reference as lucataco/flux-dev-multi-lora takes it: a bare
+ * `owner/repo` (owed live checks 2026-10-01, B5: it refused
+ * `huggingface.co/XLabs-AI/flux-RealismLora`, wanting "a HuggingFace path, a
+ * Replicate model.tar, or a URL to a .safetensors file"). `huggingface.co/` and
+ * `https://huggingface.co/` (or `http://`, `www.`) are stripped, the path after
+ * them kept as it is; a link to a `.safetensors` or `.tar` file, and anything not
+ * on huggingface.co, is kept whole.
+ * Python sends the prefix (nodes_replicate.py:895, `_autodetect_huggingface`).
+ */
+export function multiLoraHfRef(ref: string): string {
+  if (WEIGHTS_FILE_RE.test(ref)) return ref
+  const m = HF_PREFIX_RE.exec(ref)
+  const rest = m ? ref.slice(m[0].length) : ''
+  return rest ? rest : ref
+}
+
 /**
  * Each slot's LoRA as Python resolves it (:895-907): its link (as the runner
  * sends it, `runnerLoraLink`: a pasted http(s) link unstripped, fix round 1;
  * otherwise normalised and looked up, each `owner/model` once per run), else
- * its picked LoRA's weights.
+ * its picked LoRA's weights; a Hugging Face reference then as the model takes
+ * it, bare `owner/repo` (multiLoraHfRef, LC1 B5).
  */
 export async function multiLoraSlots(
   inputs: Record<string, unknown>, read: SidecarReader, o: { hosted: boolean }, cache: HuggingFaceLookups = new Map(),
@@ -264,7 +285,7 @@ export async function multiLoraSlots(
     const ref = link
       ? await autodetectHuggingface(runnerLoraLink(FLUX_MULTI_LORA_CLASS, link), o, cache)
       : resolveLoraWeightsUrl(await read(text(inputs, s.name, '[None]')))
-    resolved.push([ref, float(inputs, s.scale, s.def)] as const)
+    resolved.push([ref ? multiLoraHfRef(ref) : ref, float(inputs, s.scale, s.def)] as const)
   }
   return multiloraCollect(resolved)
 }

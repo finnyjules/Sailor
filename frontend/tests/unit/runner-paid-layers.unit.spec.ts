@@ -368,7 +368,8 @@ describe('what comes back', () => {
 describe('prices (ruling (a))', () => {
   it('a card per endpoint, read from its page; none duplicates another card', () => {
     expect(PAID_RATES['ideogram-ai/layerize']).toEqual({
-      unit: 'per_call', usd: 0.09, service: 'replicate', source: 'https://replicate.com/ideogram-ai/layerize', read: '2026-09-27', confidence: 'estimate',
+      // LC1: the live check's image_output_count 1 (the JSON isn't billed): verified.
+      unit: 'per_call', usd: 0.09, service: 'replicate', source: 'https://replicate.com/ideogram-ai/layerize', read: '2026-10-01', confidence: 'verified',
     })
     expect(PAID_RATES[SEEDREAM]).toEqual({
       unit: 'per_output_image', perImage: 0.03375, large: { fromPixels: 1536 * 1536, perImage: 0.0675 },
