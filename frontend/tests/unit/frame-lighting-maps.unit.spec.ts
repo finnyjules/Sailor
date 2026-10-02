@@ -329,6 +329,26 @@ describe('stampLightingMaps — self-lit parts (stage 3)', () => {
     expect([r.at(0).v, r.at(1).v, r.at(2).v]).toEqual([0, 255, 0])
   })
 
+  it('a varnish-only coat: lit away from the coat\'s shine, unlit where the coat is opaque (final review I-1)', () => {
+    // A coat layer over columns 0..3 whose recorded coat is nearly clear (a flat area, alpha 0.06)
+    // over columns 0..1 and opaque shine over column 2.
+    const base = stamp(rectLayer('coat'), 0, 3)
+    const coat: LightingStamp = {
+      ...base, sig: `${base.sig}|sl`,
+      // One draw of the recorder, as `selfLitStamp` does (destination-in is unbounded).
+      selfLit: (t) => {
+        const rec = new FakeCanvas(W, H)
+        ;[0.06, 0.06, 1, 0].forEach((a, i) => { Object.assign(rec.at(i), { v: 255, g: 255, b: 255, a }) })
+        t.drawImage(rec as unknown as HTMLCanvasElement, 0, 0)
+      },
+    }
+    const r = raster(stampLightingMaps([coat], W, H, W, H, opts)!.lit)
+    expect(r.at(0).v).toBeGreaterThan(230)
+    expect(r.at(1).v).toBeGreaterThan(230)
+    expect(r.at(2).v).toBe(0)
+    expect(r.at(3).v).toBe(255)
+  })
+
   it('leaves the lift map alone', () => {
     const a = rectLayer('a', { lift: 0.04 })
     const plain = stampLightingMaps([stamp(a, 0, 3)], W, H, W, H, opts)!

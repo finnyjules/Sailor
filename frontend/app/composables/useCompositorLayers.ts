@@ -311,8 +311,8 @@ import { expandRecipe } from '~/lib/compositor/recipes'
 import { applyFinish, finishRegionRect, METALS, type DeviceRect } from '~/lib/compositor/finishPass'
 // Only from finishLights.ts: the lean web-export bundle stubs that one module.
 import {
-  applyFinishLit, armSelfLit, clearSelfLit, currentFinishLights, enterFinishScope, eraseSelfLit, leaveFinishScope,
-  lightFinishes, recordSelfLit, selfLitStamp, spotUvLitOnce, takeSelfLit,
+  applyFinishLit, armSelfLit, clearSelfLit, currentFinishLights, enterFinishScope, eraseSelfLit, eraseSelfLitUnder,
+  leaveFinishScope, lightFinishes, recordSelfLit, selfLitStamp, spotUvCoatSelfLit, spotUvLitOnce, takeSelfLit,
 } from '~/lib/compositor/finishLights'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
@@ -3417,6 +3417,8 @@ function paintLayer(
       off.width = Math.max(1, dev.width)
       off.height = Math.max(1, dev.height)
       const octx = off.getContext('2d')
+      // A varnish-only Spot UV coat lit by the Frame's lights: recorded as self-lit at the stamp.
+      let coatSelfLit = false
       if (octx) {
         octx.setTransform(t)
         // Frame base for shader fills = the device transform, captured BEFORE the
@@ -3500,12 +3502,20 @@ function paintLayer(
               // says why). Needs its own case: applyPasses silently skips unknown kinds.
               // In a Frame lit by light layers it is lit by those (and stamps unlit, so the
               // lighting pass never lights it again); if that pass cannot run, the hidden light.
-              case 'spot_uv':
+              // A varnish-only coat replaces the layer's pixels: the foil under it is erased from
+              // the self-lit recorder, and the coat itself is recorded at the stamp below, so only
+              // the coat reads unlit and the picture under it is lit by the pass.
+              case 'spot_uv': {
                 const fl = currentFinishLights()
-                if (!(fl && applyFinishLit(off, e.type, e as unknown as SpotUvEffect, fl.lights, fl.lighting, s))) {
+                const coat = !!fl && !!(e as unknown as SpotUvEffect).varnishOnly
+                if (coat) eraseSelfLitUnder(off)
+                if (fl && applyFinishLit(off, e.type, e as unknown as SpotUvEffect, fl.lights, fl.lighting, s)) {
+                  if (coat) coatSelfLit = true
+                } else {
                   applyFinish(off, e.type, e as unknown as SpotUvEffect, _frameLight, s)
                 }
                 break
+              }
               default:
                 applyPasses(off, [e], { W, scale: s })
             }
@@ -3534,6 +3544,7 @@ function paintLayer(
         }
         ctx.drawImage(off, 0, 0)
         ctx.restore()
+        if (coatSelfLit) recordSelfLit(off, 0, 0, off.width, off.height)
         continue
       }
     }
@@ -7162,7 +7173,8 @@ export function paintLayerStack(
       // Relight's Compare hold shows the ORIGINAL photo: no Relight on its paint (above) and,
       // here, not lit by the Frame's lights either — it stamps as an unlit layer while held.
       if (relightBypassed(layer.id)) layer = { ...layer, lit: false } as LocalLayer
-      // A Spot UV layer was lit by its own finish shader: it stamps unlit, so it is lit once.
+      // A Spot UV layer was lit by its own finish shader: it stamps unlit, so it is lit once
+      // (a varnish-only coat stamps lit; its coat alone is punched out through `selfLit`).
       if (spotUvLitOnce(layer)) {
         layer = { ...layer, lit: false } as LocalLayer
       }
@@ -7225,9 +7237,10 @@ export function paintLayerStack(
       }
 
       const layer = item.layer
-      // A foil layer in a Frame lit by its light layers records its regions' alpha while it
-      // draws (the canvas itself is made by the first region); every other layer records none.
-      armSelfLit(currentFinishLights() !== null && layerHasFoil(layer))
+      // A foil layer (or a varnish-only Spot UV coat) in a Frame lit by its light layers records
+      // its regions' alpha while it draws (the canvas, a pooled one, is taken by the first
+      // region); every other layer records none.
+      armSelfLit(currentFinishLights() !== null && (layerHasFoil(layer) || spotUvCoatSelfLit(layer)))
       // Nested-group cascade (Task 1): absent `groups` ⇒ gc stays null ⇒ opacityMul
       // defaults to 1 everywhere below, byte-identical to pre-cascade behavior.
       const gc = groups ? resolveGroupCascade(layer.groupId, groups) : null

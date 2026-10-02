@@ -148,7 +148,7 @@ import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib
 import { __lightingRuns, __lightingLastMs } from '~/lib/frame/lighting/lightingPass'
 import { __lightingMapStamps } from '~/lib/frame/lighting/maps'
 import { lightingDragging } from '~/lib/frame/lighting/drag'
-import { MAX_LIGHTS, type LightLayer, type LightType } from '~/lib/frame/lighting/settings'
+import { MAX_LIGHTS, visibleLights, type LightLayer, type LightType } from '~/lib/frame/lighting/settings'
 import { LIGHT_PLACEMENT } from '~/lib/frame/lighting/handles'
 import LightHandles from '~/components/vue-canvas/compositor/LightHandles.vue'
 import LightInspector from '~/components/vue-canvas/compositor/LightInspector.vue'
@@ -2444,7 +2444,7 @@ watch(() => [relightMounted.value, atDesign.value, relightFrameSize.value] as co
 
 /** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
  *  selected layer carries foil anywhere (a foil fill, text colour or outline paint). */
-const finishEffectSelected = computed(() => !hasLights.value && ((activeEffect.value?.type === 'spot_uv' && finishAvailable('spot_uv'))
+const finishEffectSelected = computed(() => !finishesFrameLit.value && ((activeEffect.value?.type === 'spot_uv' && finishAvailable('spot_uv'))
   || (!!selectedLocal.value && layerHasFoil(selectedLocal.value as LocalLayer) && finishAvailable('gold_foil'))))
 /** The light control rides the FILL picker (or text colour) when that is foil, so a layer whose
  *  fill and outline are both foil shows it once, not twice. */
@@ -2468,6 +2468,10 @@ const selectedIsLight = computed(() => (selectedLocal.value as LocalLayer | null
 const hasLights = computed(() => frameLightLayers.value.length > 0)
 /** Read only while a light exists: the pass (and its GL context) is never made for a Frame without one. */
 const lightingAvail = computed(() => (hasLights.value ? lightingAvailable() : true))
+/** Foil and Spot UV are lit by the Frame's lights exactly when the painter does it: a visible light
+ *  (group visibility included) and the lighting pass available. Otherwise the hidden light lights
+ *  them, so its presets and the amber handle show. */
+const finishesFrameLit = computed(() => visibleLights(localLayers.value as LocalLayer[], localGroups.value).length > 0 && lightingAvailable())
 const isLightRow = (row: any) => (row.kind === 'local' || row.kind === 'child') && row.layer?.kind === 'light'
 /** A light inspector write: `record` is true once per gesture (LightInspector decides). */
 function onLightEdit(id: string, patch: Partial<LightParams>, record: boolean) {
@@ -11813,7 +11817,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :model-value="(activeEffect as any).varnishOnly ?? false"
               @update:model-value="(v: boolean) => updateActiveEffect({ varnishOnly: v })" />
             <p class="text-[11px] text-white/40">Varnish only hides the layer's colours and leaves just the clear coat.</p>
-            <FinishLightControl :light="frameLight" :framelit="hasLights" @update="(l: FrameLight) => setFrameLight(l)" @select-light="selectFirstLight" />
+            <FinishLightControl :light="frameLight" :framelit="finishesFrameLit" @update="(l: FrameLight) => setFrameLight(l)" @select-light="selectFirstLight" />
           </div>
 
           <!-- Relight: a pinned GPU layer effect that relights the layer's own pixels from its
@@ -12204,7 +12208,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto" data-testid="stroke-inspector">
           <div>
             <div class="panel-label mb-1.5">Colour</div>
-            <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="activeStroke!.paint"
+            <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="activeStroke!.paint"
               @update:model-value="(v: any) => updateActiveStroke({ paint: v })" />
             <StrokeFollowRow class="mt-1.5"
               :follow="strokeFollowsOf(activeStroke!)" :fade="strokeFadeOf(activeStroke!)"
@@ -12642,12 +12646,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               <div class="space-y-3">
                 <div>
                   <div class="panel-label mb-1.5">Color</div>
-                  <FillControl allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).color"
+                  <FillControl allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).color"
                     @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
                 </div>
                 <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                   <div class="panel-label mb-1.5">Outline</div>
-                  <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).strokeColor"
+                  <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).strokeColor"
                     @update:model-value="(v: any) => setLocal(selectedLocal!.id, { strokeColor: v })" />
                   <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Outline width"
                     class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -12666,12 +12670,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -12714,12 +12718,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -12746,12 +12750,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -12824,12 +12828,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               </div>
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="hasLights" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :framelit="finishesFrameLit" @select-light="selectFirstLight" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
                   show-align :out-width="outWidth" :scale="(selectedLocal as any).scale || 1"

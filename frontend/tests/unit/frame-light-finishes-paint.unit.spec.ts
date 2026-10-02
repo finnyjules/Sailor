@@ -38,7 +38,9 @@ import {
   paintLayerStack, withFlatFoil, currentFinishLights, type StackItem, type LocalLayer,
 } from '~/composables/useCompositorLayers'
 import { applyFinish } from '~/lib/compositor/finishPass'
-import { applyFinishLit } from '~/lib/compositor/finishLights'
+import {
+  applyFinishLit, __resetSelfLitPool, enterFinishScope, leaveFinishScope, lightFinishes, armSelfLit, recordSelfLit, takeSelfLit,
+} from '~/lib/compositor/finishLights'
 import { newLightLayer, DEFAULT_LIGHTING } from '~/lib/frame/lighting/settings'
 import type { LightingStamp } from '~/lib/frame/lighting/maps'
 
@@ -113,6 +115,7 @@ function mkCanvas() {
 
 
 beforeEach(() => {
+  __resetSelfLitPool()   // pooled recorders keep their ink log across paints: each test starts fresh
   finish.lit = true
   finish.seen = []
   vi.mocked(applyFinish).mockClear()
@@ -232,9 +235,96 @@ describe('a foil region is lit once: punched out of the lit map', () => {
     const made = vi.fn()
     vi.stubGlobal('document', { createElement: (tag: string) => { made(tag); return tag === 'canvas' ? mkCanvas() : ({} as any) } })
     const count = (ls: LocalLayer[]) => { made.mockClear(); paint(ls); return made.mock.calls.length }
+    __resetSelfLitPool()
     count([rect('r', { fill: FOIL })])   // warm the shared foil scratch
     expect(count([rect('r', { fill: FOIL }), lamp()]) - count([rect('r', { fill: FOIL })])).toBe(1)
     expect(count([rect('p'), lamp()]) - count([rect('p')])).toBe(0)
+  })
+})
+
+describe('the recorder canvases are pooled (final review I-2)', () => {
+  it('two consecutive lit paints of a foil Frame reuse the recorder: the second makes no canvas the unlit paint does not', () => {
+    const made = vi.fn()
+    vi.stubGlobal('document', { createElement: (tag: string) => { made(tag); return tag === 'canvas' ? mkCanvas() : ({} as any) } })
+    const count = (ls: LocalLayer[]) => { made.mockClear(); paint(ls); return made.mock.calls.filter(c => c[0] === 'canvas').length }
+    const recorderOf = () => {
+      const t = stampsOf().find(x => x.layer?.id === 'r')!
+      const target = trackedCtx('map', 10, 10)
+      t.selfLit!(target)
+      return target.drawImage.mock.calls[0]![0]
+    }
+    __resetSelfLitPool()
+    const unlit = count([rect('r', { fill: FOIL })])
+    lightFrame.mockClear()
+    expect(count([rect('r', { fill: FOIL }), lamp()])).toBe(unlit + 1)
+    const first = recorderOf()
+    lightFrame.mockClear()
+    expect(count([rect('r', { fill: FOIL }), lamp()])).toBe(unlit)
+    const second = recorderOf()
+    expect(second).toBe(first)
+    // Reused clear: the second paint's ops start with a clearRect, then the one region.
+    const ops = (second as any).getContext()._ops as string[]
+    expect(ops.at(-1)).toBe('source-over:drawImage')
+    expect((second as any).getContext().clearRect).toHaveBeenCalled()
+  })
+
+  it('two foil layers in one paint take two canvases; a nested paint never takes one the enclosing paint holds', () => {
+    __resetSelfLitPool()
+    const main = trackedCtx('main', S, S)
+    const src = mkCanvas()
+    const outer = enterFinishScope()
+    try {
+      lightFinishes([lamp()], undefined, DEFAULT_LIGHTING, main, S, S, null)
+      armSelfLit(true); recordSelfLit(src, 0, 0, S, S)
+      const a = takeSelfLit()
+      armSelfLit(true); recordSelfLit(src, 0, 0, S, S)
+      const b = takeSelfLit()
+      expect(a).toBeTruthy(); expect(b).toBeTruthy(); expect(b).not.toBe(a)
+      const inner = enterFinishScope()
+      let c: unknown
+      try {
+        lightFinishes([lamp()], undefined, DEFAULT_LIGHTING, main, S, S, null)
+        armSelfLit(true); recordSelfLit(src, 0, 0, S, S)
+        c = takeSelfLit()
+      } finally { leaveFinishScope(inner) }
+      expect(c).toBeTruthy(); expect(c).not.toBe(a); expect(c).not.toBe(b)
+      // Back in the enclosing paint, its next layer takes the slot the nested paint used.
+      armSelfLit(true); recordSelfLit(src, 0, 0, S, S)
+      expect(takeSelfLit()).toBe(c)
+    } finally { leaveFinishScope(outer) }
+  })
+})
+
+describe('a varnish-only Spot UV coat is lit once without an unlit hole (final review I-1)', () => {
+  it('stamps lit, and its coat (the effect\'s output) is recorded as selfLit at its device position', () => {
+    paint([rect('r', { effects: [{ ...SPOT_UV, varnishOnly: true }] }), rect('p'), lamp()])
+    expect(vi.mocked(applyFinishLit).mock.calls.map(c => c[1])).toEqual(['spot_uv'])
+    const st = stampsOf()
+    const r = st.find(s => s.layer?.id === 'r')!
+    expect(r.layer!.lit).toBeUndefined()   // the picture under the coat is lit by the pass
+    expect(r.selfLit).toBeTypeOf('function')
+    expect(r.sig).toContain('|sl')
+    const off = vi.mocked(applyFinishLit).mock.calls[0]![0] as any
+    const target = trackedCtx('map', 10, 10)
+    r.selfLit!(target)
+    const rec = target.drawImage.mock.calls[0]![0] as any
+    expect([rec.width, rec.height]).toEqual([S, S])
+    expect(rec.getContext().drawImage).toHaveBeenCalledWith(off, 0, 0)
+    expect(st.find(s => s.layer?.id === 'p')!.selfLit ?? null).toBeNull()
+  })
+
+  it('a non-varnish Spot UV still stamps wholly unlit and records nothing', () => {
+    paint([rect('r', { effects: [SPOT_UV] }), lamp()])
+    const r = stampsOf().find(s => s.layer?.id === 'r')!
+    expect(r.layer!.lit).toBe(false)
+    expect(r.selfLit ?? null).toBeNull()
+  })
+
+  it('the coat cannot run lit ⇒ the hidden light, and nothing recorded', () => {
+    finish.lit = false
+    paint([rect('r', { effects: [{ ...SPOT_UV, varnishOnly: true }] }), lamp()])
+    expect(applyFinish).toHaveBeenCalledTimes(1)
+    expect(stampsOf().find(s => s.layer?.id === 'r')!.selfLit ?? null).toBeNull()
   })
 })
 

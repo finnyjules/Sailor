@@ -298,19 +298,43 @@ let _selfLitRecorder: SelfLitRec | null = null
 /** The painted canvas's device size, and the Frame's device rectangle on it (drawn back in Frame units). */
 type FrameDev = { w: number; h: number; x: number; y: number; fw: number; fh: number }
 let _dev: FrameDev | null = null
+/** Recorder canvases, reused across paints (a device-size canvas per foil layer per frame was the
+ *  stage's main per-frame cost while a light is dragged). A paint takes slots from `_poolNext` up,
+ *  in the order its layers first record; a nested paint starts above its enclosing paint's slots
+ *  (still in use: their stamps are drawn at the end of that paint) and hands them back on leave. */
+const _pool: HTMLCanvasElement[] = []
+let _poolNext = 0
 
 export function currentFinishLights(): FinishLights | null { return _finishLights }
 
-export type FinishScope = [FinishLights | null, SelfLitRec | null, FrameDev | null]
-/** Start a paint: returns the enclosing paint's state, which starts clean here. */
+export type FinishScope = [FinishLights | null, SelfLitRec | null, FrameDev | null, number]
+/** Start a paint: returns the enclosing paint's state, which starts clean here (the recorder
+ *  pool's next slot is kept, so a nested paint never reuses a canvas the enclosing one holds). */
 export function enterFinishScope(): FinishScope {
-  const prev: FinishScope = [_finishLights, _selfLitRecorder, _dev]
+  const prev: FinishScope = [_finishLights, _selfLitRecorder, _dev, _poolNext]
   _finishLights = null
   _selfLitRecorder = null
   _dev = null
   return prev
 }
-export function leaveFinishScope(prev: FinishScope): void { [_finishLights, _selfLitRecorder, _dev] = prev }
+export function leaveFinishScope(prev: FinishScope): void { [_finishLights, _selfLitRecorder, _dev, _poolNext] = prev }
+
+/** Test hook: forget the pooled recorder canvases. */
+export function __resetSelfLitPool(): void { _pool.length = 0; _poolNext = 0 }
+
+/** The next pooled recorder canvas, W×H and clear (resizing clears it; otherwise cleared here). */
+function pooledRecorder(W: number, H: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null
+  const i = _poolNext++
+  let c = _pool[i]
+  if (!c) { c = document.createElement('canvas'); _pool[i] = c }
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H }
+  else {
+    const x = c.getContext('2d')
+    if (x) { x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.clearRect(0, 0, W, H); x.restore() }
+  }
+  return c
+}
 
 /** The finishes are lit by the visible lights of the folded stack (none visible ⇒ hidden light). */
 export function lightFinishes(
@@ -326,9 +350,20 @@ export function lightFinishes(
     : { w, h, x: 0, y: 0, fw: w, fh: h }
 }
 
-/** A Spot UV layer lit by its own finish shader stamps unlit, so it is lit once. */
+type SpotUvLike = { type: string; visible: boolean; varnishOnly?: boolean }
+const visibleSpotUvs = (layer: unknown) => (effectStackOf(layer as Parameters<typeof effectStackOf>[0]) as unknown as SpotUvLike[])
+  .filter(e => e.type === 'spot_uv' && e.visible)
+
+/** A Spot UV layer lit by its own finish shader stamps unlit, so it is lit once. Not a
+ *  varnish-only coat: that one is mostly transparent, the picture under it must still be lit, so
+ *  only the coat's own alpha is punched out (`spotUvCoatSelfLit`, recorded like foil). */
 export function spotUvLitOnce(layer: unknown): boolean {
-  return !!_finishLights && effectStackOf(layer as Parameters<typeof effectStackOf>[0]).some(e => e.type === 'spot_uv' && e.visible)
+  return !!_finishLights && visibleSpotUvs(layer).some(e => !e.varnishOnly)
+}
+/** A varnish-only Spot UV layer in a lit Frame: its coat (the effect's output) is recorded through
+ *  the self-lit recorder, so the lighting pass leaves the coat alone and lights what shows under it. */
+export function spotUvCoatSelfLit(layer: unknown): boolean {
+  return !!_finishLights && visibleSpotUvs(layer).some(e => !!e.varnishOnly)
 }
 
 export function armSelfLit(foilLayerInLitFrame: boolean): void {
@@ -354,13 +389,27 @@ export function selfLitStamp(
 export function recordSelfLit(s: CanvasImageSource, x: number, y: number, W: number, H: number): void {
   const rec = _selfLitRecorder
   if (!rec || rec.w !== W || rec.h !== H) return
-  if (!rec.canvas && typeof document !== 'undefined') {
-    const c = document.createElement('canvas')
-    c.width = W; c.height = H
-    rec.canvas = c
-  }
+  if (!rec.canvas) rec.canvas = pooledRecorder(W, H)
   const rctx = rec.canvas ? rec.canvas.getContext('2d') : null
   if (rctx) rctx.drawImage(s, x, y)
+}
+
+/**
+ * A varnish-only coat replaces its layer's pixels (`src`, the layer's device-size offscreen, before
+ * the coat runs): the foil it hides is not seen, so it is erased from the recorder. Nothing
+ * recorded, no recorder, or another size ⇒ nothing runs.
+ */
+export function eraseSelfLitUnder(src: HTMLCanvasElement): void {
+  const rec = _selfLitRecorder
+  if (!rec?.canvas || src.width !== rec.w || src.height !== rec.h) return
+  const c = rec.canvas.getContext('2d')
+  if (!c) return
+  c.save()
+  c.setTransform(1, 0, 0, 1, 0, 0)
+  c.globalAlpha = 1
+  c.globalCompositeOperation = 'destination-out'
+  c.drawImage(src, 0, 0)
+  c.restore()
 }
 
 /**
