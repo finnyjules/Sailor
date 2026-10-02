@@ -105,7 +105,9 @@
  * the engine; under two frames the clip is handed on (no call). The encode
  * runs before the call and holds no media slot while the service works; the
  * decodes and the writer run under one media lease: Stop kills them all
- * within a second and removes the partial batch.
+ * within a second and removes the partial batch. R11.7: a clip over 240
+ * frames goes in segments sharing their boundary frame, one call each
+ * (planSlowMotionAi); a still picture is handed on (no call).
  *
  * Whisper transcribe (R7.7, family `whisper-captions`; comfy_extras/nodes_audio_ml.py
  * :104-207): ONE call to fal's Wizper (R3.10's call and card) with the whole
@@ -154,6 +156,7 @@ import {
   VOCALS_CLASS, VOCALS_MODEL_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG, VOCALS_WORDS, vocalsMaxSeconds, vocalsWork,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
+import { clipSegments, segmentOutputFrames, segmentOutputStart } from '#shared/runner/clipSegments'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds, subjectClick } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
 import { isPieced, vocalsSilentStems, vocalsSound, wavIsSilent, type PiecedSound, type PythonWav, type VocalsSound } from '../soundWav'
@@ -181,7 +184,7 @@ import { MediaError, mediaLease } from '../../media/run'
 import { framesOf, framesSink } from '../../media/values'
 import { encodeVideo } from '../../media/encode'
 import { decodeFrames } from '../../media/decode'
-import { probeMedia, pyFrameBound } from '../../media/probe'
+import { probeMedia, pyFrameBound, type MediaProbe } from '../../media/probe'
 import { mediaTempDir, removeMediaTempDir } from '../../media/run'
 import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 import type { SamAnswerMask } from '../pixels/samMask'
@@ -1371,12 +1374,34 @@ export async function fitRifeFrame(rgb: Uint8Array, aw: number, ah: number, w: n
   return new Uint8Array(b.buffer, b.byteOffset, b.length)
 }
 
+/**
+ * R11.7 (ruling (j)): a clip over RIFE_SEGMENT_FRAMES (240) goes to RIFE in
+ * segments sharing their boundary frame (#shared/runner/clipSegments), one
+ * call each, in order: each segment's frames encoded on their own, sent, and
+ * its answer downloaded and checked before the next is sent (a bad answer
+ * sends nothing more). Then one join under one media lease: each answer is
+ * decoded in turn and forced to its segment's (n − 1)·m + 1 frames by nearest
+ * frame, Python's originals put back at i·m, and each segment after the first
+ * drops its first frame (the shared one, already written): (T − 1)·m + 1 in
+ * all. The segment count is the price's (slowMotionAiCalls), from the same
+ * T, never more than was held. A node in segments delivers only when every
+ * segment did: a failure partway, or Stop, marks each answered segment
+ * undelivered (charged 0, Sailor absorbs it), as R11.5's pieces do; the call
+ * in flight is cancelled by the engine, and the lease's jobs die with it.
+ */
 export function planSlowMotionAi(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const link = inputs.frames
   if (!isLink(link)) throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
   const m = multiplierOf(inputs.multiplier)
   const v = ctx.valueFrom?.(link)
+  // R11.7: a still picture is handed on as Python does (one frame: under two, no call, nothing charged).
+  if (v?.kind === 'files') {
+    if (v.files.length < 1) throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
+    // A batch of pictures goes to the engine before the run (localModelStart.ts); the backstop here.
+    if (v.files.length > 1) throw new Error(SLOW_MOTION_AI_WORDS.onePicture)
+    return { kind: 'pipeline', prefix: 'slow_motion_ai', run: async () => ({ values: { 0: v }, ui: null }) }
+  }
   if (v?.kind !== 'frames') throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
   const T = v.count
   // Under two frames Python hands the clip on as it is: no call, nothing charged.
@@ -1420,9 +1445,16 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
   if (typeof heldT !== 'number' || typeof heldW !== 'number' || typeof heldH !== 'number' || T > heldT || rifePricedPixels(v.w, v.h) > rifePricedPixels(heldW, heldH)) {
     throw new Error(SLOW_MOTION_AI_WORDS.moreThanHeld)
   }
-  const usd = paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: rifePricedPixels(v.w, v.h) })
-  if (usd == null) throw new Error('Slow motion (AI) has no price yet')
-  const key = 'rife'
+  // R11.7: the segments, by the price's own rule (T ≤ the T held, so never more calls than were held).
+  const segments = clipSegments(T)
+  const several = segments.length > 1
+  const parts = segments.map((seg, k) => {
+    const made = segmentOutputFrames(seg.count, m)
+    const usd = paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: made, outputPixels: rifePricedPixels(v.w, v.h) })
+    if (usd == null) throw new Error('Slow motion (AI) has no price yet')
+    // One segment keeps R7.6's key (a resumed run recorded before R11.7 matches it).
+    return { seg, made, usd, key: several ? `rife-${k + 1}` : 'rife', base: segmentOutputStart(seg, m) }
+  })
 
   return {
     kind: 'pipeline', prefix: 'slow_motion_ai',
@@ -1431,51 +1463,68 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
         if (!io.media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
         return io.media
       }
+      /** Each key marked undelivered once (not charged), with the first reason given. */
+      const marked = new Set<string>()
+      const mark = async (key: string, why: 'no-file' | 'sailor-fault') => {
+        if (marked.has(key)) return
+        marked.add(key)
+        await io.undelivered?.(key, why)
+      }
+      /** The segments answered so far (delivered, unless the node then fails). */
+      const sent: string[] = []
       const work = await mediaTempDir()
       try {
-        // The clip as H.264, once (a resumed node sends the request it recorded, and encodes nothing).
-        let payload = io.recorded?.(key) ?? null
-        if (!payload) {
+        // Each segment in turn: encoded (or its recorded request), sent, its answer downloaded and checked.
+        const answers: { path: string; probe: MediaProbe; aw: number; ah: number; n: number }[] = []
+        for (const [k, part] of parts.entries()) {
+          if (io.signal.aborted) throw new MediaError('stopped')
+          let payload = io.recorded?.(part.key) ?? null
+          if (!payload) {
+            const media = mediaOf()
+            const clip = join(work, `clip_${k + 1}.mp4`)
+            await encodeVideo({
+              input: { kind: 'ffv1', path: await media.access.verifiedPath(v.file), w: v.w, h: v.h, ...(several ? { range: { start: part.seg.start, count: part.seg.count } } : {}) },
+              out: clip, fps: RIFE_SEND_FPS, quality: RIFE_SEND_QUALITY, padToEven: true,
+              userId: media.userId, signal: io.signal, roots: [media.access.rootOf(v.file)], outRoots: [work],
+            })
+            const bytes = new Uint8Array(await readFile(clip))
+            await rm(clip, { force: true })
+            const name = several ? `slow_motion_ai_clip_${k + 1}.mp4` : 'slow_motion_ai_clip.mp4'
+            const url = ctx.bytesToUrl ? await ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, bytes) : await io.handOff(bytes, name)
+            payload = rifeVideoInput(url, m)
+          }
+          const got = await io.call({ key: part.key, provider: 'fal', endpoint: RIFE_VIDEO_SLUG, payload, media: 'video', usd: part.usd })
+          const answerUrl = got.urls[0]
+          if (!answerUrl) {
+            // Its answer named no clip: nothing delivered, so not charged (R3.17 fix round 1).
+            await mark(part.key, 'no-file')
+            throw new Error(SLOW_MOTION_AI_WORDS.noAnswer)
+          }
+          sent.push(part.key)
           const media = mediaOf()
-          const clip = join(work, 'clip.mp4')
-          await encodeVideo({
-            input: { kind: 'ffv1', path: await media.access.verifiedPath(v.file), w: v.w, h: v.h },
-            out: clip, fps: RIFE_SEND_FPS, quality: RIFE_SEND_QUALITY, padToEven: true,
-            userId: media.userId, signal: io.signal, roots: [media.access.rootOf(v.file)], outRoots: [work],
+          const answer = join(work, `answer_${k + 1}.bin`)
+          await writeFile(answer, (await io.download(answerUrl, { kind: 'video', maxBytes: RIFE_ANSWER_MAX_BYTES })).bytes)
+          // The answer's frames: its header, and its packets counted (every frame decoded comes from one).
+          const read = await (async () => {
+            const probe = await probeMedia(answer, { userId: media.userId, signal: io.signal, roots: [work], kind: 'video' })
+            const a = probe.video[0]
+            if (!a) throw new MediaError('noVideo')
+            return { probe, aw: a.w, ah: a.h, n: (await pyFrameBound(probe, { userId: media.userId, signal: io.signal, count: true })).frames }
+          })().catch(async (e) => {
+            if (io.signal.aborted) throw e
+            await mark(part.key, 'no-file')
+            throw new Error(SLOW_MOTION_AI_WORDS.badAnswer)
           })
-          const bytes = new Uint8Array(await readFile(clip))
-          const name = 'slow_motion_ai_clip.mp4'
-          const url = ctx.bytesToUrl ? await ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, bytes) : await io.handOff(bytes, name)
-          payload = rifeVideoInput(url, m)
-        }
-        const got = await io.call({ key, provider: 'fal', endpoint: RIFE_VIDEO_SLUG, payload, media: 'video', usd })
-        const answerUrl = got.urls[0]
-        if (!answerUrl) {
-          // Its answer named no clip: nothing delivered, so not charged (R3.17 fix round 1).
-          await io.undelivered?.(key, 'no-file')
-          throw new Error(SLOW_MOTION_AI_WORDS.noAnswer)
+          // A clip with no frame, or many more than asked for, is no answer.
+          if (!(read.n >= 1) || read.n > 4 * part.made + 64) {
+            await mark(part.key, 'no-file')
+            throw new Error(SLOW_MOTION_AI_WORDS.badAnswer)
+          }
+          answers.push({ path: answer, ...read })
         }
         const media = mediaOf()
-        // From here on, an answer Sailor can't use (or Sailor's own failure with it) is not charged; Stop is (rule 12).
-        const unusable = async (e: unknown, why: 'no-file' | 'sailor-fault'): Promise<never> => {
-          if (!io.signal.aborted) await io.undelivered?.(key, why)
-          throw e
-        }
-        const answer = join(work, 'answer.bin')
-        await writeFile(answer, (await io.download(answerUrl, { kind: 'video', maxBytes: RIFE_ANSWER_MAX_BYTES })).bytes)
-        // The answer's frames: its header, and its packets counted (every frame decoded comes from one).
-        const read = await (async () => {
-          const probe = await probeMedia(answer, { userId: media.userId, signal: io.signal, roots: [work], kind: 'video' })
-          const a = probe.video[0]
-          if (!a) throw new MediaError('noVideo')
-          return { probe, aw: a.w, ah: a.h, n: (await pyFrameBound(probe, { userId: media.userId, signal: io.signal, count: true })).frames }
-        })().catch((e) => {
-          if (io.signal.aborted) throw e
-          return unusable(new Error(SLOW_MOTION_AI_WORDS.badAnswer), 'no-file')
-        })
-        const { probe, aw, ah, n } = read
-        // A clip with no frame, or many more than asked for, is no answer.
-        if (!(n >= 1) || n > 4 * out + 64) await unusable(new Error(SLOW_MOTION_AI_WORDS.badAnswer), 'no-file')
+        /** The segment being joined, and whether any of its answer's frames was decoded. */
+        let at = 0
         let decoded = 0
         const made = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
           const sink = framesSink(v.w, v.h, media, lease)
@@ -1496,28 +1545,36 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
               if (g.done) throw new MediaError('failed')
               return g.value
             }
+            /** The joined clip's next frame (a later segment's first, the shared frame, is already written). */
             let j = 0
-            let last: Uint8Array | null = null
-            /** Every output frame up to answer frame `k` (Infinity: to the end): Python's originals at i·m, the answer between. */
-            const emit = async (k: number) => {
-              while (j < out) {
-                if (j % m === 0) await sink.put(await original())
-                else if (last && rifeAnswerIndex(j, n, out) <= k) await sink.put(last)
-                else return
-                j++
+            for (const [k, part] of parts.entries()) {
+              const a = answers[k]!
+              at = k
+              decoded = 0
+              const lastJ = part.base + part.made - 1
+              let last: Uint8Array | null = null
+              /** Every output frame of this segment up to answer frame `idx` (Infinity: to its end): Python's originals at i·m, the answer between. */
+              const emit = async (idx: number) => {
+                while (j <= lastJ) {
+                  if (j % m === 0) await sink.put(await original())
+                  else if (last && rifeAnswerIndex(j - part.base, a.n, part.made) <= idx) await sink.put(last)
+                  else return
+                  j++
+                }
               }
+              await decodeFrames(a.path, {
+                userId: media.userId, signal: io.signal, maxFrames: a.n, roots: [work], probe: a.probe, lease,
+                onFrame: async (rgb, index) => {
+                  last = await fitRifeFrame(rgb, a.aw, a.ah, v.w, v.h)
+                  decoded = index + 1
+                  await emit(index)
+                },
+              })
+              if (!decoded) throw new MediaError('noVideo')
+              // Fewer frames decoded than counted: the rest of the segment takes the last one.
+              await emit(Number.POSITIVE_INFINITY)
+              if (j !== lastJ + 1) throw new MediaError('failed')
             }
-            await decodeFrames(answer, {
-              userId: media.userId, signal: io.signal, maxFrames: n, roots: [work], probe, lease,
-              onFrame: async (rgb, index) => {
-                last = await fitRifeFrame(rgb, aw, ah, v.w, v.h)
-                decoded = index + 1
-                await emit(index)
-              },
-            })
-            if (!decoded) throw new MediaError('noVideo')
-            // Fewer frames decoded than counted: the rest take the last one.
-            await emit(Number.POSITIVE_INFINITY)
             if (j !== out) throw new MediaError('failed')
             const kept = await sink.done()
             finished = true
@@ -1527,12 +1584,20 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
             await originals.return?.(undefined).catch(() => undefined)
             if (!finished) await sink.abort()
           }
-        }).catch((e) => {
+        }).catch(async (e) => {
           if (io.signal.aborted) throw e
-          return unusable(decoded ? e : new Error(SLOW_MOTION_AI_WORDS.badAnswer), decoded ? 'sailor-fault' : 'no-file')
+          // From here on, an answer Sailor can't use (or Sailor's own failure with it) is not charged (rule 12).
+          const key = parts[at]!.key
+          await mark(key, decoded ? 'sailor-fault' : 'no-file')
+          throw decoded ? e : new Error(SLOW_MOTION_AI_WORDS.badAnswer)
         })
         if (io.signal.aborted) throw new MediaError('stopped')
         return { values: { 0: made }, ui: null }
+      }
+      catch (e) {
+        // R11.7: in segments, the node delivers only when every segment did: a failure partway, or Stop, charges none of them.
+        if (several) for (const key of sent) await mark(key, 'sailor-fault')
+        throw e
       }
       finally {
         await removeMediaTempDir(work)

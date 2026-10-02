@@ -108,6 +108,8 @@ export const KIND_FOLLOWS_INPUT: Readonly<Record<string, { slot: number; input: 
   ObjectRemove: { slot: 0, input: 'frames' },
   // R7.5: Subject mask's cutout (slot 1; slot 0 is its mask), the same.
   SubjectMask: { slot: 1, input: 'frames' },
+  // R11.7: Slow motion (AI): a clip's slowed-down batch, or a still picture handed on as it came.
+  FrameInterpolateAI: { slot: 0, input: 'frames' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

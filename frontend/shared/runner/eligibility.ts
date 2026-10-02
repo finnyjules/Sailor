@@ -1663,7 +1663,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── R7: the local-model nodes moved onto paid services (./localModels.ts) ──
   // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f));
   // R7.7's Whisper transcribe and R7.8's Vocal separator a sound from SOUND_OUTPUTS.
-  ...localModelRows(FRAMES_LINK_SOURCES, SOUND_OUTPUTS),
+  ...localModelRows(SOUND_OUTPUTS),
   // ── R7.9: Lens · Depth of field, free, in the server (./lensBlur.ts, server/runner/cards/lensBlur.ts) ──
   // A local render (no provider, nothing held or charged); its picture wired in, its depth optional (a
   // picture too; unwired, the depth model runs in the server); its widgets as ComfyUI validates them; its

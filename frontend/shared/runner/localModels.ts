@@ -30,6 +30,7 @@ import { WIZPER_APP } from './soundIn'
 import { MEDIA_CAPS } from './media'
 import { soundPieceBounds } from './soundPieces'
 import { tileCountBound, UPSCALE_TILE_MIN_SIDE } from './upscaleTiles'
+import { RIFE_SEGMENT_FRAMES, clipSegmentCount, clipSegments, segmentOutputFrames } from './clipSegments'
 import { isLink, type ApiPrompt } from './graph'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
@@ -146,11 +147,20 @@ export const FRAME_INTERP_AI_MULTIPLIER = { default: 2, min: 2, max: 8 } as cons
  */
 export const RIFE_MAX_MULTIPLIER = 5
 /**
- * The most frames one Slow motion (AI) node sends (ruling (g)): hosted 240
- * (10 s at 24 fps), locally the per-frame cap's 900. A clip over it is left
- * to the engine before the run (a stop-gap named in R7.6's report).
+ * The most frames one Slow motion (AI) node takes (R11.7, ruling (j)): the
+ * per-frame classes' cap (LOCAL_MODEL_MAX_FRAMES: hosted 300, locally 900),
+ * sent to RIFE in segments of at most RIFE_SEGMENT_FRAMES (240) sharing their
+ * boundary frame (./clipSegments.ts), one call each. A longer clip is refused
+ * plainly before the hold, with the cap in words (slowMotionAiOverCapWords).
  */
-export const SLOW_MOTION_AI_MAX_FRAMES = { hosted: 240, local: 900 } as const
+export const SLOW_MOTION_AI_MAX_FRAMES = { hosted: 300, local: 900 } as const
+/**
+ * The most frames Slow motion (AI) takes where Sailor's own interpolation runs
+ * it (a multiplier RIFE doesn't make, a clip too small to encode, or locally a
+ * frame past 4K): hosted the old 240, unchanged until hosted 1080p
+ * minterpolate's memory is measured on Fly (owed, R11.7's report); locally 900.
+ */
+export const SLOW_MOTION_OWN_MAX_FRAMES = { hosted: 240, local: 900 } as const
 /** Whether Slow motion (AI) at multiplier `m` calls RIFE (2–5), rather than Sailor's own interpolation or nothing. */
 export function rifeMakes(m: number): boolean {
   return Number.isInteger(m) && m >= FRAME_INTERP_AI_MULTIPLIER.min && m <= RIFE_MAX_MULTIPLIER
@@ -444,6 +454,8 @@ export const LOCAL_MODEL_SOURCE_INPUT: Readonly<Record<string, string>> = {
   ...LOCAL_MODEL_PICTURE_INPUT,
   [MASK_BY_TEXT_CLASS]: 'image',
   [MASK_EXTRACTOR_CLASS]: 'image',
+  // R11.7: Slow motion (AI) takes a clip, or a still picture it hands on as Python does (one frame, no call).
+  [FRAME_INTERP_AI_CLASS]: 'frames',
 }
 
 /** Whether a moved class makes one call per picture or frame (ruling (f)); the SAM 3 mask classes make one in all. */
@@ -458,6 +470,8 @@ export const LOCAL_MODEL_PICTURE_SLOTS: Readonly<Record<string, readonly number[
   [OBJECT_REMOVE_CLASS]: [0],
   // R7.5: Subject mask's cutout is slot 1 (slot 0 is its mask).
   [SUBJECT_MASK_CLASS]: [1],
+  // R11.7: Slow motion (AI) hands a still picture on (a picture out); a clip's batch is a frame batch (values.ts KIND_FOLLOWS_INPUT).
+  [FRAME_INTERP_AI_CLASS]: [0],
 }
 
 /** What each moved class's other slots carry (applied only while its family is on, eligibility.ts outputKindsFor). */
@@ -472,8 +486,8 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
   [MASK_EXTRACTOR_CLASS]: { 0: 'mask' },
   // R7.5: a mask per picture or frame; its cutout (slot 1) follows its input (values.ts KIND_FOLLOWS_INPUT).
   [SUBJECT_MASK_CLASS]: { 0: 'mask' },
-  // R7.6: a frame batch in (a `frames` value only), a frame batch out.
-  [FRAME_INTERP_AI_CLASS]: { 0: 'frames' },
+  // R7.6: a frame batch in, a frame batch out. R11.7: a still picture in, handed on (values.ts KIND_FOLLOWS_INPUT).
+  [FRAME_INTERP_AI_CLASS]: {},
   // R7.7: three texts (caption track, SRT, plain text).
   [WHISPER_CLASS]: { 0: 'text', 1: 'text', 2: 'text' },
   // R7.8: two sounds (vocals, instrumental), files values as every runner sound is (no row of their own).
@@ -566,6 +580,10 @@ export const SLOW_MOTION_AI_WORDS = {
   moreThanHeld: 'This clip is longer or larger than was measured before the run, so it was stopped before anything was sent.',
   noAnswer: 'The service sent back no slowed-down clip.',
   badAnswer: 'The slowed-down clip the service sent back can’t be read.',
+  /** R11.7: more than one still picture (Python slows the batch down; left to the engine until R11.9). */
+  pictureBatch: 'Slowing down a batch of still pictures can’t run here yet.',
+  /** R11.7: the backstop at the node's turn (the start of the run sends a batch of pictures to the engine). */
+  onePicture: 'Slow motion (AI) hands on one still picture; a batch of pictures can’t be slowed down here yet.',
 } as const
 
 /** Whisper transcribe's own words (R7.7). */
@@ -580,13 +598,27 @@ export const VOCALS_WORDS = {
   noAnswer: 'The service sent back no vocals or instrumental.',
 } as const
 
-/** What the start of the run says of a clip over the frame cap, in the class's own words. */
-export function overCapWords(classType: string): string {
-  if (classType === UPSCALE_2X_CLASS) return UPSCALE_2X_WORDS.overCap
-  if (classType === OBJECT_REMOVE_CLASS) return OBJECT_REMOVE_WORDS.overCap
-  if (classType === SUBJECT_MASK_CLASS) return SUBJECT_MASK_WORDS.overCap
-  if (classType === FRAME_INTERP_AI_CLASS) return SLOW_MOTION_AI_WORDS.overCap
-  return LOCAL_MODEL_WORDS.overCap
+/**
+ * What the start of the run says of a clip over the frame cap, in the class's
+ * own words; with `cap` (R11.7: refused plainly, before the hold), the cap too.
+ */
+export function overCapWords(classType: string, cap?: number): string {
+  const base = classType === UPSCALE_2X_CLASS
+    ? UPSCALE_2X_WORDS.overCap
+    : classType === OBJECT_REMOVE_CLASS
+      ? OBJECT_REMOVE_WORDS.overCap
+      : classType === SUBJECT_MASK_CLASS
+        ? SUBJECT_MASK_WORDS.overCap
+        : classType === FRAME_INTERP_AI_CLASS ? SLOW_MOTION_AI_WORDS.overCap : LOCAL_MODEL_WORDS.overCap
+  return cap === undefined ? base : `${base} Use a clip of ${cap} frames or fewer.`
+}
+
+/** R11.7: locally, a clip past 4K that Sailor's own interpolation can't take either: refused plainly, the largest frame in words. */
+export const SLOW_MOTION_AI_PAST_4K_WORDS = `${SLOW_MOTION_AI_WORDS.tooBig} Use frames of ${RIFE_LOCAL_MAX.long} × ${RIFE_LOCAL_MAX.short} or smaller.`
+
+/** R11.7: a slowed-down clip past R5's batch caps, refused plainly with the most frames that can be kept at its size. */
+export function slowMotionAiOutWords(most: number): string {
+  return `${SLOW_MOTION_AI_WORDS.outTooLong} At this size it can have ${most} frames at most: use a shorter clip or a smaller multiplier.`
 }
 
 const UPSCALE_2X_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
@@ -637,13 +669,12 @@ const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
  * The rule rows (rule 1, ruling (f)): the picture input wired, from a
  * picture or a frame batch ('local-model-source'), and every widget as
  * ComfyUI validates it. A provider class (no `local`): it is held and charged.
- * `framesSources`: the frame-batch sources (mediaEffects.ts
- * FRAMES_LINK_SOURCES, handed in so this file needs no import of it), for
- * Slow motion (AI)'s clip; `soundSources` likewise (eligibility.ts
- * SOUND_OUTPUTS), for Whisper transcribe's sound.
+ * `soundSources`: the sound sources (eligibility.ts SOUND_OUTPUTS, handed in
+ * so this file needs no import of it), for Whisper transcribe's sound. (R11.7:
+ * Slow motion (AI)'s clip is checked as the picture classes' is,
+ * 'local-model-source', which reads mediaEffects.ts FRAMES_LINK_SOURCES.)
  */
 export function localModelRows(
-  framesSources: readonly (readonly [string, number])[] = [],
   soundSources: readonly (readonly [string, number])[] = [],
 ): Record<string, RunnerNodeRule> {
   return {
@@ -705,13 +736,14 @@ export function localModelRows(
       widgets: SUBJECT_MASK_WIDGETS,
     },
     // R7.6: a frame batch (a `frames` value from a frame-batch source, as R6.6's Slow motion reads one) and
-    // the multiplier as ComfyUI validates it.
+    // the multiplier as ComfyUI validates it. R11.7: or a still picture, handed on as Python does (one frame,
+    // no call): the same 'local-model-source' check as the picture classes (a picture, or a frame-batch source).
     [FRAME_INTERP_AI_CLASS]: {
       family: 'slow-motion-ai',
       mustLink: ['frames'],
       required: ['frames'],
-      valueInputs: { frames: ['frames'] },
-      linkSources: { frames: framesSources },
+      valueInputs: { frames: ['files', 'frames'] },
+      inputCheck: 'local-model-source',
       widgets: FRAME_INTERP_AI_WIDGETS,
     },
     // R7.7: the sound (any runner sound, each source taken only while its own family is on), the
@@ -838,18 +870,25 @@ export interface SlowMotionAiMeasured {
 }
 
 /**
- * Slow motion (AI)'s call (R7.6), for its price: one RIFE call making
- * (T − 1)·m + 1 frames of the clip's size, `frames` (T) and the size
- * measured before the hold (TakeRecord.measured: `frames`, `videoWidth`,
- * `videoHeight`). No call (free) under two frames, for a multiplier RIFE
- * doesn't make, or for a clip under RIFE_MIN_SIDE (Sailor's own
- * interpolation, R6.6). A wired multiplier is held at the dearest RIFE makes.
+ * Slow motion (AI)'s calls (R7.6; R11.7 segments), for its price: one RIFE
+ * call per segment of the clip (./clipSegments.ts: at most 240 frames each,
+ * sharing their boundary frame), each making (n − 1)·m + 1 frames of the
+ * clip's size, `frames` (T) and the size measured before the hold
+ * (TakeRecord.measured: `frames`, `videoWidth`, `videoHeight`). The run cuts
+ * the clip by the same rule, so it never makes more calls than are held. No
+ * call (free) under two frames, for a multiplier RIFE doesn't make, or for a
+ * clip under RIFE_MIN_SIDE (Sailor's own interpolation, R6.6). A wired
+ * multiplier is held at the dearest RIFE makes.
  *
  * Not measured (the canvas's "up to", fix round 1): the most the start of the
  * run can hold WHERE THE CANVAS RUNS (`framesUpTo`; absent, this computer's):
- * T at that place's frame cap, the output at most its batch's frames, and
- * the frames' megapixels at most its batch's pixels (each frame at most the
- * largest RIFE is sent there: locally 4K, fix round 2; hosted its frame cap). The start pass refuses anything past those caps
+ * the longest clip that place lets through (its frame cap, and its output
+ * within the batch's frames), cut into that clip's segments, each call priced
+ * at its most frame-pixels: a segment's frames (at most a full segment's
+ * output) times its frame size, which is at most the largest RIFE is sent
+ * there (locally 4K, fix round 2; hosted its frame cap) and at most the
+ * batch's pixels over the segment's frames (no segment holds more than the
+ * whole output). The start pass refuses anything past those caps
  * (localModelStart.ts slowMotionAiStart), so what is shown is never below
  * what is held.
  */
@@ -865,19 +904,35 @@ export function slowMotionAiCalls(multiplier: unknown, frames: number | null | u
     const t = Math.trunc(frames)
     // Under two frames, or a clip too small for the encoder (Sailor's own interpolation): no call.
     if (t < 2 || !rifeTakes(m, w, h, seen?.place)) return { steps: [] }
-    return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: slowMotionAiCount(t, m), outputPixels: rifePricedPixels(w, h) }, times: 1 }] }
+    return { steps: segmentSteps(clipSegments(t).map(seg => segmentOutputFrames(seg.count, m)), () => rifePricedPixels(w, h)) }
   }
   // The ceiling where the canvas runs.
   const place = seen?.framesUpTo === 'hosted' ? 'hosted' : 'local'
   const caps = MEDIA_CAPS[place]
   const cap = SLOW_MOTION_AI_MAX_FRAMES[place]
-  const t = known && !seen?.framesUpTo ? Math.min(Math.trunc(frames), cap) : cap
+  // The longest clip let through: its frame cap, and its output within the batch's frames.
+  const longest = Math.min(cap, Math.floor((caps.batchFrames - 1) / m) + 1)
+  const t = known && !seen?.framesUpTo ? Math.min(Math.trunc(frames), longest) : longest
   if (t < 2) return { steps: [] }
-  const out = Math.min(slowMotionAiCount(t, m), caps.batchFrames)
-  // Each frame at most that place's largest RIFE is sent (locally 4K, fix round 2; hosted its frame cap).
+  const n = clipSegmentCount(t)
+  // A segment's most frames out (a full segment's, at most the whole output's).
+  const segOut = Math.min(segmentOutputFrames(Math.min(t, RIFE_SEGMENT_FRAMES), m), slowMotionAiCount(t, m))
+  // Each frame at most that place's largest RIFE is sent (locally 4K, fix round 2; hosted its frame cap), and a
+  // segment's frames × size at most the batch's pixels (its frames are among the clip's output).
   const largest = place === 'local' ? RIFE_LOCAL_MAX.long * RIFE_LOCAL_MAX.short : caps.framePixels
-  const outputPixels = sized ? rifePricedPixels(w, h) : Math.ceil(Math.min(largest, caps.batchPixels / out))
-  return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels }, times: 1 }] }
+  const outputPixels = sized ? rifePricedPixels(w, h) : Math.ceil(Math.min(largest, caps.batchPixels / segOut))
+  return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: segOut, outputPixels }, times: n }] }
+}
+
+/** RIFE calls of these output frames (one a segment) as price steps: equal neighbours folded into one step `times` over. */
+function segmentSteps(outs: readonly number[], pixels: () => number): { call: { endpoint: string; outputFrames: number; outputPixels: number }; times: number }[] {
+  const steps: { call: { endpoint: string; outputFrames: number; outputPixels: number }; times: number }[] = []
+  for (const out of outs) {
+    const last = steps.at(-1)
+    if (last && last.call.outputFrames === out) last.times++
+    else steps.push({ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: pixels() }, times: 1 })
+  }
+  return steps
 }
 
 /**

@@ -70,8 +70,11 @@ export { OPENH264_FOR, PYAV_H264_DEFAULT, h264Args, type H264Quality } from './h
 export type VideoSource =
   /** rgb24 frames, each exactly w · h · 3 bytes. */
   | { kind: 'rgb'; w: number; h: number; frames: AsyncIterable<Uint8Array> }
-  /** A kept frame batch (`writeFfv1`): the runner's own file, read without the upload caps (the caller judges the batch caps). */
-  | { kind: 'ffv1'; path: string; w: number; h: number }
+  /**
+   * A kept frame batch (`writeFfv1`): the runner's own file, read without the upload caps (the caller judges the batch caps).
+   * `range` (R11.7, Slow motion (AI)'s segments): only frames start … start + count − 1 of it.
+   */
+  | { kind: 'ffv1'; path: string; w: number; h: number; range?: { start: number; count: number } }
   /** Turntable's clips, joined. */
   | { kind: 'clips'; paths: string[]; dropFirstAfterFirst: true }
 
@@ -405,7 +408,11 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
       args.push('-noautorotate', '-r', `${o.fps.num}/${o.fps.den}`, ...inputArgs(p.path, p.format))
       // bgr0 → rgb24 is a lossless shuffle; then (R5.5) black padding to even, as Python's zeros; then exactly the rgb24 path.
       const pad = W !== inW || H !== inH ? `pad=w=${W}:h=${H}:x=0:y=0:color=black,` : ''
-      args.push('-filter_complex', `[0:v]format=rgb24,${pad}${RGB_TO_YUV420P},${restamp}[v]`)
+      const r = input.range
+      if (r && !(Number.isInteger(r.start) && Number.isInteger(r.count) && r.start >= 0 && r.count >= 1)) throw new MediaError('failed')
+      // R11.7: a segment of the batch, by frame number (the restamp after it numbers its frames from 0).
+      const trim = r ? `trim=start_frame=${r.start}:end_frame=${r.start + r.count},` : ''
+      args.push('-filter_complex', `[0:v]${trim}format=rgb24,${pad}${RGB_TO_YUV420P},${restamp}[v]`)
       videoMap = '[v]'
     }
     else {

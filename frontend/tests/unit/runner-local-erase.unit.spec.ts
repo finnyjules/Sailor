@@ -596,7 +596,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(at.problem).toBeNull()
     expect(at.counts.n).toBe(LOCAL_MODEL_MAX_FRAMES.hosted)
     const over = await localModelStartProblems({ v: lvf, n: eraseNode(2, ['v', 0], ['l', 1]), l: LOAD }, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })
-    expect(over.problem?.message).toBe(OBJECT_REMOVE_WORDS.overCap)
+    expect(over.problem?.message).toBe(`${OBJECT_REMOVE_WORDS.overCap} Use a clip of ${LOCAL_MODEL_MAX_FRAMES.hosted} frames or fewer.`)
   })
 })
 

@@ -887,7 +887,7 @@ describe('Subject mask on a clip: one call per frame, in Sailor', () => {
     const p: ApiPrompt = { v: LVF, m: subjectNode({}, ['v', 0]), s: saveFrames(['m', 1]) }
     const shapes = (count: number) => async () => new Map([['v:0', { count, w: 64, h: 36, exact: false }]])
     expect(await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(300) })).toMatchObject({ counts: { m: 300 }, problem: null })
-    expect((await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(301) })).problem?.message).toBe(SUBJECT_MASK_WORDS.overCap)
+    expect((await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(301) })).problem?.message).toBe(overCapWords(SUBJECT_MASK_CLASS, 300))
     expect(overCapWords(SUBJECT_MASK_CLASS)).toBe(SUBJECT_MASK_WORDS.overCap)
   })
 })

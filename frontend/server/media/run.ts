@@ -211,7 +211,8 @@ const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
   format: [''],
   settb: ['expr'],
   setpts: [''],
-  trim: ['start_frame'],
+  // R11.7: Slow motion (AI)'s segments send frames start … end − 1 of a kept batch (encode.ts `range`).
+  trim: ['start_frame', 'end_frame'],
   concat: ['n', 'v', 'a'],
   atrim: ['end_sample'],
   asetpts: [''],

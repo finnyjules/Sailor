@@ -346,7 +346,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
     const p: ApiPrompt = { v: lvf, n: upNode(['v', 0]), s: saveFrames(['n', 0]) }
     const shapes = (count: number, w = 64, h = 36) => async () => new Map([['v:0', { count, w, h, exact: false }]])
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(UPSCALE_2X_WORDS.overCap)
+    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(`${UPSCALE_2X_WORDS.overCap} Use a clip of ${LOCAL_MODEL_MAX_FRAMES.hosted} frames or fewer.`)
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2560, 1440) })).problem).toBeNull()
     // R11.6: over 1440p in tiles (two for 2561 × 1440), past 12288 × 1536's pixels left.
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 2 }, problem: null })

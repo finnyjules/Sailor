@@ -69,8 +69,9 @@ import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import { MEDIA_CAPS } from '#shared/runner/media'
 import {
   FRAME_INTERP_AI_CLASS, LOCAL_MODEL_FAMILY_OF, RIFE_MAX_MULTIPLIER, RIFE_VIDEO_SLUG, SERVICE_OF, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
-  RIFE_LOCAL_MAX, fitsRifeLocal, rifeMakes, rifePricedPixels, rifeTakes, serviceTooltip, slowMotionAiCount,
+  RIFE_LOCAL_MAX, SLOW_MOTION_AI_PAST_4K_WORDS, fitsRifeLocal, overCapWords, rifeMakes, rifePricedPixels, rifeTakes, serviceTooltip, slowMotionAiCount, slowMotionAiOutWords,
 } from '#shared/runner/localModels'
+import { clipSegments, segmentOutputFrames } from '#shared/runner/clipSegments'
 import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
 import { paidNoCall } from '#shared/pricing/paidSettings'
 import { priceNode } from '#shared/pricing/nodePrice'
@@ -470,7 +471,10 @@ describe('Load video → Get video components → Slow motion (AI) → Create vi
 
 // ── Before the run ───────────────────────────────────────────────────────────
 
-describe('the start of the run: the clip counted and sized for the hold; past a limit, the engine', () => {
+/** Why the start pass won't run a clip (R11.7: a plain refusal, or the engine when the count is only an upper bound), or null. */
+const whyNot = (r: ReturnType<typeof slowMotionAiStart>) => ('refused' in r ? r.refused : 'problem' in r ? r.problem : null)
+
+describe('the start of the run: the clip counted and sized for the hold; past a limit, refused plainly (R11.7) or, on an uncounted bound, the engine', () => {
   const p: ApiPrompt = {
     l: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }, g: { class_type: 'GetVideoComponents', inputs: { video: ['l', 0] } },
     n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['g', 0], multiplier: 3 } },
@@ -478,20 +482,20 @@ describe('the start of the run: the clip counted and sized for the hold; past a 
   }
   const at = (count: number, w = 640, h = 360) => async () => new Map([['g:0', { count, w, h, exact: false }]])
 
-  it('the count and size recorded; over the frame cap, an output past the batch caps, or unknown: to the engine', async () => {
+  it('the count and size recorded; over the frame cap or an output past the batch caps (an uncounted bound), or unknown: to the engine', async () => {
     const ok = await localModelStartProblems(p, ON, { hosted: true, shapes: at(48) })
     expect(ok).toMatchObject({ counts: { n: 48 }, sizes: { n: { w: 640, h: 360 } }, problem: null })
     expect(ok.keptBytes).toBeGreaterThan(0)
-    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: at(SLOW_MOTION_AI_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(SLOW_MOTION_AI_WORDS.overCap)
+    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: at(SLOW_MOTION_AI_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(overCapWords(FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES.hosted))
     expect((await localModelStartProblems(p, ON, { hosted: false, shapes: at(SLOW_MOTION_AI_MAX_FRAMES.hosted + 1) })).problem).toBeNull()
     // Hosted, 240 frames × 3 is 718 frames: past the 600-frame batch cap.
-    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: at(240) })).problem?.message).toBe(SLOW_MOTION_AI_WORDS.outTooLong)
+    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: at(240) })).problem?.message).toBe(slowMotionAiOutWords(600))
     expect((await localModelStartProblems(p, ON, { hosted: true, shapes: async () => new Map() })).problem?.message).toBeDefined()
     // ×7 (Sailor's own interpolation) holds R6.6's limits: hosted 1080p is past what it may hold, 720p runs.
-    expect(slowMotionAiStart({ multiplier: 7 }, { count: 24, w: 1920, h: 1080, exact: false }, true)).toEqual({ problem: SLOW_MOTION_AI_WORDS.tooBig })
+    expect(whyNot(slowMotionAiStart({ multiplier: 7 }, { count: 24, w: 1920, h: 1080, exact: false }, true))).toBe(SLOW_MOTION_AI_WORDS.tooBig)
     expect(slowMotionAiStart({ multiplier: 7 }, { count: 24, w: 1280, h: 720, exact: false }, true)).toEqual({ frames: 24, w: 1280, h: 720 })
     expect(slowMotionAiStart({ multiplier: 3 }, { count: 24, w: 1920, h: 1080, exact: false }, true)).toEqual({ frames: 24, w: 1920, h: 1080 })
-    expect(slowMotionAiStart({ multiplier: 2 }, { count: 2, w: 5000, h: 5000, exact: false }, true)).toEqual({ problem: SLOW_MOTION_AI_WORDS.tooBig })
+    expect(slowMotionAiStart({ multiplier: 2 }, { count: 2, w: 5000, h: 5000, exact: false }, true)).toEqual({ refused: SLOW_MOTION_AI_WORDS.tooBig })
   })
 
   it('the frame shapes: (T − 1)·m + 1 of the clip’s size, its own kept batch (the input handed on under two frames)', async () => {
@@ -567,14 +571,14 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
     expect(f).toEqual({ frames: 900, upTo: true })
     let checked = 0
     for (const [t, m, w, h] of edges(false)) {
-      if ('problem' in slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, false)) continue
+      if (whyNot(slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, false))) continue
       const badge = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
       expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, t, w, h).usd)
       checked++
     }
     expect(checked).toBeGreaterThanOrEqual(3)
     // The 900-frame local clip at ×2 is let through and held; before this fix the badge priced hosted's 240 frames of 1080p, below it.
-    expect('problem' in slowMotionAiStart({ multiplier: 2 }, { count: 900, w: 1920, h: 1080, exact: false }, false)).toBe(false)
+    expect(whyNot(slowMotionAiStart({ multiplier: 2 }, { count: 900, w: 1920, h: 1080, exact: false }, false))).toBeNull()
     const local = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
     expect(local).toBeGreaterThanOrEqual(held(2, 900, 1920, 1080).usd)
     expect(held(2, 900, 1920, 1080).usd).toBeGreaterThan(held(2, 240, 1920, 1080).usd)
@@ -589,7 +593,7 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
     expect(secs).toMatchObject({ upTo: true, seconds: { framesUpTo: 'hosted' } })
     let checked = 0
     for (const [t, m, w, h] of edges(true)) {
-      if ('problem' in slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, true)) continue
+      if (whyNot(slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, true))) continue
       const c = canvas(m)
       const s = upstreamInputSeconds(c.nodes[2], c.nodes, c.edges)!
       const badge = nodeCreditEstimate(FRAME_INTERP_AI_CLASS, { multiplier: m, frames: ['g', 0] }, { inputSeconds: s.seconds, families: ON })!
@@ -605,23 +609,26 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
 })
 
 describe('locally, RIFE takes 4K at most (fix round 2, controller ruling)', () => {
-  it('the local badge for an unseen clip is the 4K ceiling: 900 frames, each 3840 × 2160 at most, within the batch caps', () => {
+  it('the local badge for an unseen clip is the 4K ceiling: 900 frames in 240-frame segments (R11.7), each 3840 × 2160 at most, within the batch caps', () => {
     const f = localModelFrames(null, false)
     for (const m of [2, 5]) {
       const badge = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
-      const out = Math.min(slowMotionAiCount(SLOW_MOTION_AI_MAX_FRAMES.local, m), MEDIA_CAPS.local.batchFrames)
-      expect(badge, `×${m}`).toBe(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: 3840 * 2160 }))
+      // Four segments of 900 frames, each held at a full segment's output.
+      const segs = clipSegments(SLOW_MOTION_AI_MAX_FRAMES.local)
+      expect(segs.length).toBe(4)
+      const out = segmentOutputFrames(240, m)
+      expect(badge, `×${m}`).toBeCloseTo(4 * paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: 3840 * 2160 })!, 6)
       // It covers the largest 4K clip held, and is no longer this computer's 8192² ceiling.
       expect(badge).toBeGreaterThanOrEqual((priceNode(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: { frames: 900, videoWidth: 3840, videoHeight: 2160, place: 'local' } }) as { usd: number }).usd)
       expect(badge).toBeLessThan(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: 8192 * 8192 })!)
     }
-    // ×5 at the 4K ceiling: under $20.
-    expect(modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: 5 }, { families: ON, inputSeconds: localModelSeconds(f, false) })!).toBeLessThan(20)
+    // ×5 at the 4K ceiling: about $20 (four segments).
+    expect(modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: 5 }, { families: ON, inputSeconds: localModelSeconds(f, false) })!).toBeLessThan(21)
     // Hosted is unchanged: its own frame cap.
     expect(rifeTakes(2, 4096, 4096, 'hosted')).toBe(true)
   })
 
-  it('4K in either orientation fits; past it, locally: Sailor’s own interpolation where R6.6’s limits allow (no call, nothing held), else the engine', () => {
+  it('4K in either orientation fits; past it, locally: Sailor’s own interpolation where R6.6’s limits allow (no call, nothing held), else refused plainly (R11.7)', () => {
     expect([fitsRifeLocal(3840, 2160), fitsRifeLocal(2160, 3840), fitsRifeLocal(3841, 2160), fitsRifeLocal(3840, 2161), fitsRifeLocal(4000, 1000)]).toEqual([true, true, false, false, false])
     expect(RIFE_LOCAL_MAX).toEqual({ long: 3840, short: 2160 })
     // 4000 × 1000 (4 Mpx, within minterpolate's 2048²): Sailor's interpolation, held for nothing.
@@ -629,8 +636,8 @@ describe('locally, RIFE takes 4K at most (fix round 2, controller ruling)', () =
     expect(priceNode(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: { frames: 24, videoWidth: 4000, videoHeight: 1000, place: 'local' } })).toEqual({ usd: 0, credits: 0 })
     // The same clip hosted (within its frame cap) still goes to RIFE.
     expect((priceNode(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: { frames: 24, videoWidth: 4000, videoHeight: 1000, place: 'hosted' } }) as { credits: number }).credits).toBeGreaterThan(0)
-    // 5120 × 2880 locally: past 4K and past minterpolate's largest frame: left to the engine (a named stop-gap).
-    expect(slowMotionAiStart({ multiplier: 2 }, { count: 24, w: 5120, h: 2880, exact: false }, false)).toEqual({ problem: SLOW_MOTION_AI_WORDS.tooBig })
+    // 5120 × 2880 locally: past 4K and past minterpolate's largest frame: refused plainly, 4K in words (R11.7, ruling (j)).
+    expect(slowMotionAiStart({ multiplier: 2 }, { count: 24, w: 5120, h: 2880, exact: false }, false)).toEqual({ refused: SLOW_MOTION_AI_PAST_4K_WORDS })
   })
 
   it('a local clip past 4K through the plan: no call, Sailor’s interpolation, Python’s count, the originals bit for bit', LONG, async () => {
@@ -669,7 +676,7 @@ describe('the family and its row', () => {
     expect(KEPT_MEDIA_MAKERS.has(FRAME_INTERP_AI_CLASS)).toBe(true)
   })
 
-  it('taken with a frame batch in; a still picture, a multiplier out of range or wired: to the engine; its batch read by the frame readers', () => {
+  it('taken with a frame batch in, or (R11.7) a still picture, handed on as a picture; a multiplier out of range or wired: to the engine; its batch read by the frame readers', () => {
     const lv = { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }
     const g = { class_type: 'GetVideoComponents', inputs: { video: ['l', 0] } }
     const p: ApiPrompt = { l: lv, g, n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['g', 0], multiplier: 4 } }, c: { class_type: 'CreateVideo', inputs: { images: ['n', 0], fps: 24 } } }
@@ -677,7 +684,8 @@ describe('the family and its row', () => {
     expect(outputKind(p, ['n', 0], outputKindsFor(ON))).toBe('frames')
     expect(runnerTakesNode(p, 'c', ON)).toBe(true)
     const still: ApiPrompt = { i: { class_type: 'LoadImage', inputs: { image: 'a.png' } }, n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['i', 0], multiplier: 2 } } }
-    expect(runnerTakesNode(still, 'n', ON)).toBe(false)
+    expect(runnerTakesNode(still, 'n', ON)).toBe(true)
+    expect(outputKind(still, ['n', 0], outputKindsFor(ON))).toBe('files')
     for (const multiplier of [1, 9, ['x', 0]]) expect(runnerTakesNode({ ...p, n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['g', 0], multiplier } } }, 'n', ON), String(multiplier)).toBe(false)
     // Without media-video (its chain), or without its own family, it is left to the engine and named.
     for (const fam of [new Set<RunnerFamily>(['cards', 'slow-motion-ai']), new Set<RunnerFamily>(['cards', 'media-video'])]) {

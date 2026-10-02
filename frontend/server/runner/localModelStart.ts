@@ -11,11 +11,12 @@
  *     image's batch; an effect, the most of what it reads.
  * The count is recorded on the take (TakeRecord.measured's `frames`), so the
  * hold and the charge are priced on it, and the node's turn refuses more
- * than it (../generators/localModels.ts). A count that can't be known, or
- * one over the cap (LOCAL_MODEL_MAX_FRAMES), leaves the whole workflow to
- * the engine (RUNNER_NOT_ELIGIBLE), never a refusal: switching a family on
- * never makes a working graph fail. Both are stop-gaps while ComfyUI exists
- * (R7.1's report says how each closes).
+ * than it (../generators/localModels.ts). A count that can't be known leaves
+ * the whole workflow to the engine (RUNNER_NOT_ELIGIBLE), a stop-gap R11.8
+ * closes. R11.7 (ruling (j)): a count over the cap (LOCAL_MODEL_MAX_FRAMES,
+ * kept at 300 hosted and 900 locally until a Fly measurement) is refused
+ * plainly before the hold, the cap in words, when the count is sure (a
+ * clip's packets counted); an upper bound alone still goes to the engine.
  *
  * R7.2: a class whose service states a largest picture (LOCAL_MODEL_MAX_PIXELS,
  * Upscale (2×)'s Real-ESRGAN) is sized here too, as a true upper bound: a
@@ -31,13 +32,14 @@
  * true upper bound whatever the shape), and its 2× pictures are counted in
  * the kept room.
  *
- * R7.6: Slow motion (AI) sends its whole clip in one RIFE call (not a call
- * per frame): its clip's count T and size (R6's frame shapes) are recorded
- * for the hold (`counts`, `sizes`). A clip over SLOW_MOTION_AI_MAX_FRAMES,
- * an output past R5's batch caps, or, for a multiplier RIFE doesn't make or
- * a clip too small to encode (Sailor's own interpolation), a frame past
- * R6.6's own limits leaves the
- * workflow to the engine the same way (stop-gaps named in R7.6's report).
+ * R7.6: Slow motion (AI) sends its clip to RIFE (not a call per frame): its
+ * clip's count T and size (R6's frame shapes) are recorded for the hold
+ * (`counts`, `sizes`). R11.7: a clip over 240 frames goes in segments
+ * (#shared/runner/clipSegments), the hold priced on them; a clip over
+ * SLOW_MOTION_AI_MAX_FRAMES, an output past R5's batch caps, a frame past the
+ * largest it takes there, or (Sailor's own interpolation) one past R6.6's
+ * limits is refused plainly before the hold (slowMotionAiStart). A still
+ * picture is handed on (count 1, nothing held).
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
@@ -47,7 +49,7 @@ import { EFFECT_PICTURE_OUTPUTS, effectFamilyOn, effectSchemaOf } from '#shared/
 import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
 import {
-  BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS, rifeTakes, slowMotionAiCount, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
+  BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_PAST_4K_WORDS, SLOW_MOTION_AI_WORDS, SLOW_MOTION_OWN_MAX_FRAMES, fitsRifeLocal, rifeTakes, slowMotionAiCount, slowMotionAiOutWords, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
   OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
 } from '#shared/runner/localModels'
 import { tileCount, tileCountBound, tooThinToTile } from '#shared/runner/upscaleTiles'
@@ -130,7 +132,9 @@ export function pictureBound(prompt: ApiPrompt, link: ApiLink, families: Readonl
     const n = intOf(inputs.batch_size ?? 1)
     return n !== null && n >= 1 ? n : null
   }
-  if (localModelOn(cls, families)) {
+  // R11.7: Slow motion (AI) hands a still picture on as it came (more than one goes to the engine before the run).
+  if (cls === FRAME_INTERP_AI_CLASS) return localModelOn(cls, families) && link[1] === 0 && isLink(inputs.frames) ? pictureBound(prompt, inputs.frames, families, depth + 1) : null
+  if (localModelOn(cls, families) && Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, cls)) {
     const name = LOCAL_MODEL_PICTURE_INPUT[cls]!
     // Its picture's slot (R7.5: Subject mask's cutout is slot 1).
     return link[1] === localModelPictureSlot(cls) && isLink(inputs[name]) ? pictureBound(prompt, inputs[name], families, depth + 1) : null
@@ -243,25 +247,44 @@ export function hasLocalModelPicture(prompt: ApiPrompt, families: ReadonlySet<Ru
 
 /**
  * R7.6: Slow motion (AI)'s clip, before the hold: its count and size, or why
- * the workflow goes to the engine. `shape`: its input's frame shape (null
- * when it can't be known).
+ * it can't run here. `shape`: its input's frame shape (null when it can't be
+ * known: the workflow goes to the engine, a stop-gap R11.8 closes). R11.7
+ * (ruling (j)): a clip over the frame cap, a slowed-down batch past R5's batch
+ * caps, a frame past the largest it can take there, or (Sailor's own
+ * interpolation) past R6.6's limits is refused plainly, before the hold, with
+ * the cap in words where there is one; RIFE takes a long clip in segments
+ * (#shared/runner/clipSegments), the hold priced on them. A refusal that
+ * rests on the count needs the count to be sure (the packets counted, as the
+ * run's start pass does, or exact); an upper bound alone proves nothing over
+ * a cap, so that clip goes to the engine as before (LC2's rule; R11.8).
  */
-export function slowMotionAiStart(inputs: Record<string, unknown>, shape: FrameShape | null | undefined, hosted: boolean): { frames: number; w: number; h: number } | { problem: string } {
+export function slowMotionAiStart(inputs: Record<string, unknown>, shape: FrameShape | null | undefined, hosted: boolean): { frames: number; w: number; h: number } | { problem: string } | { refused: string } {
   if (!shape || !(shape.count >= 0)) return { problem: LOCAL_MODEL_WORDS.unknownCount }
   const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
-  if (shape.count > (hosted ? SLOW_MOTION_AI_MAX_FRAMES.hosted : SLOW_MOTION_AI_MAX_FRAMES.local)) return { problem: SLOW_MOTION_AI_WORDS.overCap }
-  if (shape.w * shape.h > caps.framePixels) return { problem: SLOW_MOTION_AI_WORDS.tooBig }
   const m = inputs.multiplier as number
+  const rife = shape.count < 2 || rifeTakes(m, shape.w, shape.h, hosted ? 'hosted' : 'local')
+  // RIFE's cap (in segments), else Sailor's own interpolation's (hosted unchanged until its memory is measured on Fly).
+  const cap = rife ? (hosted ? SLOW_MOTION_AI_MAX_FRAMES.hosted : SLOW_MOTION_AI_MAX_FRAMES.local) : (hosted ? SLOW_MOTION_OWN_MAX_FRAMES.hosted : SLOW_MOTION_OWN_MAX_FRAMES.local)
+  const sure = shape.exact || shape.counted === true
+  /** A refusal resting on the count: plain when the count is sure, else the engine (a stop-gap R11.8 closes). */
+  const byCount = (words: string) => (sure ? { refused: words } : { problem: words })
+  if (shape.w * shape.h > caps.framePixels) return { refused: SLOW_MOTION_AI_WORDS.tooBig }
+  if (shape.count > cap) return byCount(overCapWords(FRAME_INTERP_AI_CLASS, cap))
   const out = slowMotionAiCount(shape.count, m)
-  // The batch it hands on, held to R5's batch caps (values.ts keepFrames).
-  if (out > caps.batchFrames || out * shape.w * shape.h > caps.batchPixels) return { problem: SLOW_MOTION_AI_WORDS.outTooLong }
-  if (shape.count >= 2 && !rifeTakes(m, shape.w, shape.h, hosted ? 'hosted' : 'local')) {
+  // The batch it hands on, held to R5's batch caps (values.ts keepFrames): refused plainly with the most frames that fit.
+  if (out > caps.batchFrames || out * shape.w * shape.h > caps.batchPixels) {
+    return byCount(slowMotionAiOutWords(Math.max(1, Math.min(caps.batchFrames, Math.floor(caps.batchPixels / Math.max(1, shape.w * shape.h))))))
+  }
+  if (!rife) {
     // Sailor's own interpolation (R6.6's Slow motion): its memory, its largest frame and its work, as R6.6's start pass judges them.
+    // Locally past 4K, where it can't take the clip either: refused plainly, 4K in words (ruling (j)).
+    const tooBig = !hosted && !fitsRifeLocal(shape.w, shape.h) && rifeTakes(m, shape.w, shape.h, 'hosted') ? SLOW_MOTION_AI_PAST_4K_WORDS : SLOW_MOTION_AI_WORDS.tooBig
     const spec = VIDEO_EFFECTS.FrameInterpolate!
     const w = { multiplier: m }
     const outShape = { count: out, w: shape.w, h: shape.h, exact: shape.exact }
-    if (spec.heldBytes(w, [shape]) > caps.heldFrameBytes || spec.work(w, [shape], outShape) > caps.effectWork) return { problem: SLOW_MOTION_AI_WORDS.tooBig }
-    for (const f of spec.limits?.(w, [shape]) ?? []) if (f.value > f.limit) return { problem: SLOW_MOTION_AI_WORDS.tooBig }
+    if (spec.heldBytes(w, [shape]) > caps.heldFrameBytes) return { refused: tooBig }
+    for (const f of spec.limits?.(w, [shape]) ?? []) if (f.value > f.limit) return { refused: tooBig }
+    if (spec.work(w, [shape], outShape) > caps.effectWork) return byCount(tooBig)
   }
   return { frames: shape.count, w: shape.w, h: shape.h }
 }
@@ -293,8 +316,17 @@ export async function localModelStartProblems(
     if (n.class_type === FRAME_INTERP_AI_CLASS && localModelOn(n.class_type, families)) {
       const link = n.inputs?.frames
       if (!isLink(link)) continue
+      // R11.7: a still picture is handed on as Python does (one frame, no call); a batch of pictures, which
+      // Python would slow down, goes to the engine (a stop-gap R11.9 closes with plain words).
+      if (outputKind(prompt, link, kinds) !== 'frames') {
+        const pictures = pictureBound(prompt, link, families)
+        if (pictures !== 1) return { counts, keptBytes: 0, problem: { message: pictures === null ? LOCAL_MODEL_WORDS.unknownCount : SLOW_MOTION_AI_WORDS.pictureBatch, nodeId, classType: n.class_type } }
+        counts[nodeId] = 1
+        continue
+      }
       shapes ??= await o.shapes()
       const got = slowMotionAiStart(n.inputs ?? {}, shapes.get(`${link[0]}:${link[1]}`), o.hosted)
+      if ('refused' in got) return { counts, keptBytes: 0, problem: null, refused: { message: got.refused, nodeId, classType: n.class_type } }
       if ('problem' in got) return { counts, keptBytes: 0, problem: { message: got.problem, nodeId, classType: n.class_type } }
       counts[nodeId] = got.frames
       sizes[nodeId] = { w: got.w, h: got.h, place: o.hosted ? 'hosted' : 'local' }
@@ -307,6 +339,8 @@ export async function localModelStartProblems(
     const link = n.inputs?.[LOCAL_MODEL_PICTURE_INPUT[n.class_type]!]
     if (!isLink(link)) continue
     let count: number | null
+    // R11.7: whether the count is sure (a picture source's own count; a clip's packets counted), for a plain refusal over the cap.
+    let countSure = true
     const maxPixels = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_MAX_PIXELS, n.class_type) ? LOCAL_MODEL_MAX_PIXELS[n.class_type]! : null
     let pixels: number | null = null
     // R11.6: the pictures' exact shapes where known (a clip's frame shape; a picture's, by the gate's walk).
@@ -317,6 +351,7 @@ export async function localModelStartProblems(
       shapes ??= await o.shapes()
       const s = shapes.get(`${link[0]}:${link[1]}`)
       count = s?.count ?? null
+      countSure = s?.exact === true || s?.counted === true
       // A class with a mask slot (Background remove) keeps a mask per frame too.
       if (s && keepsMasks(n.class_type)) masks += maskBytesBound(s)
       if (s) {
@@ -342,7 +377,13 @@ export async function localModelStartProblems(
     if (count === null || !Number.isFinite(count) || count < 0) {
       return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId, classType: n.class_type } }
     }
-    if (count > cap) return { counts, keptBytes: 0, problem: { message: overCapWords(n.class_type), nodeId, classType: n.class_type } }
+    // R11.7 (ruling (j)): over the frame cap, refused plainly before the hold, the cap in words (raised only after a Fly
+    // measurement). A clip's count that is only an upper bound (its packets not counted) proves nothing over the cap:
+    // that one goes to the engine as before (LC2's rule; R11.8).
+    if (count > cap) {
+      const words = { message: overCapWords(n.class_type, cap), nodeId, classType: n.class_type }
+      return countSure ? { counts, keptBytes: 0, problem: null, refused: words } : { counts, keptBytes: 0, problem: words }
+    }
     if (maxPixels) {
       if (pixels === null || !Number.isFinite(pixels) || pixels <= 0) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.unknownSize, nodeId, classType: n.class_type } }
       if (pixels > maxPixels) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.tooLarge, nodeId, classType: n.class_type } }

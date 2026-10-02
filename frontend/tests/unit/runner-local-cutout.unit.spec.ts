@@ -50,7 +50,7 @@ import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import {
-  BG_REMOVE_CLASS, BG_REMOVE_SLUG, LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, SERVICE_OF, localModelCalls, serviceTooltip,
+  BG_REMOVE_CLASS, BG_REMOVE_SLUG, LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, SERVICE_OF, localModelCalls, overCapWords, serviceTooltip,
 } from '#shared/runner/localModels'
 import { PAID_RATES } from '#shared/pricing/paidRates'
 import { FAMILY_PRICED_CLASSES, perFrameCredits, priceNode } from '#shared/pricing/nodePrice'
@@ -577,11 +577,11 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(keptFiles.length).toBe(1)
   })
 
-  it('over the frame cap, or a count that can\'t be known: the workflow is left to the engine before anything is held', async () => {
+  it('over the frame cap on an uncounted bound, or a count that can\'t be known: the workflow is left to the engine before anything is held (R11.7: a counted clip is refused plainly, runner-clip-caps)', async () => {
     const p: ApiPrompt = { v: lvf, n: bgNode(c, ['v', 0]), s: saveFrames(['n', 0]) }
     const shapes = (count: number) => async () => new Map([['v:0', { count, w: 64, h: 36, exact: false }]])
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(LOCAL_MODEL_WORDS.overCap)
+    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(overCapWords(BG_REMOVE_CLASS, LOCAL_MODEL_MAX_FRAMES.hosted))
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: false, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem).toBeNull()
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map() })).problem?.message).toBe(LOCAL_MODEL_WORDS.unknownCount)
     // The batches kept while it runs (the clip's, the cut-out's) and the masks, for the run's kept room (hosted 4 GiB):
