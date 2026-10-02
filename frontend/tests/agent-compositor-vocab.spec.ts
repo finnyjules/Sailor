@@ -230,23 +230,14 @@ test.describe('Compositor agent vocabulary (F-cap)', () => {
   })
 
   test('lights: one undo after approving removes the lamp, the Darkness and the band together (light layers stage 4)', async ({ page }) => {
-    // KNOWN BUG (found by this check, 2026-10-01): a Frame assistant proposal records no undo
-    // step of its own (useCompositorAgent / CompositorModal setState never call recordHistory).
-    // setState's `editor.setLighting` records one AFTER `commit(s.layers)` has already put the
-    // lamp in, so the only undo step restores the old Darkness and drops the band but keeps the
-    // lamp — and no later ⌘Z can remove it. Remove `test.fail` once a proposal is one undo step.
-    test.fail()
+    // A proposal is one undo step (the agent records once, before its first write).
     const { before, pixels0 } = await proposeNight(page)
     await page.getByTestId('compositor-prompt-dock').getByRole('button', { name: 'Approve', exact: true }).click()
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
     await page.keyboard.press('Meta+z')
-    await page.waitForTimeout(800)
+    await expect.poll(async () => (await layers(page)).map((l: any) => l.kind), { timeout: 10_000 }).toEqual(['rect'])
     const after = { kinds: (await layers(page)).map((l: any) => l.kind), ...(await frameProps(page)) }
-    await page.keyboard.press('Meta+z')
-    await page.waitForTimeout(800)
-    const after2 = { kinds: (await layers(page)).map((l: any) => l.kind), ...(await frameProps(page)) }
-    console.log('[agent lights undo] before', JSON.stringify(before), '| after one undo', JSON.stringify(after), '| after a second undo', JSON.stringify(after2))
-    expect(after.kinds).toEqual(['rect'])
+    console.log('[agent lights undo] before', JSON.stringify(before), '| after one undo', JSON.stringify(after))
     expect(after.motionx).not.toContain('layers.lamp.light.brightness')
     expect(after.lighting?.darkness ?? null).toBe(before.lighting?.darkness ?? null)
     await expect(page.getByTestId('light-dot')).toHaveCount(0)

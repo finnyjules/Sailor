@@ -1480,7 +1480,7 @@ const rgbMean = (page: Page, name: string, b: Box) => page.evaluate(([n, b]) => 
   for (let y = y0!; y < y1!; y++) for (let x = x0!; x < x1!; x++) { const i = (y * s.w + x) * 4; for (let c = 0; c < 3; c++) sum[c]! += s.d[i + c]; k++ }
   return sum.map(v => Math.round((v / k) * 10) / 10)
 }, [name, b] as const)
-/** A layer's row header in the Motion tab's timeline (its label: a light reads "light"). */
+/** A layer's row header in the Motion tab's timeline (its label: a light reads its name, else Lamp / Spot / Sun). */
 const motionRow = (page: Page, label: string) => page.getByTestId('band-timeline').getByRole('button', { name: `▾ ${label}`, exact: true })
 /** ⇧-drag on the ruler (⇧ resets the timeline's zoom to the whole length) past its left (t = 0)
  *  or right (t = the end) edge. Returns the time the playhead flag shows. */
@@ -1502,7 +1502,7 @@ test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animat
     const lampAt = (b: number) => [...BASE, light('lamp', 'lamp', 0.14, 0.5, { brightness: b })]
     await setLayers(page, lampAt(1.6))
     await enterMotion(page)
-    await motionRow(page, 'light').click()
+    await motionRow(page, 'Lamp').click()
     await addProperty(page, 'layers.lamp.light.brightness', '1-motion-light-group.png')
     await setPoint(page, 'layers.lamp.light.brightness', 0, 0)
     await setPoint(page, 'layers.lamp.light.brightness', 1, 3)
@@ -1524,6 +1524,7 @@ test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animat
     const px = { t0: await pixOff(page, 'b0', 'static0'), end: await pixOff(page, 'b1', 'static3') }
     console.log('[s4 brightness] t', t0, '→', t1, '| halves static0', s0, 'static3', s3, 'band t0', b0, 'band end', b1, '| max 6×6 cell diffs', g, '| pixels off by >2', px)
     expect(t0).toBe(0)
+    expect(t1).toBe(4)                                     // the end flag: the Frame's duration (4 s, the default)
     expect(b1.left - b0.left).toBeGreaterThan(10)         // the lit (left) side brightens
     expect(px.t0.over).toBe(0)
     expect(px.end.over).toBe(0)
@@ -1532,7 +1533,7 @@ test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animat
     await openFrame(page)
     await setLayers(page, [...BASE, light('lamp', 'lamp', 0.14, 0.5, { color: '#ffffff', brightness: 2.4 })])
     await enterMotion(page)
-    await motionRow(page, 'light').click()
+    await motionRow(page, 'Lamp').click()
     await addProperty(page, 'layers.lamp.light.color')
     await setPoint(page, 'layers.lamp.light.color', 0, '#ffffff')
     await setPoint(page, 'layers.lamp.light.color', 1, '#ff0000')
@@ -1578,23 +1579,34 @@ test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animat
     expect(m.far0 - m.far1).toBeGreaterThan(30)                       // far from the lamp, the Frame goes dark
     expect(m.far1 / m.far0).toBeLessThan(m.near1 / m.near0 - 0.1)    // far keeps less of its light than the lamp's side
 
-    // The review minor: does the row stay highlighted after a click on empty canvas?
+    // A click on empty canvas clears the row's selection, as it clears a layer's.
     await row.click()
-    const cls = () => row.getAttribute('class')
-    const selected = await cls()
+    const highlighted = async () => /\btext-white\b(?!\/)/.test((await row.getAttribute('class')) ?? '')
+    await expect.poll(highlighted).toBe(true)
     const stage = await canvasRect(page)
     await page.mouse.click(stage.x + stage.width + 40, stage.y + stage.height / 2)   // empty stage, off the Frame
-    await page.waitForTimeout(300)
-    const afterClick = await cls()
-    console.log('[s4 all lights row] selected:', /\btext-white\b(?!\/)/.test(selected ?? ''), '| after an empty-canvas click:', /\btext-white\b(?!\/)/.test(afterClick ?? ''))
+    await expect.poll(highlighted).toBe(false)
 
-    // The last light deleted: the row goes.
+    // The last light deleted: the row goes, and its Darkness band with it, in the same undo step.
     await enterDesign(page)
     await page.getByTestId('light-dot').click()
     await page.getByTestId('light-delete').click()
     await expect(page.getByTestId('light-dot')).toHaveCount(0)
     await enterMotion(page)
     await expect(page.getByTestId('all-lights-row')).toHaveCount(0)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    await page.keyboard.press('Meta+z')                                          // one undo: the lamp and its Darkness band
+    await expect(page.getByTestId('all-lights-row')).toHaveCount(1)
+    await expect(page.getByTestId('band-frame.darkness')).toBeVisible()
+    await page.keyboard.press('Meta+Shift+z')
+    await expect(page.getByTestId('all-lights-row')).toHaveCount(0)
+    // A new lamp starts with no Darkness animation.
+    await enterDesign(page)
+    await page.getByTestId('add-light').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
+    await enterMotion(page)
+    await expect(page.getByTestId('all-lights-row')).toHaveCount(1)
+    await expect(page.getByTestId('band-frame.darkness')).toHaveCount(0)
   })
 
   test('a Lift band on the headline lengthens its shadow over time', async ({ page }) => {
@@ -1627,7 +1639,7 @@ test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animat
     await openFrame(page)
     await setLayers(page, [...BASE, light('lamp', 'lamp', 0.5, 0.5)])
     await enterMotion(page)
-    await motionRow(page, 'light').click()
+    await motionRow(page, 'Lamp').click()
     await addProperty(page, 'layers.lamp.x')
     await setPoint(page, 'layers.lamp.x', 0, 0.08)
     await setPoint(page, 'layers.lamp.x', 1, 0.92)
@@ -1649,7 +1661,7 @@ test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animat
     ]
     await setLayers(page, [...shapes, light('lamp', 'lamp', 0.12, 0.35, { height: 0.35 })])
     await enterMotion(page)
-    await motionRow(page, 'light').click()
+    await motionRow(page, 'Lamp').click()
     await addProperty(page, 'layers.lamp.light.brightness')
     await setPoint(page, 'layers.lamp.light.brightness', 0, 0.2)
     await setPoint(page, 'layers.lamp.light.brightness', 1, 3)
