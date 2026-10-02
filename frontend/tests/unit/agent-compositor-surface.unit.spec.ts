@@ -23,14 +23,28 @@ describe('describeCompositor', () => {
     const doc = snap.objects.find(o => o.type === 'document')!
     expect((doc.current as { background: string }).background).toBe('#000000')
   })
-  it('a lit Frame reports its light count and Darkness as read-only document facts; an unlit one does not', () => {
+  it('lists lights as layers and always carries the Frame lighting; switches show only when not default', () => {
     const doc = (st: CompositorState) => describeCompositor(st).objects.find(o => o.type === 'document')!.current as Record<string, unknown>
-    expect(doc(state())).not.toHaveProperty('lights')
+    expect(doc(state()).lighting).toEqual({ darkness: 0.45, backgroundLit: true })
     const lit = state()
-    lit.layers = [...lit.layers, { id: 'L1', kind: 'light', x: 0.3, y: 0.3, rotation: 0, opacity: 1, light: { type: 'lamp' } } as unknown as LocalLayer]
-    lit.lighting = { darkness: 0.6, backgroundLit: true }
-    expect(doc(lit)).toMatchObject({ lights: 1, darkness: 0.6 })
-    expect(describeCompositor(lit).objects.some(o => o.id === 'L1')).toBe(false)
+    lit.layers = [
+      ...lit.layers.map(l => (l.id === 'r1' ? { ...l, lit: false, castsShadow: true, lift: 0.1 } : l)),
+      { id: 'L1', kind: 'light', x: 0.3, y: 0.2, rotation: 0, opacity: 1, light: { type: 'spot', height: 0.8, color: '#fff1d6', brightness: 2.2, reach: 1.4, aimX: 0.5, aimY: 0.6, cone: 0.35, edge: 0.5 } },
+      { id: 'L2', kind: 'light', name: 'Desk', x: 0.7, y: 0.7, rotation: 0, opacity: 1, light: { type: 'lamp', height: 0.55, color: '#ffb36b', brightness: 1.6, reach: 1, aimX: 0.5, aimY: 0.5, cone: 0.35, edge: 0.5 } },
+    ] as unknown as LocalLayer[]
+    lit.lighting = { darkness: 0.6, backgroundLit: false }
+    expect(doc(lit).lighting).toEqual({ darkness: 0.6, backgroundLit: false })
+    const objs = describeCompositor(lit).objects
+    expect(objs.find(o => o.id === 'L1')).toEqual({ id: 'L1', label: 'Spot', type: 'light', current: { x: 0.3, y: 0.2, type: 'spot', height: 0.8, color: '#fff1d6', brightness: 2.2, reach: 1.4, aimX: 0.5, aimY: 0.6, cone: 0.35 } })
+    const lamp = objs.find(o => o.id === 'L2')!
+    expect(lamp.label).toBe('Desk')
+    expect(lamp.current).not.toHaveProperty('cone')
+    expect(lamp.current).not.toHaveProperty('aimX')
+    // r1: lit off and lift differ from defaults; casts shadow is the rect default → not shown.
+    const r1 = objs.find(o => o.id === 'r1')!.current as Record<string, unknown>
+    expect(r1).toMatchObject({ lit: false, lift: 0.1 })
+    expect(r1).not.toHaveProperty('castsShadow')
+    expect(objs.find(o => o.id === 't1')!.current).not.toHaveProperty('lift')
   })
   it('every command carries a hint', () => {
     const snap = describeCompositor(state())
@@ -764,5 +778,94 @@ describe('agent edits make a layout piece the user\'s own (M2)', () => {
     const r = applyCompositorCommand(withOwned(), { op: 'setLayerDepth', target: 'r1', args: { to: 'front' } })
     if (!r.ok) return
     expect((r.template.layers.find(l => l.id === 'r1') as any).owner).toEqual({ by: 'layout', key: 'band-0' })
+  })
+})
+
+// Frame light layers stage 4 — the assistant adds, sets and animates lights.
+describe('light ops', () => {
+  const lights = (s: CompositorState) => s.layers.filter(l => l.kind === 'light') as unknown as { id: string; x: number; y: number; light: Record<string, unknown> }[]
+  const ok = (r: ReturnType<typeof applyCompositorCommand>) => { expect(r.ok).toBe(true); if (!r.ok) throw new Error(r.detail); return r.template }
+
+  it('addLight puts a clamped light on top of the stack', () => {
+    const s = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'lamp', x: 3, y: 0.2, color: '#FFB066', brightness: 9, height: -1, reach: 0.1 } }))
+    expect(s.layers.at(-1)!.kind).toBe('light')
+    const [l] = lights(s)
+    expect(l!.x).toBe(1.5); expect(l!.y).toBe(0.2)
+    expect(l!.light).toMatchObject({ type: 'lamp', color: '#ffb066', brightness: 3, height: 0, reach: 0.2 })
+    // An id of the agent's choosing, so it can target the light next; a duplicate is refused.
+    const named = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'sun', x: 0.1, y: 0.1, id: 'sun1' } }))
+    expect(lights(named)[0]!.id).toBe('sun1')
+    expect(applyCompositorCommand(named, { op: 'addLight', args: { type: 'sun', id: 'sun1' } }).ok).toBe(false)
+  })
+
+  it('addLight refuses junk instead of resetting it', () => {
+    expect(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'torch' } }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'lamp', color: 'orange' } }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'lamp', brightness: 'lots' } }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'lamp', cone: 0.3 } }).ok).toBe(false)
+  })
+
+  it('a 7th light is refused with a plain reason', () => {
+    let s = state()
+    for (let i = 0; i < 6; i++) s = ok(applyCompositorCommand(s, { op: 'addLight', args: { type: 'lamp', x: i / 6, y: 0.5 } }))
+    expect(lights(s)).toHaveLength(6)
+    const r = applyCompositorCommand(s, { op: 'addLight', args: { type: 'spot', x: 0.5, y: 0.5 } })
+    expect(r.ok).toBe(false); if (r.ok) return
+    expect(r.detail).toBe('A Frame holds up to 6 lights')
+  })
+
+  it('setLight changes and clamps a light; aim and cone reach a spot', () => {
+    const s0 = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'spot', x: 0.5, y: 0.1, id: 'S' } }))
+    const s = ok(applyCompositorCommand(s0, { op: 'setLight', target: 'S', args: { cone: 2, aimX: -3, aimY: 0.7, brightness: 1, x: 0.4 } }))
+    const l = lights(s)[0]!
+    expect(l.x).toBe(0.4)
+    expect(l.light).toMatchObject({ type: 'spot', cone: 0.8, aimX: -0.5, aimY: 0.7, brightness: 1, height: 0.8 })
+    expect(applyCompositorCommand(s0, { op: 'setLight', target: 'S', args: {} }).ok).toBe(false)
+    expect(applyCompositorCommand(s0, { op: 'setLight', target: 'r1', args: { brightness: 1 } }).ok).toBe(false)
+    expect(applyCompositorCommand(s0, { op: 'setLight', target: 'S', args: { color: '#abc' } }).ok).toBe(false)
+  })
+
+  it('setLighting writes the Frame lighting, clamped, and its inverse restores it', () => {
+    const r = applyCompositorCommand(state(), { op: 'setLighting', args: { darkness: 1.5, backgroundLit: false } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(r.template.lighting).toEqual({ darkness: 1, backgroundLit: false })
+    const back = applyCompositorCommand(r.template, r.inverse)
+    expect(back.ok && back.template.lighting).toBeUndefined()
+    const night = ok(applyCompositorCommand(state(), { op: 'setLighting', args: { darkness: 0.85 } }))
+    expect(night.lighting).toEqual({ darkness: 0.85, backgroundLit: true })
+    expect(applyCompositorCommand(state(), { op: 'setLighting', args: {} }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'setLighting', args: { darkness: 'night' } }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'setLighting', args: { ambient: 1 } }).ok).toBe(false)
+  })
+
+  it('setLayerLight sets a layer\'s switches, clamps lift, and refuses a light', () => {
+    const s = ok(applyCompositorCommand(state(), { op: 'setLayerLight', target: 'r1', args: { lit: false, castsShadow: false, lift: 1 } }))
+    expect(s.layers.find(l => l.id === 'r1')).toMatchObject({ lit: false, castsShadow: false, lift: 0.15 })
+    expect(applyCompositorCommand(state(), { op: 'setLayerLight', target: 'r1', args: { lit: 'yes' } }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'setLayerLight', target: 'r1', args: {} }).ok).toBe(false)
+    const withLight = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'lamp', id: 'L' } }))
+    expect(applyCompositorCommand(withLight, { op: 'setLayerLight', target: 'L', args: { lit: false } }).ok).toBe(false)
+  })
+
+  it('removeLayer removes a light', () => {
+    const s = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'lamp', id: 'L' } }))
+    const r = ok(applyCompositorCommand(s, { op: 'removeLayer', target: 'L' }))
+    expect(lights(r)).toHaveLength(0)
+  })
+
+  it('summaries read plainly', () => {
+    const s = ok(applyCompositorCommand(state(), { op: 'addLight', args: { type: 'spot', id: 'S' } }))
+    expect(summarizeCompositorChange(state(), { op: 'addLight', args: { type: 'lamp' } })!.label).toBe('Added a lamp')
+    expect(summarizeCompositorChange(s, { op: 'setLight', target: 'S', args: { brightness: 1 } })!.label).toBe('Changed the light')
+    expect(summarizeCompositorChange(s, { op: 'setLighting', args: { darkness: 0.85 } })!.label).toBe('Darkness 85%')
+    expect(summarizeCompositorChange(s, { op: 'animateLight', target: 'S', args: { key: 'brightness', from: 0, to: 2 } })!.label).toBe('Animated the light')
+  })
+
+  it('the light hints carry the night/day guidance and the menu stays under the ceiling', () => {
+    const cmds = describeCompositor(state()).commands
+    for (const op of ['addLight', 'setLight', 'setLighting', 'setLayerLight', 'animateLight']) expect(cmds.some(c => c.op === op), op).toBe(true)
+    expect(cmds.find(c => c.op === 'addLight')!.hint).toContain('Night: darkness 0.85 and a warm lamp (#ffb066). Day: darkness 0.2.')
+    const total = cmds.reduce((n, c) => n + (c.hint?.length ?? 0), 0)
+    expect(total, `compositor hints are ${total} chars`).toBeLessThanOrEqual(COMPOSITOR_HINT_CEILING)
   })
 })

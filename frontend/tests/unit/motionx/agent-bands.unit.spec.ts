@@ -26,4 +26,19 @@ describe('mergeAgentBands — the agent only owns untagged effect-dial bands', (
     const agent = [band('layers.L1.x', 0.1), band(DIAL, 1, { behaviourId: 'bX' })]
     expect(mergeAgentBands(current, agent)).toBe(current)
   })
+
+  it('lighting bands are the agent\'s too: light dials, lift and darkness', () => {
+    const userBand = band('layers.L1.opacity')
+    const agent = [band('layers.LT.light.brightness', 2), band('layers.R.lift', 0.1), band('frame.darkness', 0.85)]
+    expect(mergeAgentBands([userBand], agent)).toEqual([userBand, ...agent])
+    expect(mergeAgentBands([userBand, ...agent], [])).toEqual([userBand])   // reject removes them
+  })
+  it('a position band is the agent\'s only on a light layer it is told about', () => {
+    const userX = band('layers.R.x', 0.5)
+    const lightX = band('layers.LT.x', 0.9)
+    const ids = new Set(['LT'])
+    expect(mergeAgentBands([userX], [band('layers.R.x', 0.1), lightX], ids)).toEqual([userX, lightX])
+    const cur = [userX]
+    expect(mergeAgentBands(cur, [lightX])).toBe(cur)                        // no light ids → not the agent's
+  })
 })

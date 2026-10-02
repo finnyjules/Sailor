@@ -82,9 +82,9 @@ describe('F8 · effect-dial motion is agent-drivable via animateDial (F-cap Task
     expect(fx.tracks).toBeUndefined()   // the smuggled track does not
   })
 
-  it('the described agent vocabulary now lists animateDial (the ONE motion op)', () => {
+  it('the described agent vocabulary lists animateDial and, since light layers stage 4, animateLight', () => {
     const cmds = describeCompositor(state()).commands
     const motionOps = cmds.filter(c => /track|dial|motion|keyframe|animat/i.test(String(c.op)))
-    expect(motionOps.map(c => c.op)).toEqual(['animateDial'])
+    expect(motionOps.map(c => c.op)).toEqual(['animateDial', 'animateLight'])
   })
 })

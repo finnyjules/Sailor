@@ -1669,12 +1669,14 @@ const compositorAgent = useCompositorAgent({
     if (s.background !== background.value) setBackground(s.background)
     if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
     if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(layoutGrid.value)) setLayoutGrid(s.grid)
+    if (s.lighting && JSON.stringify(s.lighting) !== JSON.stringify(frameLighting.value)) editor.setLighting(s.lighting)
     // Only the agent's timeline BANDS flow back (animateDial authors them) — fps/duration are
     // the timeline's own controls, never touched by the agent.
     // The agent's state is a snapshot from when the user asked and is replayed on accept / reject,
     // so it must never replace the whole list — only its own dial bands merge back in.
     const curBands = motionDoc.value.motionx ?? []
-    const nextBands = mergeAgentBands(curBands, s.motion?.motionx ?? [])
+    const lightIds = new Set([...s.layers, ...(localLayers.value as LocalLayer[])].filter(l => l.kind === 'light').map(l => l.id))
+    const nextBands = mergeAgentBands(curBands, s.motion?.motionx ?? [], lightIds)
     if (nextBands !== curBands) {
       setMotion({ motionx: nextBands })
       commitMotionTimeline()

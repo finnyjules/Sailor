@@ -55,6 +55,16 @@ describe('mergeCompositorState — apply the agent\'s delta onto the CURRENT doc
     expect(out.postEffects).toEqual([{ type: 'grain' }])
     expect(out.grid).toEqual({ mode: 'columns' })
   })
+  it('lighting merges like the other doc fields: the agent\'s only when the agent changed it', () => {
+    const night = { darkness: 0.85, backgroundLit: true }, user = { darkness: 0.3, backgroundLit: false }
+    const base = S([L('a')], { lighting: { darkness: 0.45, backgroundLit: true } })
+    // The agent made it night; the user touched nothing → night.
+    expect(mergeCompositorState(base, base, S([L('a')], { lighting: night })).lighting).toEqual(night)
+    // The agent left lighting alone; the user changed it meanwhile → the user's stays (layer edits too).
+    expect(mergeCompositorState(S([L('a', 0.9)], { lighting: user }), base, S([L('a')], { lighting: base.lighting })).lighting).toEqual(user)
+    // Both changed it → the agent's wins (same rule as a conflicting layer).
+    expect(mergeCompositorState(S([L('a')], { lighting: user }), base, S([L('a')], { lighting: night })).lighting).toEqual(night)
+  })
   it('never mutates its inputs', () => {
     const base = S([L('a')]), current = S([L('a'), L('u')]), next = S([L('a', 0.1)])
     const snap = JSON.stringify([base, current, next])

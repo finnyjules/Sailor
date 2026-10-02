@@ -41,5 +41,5 @@ export function mergeCompositorState(current: CompositorState, base: CompositorS
 /** Whole-doc fields: take the agent's value only when the agent changed it. */
 function mergeDocFields(current: CompositorState, base: CompositorState, next: CompositorState) {
   const pick = <K extends keyof CompositorState>(k: K): CompositorState[K] => (same(next[k], base[k]) ? current[k] : next[k])
-  return { background: pick('background'), postEffects: pick('postEffects'), grid: pick('grid'), groups: pick('groups'), templates: pick('templates') }
+  return { background: pick('background'), postEffects: pick('postEffects'), grid: pick('grid'), groups: pick('groups'), templates: pick('templates'), lighting: pick('lighting') }
 }

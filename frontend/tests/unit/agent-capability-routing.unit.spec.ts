@@ -309,6 +309,17 @@ const REACHABLE: { phrase: string; expect: string }[] = [
   { phrase: 'can you take the background out of this photo', expect: 'RemoveBackgroundNode' }, // vs Outpaint/Split/Edit
   { phrase: 'give the image a glitchy vhs vibe', expect: 'ShaderStudio' },                     // vs RestyleFromImage
 ]
+// Frame light layers stage 4: lighting requests reach the Frame (top-3).
+describe('lighting phrases route to the Frame', () => {
+  // 'make it night' is left to the Frame's own assistant: as a canvas intent it steals image ideas
+  // ("a snowy street at night…") from the sketch fast-path, and on a photo it is EditImage's.
+  for (const phrase of ['add a light', 'add a warm lamp', 'light the scene', 'darker', 'spotlight']) {
+    it(`"${phrase}" → Compositor`, () => {
+      expect(topN(phrase, 3)).toContain('Compositor')
+    })
+  }
+})
+
 describe('ambiguous requests stay discoverable (top-6)', () => {
   for (const { phrase, expect: exp } of REACHABLE) {
     it(`"${phrase}" → ${exp} in top-6`, () => {

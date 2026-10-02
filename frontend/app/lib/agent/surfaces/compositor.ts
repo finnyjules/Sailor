@@ -32,7 +32,12 @@ import {
 } from '~/lib/compositor/strokeStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { patchLayoutGrid, describeLayoutGrid, type LayoutGrid } from '~/lib/frame/layoutGrid'
-import { DEFAULT_LIGHTING, visibleLights, type FrameLighting } from '~/lib/frame/lighting/settings'
+import {
+  DEFAULT_LIGHTING, MAX_LIGHTS, HEX, newLightLayer, sanitizeLightLayer, sanitizeLighting, effectiveLift,
+  defaultLit, defaultCastsShadow, defaultLift, type FrameLighting, type LightLayer,
+} from '~/lib/frame/lighting/settings'
+import { LIGHT_MOTION_KEYS, DARKNESS_PATH } from '~/lib/frame/lighting/motion'
+import { lightLabel } from '~/lib/frame/lighting/labels'
 import { defaultGrid, type MosaicGrid } from '~/lib/compositor/mosaicGrid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import {
@@ -84,8 +89,8 @@ export interface CompositorState {
    *  only ever authors timeline bands (`motion.motionx`, via animateDial); fps/duration
    *  are the timeline's own controls and flow through here read-only. Absent = no motion authored. */
   motion?: FrameMotion
-  /** The Frame's lighting record (`sailor_localLighting`) — read-only context: describe reports
-   *  that the Frame is lit (light count, Darkness). No light ops until stage 4; never written back. */
+  /** The Frame's lighting record (`sailor_localLighting`): Darkness and whether the background is
+   *  lit. Written by setLighting; the host writes it back through `editor.setLighting`. Absent = the defaults. */
   lighting?: FrameLighting
 }
 
@@ -876,6 +881,11 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerEffect', hint: 'Add/update/remove an effect ON ONE LAYER. target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"gradientMap"|"dof"|"trim"|"offset"|"round_corners"|"roughen"|"boolean"|"morph"|"warp"|"long_shadow"|"shatter"|"background_blur"|"inner_shadow"|"layer_blur"|"drop_shadow"|"torn_edge"|"feather", ...params }, remove? }. adjust: brightness/contrast/saturation 0..2 (1=neutral), hue -180..180. bloom: threshold 0..1, radius ~0.02, intensity 0..2. grain: amount 0..1, size 1..8. vignette: amount/size/softness 0..1. duotone: shadows/highlights "#RRGGBB", mix 0..1. gradientMap: stops [{pos,color}], contrast -1..1, mix 0..1. dof (IMAGE ONLY, BRIGHT=NEAR): focus 0..1, range 0..1, aperture 0..1 blur, bladeCount 0..12 (6=hex), bladeRotation 0..360, bloomThreshold 0..1, bloomStrength 0..4. GEOMETRY EFFECTS (vector only — rect/ellipse/path/polygon/star + outlined text, no-op elsewhere; widths are canvas-width fractions): trim: start/end 0..1. offset: distance 0..1, negative=inward. round_corners: radius 0..1. roughen: amount 0..1, seed integer. boolean: op unite|subtract|intersect|exclude. morph: amount 0..1. boolean/morph need a SIBLING shape picked in UI (you set params, NOT the partner). warp: field bulge|pinch|wave|twist, amount -1..1 (signed), frequency (wave only). long_shadow: angle 0..360, length 0..1, color "#RRGGBB"/rgba(). shatter: cells 1..96, gap 0..1, seed integer. drop_shadow / inner_shadow (silhouette, out/inward): color "#RRGGBB"/rgba(), x/y -1..1, blur 0..1. layer_blur: radius 0..1. background_blur (behind layer, within silhouette): radius 0..1. torn_edge/feather: patch keys as setLayerTornEdge/setLayerFeather. LAYER STYLES (more "type" values, pixel passes, any layer): outer_glow/inner_glow (color,radius,intensity); diffused_edge (edge keeps its colour, middle fades to color: width,strength,grain,grainSize); color_overlay (color,blend,opacity) and gradient_overlay (from,to,angle,blend,opacity), blend normal|multiply|screen|overlay|soft-light; stroke_from_alpha (width,align inside|center|outside,color); directional_blur (angle,distance), radial_blur/zoom_blur (centerX,centerY,amount); levels (black,white,gamma), posterise (levels), threshold (cutoff), invert (amount); rough_edge/ink_bleed (amount,seed). PRINT RECIPES (pixel passes, any layer): risograph (ink,inkTwo "#RRGGBB"; levels 2..8; grain 0..1; contrast 0.5..2), photocopy (threshold 0..1; dirt 0..1; contrast 0.5..3), letterpress (depth 0..1; ink "#RRGGBB"; paper 0..1). backdrop_luminance_mask (masks the layer to where the backdrop is bright: threshold 0..1; softness 0..1; invert true/false).' + SHADER_LOOK_HINT + ' Numeric params clamp to range. Omitted params keep their value. remove:true deletes that kind.' },
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make it warmer", "add film grain", "cinematic colour grade" mean.' },
   { op: 'animateDial', hint: 'Animate one EFFECT DIAL on a layer over time — "animate the grain from 0 to 0.9", "fade the blur in", "ramp the vignette up". The effect must ALREADY be on the layer (add it with setLayerEffect first). target = layer id; args: { effect (an effect KIND on the layer, e.g. grain), dial (one of that effect\'s animatable dials, e.g. grain: amount|size; adjust: brightness|contrast|saturation|hue; a colour dial like long_shadow: color), from, to (start/end values — a number dial clamps to the dial\'s range, a colour dial takes a hex), start? (seconds, default 0), end? (seconds, default the frame duration) }. Authors a two-keyframe motion band on the frame; re-animating the same dial replaces it.' },
+  { op: 'addLight', hint: 'Add a LIGHT layer; it lights the layers below it. args: { type "lamp"|"spot"|"sun", x, y (-0.5..1.5, centre), color? "#rrggbb", brightness? 0..3, height? 0..1 (low = long shadows), reach? 0.2..2, id? }. Lands on top; a Frame holds up to 6 lights. Night: darkness 0.85 and a warm lamp (#ffb066). Day: darkness 0.2.' },
+  { op: 'setLight', hint: 'Change a light. target = light id; args: addLight\'s keys, plus aimX/aimY -0.5..1.5 and cone 0.1..0.8 (spot). Omitted keys keep their value.' },
+  { op: 'setLighting', hint: 'The Frame\'s lighting. args: { darkness? 0..1 (how dark the unlit Frame is; "darker" = higher), backgroundLit? bool }.' },
+  { op: 'setLayerLight', hint: 'How a layer takes the light. target = layer id (not a light); args: { lit? bool, castsShadow? bool, lift? 0.005..0.15 (height above the page: longer shadow) }.' },
+  { op: 'animateLight', hint: 'Animate lighting over time. target = a light id (key x|y|height|color|brightness|reach|aimX|aimY|cone), another layer id (key lift) or "frame" (key darkness); args: { key, from, to (colour = hex), start?, end? (seconds), ease? linear|easeIn|easeOut|easeInOut }. Replaces that key\'s band.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic tear | "deckle"=soft handmade-paper edge | "shredded"=spiky rip), amount (tear depth px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble; 0 = crisp), grainTexture (0..1 paper-fibre on the lip), lipWidth (px white underside band; 0 = none), lipVariation (0..1 lip unevenness), lipColor ("#RRGGBB", warm white default), seed (integer, for a different tear). Omitted keys keep their value. remove:true removes it. This is what "torn paper edge" means.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades in to the centre), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their value. remove:true removes it. This is what "feather the edges" means.' },
   { op: 'setLayerMaskBreak', hint: 'Let a SUBJECT masked to a shape BREAK OUT of one edge — the head pops over the top of the circle while the rest stays clipped. target = the MASKED layer id (must already be masked to a shape, see maskBreak in its description). args: { edge ("top"|"bottom"|"left"|"right"), offset? (0..1, how far the break line sits into the shape from that edge; default 0 = the shape edge), remove? }. This is what "let his head pop out of the top" means.' },
@@ -889,17 +899,24 @@ function findLayer(s: CompositorState, id?: string): LocalLayer | undefined {
 }
 
 /** Read a Compositor frame as an agent snapshot: each layer + a document object. */
-/** Document facts for a lit Frame: how many lights are on and its Darkness. Nothing for an unlit
- *  Frame, so its description is unchanged. */
-function describeLighting(state: CompositorState): Record<string, unknown> {
-  const n = visibleLights(state.layers, state.groups).length
-  if (!n) return {}
-  return { lights: n, darkness: Math.round((state.lighting ?? DEFAULT_LIGHTING).darkness * 100) / 100 }
+/** The Frame's lighting as the agent reads it: always present (the defaults when unset). */
+function describeLighting(state: CompositorState): FrameLighting {
+  const l = state.lighting ?? DEFAULT_LIGHTING
+  return { darkness: Math.round(l.darkness * 100) / 100, backgroundLit: l.backgroundLit }
+}
+
+/** A light layer reads back as its kind, position and dials; aim and cone only for a spot. */
+function describeLight(l: LightLayer): SurfaceSnapshot['objects'][number] {
+  const p = l.light
+  const cur: Record<string, unknown> = { x: l.x, y: l.y, type: p.type, height: p.height, color: p.color, brightness: p.brightness, reach: p.reach }
+  if (p.type === 'spot') { cur.aimX = p.aimX; cur.aimY = p.aimY; cur.cone = p.cone }
+  if (l.visible === false) cur.hidden = true
+  return { id: l.id, label: lightLabel(l), type: 'light', current: cur }
 }
 
 export function describeCompositor(state: CompositorState): SurfaceSnapshot {
-  // Lights are not content the agent can address in stage 1 (agent light ops come in stage 4).
-  const objects: SurfaceSnapshot['objects'] = state.layers.filter(l => l.kind !== 'light').map((l) => {
+  const objects: SurfaceSnapshot['objects'] = state.layers.map((l) => {
+    if (l.kind === 'light') return describeLight(l as LightLayer)
     // Expose enough CURRENT state for relative edits ("bigger", "a bit darker",
     // "rotate more") and questions ("what font is the title?") to be answerable.
     const cur: Record<string, unknown> = { x: l.x, y: l.y, opacity: l.opacity }
@@ -949,6 +966,12 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     const strokes = describeStrokes(l)
     if (strokes) cur.strokes = strokes
     if (l.visible === false) cur.hidden = true
+    // The light switches, only where they differ from the layer's defaults (short description).
+    const sw = l as { lit?: boolean; castsShadow?: boolean; lift?: number }
+    if (typeof sw.lit === 'boolean' && sw.lit !== defaultLit()) cur.lit = sw.lit
+    if (typeof sw.castsShadow === 'boolean' && sw.castsShadow !== defaultCastsShadow(l.kind)) cur.castsShadow = sw.castsShadow
+    const lift = effectiveLift({ kind: l.kind, lift: sw.lift })
+    if (lift !== defaultLift(l.kind)) cur.lift = lift
     // The agent never sees the internal kind 'deal': that layer is a "mosaic".
     const type = l.kind === 'deal' ? 'mosaic' : l.kind
     return { id: l.id, label: l.kind === 'text' ? `“${l.text}”` : type, type, current: cur }
@@ -972,8 +995,7 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
       background: paintLabel(state.background),
       postEffects: state.postEffects?.filter(e => e.visible).map(e => e.type).join(', ') || 'none',
       grid: state.grid ? describeLayoutGrid(state.grid) : 'none',
-      // Read-only: the Frame is lit by its light layers (the agent cannot add or move lights yet).
-      ...describeLighting(state),
+      lighting: describeLighting(state),
       // The frame is a unit square in normalized coords: x/y/sizes are 0..1.
       coordinateSpace: 'normalized 0..1 (0,0 = top-left, 0.5,0.5 = centre)',
       // Every id addShape accepts. ~1.5 KB (measured 1,530 chars serialised); listed so the model never guesses a name.
@@ -1001,8 +1023,55 @@ function defaultLayer(kind: LocalLayerKind, id: string): Record<string, unknown>
  *  a layout's own piece (a rule, a band) the user's: its `owner` goes, so the next layout keeps it. */
 const OWNER_CLEARING_OPS = new Set([
   'setLayerProps', 'setText', 'setTextStyle', 'setFill', 'setStroke', 'addStroke', 'removeStroke', 'setStrokeProps',
-  'setSize', 'setLayerEffect', 'setLayerTornEdge', 'setLayerFeather', 'setLayerMaskBreak',
+  'setSize', 'setLayerEffect', 'setLayerTornEdge', 'setLayerFeather', 'setLayerMaskBreak', 'setLight', 'setLayerLight',
 ])
+
+// ── Light ops (light layers stage 4): every check and clamp for the agent's lights lives here ──
+const ADD_LIGHT_KEYS: ReadonlySet<string> = new Set(['id', 'type', 'x', 'y', 'color', 'brightness', 'height', 'reach'])
+const SET_LIGHT_KEYS: ReadonlySet<string> = new Set([...ADD_LIGHT_KEYS, 'aimX', 'aimY', 'cone'])
+const LIGHT_LIMIT_REASON = `A Frame holds up to ${MAX_LIGHTS} lights`
+const NAMED_EASES: ReadonlySet<string> = new Set(['linear', 'easeIn', 'easeOut', 'easeInOut'])
+
+/** The agent's light keys, checked by type: a position and a partial light (clamped later by the
+ *  light sanitizer). A junk value is refused rather than silently reset to the type's default. */
+function lightArgs(a: Record<string, unknown>, allowed: ReadonlySet<string>): { pos: { x?: number; y?: number }; light: Partial<LightLayer['light']> } | string {
+  const bad = Object.keys(a).filter(k => !allowed.has(k))
+  if (bad.length) return `light key(s) not valid: ${bad.join(', ')}`
+  const pos: { x?: number; y?: number } = {}
+  const light: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(a)) {
+    if (k === 'id') continue
+    if (k === 'type') {
+      if (v !== 'lamp' && v !== 'spot' && v !== 'sun') return 'type must be "lamp" | "spot" | "sun"'
+      light.type = v
+    } else if (k === 'color') {
+      if (typeof v !== 'string' || !HEX.test(v)) return 'color must be "#rrggbb"'
+      light.color = v
+    } else if (typeof v !== 'number' || !Number.isFinite(v)) return `${k} must be a number`
+    else if (k === 'x' || k === 'y') pos[k] = v
+    else light[k] = v
+  }
+  return { pos, light: light as Partial<LightLayer['light']> }
+}
+
+/** Where an `animateLight` key lands, and how its value is checked and clamped. */
+function lightBand(state: CompositorState, target: string, key: string): { path: string; color: boolean; clampTo: (v: number | string) => number | string } | string {
+  if (target === 'frame') {
+    if (key !== 'darkness') return 'on "frame" the key is darkness'
+    return { path: DARKNESS_PATH, color: false, clampTo: v => sanitizeLighting({ darkness: v }).darkness }
+  }
+  const layer = findLayer(state, target)
+  if (!layer) return `no layer '${target}'`
+  if (layer.kind !== 'light') {
+    if (key !== 'lift') return 'on a layer that is not a light the key is lift'
+    return { path: `layers.${layer.id}.lift`, color: false, clampTo: v => effectiveLift({ kind: layer.kind, lift: v as number }) }
+  }
+  const l = layer as LightLayer
+  if (key === 'x' || key === 'y') return { path: `layers.${l.id}.${key}`, color: false, clampTo: v => sanitizeLightLayer({ ...l, [key]: v })[key] }
+  if (!(LIGHT_MOTION_KEYS as readonly string[]).includes(key)) return `'${key}' is not an animatable light key (${['x', 'y', ...LIGHT_MOTION_KEYS].join('|')})`
+  const k = key as typeof LIGHT_MOTION_KEYS[number]
+  return { path: `layers.${l.id}.light.${k}`, color: k === 'color', clampTo: v => sanitizeLightLayer({ ...l, light: { ...l.light, [k]: v } }).light[k] }
+}
 
 /** Apply one command to a Compositor frame, returning the new state + an inverse.
  *  Pure — the input is never mutated. */
@@ -1017,7 +1086,7 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
 
 function applyCommand(input: CompositorState, cmd: Command): CommandResult<CompositorState> {
   const state = clone(input)
-  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates), motion: clone(input.motion), grid: clone(input.grid) } })
+  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates), motion: clone(input.motion), grid: clone(input.grid), lighting: clone(input.lighting) } })
 
   switch (cmd.op) {
     case 'setLayerProps': {
@@ -1464,6 +1533,83 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       state.motion = { ...base, motionx: setBandTrack(base.motionx ?? [], target, band) }
       return { ok: true, template: state, inverse: snapshot() }
     }
+    case 'addLight': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      if (state.layers.filter(l => l.kind === 'light').length >= MAX_LIGHTS) return { ok: false, reason: 'invalid', detail: LIGHT_LIMIT_REASON }
+      const r = lightArgs(a, ADD_LIGHT_KEYS)
+      if (typeof r === 'string') return { ok: false, reason: 'invalid', detail: r }
+      const fresh = newLightLayer(r.light.type ?? 'lamp', { x: r.pos.x ?? 0.5, y: r.pos.y ?? 0.5 })
+      const id = typeof a.id === 'string' && a.id ? a.id : fresh.id
+      if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
+      const layer = sanitizeLightLayer({ ...fresh, id, light: { ...fresh.light, ...r.light } })
+      return { ok: true, template: { ...state, layers: [...state.layers, layer as LocalLayer] }, inverse: snapshot() }
+    }
+    case 'setLight': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const id = cmd.target ?? (typeof a.id === 'string' ? a.id : undefined)
+      const idx = state.layers.findIndex(l => l.id === id)
+      if (idx < 0 || state.layers[idx]!.kind !== 'light') return { ok: false, reason: 'invalid', detail: `no light '${String(id)}'` }
+      const r = lightArgs(a, SET_LIGHT_KEYS)
+      if (typeof r === 'string') return { ok: false, reason: 'invalid', detail: r }
+      if (!Object.keys(r.pos).length && !Object.keys(r.light).length) return { ok: false, reason: 'invalid', detail: 'nothing to change' }
+      const l = state.layers[idx] as LightLayer
+      state.layers[idx] = sanitizeLightLayer({ ...l, ...r.pos, light: { ...l.light, ...r.light } }) as LocalLayer
+      return { ok: true, template: state, inverse: snapshot() }
+    }
+    case 'setLighting': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const bad = Object.keys(a).filter(k => k !== 'darkness' && k !== 'backgroundLit')
+      if (bad.length) return { ok: false, reason: 'invalid', detail: `lighting key(s) not valid: ${bad.join(', ')}` }
+      if ('darkness' in a && !(typeof a.darkness === 'number' && Number.isFinite(a.darkness))) return { ok: false, reason: 'invalid', detail: 'darkness must be a number' }
+      if ('backgroundLit' in a && typeof a.backgroundLit !== 'boolean') return { ok: false, reason: 'invalid', detail: 'backgroundLit must be true or false' }
+      if (!Object.keys(a).length) return { ok: false, reason: 'invalid', detail: 'nothing to change' }
+      state.lighting = sanitizeLighting({ ...(state.lighting ?? DEFAULT_LIGHTING), ...a })
+      return { ok: true, template: state, inverse: snapshot() }
+    }
+    case 'setLayerLight': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const layer = findLayer(state, cmd.target ?? (typeof a.id === 'string' ? a.id : undefined))
+      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
+      if (layer.kind === 'light') return { ok: false, reason: 'invalid', detail: 'a light has no lit, shadow or lift — use setLight' }
+      const bad = Object.keys(a).filter(k => !['id', 'lit', 'castsShadow', 'lift'].includes(k))
+      if (bad.length) return { ok: false, reason: 'invalid', detail: `key(s) not valid: ${bad.join(', ')}` }
+      if ('lit' in a && typeof a.lit !== 'boolean') return { ok: false, reason: 'invalid', detail: 'lit must be true or false' }
+      if ('castsShadow' in a && typeof a.castsShadow !== 'boolean') return { ok: false, reason: 'invalid', detail: 'castsShadow must be true or false' }
+      if ('lift' in a && !(typeof a.lift === 'number' && Number.isFinite(a.lift))) return { ok: false, reason: 'invalid', detail: 'lift must be a number' }
+      if (!('lit' in a) && !('castsShadow' in a) && !('lift' in a)) return { ok: false, reason: 'invalid', detail: 'nothing to change' }
+      const L = layer as LocalLayer & { lit?: boolean; castsShadow?: boolean; lift?: number }
+      if ('lit' in a) L.lit = a.lit as boolean
+      if ('castsShadow' in a) L.castsShadow = a.castsShadow as boolean
+      if ('lift' in a) L.lift = effectiveLift({ kind: layer.kind, lift: a.lift as number })
+      return { ok: true, template: state, inverse: snapshot() }
+    }
+    case 'animateLight': {
+      // A light dial, a light's position, a layer's Lift or the Frame's Darkness on the timeline —
+      // a two-point motionx band, like animateDial. Colours stay #rrggbb and blend in oklab (the default).
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const target = cmd.target ?? (typeof a.id === 'string' ? a.id : '')
+      const where = lightBand(state, String(target), String(a.key ?? ''))
+      if (typeof where === 'string') return { ok: false, reason: 'invalid', detail: where }
+      let from: number | string, to: number | string
+      if (where.color) {
+        if (typeof a.from !== 'string' || !HEX.test(a.from) || typeof a.to !== 'string' || !HEX.test(a.to)) return { ok: false, reason: 'invalid', detail: 'colour from/to must be "#rrggbb"' }
+        from = where.clampTo(a.from); to = where.clampTo(a.to)
+      } else {
+        if (typeof a.from !== 'number' || !Number.isFinite(a.from) || typeof a.to !== 'number' || !Number.isFinite(a.to)) return { ok: false, reason: 'invalid', detail: 'from/to must be numbers' }
+        from = where.clampTo(a.from); to = where.clampTo(a.to)
+      }
+      const start = Number.isFinite(+(a.start as number)) ? Math.max(0, +(a.start as number)) : 0
+      const end = Number.isFinite(+(a.end as number)) ? +(a.end as number) : (state.motion?.duration ?? DEFAULT_FRAME_MOTION.duration)
+      const ease = typeof a.ease === 'string' && NAMED_EASES.has(a.ease) ? a.ease as MotionxTrack['keyframes'][number]['ease'] : 'easeInOut'
+      const band: MotionxTrack = {
+        path: where.path,
+        type: where.color ? 'color' : 'number',
+        keyframes: [{ t: start, value: from, ease }, { t: end, value: to, ease: 'linear' }],
+      }
+      const base = state.motion ?? DEFAULT_FRAME_MOTION
+      state.motion = { ...base, motionx: setBandTrack(base.motionx ?? [], where.path, band) }
+      return { ok: true, template: state, inverse: snapshot() }
+    }
     // Thin aliases: torn edge and feather are now just two more entries in the
     // stack, reachable through setLayerEffect — kept as named ops so an existing
     // agent recipe (and the command hints) keep working unchanged.
@@ -1515,6 +1661,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       if ('templates' in (cmd.args ?? {})) next.templates = clone(cmd.args!.templates as TemplateInstance[] | undefined)
       if ('motion' in (cmd.args ?? {})) next.motion = clone(cmd.args!.motion as FrameMotion | undefined)
       if ((cmd.args as any)?.grid) next.grid = clone(cmd.args!.grid as LayoutGrid)
+      if ('lighting' in (cmd.args ?? {})) next.lighting = clone(cmd.args!.lighting as FrameLighting | undefined)
       return { ok: true, template: next, inverse: snapshot() }
     }
     case 'placeTemplate': {
@@ -1606,7 +1753,7 @@ export function verifyCompositor(state: CompositorState): LayoutIssue[] {
 /** Human-readable summary of a command for the proposal UI. */
 export function summarizeCompositorChange(state: CompositorState, cmd: Command): { label: string; before: string; after: string } | null {
   const layer = findLayer(state, cmd.target)
-  const name = layer ? (layer.kind === 'text' ? `“${layer.text}”` : layer.kind) : (cmd.target ?? '')
+  const name = layer ? (layer.kind === 'text' ? `“${layer.text}”` : layer.kind === 'light' ? lightLabel(layer as LightLayer) : layer.kind) : (cmd.target ?? '')
   const a = cmd.args ?? {}
   switch (cmd.op) {
     case 'setText': return { label: name || 'Text', before: layer && layer.kind === 'text' ? layer.text : '', after: String(a.text ?? '') }
@@ -1637,6 +1784,16 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
       return { label: `${type} effect (frame)`, before: had ? type : 'none', after: a.remove === true ? 'removed' : 'updated' }
     }
     case 'setLayerMaskBreak': return { label: `${name} break-out`, before: '', after: a.remove === true ? 'removed' : String(a.edge ?? '') }
+    case 'addLight': return { label: `Added a ${['spot', 'sun'].includes(String(a.type)) ? String(a.type) : 'lamp'}`, before: '', after: '' }
+    case 'setLight': return { label: 'Changed the light', before: layer?.kind === 'light' ? lightLabel(layer as LightLayer) : '', after: Object.keys(a).filter(k => k !== 'id').map(k => `${k}: ${String(a[k])}`).join(', ') }
+    case 'setLighting': {
+      const parts: string[] = []
+      if (typeof a.darkness === 'number') parts.push(`Darkness ${Math.round(sanitizeLighting({ darkness: a.darkness }).darkness * 100)}%`)
+      if (typeof a.backgroundLit === 'boolean') parts.push(a.backgroundLit ? 'Background lit' : 'Background unlit')
+      return { label: parts.join(', ') || 'Lighting', before: '', after: '' }
+    }
+    case 'setLayerLight': return { label: `${name} light`, before: '', after: ['lit', 'castsShadow', 'lift'].filter(k => k in a).map(k => `${k}: ${String(a[k])}`).join(', ') }
+    case 'animateLight': return { label: 'Animated the light', before: String(a.from ?? ''), after: String(a.to ?? '') }
     case 'animateDial': return { label: `Animate ${String(a.effect ?? '')} ${String(a.dial ?? '')} (layer ${name || String(cmd.target ?? '')})`, before: String(a.from ?? ''), after: String(a.to ?? '') }
     case 'placeTemplate': { const t = a.template as { name?: string } | undefined; return { label: 'Place template', before: '', after: t?.name ?? 'template' } }
     case 'setTemplateSlot': {
