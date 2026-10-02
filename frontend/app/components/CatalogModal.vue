@@ -200,8 +200,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <!-- Search row — sits on its own line so the filter row below has
                the whole width to lay chips out without orphans. -->
-          <div class="px-5 pt-3 pb-2.5">
-            <div class="relative max-w-md">
+          <div class="px-5 pt-3 pb-2.5 flex items-center gap-3">
+            <div class="relative flex-1 max-w-md">
               <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-white/35 pointer-events-none" />
               <input
                 :value="searchQuery ?? ''"
@@ -211,6 +211,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 @input="emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
               />
             </div>
+            <slot name="search-extra" />
           </div>
           <!-- Filter chip strip — horizontally scrollable so a long tag list
                never wraps into orphan rows. The track has no visible

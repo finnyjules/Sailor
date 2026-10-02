@@ -24,6 +24,7 @@ import { hostedModeEnabled } from '~/lib/hostedMode'
 import { galleryEntries } from '#shared/runner/modelMenus'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { imageRateLabel } from '#shared/pricing/imageRates'
+import { BENCHMARK_PROMPTS, benchmarkPicture, type BenchmarkManifest } from '~/data/model-benchmark'
 
 // -- Replicate cover image fetch + cache -----------------------------------
 //
@@ -166,7 +167,41 @@ function loadDraftFor(modelId: string | null) {
 onMounted(() => {
   loadDraftFor(currentModelId.value)
   seedCoversFromCache()
+  loadBenchmark()
 })
+
+// -- Benchmark pictures -------------------------------------------------------
+//
+// "Show" swaps every card's cover for the picture that model made from one
+// fixed test prompt (app/data/model-benchmark.ts), so models can be compared
+// on the same prompt. No manifest → no menu, and the picker is as before.
+const SHOW_KEY = 'image-models.show.v1'
+const benchmark = ref<BenchmarkManifest | null>(null)
+const showPrompt = ref('') // '' = the model's own picture
+const showOptions = computed(() => BENCHMARK_PROMPTS.filter(p => benchmark.value?.results[p.id]))
+
+async function loadBenchmark() {
+  try {
+    const res = await fetch('/model-benchmark/manifest.json')
+    const m = res.ok ? await res.json() as BenchmarkManifest : null
+    benchmark.value = m?.results ? m : null
+  }
+  catch { benchmark.value = null }
+  let saved = ''
+  try { saved = localStorage.getItem(SHOW_KEY) ?? '' } catch {}
+  if (showOptions.value.some(p => p.id === saved)) showPrompt.value = saved
+}
+watch(showPrompt, (v) => { try { localStorage.setItem(SHOW_KEY, v) } catch {} })
+
+/** The card's picture: the benchmark one while a prompt is shown, else the Replicate cover. */
+function cardCover(m: ImageModel): string | null {
+  if (showPrompt.value) {
+    const pic = benchmarkPicture(benchmark.value, showPrompt.value, m.id)
+    if (pic) return pic
+  }
+  return coverUrls.value[m.replicateSlug] ?? null
+}
+const notTested = (m: ImageModel) => !!showPrompt.value && !benchmarkPicture(benchmark.value, showPrompt.value, m.id)
 // Re-seed when the node we're attached to changes (e.g. the modal is reused
 // across different nodes via the same mount point).
 watch(() => props.nodeId, () => loadDraftFor(currentModelId.value))
@@ -295,12 +330,27 @@ const focusedModel = computed<ImageModel | null>(() =>
     @update:active-filter-id="(id: string) => activeFilterId = id"
     @update:search-query="(q: string) => searchQuery = q"
   >
+    <template v-if="showOptions.length" #search-extra>
+      <label class="flex items-center gap-2 text-[11px] text-white/45 shrink-0">
+        Show
+        <select
+          v-model="showPrompt"
+          class="bg-white/[0.04] border border-white/10 rounded-md px-2 py-1.5 text-xs text-white/85 outline-none focus:border-white/20 cursor-pointer"
+          data-testid="model-gallery-show"
+        >
+          <option value="">Model's own picture</option>
+          <option v-for="p in showOptions" :key="p.id" :value="p.id" :title="p.prompt">{{ p.label }}</option>
+        </select>
+      </label>
+    </template>
+
     <!-- Card -->
     <template #card="{ item, focused }">
       <!-- Thumbnail: Replicate cover image when fetched, brand wordmark
            swatch underneath until it loads / on failure. -->
       <div
-        class="aspect-[16/10] w-full relative overflow-hidden"
+        class="w-full relative overflow-hidden"
+        :class="showPrompt ? 'aspect-square' : 'aspect-[16/10]'"
         :style="{ background: `linear-gradient(135deg, ${brandHue((item as ImageModel).brand)}33 0%, ${brandHue((item as ImageModel).brand)}11 60%, transparent 100%)` }"
       >
         <!-- Brand wordmark sits behind the cover so the card stays visually
@@ -312,19 +362,26 @@ const focusedModel = computed<ImageModel | null>(() =>
           {{ (item as ImageModel).brand }}
         </div>
         <img
-          v-if="coverUrls[(item as ImageModel).replicateSlug]"
-          :src="coverUrls[(item as ImageModel).replicateSlug]!"
+          v-if="cardCover(item as ImageModel)"
+          :key="cardCover(item as ImageModel)!"
+          :src="cardCover(item as ImageModel)!"
           class="absolute inset-0 w-full h-full object-cover transition-transform duration-500"
           :class="focused ? 'scale-105' : 'group-hover:scale-105'"
           loading="lazy"
           referrerpolicy="no-referrer"
+          data-testid="model-card-cover"
         />
         <!-- Top vignette darkens the cover image just enough that the price
              badge stays legible no matter what's behind it. -->
         <div
-          v-if="coverUrls[(item as ImageModel).replicateSlug]"
+          v-if="cardCover(item as ImageModel)"
           class="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/45 to-transparent pointer-events-none"
         />
+        <span
+          v-if="notTested(item as ImageModel)"
+          class="absolute top-2 left-2 text-[9px] leading-none px-1.5 py-1 rounded bg-black/55 text-white/70 backdrop-blur-sm"
+          data-testid="model-not-tested"
+        >Not tested</span>
         <!-- Price badge -->
         <span
           v-if="priceLabel(item as ImageModel)"
@@ -381,19 +438,21 @@ const focusedModel = computed<ImageModel | null>(() =>
         <!-- Cover hero — when available, gives a big preview of the model's
              aesthetic so the user can pick by vibe, not just spec sheet. -->
         <div
-          v-if="coverUrls[(item as ImageModel).replicateSlug]"
-          class="relative aspect-[16/10] w-full overflow-hidden"
+          v-if="cardCover(item as ImageModel)"
+          class="relative w-full overflow-hidden"
+          :class="showPrompt && !notTested(item as ImageModel) ? 'aspect-square' : 'aspect-[16/10]'"
           :style="{ background: `linear-gradient(135deg, ${brandHue((item as ImageModel).brand)}33 0%, ${brandHue((item as ImageModel).brand)}11 60%, transparent 100%)` }"
         >
           <img
-            :src="coverUrls[(item as ImageModel).replicateSlug]!"
+            :key="cardCover(item as ImageModel)!"
+            :src="cardCover(item as ImageModel)!"
             class="absolute inset-0 w-full h-full object-cover"
             loading="lazy"
             referrerpolicy="no-referrer"
           />
           <div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#1b1b1b] via-[#1b1b1b]/55 to-transparent pointer-events-none" />
         </div>
-        <div class="p-5 space-y-5" :class="coverUrls[(item as ImageModel).replicateSlug] ? '-mt-5 relative z-10' : ''">
+        <div class="p-5 space-y-5" :class="cardCover(item as ImageModel) ? '-mt-5 relative z-10' : ''">
         <!-- Header -->
         <div>
           <div class="flex items-center gap-2 mb-1">
