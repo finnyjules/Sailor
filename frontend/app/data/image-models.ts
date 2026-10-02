@@ -441,6 +441,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'imagen-4',
+    hidden: true,
     label: 'Imagen 4',
     brand: 'Google',
     replicateSlug: 'google/imagen-4',
@@ -456,6 +457,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'imagen-4-fast',
+    hidden: true,
     label: 'Imagen 4 Fast',
     brand: 'Google',
     replicateSlug: 'google/imagen-4-fast',
@@ -550,6 +552,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     // 2K picture (server/runner/generators/ideogram4.ts). No Python builder.
     // The sizes are #shared/pricing/imageSettings IDEOGRAM_4_SIZES.
     id: 'ideogram-4',
+    hidden: true,
     runnerOnly: true,
     family: 'ideogram-4',
     label: 'Ideogram 4',
@@ -711,6 +714,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v4-pro',
+    hidden: true,
     label: 'Recraft V4 Pro',
     brand: 'Recraft',
     replicateSlug: 'recraft-ai/recraft-v4-pro',
@@ -739,6 +743,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v4',
+    hidden: true,
     label: 'Recraft V4',
     brand: 'Recraft',
     replicateSlug: 'recraft-ai/recraft-v4',
@@ -867,6 +872,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== OpenAI =============================================================
   {
     id: 'gpt-image-2',
+    hidden: true,
     label: 'GPT Image 2',
     brand: 'OpenAI',
     replicateSlug: 'openai/gpt-image-2',
@@ -1117,6 +1123,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== Bria ===============================================================
   {
     id: 'bria-fibo',
+    hidden: true,
     label: 'Bria Fibo',
     brand: 'Bria',
     replicateSlug: 'bria/fibo',
@@ -1132,6 +1139,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'bria-image-3.2',
+    hidden: true,
     label: 'Bria Image 3.2',
     brand: 'Bria',
     replicateSlug: 'bria/image-3.2',
@@ -1200,6 +1208,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     // are that file's REVE_21_RATIOS; its fal schema has no size and no
     // other setting worth a control, so there are none.
     id: 'reve-2.1',
+    hidden: true,
     runnerOnly: true,
     family: 'reve-2.1',
     label: 'Reve 2.1',

@@ -446,7 +446,7 @@ describe('the gallery', () => {
   it('runner-only in family ideogram-4, with its brand name and plain labels', () => {
     const m = IMAGE_MODELS_BY_ID[ID]!
     expect(m).toMatchObject({ runnerOnly: true, family: FAMILY, label: 'Ideogram 4', brand: 'Ideogram', defaultAspectRatio: '1:1' })
-    expect(m.hidden).toBeUndefined()
+    expect(m.hidden).toBe(true) // picker trim, 2 Oct 2026
     expect(m.advanced.map(f => [f.name, f.type, f.default, f.options])).toEqual([
       ['rendering_speed', 'select', IDEOGRAM_4_DEFAULT_SPEED, [...IDEOGRAM_4_SPEEDS]],
       ['resolution', 'select', IDEOGRAM_4_DEFAULT_RESOLUTION, ['1K', '2K']],
@@ -460,11 +460,11 @@ describe('the gallery', () => {
     }
   })
 
-  it('hidden from "Generate an image" while the family is off, shown while on; a saved node still shows it, tagged', () => {
+  it('hidden from "Generate an image" (picker trim, 2 Oct 2026) even with the family on; a saved node still shows it, tagged', () => {
     const shown = (f: ReadonlySet<RunnerFamily>) => galleryEntries(IMAGE_MODELS, { classType: 'GenerateImageNode', families: f, current: null }).map(e => e.model.id)
     expect(shown(NO_FAMILIES)).not.toContain(ID)
     expect(shown(ALL_BUT)).not.toContain(ID)
-    expect(shown(ON)).toContain(ID)
+    expect(shown(ON)).not.toContain(ID)
     const saved = galleryEntries(IMAGE_MODELS, { classType: 'GenerateImageNode', families: NO_FAMILIES, current: ID })
     expect(saved.find(e => e.model.id === ID)).toMatchObject({ hiddenTag: true, tag: 'Hidden' })
   })

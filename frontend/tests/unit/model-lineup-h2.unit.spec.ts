@@ -36,6 +36,9 @@ const HIDDEN_IMAGES = [
   'photon', 'photon-flash', 'wan-2.2-image-pruna', 'recraft-v3', 'recraft-v3-svg',
   // Model line-up F8: Ideogram 4 covers every Ideogram V3 speed; Grok Imagine 2 (F7) replaces Grok Imagine.
   'ideogram-v3-quality', 'ideogram-v3-balanced', 'ideogram-v3-turbo', 'grok-imagine',
+  // Picker trim, 2 Oct 2026: overlaps with a better or cheaper model kept in the picker.
+  'imagen-4', 'imagen-4-fast', 'gpt-image-2', 'bria-fibo', 'bria-image-3.2', 'ideogram-4', 'reve-2.1',
+  'recraft-v4', 'recraft-v4-pro',
 ]
 const HIDDEN_VIDEOS = ['hailuo-2.3', 'wan-2.5-i2v-fast', 'wan-2.7-t2v', 'luma-ray-2-720p', 'ltx-video', 'kling-v2.5-turbo-pro']
 const DISCONTINUED_VIDEOS = ['sora-2', 'sora-2-pro']
@@ -136,12 +139,14 @@ describe('the hide lists', () => {
     // (Recraft V3 SVG is hidden and runner-only since R11.4 fix round 1: blocked on the ComfyUI path, runner-taken.)
     for (const id of HIDDEN_IMAGES) {
       if (SVG_IMAGES.includes(id)) continue
-      expect(blockedModelUses(one(img(id))), id).toEqual([])
+      // Runner-only models (Ideogram 4, Reve 2.1, hidden in the 2 Oct trim) only ever run on the runner, with their family on.
+      if (!RUNNER_ONLY_IMAGES.includes(id)) expect(blockedModelUses(one(img(id))), id).toEqual([])
       expect(blockedModelUses(one(img(id)), { families: ALL, runnerTakes: true }), id).toEqual([])
     }
     for (const id of HIDDEN_VIDEOS) expect(blockedModelUses(one(vid(id)), { families: ALL, runnerTakes: true }), id).toEqual([])
     const served = applyModelOverlay(baseline(), NO_FAMILIES)
-    for (const id of HIDDEN_IMAGES) expect(cfg(served, 'GenerateImageNode').options, id).toContain(id)
+    // The engine's list never had the runner-only ids; the runner serves those.
+    for (const id of HIDDEN_IMAGES.filter(i => !RUNNER_ONLY_IMAGES.includes(i))) expect(cfg(served, 'GenerateImageNode').options, id).toContain(id)
     for (const id of [...HIDDEN_VIDEOS, ...DISCONTINUED_VIDEOS]) {
       expect(cfg(served, 'GenerateVideoNode').options, id).toContain(id)
       expect(cfg(served, 'FilmShotNode').options, id).toContain(id)
@@ -155,7 +160,8 @@ describe('the hide lists', () => {
     // Every family off: the runner-only models are left out too.
     for (const id of UNPRICED_IMAGES) expect(images.map(e => e.model.id), id).not.toContain(id)
     const svgNotHidden = SVG_IMAGES.filter(id => !HIDDEN_IMAGES.includes(id))
-    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length - RUNNER_ONLY_IMAGES.length - UNPRICED_IMAGES.length - svgNotHidden.length)
+    const left = new Set([...HIDDEN_IMAGES, ...RUNNER_ONLY_IMAGES, ...UNPRICED_IMAGES, ...svgNotHidden])
+    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - left.size)
     for (const cls of ['GenerateVideoNode', 'FilmShotNode']) {
       const shown = galleryEntries(VIDEO_MODELS, { classType: cls, families: ALL, current: null }).map(e => e.model.id)
       for (const id of [...HIDDEN_VIDEOS, ...DISCONTINUED_VIDEOS]) expect(shown, `${cls} ${id}`).not.toContain(id)
