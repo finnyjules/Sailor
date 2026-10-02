@@ -66,6 +66,7 @@ import { keptBatchBoundWithin, keptPeak } from './video/start'
 import { batchSlotOf, clipAtCaps } from './video/shapes'
 import { VIDEO_EFFECTS } from './video/table'
 import { parseInputFileRef } from './inputs'
+import { loaderFileBehind } from './cards/bakeReplay'
 import type { OutputFile } from './types'
 import type { SoundShape } from './video/table'
 import { madeSoundShapeOf } from './video/soundShapes'
@@ -400,23 +401,47 @@ export async function localModelStartProblems(
       if (!isLink(link)) continue
       // R11.7: a still picture is handed on as Python does (one frame, no call); a batch of pictures, which
       // Python would slow down, goes to the engine (a stop-gap R11.9 closes with plain words).
+      let clip: FrameShape | undefined
+      let fromPictures = false
       if (outputKind(prompt, link, kinds) !== 'frames') {
         const pictures = pictureBound(prompt, link, families, 0, lf)
-        // Fix round 1 (L3): a count that can't be known goes to the engine as before (a batch fails at the turn after
-        // earlier paid nodes otherwise); R11.9's plain words close it.
-        if (pictures !== 1) return { counts, keptBytes: 0, problem: { message: pictures === null ? LOCAL_MODEL_WORDS.unknownCount : SLOW_MOTION_AI_WORDS.pictureBatch, nodeId, classType: n.class_type } }
-        counts[nodeId] = 1
-        continue
+        // R11.9c fix round 4: a LoadImage's animated GIF or WebP (its frames a picture each) is the clip Python
+        // interpolates: measured from its header (the frame count every reader uses) and held as any clip.
+        const loader = pictures !== null && pictures > 1 ? loaderFileBehind(prompt, link) : null
+        let size: { w: number; h: number } | null = null
+        if (loader?.classType === 'LoadImage' && o.read) {
+          try {
+            const meta = await pictureMeta(await o.read(loader.file))
+            if (meta.width && meta.height) size = (meta.orientation ?? 1) >= 5 ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
+          }
+          catch { size = null }
+        }
+        if (loader?.classType === 'LoadImage' && size) {
+          clip = { count: pictures!, w: size.w, h: size.h, exact: true, counted: true }
+          fromPictures = true
+        }
+        else {
+          // Fix round 1 (L3): a count that can't be known goes to the engine as before (a batch fails at the turn after
+          // earlier paid nodes otherwise); R11.9's plain words close it.
+          if (pictures !== 1) return { counts, keptBytes: 0, problem: { message: pictures === null ? LOCAL_MODEL_WORDS.unknownCount : SLOW_MOTION_AI_WORDS.pictureBatch, nodeId, classType: n.class_type } }
+          counts[nodeId] = 1
+          continue
+        }
       }
-      shapes ??= await o.shapes()
-      const got = slowMotionAiStart(n.inputs ?? {}, shapes.get(`${link[0]}:${link[1]}`), o.hosted)
+      if (!clip) {
+        shapes ??= await o.shapes()
+        clip = shapes.get(`${link[0]}:${link[1]}`)
+      }
+      const got = slowMotionAiStart(n.inputs ?? {}, clip, o.hosted)
       if ('refused' in got) return { counts, keptBytes: 0, problem: null, refused: { message: got.refused, nodeId, classType: n.class_type } }
       if ('problem' in got) return { counts, keptBytes: 0, problem: { message: got.problem, nodeId, classType: n.class_type } }
       counts[nodeId] = got.frames
       sizes[nodeId] = { w: got.w, h: got.h, place: o.hosted ? 'hosted' : 'local', ...('upTo' in got && got.upTo ? { upTo: true as const } : {}) }
       // Its output batch: (T − 1)·m + 1 frames of the clip's size, at most what R5's batch caps keep (R11.8).
-      const out = shapes.get(`${nodeId}:0`) ?? { count: slowMotionAiCount(got.frames, n.inputs?.multiplier as number), w: got.w, h: got.h, exact: false }
+      const out = shapes?.get(`${nodeId}:0`) ?? { count: slowMotionAiCount(got.frames, n.inputs?.multiplier as number), w: got.w, h: got.h, exact: false }
       keptByNode[nodeId] = keptBatchBoundWithin(out, caps)
+      // R11.9c fix round 4: a picture batch is kept as a clip first, and its result handed on as pictures again.
+      if (fromPictures) keptByNode[nodeId] += keptBatchBoundWithin(clip!, caps) + out.count * (Math.ceil(out.w * out.h * 3 * 1.01) + 64 * 1024)
       continue
     }
     if (!localModelOn(n.class_type, families) || !Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type)) continue

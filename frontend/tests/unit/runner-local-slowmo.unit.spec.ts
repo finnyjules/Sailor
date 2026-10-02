@@ -474,6 +474,66 @@ describe('Load video → Get video components → Slow motion (AI) → Create vi
 /** Why the start pass won't run a clip (R11.7: a plain refusal, or the engine when the count is only an upper bound), or null. */
 const whyNot = (r: ReturnType<typeof slowMotionAiStart>) => ('refused' in r ? r.refused : 'problem' in r ? r.problem : null)
 
+describe('R11.9c fix round 4: a LoadImage’s animated GIF is the clip Slow motion (AI) interpolates, as Python’s batch', () => {
+  /** A GIF of `n` flat frames of w × h, each its own grey, no see-through parts. */
+  async function gifOf(n: number, w: number, h: number): Promise<Uint8Array> {
+    const sharp = (await import('sharp')).default
+    const px = new Uint8Array(w * h * n * 3)
+    for (let f = 0; f < n; f++) px.fill(40 + f * 50, f * w * h * 3, (f + 1) * w * h * 3)
+    const b = new Uint8Array(await sharp(px, { raw: { width: w, height: h * n, channels: 3, pageHeight: h } as never }).gif().toBuffer())
+    for (let i = 0; i + 3 < b.length; i++) if (b[i] === 0x21 && b[i + 1] === 0xF9 && b[i + 2] === 4) b[i + 3] = b[i + 3]! & ~1
+    return b
+  }
+  const prompt = (m: number): ApiPrompt => ({
+    l: { class_type: 'LoadImage', inputs: { image: 'anim4.gif', upload: 'image' } },
+    n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['l', 0] as Link, multiplier: m } },
+    s: { class_type: 'SaveImage', inputs: { images: ['n', 0] as Link, filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: false } },
+  })
+  const saved = (root: string) => (readdirSync(join(root, 'output'), { recursive: true }) as string[]).filter(f => f.endsWith('.png'))
+  const charged = (k: { ledger: { holds: Map<number, { credits: number; state: string; actual: number | null }> } }) =>
+    [...k.ledger.holds.values()].map(x => [x.credits, x.state === 'released' ? 0 : x.actual])
+
+  it('4-frame GIF → Slow motion (AI) ×2 → Save image: one RIFE call, held and charged as a 4-frame clip, 7 frames saved', LONG, async () => {
+    await requireMediaTools()
+    const fal = createFakeFal({ answer: () => ({ video: { url: ANSWER_URL } }) })
+    const dir = mkdtempSync(join(scratch, 'kit-'))
+    const k = makeKit({
+      hosted: true, dir, fal,
+      deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')), download: async () => ({ bytes: await ffv1Clip(Array.from({ length: 7 }, (_, i) => new Uint8Array(32 * 24 * 3).fill(30 * i)), 32, 24), contentType: 'video/mp4' }) },
+    })
+    writeFileSync(join(k.root, 'input', 'anim4.gif'), await gifOf(4, 32, 24))
+    expect(isRunnerEligible(prompt(2), ON)).toBe(true)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt(2)], ...START })
+    await k.engine.settled(runId)
+    const take = (await k.store.get(runId))!.takes[0]!
+    for (const id of ['l', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    // The batch measured as the clip (its frames and size), one call, the hold its price.
+    expect(take.measured?.n?.seconds).toMatchObject({ frames: 4, videoWidth: 32, videoHeight: 24 })
+    expect(fal.submitted().map(c => c.endpoint)).toEqual([RIFE_VIDEO_SLUG])
+    const credits = (priceNode(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: { frames: 4, videoWidth: 32, videoHeight: 24 } }) as { credits: number }).credits
+    expect(take.nodes.n!.credits).toBe(credits)
+    expect(charged(k)).toEqual([[credits + 1, credits + 1]])
+    // Handed on as pictures, as it came: (4 − 1)·2 + 1 = 7, the originals at i·2 exactly.
+    const v = take.nodes.n!.values![0] as Extract<RunnerValue, { kind: 'files' }>
+    expect([v.kind, v.files.length]).toEqual(['files', 7])
+    expect(saved(k.root)).toHaveLength(7)
+  })
+
+  it('×7 (no RIFE video multiplier): Sailor’s own interpolation, no call, 22 frames saved, nothing held for it', LONG, async () => {
+    await requireMediaTools()
+    const fal = createFakeFal()
+    const dir = mkdtempSync(join(scratch, 'kit-'))
+    const k = makeKit({ dir, fal, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    writeFileSync(join(k.root, 'input', 'anim4.gif'), await gifOf(4, 16, 12))
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt(7)], ...START })
+    await k.engine.settled(runId)
+    const take = (await k.store.get(runId))!.takes[0]!
+    for (const id of ['l', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(fal.submitted()).toEqual([])
+    expect(saved(k.root)).toHaveLength(slowMotionAiCount(4, 7))
+  })
+})
+
 describe('the start of the run: the clip counted and sized for the hold; past a limit, refused plainly (R11.7) or, on an uncounted bound, held at the cap (R11.8)', () => {
   const p: ApiPrompt = {
     l: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }, g: { class_type: 'GetVideoComponents', inputs: { video: ['l', 0] } },

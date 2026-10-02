@@ -183,7 +183,7 @@ import { png8 } from '../effects/plan'
 import { onlySavesRead } from '../cards/utilities'
 import { framesQuantOf } from '../video/plan'
 import { MediaError, mediaLease } from '../../media/run'
-import { framesOf, framesSink } from '../../media/values'
+import { framesOf, framesSink, keepFrames, readFrames } from '../../media/values'
 import { encodeVideo } from '../../media/encode'
 import { decodeFrames } from '../../media/decode'
 import { probeMedia, pyFrameBound, type MediaProbe } from '../../media/probe'
@@ -1399,20 +1399,62 @@ export async function fitRifeFrame(rgb: Uint8Array, aw: number, ah: number, w: n
  * undelivered (charged 0, Sailor absorbs it), as R11.5's pieces do; the call
  * in flight is cancelled by the engine, and the lease's jobs die with it.
  */
-export function planSlowMotionAi(ctx: PlanContext): NodePlan {
+export async function planSlowMotionAi(ctx: PlanContext): Promise<NodePlan> {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const link = inputs.frames
   if (!isLink(link)) throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
   const m = multiplierOf(inputs.multiplier)
-  const v = ctx.valueFrom?.(link)
+  const came = ctx.valueFrom?.(link)
+  let v: RunnerValue | undefined = came
+  /** R11.9c fix round 4: a LoadImage's animated GIF or WebP, its frames a picture each: Python's clip. */
+  let pictures: OutputFile[] | null = null
   // R11.7: a still picture is handed on as Python does (one frame: under two, no call, nothing charged).
-  if (v?.kind === 'files') {
-    if (v.files.length < 1) throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
-    // A batch of pictures goes to the engine before the run (localModelStart.ts); the backstop here.
-    if (v.files.length > 1) throw new Error(SLOW_MOTION_AI_WORDS.onePicture)
-    return { kind: 'pipeline', prefix: 'slow_motion_ai', run: async () => ({ values: { 0: v }, ui: null }) }
+  if (came?.kind === 'files') {
+    if (came.files.length < 1) throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
+    if (came.files.length === 1) return { kind: 'pipeline', prefix: 'slow_motion_ai', run: async () => ({ values: { 0: came }, ui: null }) }
+    // R11.9c fix round 4: a batch of pictures (LoadImage's animation) is the clip Python interpolates: kept as a
+    // frame batch at the start of the run, slowed down as any clip, and handed on as pictures, as it came.
+    // A batch the start didn't measure as a clip was refused before the hold (localModelStart.ts); the backstop here.
+    if (!ctx.readFile || typeof ctx.measured?.frames !== 'number') throw new Error(SLOW_MOTION_AI_WORDS.onePicture)
+    const meta = await sharp(await ctx.readFile(came.files[0]!)).metadata()
+    if (!meta.width || !meta.height) throw new Error(SLOW_MOTION_AI_WORDS.badAnswer)
+    pictures = came.files
+    v = { kind: 'frames', file: came.files[0]!, count: came.files.length, w: meta.width, h: meta.height }
   }
   if (v?.kind !== 'frames') throw new Error(SLOW_MOTION_AI_WORDS.noFrames)
+  const batch = pictures
+  const shape = { count: v.count, w: v.w, h: v.h }
+  /** The clip as a kept frame batch: the frames value itself, or (a picture batch) its pictures kept as one, once. */
+  let kept: Promise<FramesValue> | null = null
+  const clipOf = (io: PipelineIO): Promise<FramesValue> => {
+    if (!batch) return Promise.resolve(v as FramesValue)
+    kept ??= (async () => {
+      const media = io.media
+      if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+      async function* rgbFrames(): AsyncIterable<Uint8Array> {
+        for (const f of batch!) {
+          if (io.signal.aborted) throw new MediaError('stopped')
+          const { data, info } = await sharp(await io.read(f)).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+          if (info.width !== shape.w || info.height !== shape.h || info.channels !== 3) throw new MediaError('sizeChanged')
+          yield new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        }
+      }
+      return keepFrames(media.runId, rgbFrames(), shape.w, shape.h, media)
+    })()
+    return kept
+  }
+  /** What the node hands on: a clip's batch as it is; a picture batch's as pictures again, as it came (its slot's kind). */
+  const handOn = async (made: RunnerValue, io: PipelineIO): Promise<RunnerValue> => {
+    if (!batch || made.kind !== 'frames') return made
+    const media = io.media
+    if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+    const files: OutputFile[] = []
+    await readFrames(made, media, async (rgb) => {
+      const png = new Uint8Array(await sharp(rgb, { raw: { width: made.w, height: made.h, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer())
+      files.push(await io.keep(png, 'png'))
+    })
+    return { kind: 'files', files }
+  }
   const T = v.count
   // Under two frames Python hands the clip on as it is: no call, nothing charged.
   if (T < 2) return { kind: 'pipeline', prefix: 'slow_motion_ai', run: async () => ({ values: { 0: v }, ui: null }) }
@@ -1433,11 +1475,12 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
       run: async (io: PipelineIO) => {
         const media = io.media
         if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+        const clip = await clipOf(io)
         const made = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
           const sink = framesSink(v.w, v.h, media, lease)
           let finished = false
           try {
-            for await (const f of framesOf(v, media, lease, { slowMotion: m })) await sink.put(f)
+            for await (const f of framesOf(clip, media, lease, { slowMotion: m })) await sink.put(f)
             const kept = await sink.done()
             finished = true
             return kept
@@ -1447,7 +1490,7 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
           }
         })
         if (io.signal.aborted) throw new MediaError('stopped')
-        return { values: { 0: made }, ui: null }
+        return { values: { 0: await handOn(made, io) }, ui: null }
       },
     }
   }
@@ -1489,6 +1532,8 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
       const sent: string[] = []
       const work = await mediaTempDir()
       try {
+        // R11.9c fix round 4: a picture batch kept as the clip first (nothing is sent before it is).
+        const clip = await clipOf(io)
         // Each segment in turn: encoded (or its recorded request), sent, its answer downloaded and checked.
         const answers: { path: string; probe: MediaProbe; aw: number; ah: number; n: number }[] = []
         for (const [k, part] of parts.entries()) {
@@ -1496,17 +1541,17 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
           let payload = io.recorded?.(part.key) ?? null
           if (!payload) {
             const media = mediaOf()
-            const clip = join(work, `clip_${k + 1}.mp4`)
+            const clipPath = join(work, `clip_${k + 1}.mp4`)
             const encoded = await encodeVideo({
-              input: { kind: 'ffv1', path: await media.access.verifiedPath(v.file), w: v.w, h: v.h, ...(several ? { range: { start: part.seg.start, count: part.seg.count } } : {}) },
-              out: clip, fps: RIFE_SEND_FPS, quality: RIFE_SEND_QUALITY, padToEven: true,
-              userId: media.userId, signal: io.signal, roots: [media.access.rootOf(v.file)], outRoots: [work],
+              input: { kind: 'ffv1', path: await media.access.verifiedPath(clip.file), w: v.w, h: v.h, ...(several ? { range: { start: part.seg.start, count: part.seg.count } } : {}) },
+              out: clipPath, fps: RIFE_SEND_FPS, quality: RIFE_SEND_QUALITY, padToEven: true,
+              userId: media.userId, signal: io.signal, roots: [media.access.rootOf(clip.file)], outRoots: [work],
             })
             // R11.8 (R11.7 review M2): the segment sent must be the frames asked for; one that isn't is never sent
             // (no call, nothing charged; in segments, the ones already answered are not charged either).
             if (encoded.frames !== part.seg.count) throw new MediaError('failed')
-            const bytes = new Uint8Array(await readFile(clip))
-            await rm(clip, { force: true })
+            const bytes = new Uint8Array(await readFile(clipPath))
+            await rm(clipPath, { force: true })
             const name = several ? `slow_motion_ai_clip_${k + 1}.mp4` : 'slow_motion_ai_clip.mp4'
             const url = ctx.bytesToUrl ? await ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, bytes) : await io.handOff(bytes, name)
             payload = rifeVideoInput(url, m)
@@ -1546,7 +1591,7 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
         let decoded = 0
         const made = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
           const sink = framesSink(v.w, v.h, media, lease)
-          const originals = framesOf(v, media, lease)[Symbol.asyncIterator]()
+          const originals = framesOf(clip, media, lease)[Symbol.asyncIterator]()
           let finished = false
           try {
             // The first original, read now: its decode starts here, never from inside the answer's decode.
@@ -1610,7 +1655,7 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
           throw decoded ? e : new Error(SLOW_MOTION_AI_WORDS.badAnswer)
         })
         if (io.signal.aborted) throw new MediaError('stopped')
-        return { values: { 0: made }, ui: null }
+        return { values: { 0: await handOn(made, io) }, ui: null }
       }
       catch (e) {
         // R11.7: in segments, the node delivers only when every segment did: a failure partway, or Stop, charges none of them.
