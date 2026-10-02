@@ -8,15 +8,15 @@
  * (server/utils/blockedModels.ts) share them, so there is one rule.
  */
 import { isLink, type ApiNode, type ApiPrompt } from './graph'
-import { isRunnerEligible, runnerTakesNode, svgReaderProblems } from './eligibility'
-import { isLocalOnlyClass } from './localOnly'
-import { prunedAny, pruneInvalidOutputs } from './validate'
+import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, isRunnerEligible, nodeValidationErrors, runnerTakesNode, svgReaderProblems } from './eligibility'
+import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from './localOnly'
+import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, prunedAny, pruneInvalidOutputs, readByOutputs } from './validate'
 import { EVERY_KNOWN_FAMILY, NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
-import { shaderEngineReason } from './shaderBakeKey'
+import { SHADER_ENGINE_WORDS, shaderEngineReason } from './shaderBakeKey'
 import { switchedOffNodes } from './stopGaps'
 import { NOT_TAKEN_NODE_WORDS, switchedOffWords } from './messages'
-import { isEditorOnlyClass, retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
+import { RETIRED_CLASSES, isEditorOnlyClass, retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -98,54 +98,138 @@ const STAND_IN_SOURCES: Readonly<Record<string, { node: ApiNode; slot: number }>
   VIDEO: { node: { class_type: 'LoadVideo', inputs: { file: 'stand-in.mp4' } }, slot: 0 },
 }
 
-/** The output types of a class (/object_info's `output`), or undefined when not known. */
-export type OutputTypesOf = (classType: string) => readonly string[] | undefined
+/** The node catalogue as /object_info gives it (only what the engine route reads). */
+export type NodeCatalog = Readonly<Record<string, {
+  input?: { required?: Readonly<Record<string, unknown>> }
+  output?: readonly string[]
+  output_node?: unknown
+} | undefined>>
+
+/** A class's entry in the catalogue, or undefined. */
+const catalogEntry = (catalog: NodeCatalog | null | undefined, ct: string) =>
+  catalog && Object.prototype.hasOwnProperty.call(catalog, ct) ? catalog[ct] : undefined
+
+/** The widget types (/object_info): a required input of any other type is a wire. */
+const WIDGET_TYPES: ReadonlySet<string> = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
+
+/** The required wired inputs of a class (ComfyUI refuses a node missing one: required_input_missing). */
+function requiredWires(catalog: NodeCatalog | null | undefined, ct: string): string[] {
+  const req = catalogEntry(catalog, ct)?.input?.required
+  if (!req) return []
+  return Object.entries(req).filter(([, spec]) => {
+    const t = Array.isArray(spec) ? spec[0] : undefined
+    return typeof t === 'string' && !WIDGET_TYPES.has(t)
+  }).map(([name]) => name)
+}
 
 /**
- * The run with every wire from a `refused` node reading a stand-in source of
- * its type instead (STAND_IN_SOURCES): each node is then judged on its own.
+ * The run with node `id`'s wires from a `refused` node reading a stand-in
+ * source of its type instead (STAND_IN_SOURCES): the node is then judged on
+ * its own (what reads it is left as it is).
  */
-function withStandIns(run: ApiPrompt, refused: ReadonlySet<string>, outputTypesOf?: OutputTypesOf): ApiPrompt {
-  const out: ApiPrompt = {}
-  for (const [id, node] of Object.entries(run)) {
-    let inputs: Record<string, unknown> | null = null
-    for (const [name, v] of Object.entries(node.inputs ?? {})) {
-      if (!isLink(v) || !refused.has(v[0]) || !run[v[0]]) continue
-      const type = outputTypesOf?.(run[v[0]]!.class_type)?.[v[1]]
-      const stand = STAND_IN_SOURCES[type ?? 'IMAGE'] ?? STAND_IN_SOURCES.IMAGE!
-      const standId = `stand-in:${v[0]}:${v[1]}`
-      out[standId] = { class_type: stand.node.class_type, inputs: { ...stand.node.inputs } }
-      inputs ??= { ...node.inputs }
-      inputs[name] = [standId, stand.slot]
-    }
-    out[id] = inputs ? { ...node, inputs } : node
+function withStandIns(run: ApiPrompt, id: string, refused: ReadonlySet<string>, catalog?: NodeCatalog | null): ApiPrompt {
+  const node = run[id]!
+  const out: ApiPrompt = { ...run }
+  let inputs: Record<string, unknown> | null = null
+  for (const [name, v] of Object.entries(node.inputs ?? {})) {
+    if (!isLink(v) || !refused.has(v[0]) || !run[v[0]]) continue
+    const type = catalogEntry(catalog, run[v[0]]!.class_type)?.output?.[v[1]]
+    const stand = STAND_IN_SOURCES[type ?? 'IMAGE'] ?? STAND_IN_SOURCES.IMAGE!
+    const standId = `stand-in:${v[0]}:${v[1]}`
+    out[standId] = { class_type: stand.node.class_type, inputs: { ...stand.node.inputs } }
+    inputs ??= { ...node.inputs }
+    inputs[name] = [standId, stand.slot]
   }
+  if (inputs) out[id] = { ...node, inputs }
   return out
 }
 
 /** Where a run that isn't going to the runner goes: the local engine, or nowhere, with words. */
 export type EngineRoute =
-  | { to: 'engine' }
+  /** `notice`: the local-engine toast naming the Sailor nodes that still need it (NEEDS_LOCAL_ENGINE), shown as it goes. */
+  | { to: 'engine'; notice?: { title: string; description: string } }
   | { to: 'refused'; title: string; description: string }
+
+/** A class the runner knows (a runner type or a rule row), whatever its families. */
+const runnerKnowsClass = (ct: string) => RUNNER_NODE_TYPES.has(ct) || Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, ct)
+
+/**
+ * Fix round 1: what ComfyUI would run of a prompt (validate_prompt): an output
+ * whose own subgraph fails validation is dropped, with what only it reads.
+ * The runner's own pruning (./validate.ts) does this only when it knows every
+ * class; here a node is invalid on the runner's own checks or when it misses a
+ * wire the catalogue says is required (an Upscale with no picture); a class
+ * the runner doesn't know is an output when the catalogue says so (one it
+ * doesn't list counts as one: the safe side). 'failed': every output fails;
+ * 'no-outputs': nothing shows or saves a result ("Prompt has no outputs").
+ */
+function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | 'failed' | 'no-outputs' {
+  const ids = Object.keys(prompt)
+  const isOutput = (ct: string) => {
+    if (runnerKnowsClass(ct)) return RUNNER_OUTPUT_CLASSES.has(ct)
+    const def = catalogEntry(catalog, ct)
+    return !def || def.output_node === true
+  }
+  const outputs = ids.filter(id => isOutput(prompt[id]!.class_type))
+  if (!outputs.length) return ids.length ? 'no-outputs' : prompt
+  const valid = new Map<string, boolean>()
+  const check = (id: string, seen: Set<string>): boolean => {
+    const known = valid.get(id)
+    if (known !== undefined) return known
+    const node = prompt[id]
+    if (!node || seen.has(id)) return true
+    seen.add(id)
+    let ok = !nodeValidationErrors(node.class_type, node.inputs ?? {}).length
+      && requiredWires(catalog, node.class_type).every(name => node.inputs?.[name] !== undefined)
+    for (const v of Object.values(node.inputs ?? {})) if (isLink(v) && !check(v[0], seen)) ok = false
+    valid.set(id, ok)
+    return ok
+  }
+  const good = outputs.filter(o => check(o, new Set()))
+  if (!good.length) return 'failed'
+  const keep = readByOutputs(prompt, good)
+  if (keep.size === ids.length) return prompt
+  return Object.fromEntries(ids.filter(id => keep.has(id)).map(id => [id, prompt[id]!]))
+}
+
+/**
+ * Fix round 1: what ComfyUI would run of a prompt (engineRunPart), or null
+ * when nothing of it would run. The canvas hands this to the runner when the
+ * runner won't take the prompt as it is but takes this (a result missing a
+ * wire it needs, with what only it reads, no longer keeps the rest off the
+ * runner: ComfyUI would have dropped it and run the rest).
+ */
+export function engineRunPrompt(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
+  const part = engineRunPart(prompt, catalog)
+  return typeof part === 'string' ? null : part
+}
 
 /**
  * R10.2: whether a run the runner won't take (declined, or skipped because the
  * browser already knows it won't) may go to the local engine. Only when:
  *   - this is local, not hosted;
  *   - the engine is up;
- *   - every node the runner refuses is one of decision 4's local-only classes
- *     (./localOnly.ts). A node the runner refuses only because it reads a
- *     refused node (Save image after VAE decode) rides along: it is judged
- *     with a stand-in source in that node's place, so only the node at fault
- *     is named.
+ *   - every node the runner refuses, in what ComfyUI would run of it
+ *     (engineRunPart: an empty Frame or a Save image with nothing wired in is
+ *     dropped, as ComfyUI drops it), is one of:
+ *       - decision 4's local-only classes (./localOnly.ts);
+ *       - a class the node catalogue doesn't list (a custom node installed
+ *         locally; fix round 1 (b)): `catalog`;
+ *       - a Sailor node that still needs the local engine (fix round 1 (a),
+ *         (c): NEEDS_LOCAL_ENGINE, a Shader effect showing one of your own
+ *         effects). The run then goes with the local-engine toast naming them.
+ *   A node the runner refuses only because it reads a refused node (Save
+ *   image after VAE decode) rides along: it is judged with a stand-in source
+ *   in that node's place, so only the node at fault is named.
  * Otherwise the run is refused in the runner's words, naming each node:
- *   - a node refused for its own sake (not local-only): its reason (a Shader
- *     effect's cause, "is switched off right now", or NOT_TAKEN_NODE_WORDS);
+ *   - a node refused for its own sake: its reason (a Shader effect's cause,
+ *     "is switched off right now", or NOT_TAKEN_NODE_WORDS);
+ *   - every result fails validation: NO_VALID_OUTPUTS_MESSAGE;
  *   - nothing refused here but the runner still declined (or is off): the
  *     runner's own words (`declined`: the server's message, or RUNNER_OFF_WORDS);
- *   - only local-only nodes, in hosted: they run only on the local engine;
- *   - only local-only nodes, locally with the engine off: "This workflow needs
- *     the local engine" (the old toast, kept for these classes only).
+ *   - only nodes for the local engine, in hosted: they run only there;
+ *   - only nodes for the local engine, locally with it off: "This workflow
+ *     needs the local engine" (the old toast).
  * `titleOf` names a take's nodes (workflowNodeTitles).
  */
 export function engineRoute(
@@ -155,7 +239,8 @@ export function engineRoute(
     families?: ReadonlySet<RunnerFamily>
     hosted: boolean
     engineUp: boolean
-    outputTypesOf?: OutputTypesOf
+    /** The node catalogue (/object_info): outputs, required wires, output types; a class it doesn't list goes to the local engine. */
+    catalog?: NodeCatalog | null
     /** The runner's words when it declined the run (the server's refusal message). */
     declined?: string | null
   },
@@ -166,43 +251,76 @@ export function engineRoute(
   const lenient = { plainRefusals: true }
   const refused = new Map<string, string>()
   const localOnly = new Set<string>()
+  /** Sailor nodes that still need the local engine (NEEDS_LOCAL_ENGINE), by title, with their words for elsewhere. */
+  const listed = new Map<string, string>()
+  let allFailed = false
+  let noOutputs = false
   for (const take of takes) {
     if (!take.prompt) continue
-    const { run, ids } = blockedNodes(take.prompt, families)
+    const part = engineRunPart(take.prompt, opts.catalog)
+    if (part === 'failed') { allFailed = true; continue }
+    if (part === 'no-outputs') { noOutputs = true; continue }
+    const { run, ids } = blockedNodes(part, families)
     if (!ids.length) continue
-    const local = ids.filter(id => isLocalOnlyClass(run[id]!.class_type))
-    for (const id of local) localOnly.add(take.titleOf(id))
-    const judged = withStandIns(run, new Set(ids), opts.outputTypesOf)
+    const toEngine = (id: string) => {
+      const ct = run[id]!.class_type
+      return isLocalOnlyClass(ct) || (!!opts.catalog && !catalogEntry(opts.catalog, ct) && !runnerKnowsClass(ct) && !RETIRED_CLASSES.has(ct))
+    }
+    for (const id of ids) if (toEngine(id)) localOnly.add(take.titleOf(id))
+    const blocked = new Set(ids)
     const off = new Set(switchedOffNodes(run, families))
     for (const id of ids) {
-      if (isLocalOnlyClass(run[id]!.class_type)) continue
-      if (runnerTakesNode(judged, id, families, lenient)) continue
+      if (toEngine(id)) continue
+      if (runnerTakesNode(withStandIns(run, id, blocked, opts.catalog), id, families, lenient)) continue
       const title = take.titleOf(id)
-      if (refused.has(title)) continue
-      const why = shaderEngineReason(run, id, families) ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS)
-      refused.set(title, why)
+      if (refused.has(title) || listed.has(title)) continue
+      const shaderWhy = shaderEngineReason(run, id, families)
+      const needs = needsLocalEngineWords(run[id]!, shaderWhy, off.has(id))
+      if (needs) { listed.set(title, needs); continue }
+      refused.set(title, shaderWhy ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS))
     }
   }
   if (refused.size) {
     const titles = [...refused.keys()]
-    const named = titles.slice(0, MAX_NAMED).map((t) => {
-      const why = refused.get(t)!
-      return why.startsWith(`“${t}”`) ? why : `“${t}”: ${why}`
-    })
-    const more = titles.length - named.length
-    return {
-      to: 'refused',
-      title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`,
-      description: [...named, ...(more > 0 ? [`And ${more} more.`] : [])].join(' '),
-    }
+    return { to: 'refused', title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`, description: namedWords(refused) }
   }
-  if (!localOnly.size) {
+  if (!localOnly.size && !listed.size) {
+    if (allFailed) return { to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` }
+    if (noOutputs) return { to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE }
     return { to: 'refused', title: 'This workflow can’t run', description: opts.declined?.trim() || WORKFLOW_CANT_RUN_WORDS }
   }
-  const titles = [...localOnly]
-  if (opts.hosted) return { to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(titles) }
+  const titles = [...localOnly, ...[...listed.keys()].filter(t => !localOnly.has(t))]
+  if (opts.hosted) {
+    const parts = [...(localOnly.size ? [localOnlyHostedWords([...localOnly])] : []), ...(listed.size ? [namedWords(listed)] : [])]
+    return { to: 'refused', title: 'This workflow can’t run here', description: parts.join(' ') }
+  }
   if (!opts.engineUp) return { to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(titles) }
-  return { to: 'engine' }
+  return listed.size
+    ? { to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription([...listed.keys()]) } }
+    : { to: 'engine' }
+}
+
+/**
+ * Fix round 1 (a), (c): the words for a Sailor node that still needs the local
+ * engine, used where it can't go (hosted, the engine off), or null when it
+ * isn't one: its class is in NEEDS_LOCAL_ENGINE and nothing more particular
+ * refuses it, or it is a Shader effect showing one of your own effects.
+ */
+function needsLocalEngineWords(node: ApiNode, shaderWhy: string | null, switchedOff: boolean): string | null {
+  if (node.class_type === 'ShaderEffect') return shaderWhy === SHADER_ENGINE_WORDS.myEffect ? shaderWhy : null
+  if (shaderWhy || switchedOff || !Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, node.class_type)) return null
+  return NEEDS_LOCAL_ENGINE_WORDS
+}
+
+/** “A”: why. “B”: why. (at most MAX_NAMED, then "And N more."); a reason that already names its node stands as it is. */
+function namedWords(byTitle: ReadonlyMap<string, string>): string {
+  const titles = [...byTitle.keys()]
+  const named = titles.slice(0, MAX_NAMED).map((t) => {
+    const why = byTitle.get(t)!
+    return why.startsWith(`“${t}”`) ? why : `“${t}”: ${why}`
+  })
+  const more = titles.length - named.length
+  return [...named, ...(more > 0 ? [`And ${more} more.`] : [])].join(' ')
 }
 
 /** The words for a run while the runner is switched off (in this browser's settings, or a 404 from the server). */

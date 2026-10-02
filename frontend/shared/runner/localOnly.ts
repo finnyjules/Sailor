@@ -268,3 +268,38 @@ export const LOCAL_ONLY_CLASSES: ReadonlySet<string> = new Set([
 export function isLocalOnlyClass(classType: unknown): boolean {
   return typeof classType === 'string' && LOCAL_ONLY_CLASSES.has(classType)
 }
+
+/** What becomes of a Sailor class that still needs the local engine (R11.10 judges each). */
+export type NeedsLocalEnginePlan = 'port' | 'retire' | 'keep local'
+
+/**
+ * Fix round 1 (a): Sailor's own classes the runner doesn't run yet that ran
+ * on the local engine before R10.2. "Switching a family on never makes a
+ * working graph fail": until each is ported or retired, it is on this
+ * explicit, named list. Locally with the engine up, a run holding one goes
+ * there with the local-engine toast naming it; in hosted, or with the engine
+ * off, it is refused in plain words (NEEDS_LOCAL_ENGINE_WORDS). The counts
+ * are the saved graphs holding each (2026-10-02: 1,251 graphs of 1,566
+ * projects, user/sailor/projects and its migration backup).
+ *
+ * A Shader effect showing one of your own effects (fix round 1 (c)) is the
+ * same case by its setting, not its class (./needsEngine.ts).
+ */
+export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {
+  PreviewVideo: { plan: 'port', savedGraphs: 0, why: 'Preview video: a temporary Save video, which the runner already does; no saved graph uses it.' },
+  FilmShotNode: { plan: 'port', savedGraphs: 11, why: 'Film a shot: the runner takes it only for the models and settings it films (eligibility.ts filmShotTaken).' },
+  SmartLayout: { plan: 'port', savedGraphs: 28, why: 'Smart Layout read by an Image card (the runner hands its pictures only to Save image and Preview image).' },
+  Text: { plan: 'port', savedGraphs: 2, why: 'A Text card showing a LoRA node’s log (the runner doesn’t hand that text on).' },
+  RenderType: { plan: 'retire', savedGraphs: 0, why: 'Font Playground: no saved graph uses it and nothing in the app builds it; retire unless R11.10 finds a use.' },
+  KineticType: { plan: 'retire', savedGraphs: 0, why: 'Kinetic Typography: migrated to Vector Type on open (app/lib/vectortype/migrateKinetic.ts).' },
+  FluxProRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate image runs these models.' },
+  IdeogramV3TurboRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate image runs these models.' },
+  FluxKontextRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Edit image runs these models.' },
+  ClarityUpscaleRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Upscale runs Clarity.' },
+  Seedance2RemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate a video runs these models.' },
+  Veo3RemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate a video runs these models.' },
+  KlingVideoRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate a video runs these models.' },
+}
+
+/** Where a node on NEEDS_LOCAL_ENGINE can't go (hosted, or the engine off). */
+export const NEEDS_LOCAL_ENGINE_WORDS = 'Sailor can’t run this node yet. It runs only on the local engine, on your own computer.'

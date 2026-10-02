@@ -114,7 +114,9 @@ const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
  * R11.9c fix round 1 (M1, I3) named the Shader effects the runner left to the engine; R10.2 closed every one:
  * each is a plain refusal with its words, locally with the engine up as in hosted, and a bake this browser or
  * machine can't make stops the run in plain words everywhere (layouts/default.vue; the guard is in
- * runner-no-silent-engine.unit.spec.ts). The list of cases still left to the engine is empty.
+ * runner-no-silent-engine.unit.spec.ts). The list of cases silently left to the engine is empty. R10.2 fix
+ * round 1 (c): one of your own effects goes to the local engine again, locally with it up, but named (the
+ * local-engine toast), never silently; elsewhere it gets its words.
  */
 const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {}
 const SHADER_CLOSED_CASES: Readonly<Record<string, string>> = {
@@ -150,8 +152,13 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
     for (const [name, p] of cases) {
       expect(runnerTakesNode(p, 'fx', SH), name).toBe(false)
       expect(needsEngineReasons(p, { runnerOn: true, families: SH }), name).toEqual([SHADER_CLOSED_CASES[name]])
-      expect(engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: false, engineUp: true }), name)
-        .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
+      const local = engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: false, engineUp: true })
+      if (name === 'a My effect or a draft') {
+        expect(local, name).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: 'Only the engine can run “Halftone”.' } })
+        expect(engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: true, engineUp: true }), name)
+          .toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
+      }
+      else expect(local, name).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
     }
     expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_CLOSED_CASES['a wired setting'])
   })

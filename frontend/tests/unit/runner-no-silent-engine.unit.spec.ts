@@ -18,13 +18,13 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { EVERY_KNOWN_FAMILY, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, SWITCHED_CLASSES, runnerRuleFor } from '#shared/runner/eligibility'
 import { RETIRED_CLASSES } from '#shared/runner/retired'
-import { LOCAL_ONLY_CLASSES, isLocalOnlyClass } from '#shared/runner/localOnly'
+import { LOCAL_ONLY_CLASSES, NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from '#shared/runner/localOnly'
 import { NOT_TAKEN_NODE_WORDS, switchedOffWords } from '#shared/runner/messages'
 import { SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST, shaderBakedText } from '#shared/runner/shaderBakeKey'
-import { RUNNER_OFF_WORDS, WORKFLOW_CANT_RUN_WORDS, engineRoute, localOnlyHostedWords, needsEngineDescription, type EngineRoute } from '~/lib/runner/needsEngine'
+import { RUNNER_OFF_WORDS, WORKFLOW_CANT_RUN_WORDS, engineRoute, engineRunPrompt, localOnlyHostedWords, needsEngineDescription, type EngineRoute } from '~/lib/runner/needsEngine'
+import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, runnerTakesWorkflow } from '#shared/runner/validate'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { output?: string[] }>
-const outputTypesOf = (ct: string) => CATALOG[ct]?.output
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { output?: string[]; output_node?: boolean; input?: { required?: Record<string, unknown> } }>
 const EVERY: ReadonlySet<RunnerFamily> = EVERY_KNOWN_FAMILY
 type Link = [string, number]
 
@@ -53,7 +53,7 @@ const kSampler = (tail: ApiPrompt = { s: saveImage(['d', 0]) }): ApiPrompt => ({
   ...tail,
 })
 const TITLES: Record<string, string> = {
-  ck: 'Load checkpoint', p: 'Prompt', n: 'Negative', e: 'Empty latent', k: 'KSampler', d: 'VAE decode', s: 'Save', b: 'Soft blur', fx: 'Halftone', r: 'Poster type',
+  ck: 'Load checkpoint', p: 'Prompt', n: 'Negative', e: 'Empty latent', k: 'KSampler', d: 'VAE decode', s: 'Save', b: 'Soft blur', fx: 'Halftone', r: 'Poster type', v: 'Save clip', c: 'My node', lay: 'Layout', u: 'Upscale',
 }
 const titleOf = (id: string) => TITLES[id] ?? `Node ${id}`
 const LOCAL_TITLES = ['Load checkpoint', 'Prompt', 'Negative', 'Empty latent', 'KSampler', 'VAE decode']
@@ -64,7 +64,7 @@ const shader = (over: Record<string, unknown>, image: Link = ['0', 0]): ApiPromp
   s: saveImage(['fx', 0]),
 })
 
-const LOCAL_UP = { runnerOn: true, families: EVERY, hosted: false, engineUp: true, outputTypesOf }
+const LOCAL_UP = { runnerOn: true, families: EVERY, hosted: false, engineUp: true, catalog: CATALOG }
 const route = (prompt: ApiPrompt, over: Partial<Parameters<typeof engineRoute>[1]> = {}): EngineRoute =>
   engineRoute([{ prompt, titleOf }], { ...LOCAL_UP, ...over })
 
@@ -116,16 +116,19 @@ describe('engineRoute: a KSampler graph', () => {
   })
 })
 
+/** Save video reading a still picture: a Sailor node the runner refuses for its own sake (not on NEEDS_LOCAL_ENGINE). */
+const saveVideoOfPicture = (from: Link) => ({ class_type: 'SaveVideo', inputs: { video: from, filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } })
+
 describe('engineRoute: a declined Sailor class never goes to the engine', () => {
-  it('a Sailor class the runner doesn’t run is refused by its title, even locally with the engine up', () => {
-    const p: ApiPrompt = { l: loadImage(), r: { class_type: 'RenderType', inputs: { text: 'Hi' } }, s: saveImage(['l', 0]) }
-    expect(route(p)).toEqual({ to: 'refused', title: '“Poster type” can’t run', description: `“Poster type”: ${NOT_TAKEN_NODE_WORDS}` })
+  it('a Sailor node refused for its own sake is refused by its title, even locally with the engine up', () => {
+    const p: ApiPrompt = { l: loadImage(), v: saveVideoOfPicture(['l', 0]) }
+    expect(route(p)).toEqual({ to: 'refused', title: '“Save clip” can’t run', description: `“Save clip”: ${NOT_TAKEN_NODE_WORDS}` })
   })
 
   it('one inside a KSampler graph is refused too: only local-only nodes may take a run to the engine', () => {
-    const r = route(kSampler({ r: { class_type: 'RenderType', inputs: { text: 'Hi' } } }))
+    const r = route(kSampler({ s: saveImage(['d', 0]), l: loadImage(), v: saveVideoOfPicture(['l', 0]) }))
     expect(r.to).toBe('refused')
-    expect(r.to === 'refused' && r.title).toBe('“Poster type” can’t run')
+    expect(r.to === 'refused' && r.title).toBe('“Save clip” can’t run')
   })
 
   it('a family that is off is refused with “is switched off right now.” (row 25)', () => {
@@ -142,14 +145,14 @@ describe('engineRoute: a declined Sailor class never goes to the engine', () => 
   })
 
   it('every take is judged: a Sailor refusal in take 2 refuses the run', () => {
-    const second: ApiPrompt = { l: loadImage(), r: { class_type: 'RenderType', inputs: { text: 'Hi' } }, s: saveImage(['l', 0]) }
+    const second: ApiPrompt = { l: loadImage(), v: saveVideoOfPicture(['l', 0]) }
     const r = engineRoute([{ prompt: kSampler(), titleOf }, { prompt: second, titleOf }], LOCAL_UP)
     expect(r.to).toBe('refused')
   })
 
   it('several refused nodes are each named, at most four, then “And N more.”', () => {
-    const p: ApiPrompt = { l: loadImage(), s: saveImage(['l', 0]) }
-    for (let i = 0; i < 6; i++) p[`r${i}`] = { class_type: 'RenderType', inputs: { text: 'Hi' } }
+    const p: ApiPrompt = { l: loadImage() }
+    for (let i = 0; i < 6; i++) p[`r${i}`] = saveVideoOfPicture(['l', 0])
     const r = route(p)
     expect(r).toMatchObject({ to: 'refused', title: '6 nodes can’t run' })
     expect(r.to === 'refused' && r.description).toBe(
@@ -164,7 +167,6 @@ describe('R10.2 closes the Shader effect’s engine cases: each is a plain refus
   const madeInRun: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), ...shader({}, ['b', 0]) }
   delete madeInRun[0]
   const cases: [string, ApiPrompt, string][] = [
-    ['a My effect or a draft', shader({ effect: 'mine_abc~v1' }), SHADER_ENGINE_WORDS.myEffect],
     ['an effect the runner doesn’t know', shader({ effect: 'no_such_effect' }), SHADER_ENGINE_WORDS.unknownEffect],
     ['params only Python reads', shader({ params: '{"u_amount":"0.5"}' }), SHADER_ENGINE_WORDS.oddParams],
     ['a wired setting', { ...shader({ seed: ['9', 0] }), 9: { class_type: 'PrimitiveInt', inputs: { value: 3 } } }, SHADER_ENGINE_WORDS.wired],
@@ -178,8 +180,90 @@ describe('R10.2 closes the Shader effect’s engine cases: each is a plain refus
     })
   }
 
-  it('the words no longer promise the local engine', () => {
-    for (const w of Object.values(SHADER_ENGINE_WORDS)) expect(w).not.toMatch(/engine/i)
+  it('a Shader effect with no picture whose effect needs one never ran anywhere: refused with its words', () => {
+    const p: ApiPrompt = shader({})
+    delete p[0]
+    delete p.fx!.inputs.image
+    expect(route(p)).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_ENGINE_WORDS.needsPicture}` })
+  })
+
+  it('the words no longer promise the local engine, but for your own effects (fix round 1 (c))', () => {
+    for (const [k, w] of Object.entries(SHADER_ENGINE_WORDS)) if (k !== 'myEffect') expect(w, k).not.toMatch(/engine/i)
+  })
+})
+
+describe('fix round 1 (a): Sailor classes that still need the local engine are named, never silent', () => {
+  it('the list names each class with its plan; every Sailor class the runner doesn’t run is on it but the Timeline (editor-only, R9.1)', () => {
+    expect(Object.keys(NEEDS_LOCAL_ENGINE).sort()).toEqual([
+      'ClarityUpscaleRemoteNode', 'FilmShotNode', 'FluxKontextRemoteNode', 'FluxProRemoteNode', 'IdeogramV3TurboRemoteNode', 'KineticType',
+      'KlingVideoRemoteNode', 'PreviewVideo', 'RenderType', 'Seedance2RemoteNode', 'SmartLayout', 'Text', 'Veo3RemoteNode',
+    ])
+    for (const ct of SAILOR_NOT_TAKEN) if (ct !== 'Timeline') expect(NEEDS_LOCAL_ENGINE[ct], ct).toBeDefined()
+    for (const [ct, e] of Object.entries(NEEDS_LOCAL_ENGINE)) {
+      expect(['port', 'retire', 'keep local'], ct).toContain(e.plan)
+      expect(isLocalOnlyClass(ct), ct).toBe(false)
+    }
+  })
+
+  const renderType: ApiPrompt = { r: { class_type: 'RenderType', inputs: { text: 'Hi' } }, rs: saveImage(['r', 0]) }
+  it('locally with the engine up it goes there, with the local-engine toast naming it', () => {
+    expect(route(renderType)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Poster type']) } })
+    expect(route(kSampler({ s: saveImage(['d', 0]), ...renderType }))).toMatchObject({ to: 'engine', notice: { description: needsEngineDescription(['Poster type']) } })
+  })
+  it('in hosted, plain words; with the engine off, the needs-the-engine toast', () => {
+    expect(route(renderType, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Poster type”: ${NEEDS_LOCAL_ENGINE_WORDS}` })
+    expect(route(renderType, { engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['Poster type']) })
+  })
+  it('a Smart Layout read by an Image card (28 saved graphs) goes there, named', () => {
+    const p: ApiPrompt = {
+      lay: { class_type: 'SmartLayout', inputs: { layout: '{}', aspects: '1x1' } },
+      i: { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true, batch_index: -1, images: ['lay', 0] } },
+    }
+    expect(route(p)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Layout']) } })
+  })
+  it('a node with a plainer reason is refused, not sent: a switched-off family stays refused', () => {
+    const off = new Set<RunnerFamily>([...EVERY].filter(f => f !== 'effects-blur'))
+    expect(route({ l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]) }, { families: off }).to).toBe('refused')
+  })
+})
+
+describe('fix round 1 (b): a class the catalogue doesn’t list is a custom node: local engine locally, words in hosted', () => {
+  const custom: ApiPrompt = { l: loadImage(), c: { class_type: 'MyCustomUpscaler', inputs: { image: ['l', 0] } } }
+  it('goes to the local engine locally, with the engine up', () => {
+    expect(route(custom)).toEqual({ to: 'engine' })
+  })
+  it('hosted refuses it, naming it', () => {
+    expect(route(custom, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(['My node']) })
+  })
+  it('without a catalogue nothing counts as custom', () => {
+    expect(route(custom, { catalog: undefined }).to).toBe('refused')
+  })
+})
+
+describe('fix round 1 (c): a Shader effect showing one of your own effects goes to the local engine, named', () => {
+  const mine = shader({ effect: 'mine_abc~v1' })
+  it('locally with the engine up: there, with the toast naming it', () => {
+    expect(route(mine)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) } })
+  })
+  it('hosted, or the engine off: words', () => {
+    expect(route(mine, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Halftone”: ${SHADER_ENGINE_WORDS.myEffect}` })
+    expect(route(mine, { engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) })
+  })
+})
+
+describe('fix round 1: what ComfyUI would drop doesn’t decide the route', () => {
+  it('an output ComfyUI drops no longer keeps a runner graph off the runner', () => {
+    // A Preview any reading a VAE decode with nothing wired in: ComfyUI drops both and runs the rest.
+    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), d: { class_type: 'VAEDecode', inputs: {} }, pa: { class_type: 'PreviewAny', inputs: { source: ['d', 0] } } }
+    expect(runnerTakesWorkflow(p, EVERY)).toBe(false)
+    const pruned = engineRunPrompt(p, CATALOG)!
+    expect(Object.keys(pruned).sort()).toEqual(['b', 'l', 's'])
+    expect(runnerTakesWorkflow(pruned, EVERY)).toBe(true)
+  })
+  it('a KSampler graph with nothing to show refuses as ComfyUI does; one whose every result fails, too', () => {
+    const { s: _s, ...noOutput } = kSampler()
+    expect(route(noOutput)).toEqual({ to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE })
+    expect(route(kSampler({ s: { class_type: 'SaveImage', inputs: { ...SAVE_DEFAULTS } } }))).toEqual({ to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` })
   })
 })
 
@@ -209,7 +293,10 @@ describe('layouts/default.vue: the run route', () => {
     expect(call).toContain('hosted: hostedShell')
     expect(call).toContain('engineUp: engineUp.value || direct.isMainSocketOpen()')
     expect(call).toContain('declined: declinedWords')
-    expect(call).toContain('outputTypesOf:')
+    expect(call).toContain('catalog: objectInfo.value')
+    // Fix round 1: the named local-engine toast, and the pruned prompts for the runner.
+    expect(body).toContain("if (route?.to === 'engine' && route.notice) toast.info(route.notice.title, { description: route.notice.description })")
+    expect(body).toContain('engineRunPrompt(p, objectInfo.value)')
   })
 
   it('no silent fallback is left: no “runs on the local engine instead”, no engine-there exception for a shader bake', () => {

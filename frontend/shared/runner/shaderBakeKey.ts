@@ -69,11 +69,13 @@ export const SHADER_GENERATIVE_IDS: readonly string[] = [
 
 /**
  * R11.9c fix round 1 (M1): the plain words for each Shader effect the runner doesn't take, by cause.
- * R10.2: each is a refusal now, everywhere (never the engine): the words say what to change.
+ * R10.2: each is a refusal now, everywhere: the words say what to change. Fix round 1 (c): one of your
+ * own effects still goes to the local engine, locally with it up (NEEDS_LOCAL_ENGINE's toast), until the
+ * browser bakes them; these words are for where it can't go.
  */
 export const SHADER_ENGINE_WORDS = {
   /** A My effect or a draft (its id is the user's own: `mine_…`). */
-  myEffect: 'This shader is one of your own effects, which can’t run in a workflow yet. Pick one of Sailor’s effects.',
+  myEffect: 'This shader is one of your own effects, which only the local engine runs in a workflow for now. Pick one of Sailor’s effects to run it here.',
   /** An effect id the runner's catalog doesn't list. */
   unknownEffect: 'This shader effect isn’t one Sailor knows yet. Pick another effect.',
   /** A setting wired in from another node. */
@@ -82,6 +84,8 @@ export const SHADER_ENGINE_WORDS = {
   oddParams: 'This shader’s settings are written in a way Sailor can’t read. Change any setting in the shader to rewrite them.',
   /** A bake whose key doesn't agree with the prompt as sent. */
   keyMismatch: 'This shader changed after its frames were drawn. Run it again.',
+  /** Fix round 1: an effect that works on a picture, with none wired in (Python raises; never ran anywhere). */
+  needsPicture: 'This shader effect works on a picture. Wire one into it, or pick an effect that makes its own.',
 } as const
 
 /** The node's `aspect` options. */
@@ -545,6 +549,7 @@ export function shaderEngineReason(prompt: ApiPrompt, nodeId: string, families: 
   if (typeof inputs.effect === 'string' && !SHADER_EFFECT_IDS.includes(resolveShaderEffectId(inputs.effect))) {
     return inputs.effect.startsWith('mine_') ? SHADER_ENGINE_WORDS.myEffect : SHADER_ENGINE_WORDS.unknownEffect
   }
+  if (!isLink(image) && typeof inputs.effect === 'string' && !SHADER_GENERATIVE_IDS.includes(resolveShaderEffectId(inputs.effect))) return SHADER_ENGINE_WORDS.needsPicture
   if (!shaderParamsLookPortable(inputs.params)) return SHADER_ENGINE_WORDS.oddParams
   const baked = parseShaderBaked(inputs.sailor_baked)
   if (baked && !shaderBakeTaken(prompt, nodeId)) {

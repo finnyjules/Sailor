@@ -68,7 +68,7 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { workflowNodeTitles, blockedRunRefusal, engineRoute, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
+import { workflowNodeTitles, blockedRunRefusal, engineRoute, engineRunPrompt, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
 import { outputClassesOf } from '#shared/runner/validate'
 import { bakeShaderEffectsForRun, stopShaderBakes } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
@@ -938,7 +938,14 @@ async function runVueWorkflow(
         if (!opts.live) armDirectRunWatchdog(res.prompt_id, runTabId, isRunnerPromptId(res.prompt_id) ? RUNNER_STAGE_STALL_MS : DIRECT_RUN_STALL_MS)
         opts.onQueued?.(res.prompt_id)
       }
-      const runnerPrompts = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
+      const asBuilt = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
+      // R10.2 fix round 1: a run the runner won't take as built, but takes once what ComfyUI would drop is
+      // dropped (a result missing a wire it needs, with what only it reads), goes to the runner without
+      // those parts, as ComfyUI would have run it without them.
+      const pruned = asBuilt.map(p => (p ? (engineRunPrompt(p, objectInfo.value) ?? p) : p))
+      const runnerPrompts = !shouldUseRunner(runnerEnabled, asBuilt, runnerFamilies) && shouldUseRunner(runnerEnabled, pruned, runnerFamilies)
+        ? pruned
+        : asBuilt
       let sentToRunner = false
       // R10.2: the runner's words when it declined the run (the engine route below names the nodes).
       let declinedWords: string | null = runnerEnabled ? null : RUNNER_OFF_WORDS
@@ -992,7 +999,7 @@ async function runVueWorkflow(
           families: runnerFamilies,
           hosted: hostedShell,
           engineUp: engineUp.value || direct.isMainSocketOpen(),
-          outputTypesOf: ct => objectInfo.value?.[ct]?.output,
+          catalog: objectInfo.value,
           declined: declinedWords,
         },
       )
@@ -1002,6 +1009,9 @@ async function runVueWorkflow(
         currentRunSilent.value = false
         return false
       }
+      // Fix round 1: Sailor nodes that still need the local engine (NEEDS_LOCAL_ENGINE, your own shader
+      // effects) go there named, never silently.
+      if (route?.to === 'engine' && route.notice) toast.info(route.notice.title, { description: route.notice.description })
       if (sentToRunner) {
         // Registered as the POST returned (sendRunnerPost), before its early events were replayed.
       } else if (takeCount > 1) {
