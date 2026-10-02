@@ -161,18 +161,31 @@ export async function abandonShaderBake(inputRoot: string, folder: string, owns:
   if (!p) return false
   let names: string[]
   try { names = await readdir(p) }
-  catch { return false }
+  catch (e) {
+    // R11.9c fix round 5 (M3): the folder isn't there yet (the abandon came before the first frame's upload made it):
+    // nothing to delete or protect, but the tombstone still stands, so a frame on its way is refused by the gate
+    // and a folder it brings back is swept. The name was checked by folderPath before anything touched the disk.
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') await tombstone(inputRoot, folder)
+    return false
+  }
   if (names.includes(CLAIMED_MARKER)) return false
   for (const n of names) if (!(await owns(n))) return false
   await rm(p, { recursive: true, force: true })
   // Fix round 3 (B2): a tombstone, for an upload still on its way.
+  await tombstone(inputRoot, folder)
+  return true
+}
+
+/** Fix round 3 (B2): the tombstone for a bake folder given up (its name already checked). Never throws. */
+async function tombstone(inputRoot: string, folder: string): Promise<void> {
+  const f = bakeFolderOf(folder)
+  if (!f) return
   try {
     const tombs = join(resolve(inputRoot), SHADER_BAKE_ROOT, TOMBSTONES)
     await mkdir(tombs, { recursive: true })
-    await writeFile(join(tombs, folder.slice(SHADER_BAKE_ROOT.length + 1)), '')
+    await writeFile(join(tombs, f.slice(SHADER_BAKE_ROOT.length + 1)), '')
   }
   catch { /* the sweep still deletes the folder by age */ }
-  return true
 }
 
 /** Fix round 3 (B2): whether this bake folder was abandoned (a tombstone stands for it). */

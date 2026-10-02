@@ -32,6 +32,7 @@
  * CARD_MAX_PIXELS.
  */
 import sharp from 'sharp'
+import { loaderBatchSizeOf } from './loaderBatch'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { GATE_CLASS, linksOf, type ApiPrompt } from '#shared/runner/graph'
@@ -119,7 +120,10 @@ export function planGetImageSize(ctx: PlanContext): NodePlan {
       const n = (value: number): RunnerValue => ({ kind: 'number', value, int: true })
       if (!w.files.length) return { values: { 0: n(1), 1: n(1), 2: n(1) }, ui: null }
       const first = (await sizes(io, w, false)).get(keyOf(w.files[0]!))!
-      return { values: { 0: n(first.w), 1: n(first.h), 2: n(w.files.length) }, ui: null }
+      // R11.9c fix round 5 (M4): a LoadImage's animation is Python's batch of every frame, its count from the header
+      // (its frames are made only for a reader that takes them, cards/loaderBatch.ts; an APNG's are never read here).
+      const frames = w.files.length === 1 ? await loaderBatchSizeOf(ctx.prompt, ctx.prompt[ctx.nodeId]!.inputs?.image, f => io.read(f)) : null
+      return { values: { 0: n(first.w), 1: n(first.h), 2: n(frames ?? w.files.length) }, ui: null }
     },
   }
 }

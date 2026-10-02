@@ -43,7 +43,7 @@ import { answerRgbPng } from './pictures/pythonView'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, withRunCap, type KeptBytes, type KeptExt } from './keptBytes'
-import { LOADER_FRAMES_TOO_MUCH, MEDIA_CAPS, MEDIA_WORDS, pictureBatchOverCaps } from '#shared/runner/media'
+import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { TURNTABLE_CLASS } from '#shared/runner/turntable'
 import { turntableKeptBytes } from './generators/turntable'
 import { createFileAccess } from './fileAccess'
@@ -61,7 +61,7 @@ import { handoffKey, handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderS
 import { sha256Hex } from './handoff'
 import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
-import { PICTURE_ANIMATED, pictureFrameCount, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
+import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimateParts, unpricedProviderNode, type Metering } from './metering'
 import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
@@ -69,7 +69,8 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectStartProblems, nearLimit, waveformStartProblems } from './video/start'
 import { clipAtCaps, frameShapes, videoSourceShapeOf } from './video/shapes'
-import { SAVE_FRAMES_TOO_MUCH, saveFramesKeptBytes } from './cards/saveImage'
+import { SAVE_FRAMES_TOO_MUCH, saveFramesKeptBytes, saveSize } from './cards/saveImage'
+import { loaderBatchStartProblems } from './cards/loaderBatch'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
 import { lensStartRefusal } from './cards/lensBlur'
 import { keepStartRefusal } from './compositor/keep'
@@ -2568,28 +2569,17 @@ export function createEngine(deps: EngineDeps) {
         }
       }
     }
-    // R11.9c fix round 3 (B1): a LoadImage's animated GIF or WebP is a batch of its frames (cards/loadImage.ts), a PNG
-    // and a mask each: checked against the batch caps and counted in the run's kept room before the hold, from the
-    // count the Shader effect's check uses (pythonView.ts pictureFrameCount).
+    // R11.9c fix round 3 (B1), fix round 5 (I1, I2, M2): a LoadImage's animated GIF or WebP is a batch of its frames
+    // (cards/loadImage.ts) only where a reader takes it (cards/loaderBatch.ts; else frame 0 alone, no cap): checked
+    // against the batch caps and each reader's own limits (frames × size: the cards' 268 million pixels, Save image's
+    // after its scale, an effect's masks and outputs), refused plainly before the hold naming the node, and its frames
+    // (a PNG, a mask and, read as a float, a mask tensor each) counted in the run's kept room.
     if (families.has('cards')) {
       for (const p of prompts) {
-        for (const [id, n] of Object.entries(p)) {
-          if (n.class_type !== 'LoadImage') continue
-          const f = parseInputFileRef(n.inputs?.image)
-          if (!f || !(await files.exists(f))) continue
-          const bytes = await files.read(f)
-          let meta: Awaited<ReturnType<typeof pictureMeta>>
-          try { meta = await pictureMeta(bytes) }
-          catch { continue }
-          if (!pictureHasFrames(meta, bytes) || (meta.pages ?? 1) < 2 || !meta.width || !meta.height) continue
-          const count = pictureFrameCount(meta, bytes)
-          const w = meta.width
-          const h = meta.pageHeight ?? meta.height
-          if (pictureBatchOverCaps(count, w, h, deps.hosted())) throw stopGap({ message: LOADER_FRAMES_TOO_MUCH, nodeId: id, classType: n.class_type, code: 'too-much-work' })
-          // Each frame's RGB PNG and 16-bit mask PNG at most their raw size and a margin.
-          bakeBytes += count * (Math.ceil(w * h * 5 * 1.01) + 2 * 64 * 1024)
-          roomAt ??= { nodeId: id, classType: n.class_type }
-        }
+        const loaders = await loaderBatchStartProblems(p, families, { hosted: deps.hosted(), read: f => files.read(f), exists: f => files.exists(f), saveSize })
+        if (loaders.problem) throw stopGap(loaders.problem)
+        bakeBytes += loaders.keptBytes
+        roomAt ??= loaders.first
       }
     }
     if (familyOn('shader-bake', families) || families.has('cards')) {
@@ -2655,8 +2645,9 @@ export function createEngine(deps: EngineDeps) {
       // R11.9a: what can't be counted or sized, or several still pictures into Slow motion (AI), refused plainly.
       if (counted.problem) throw stopGap(counted.problem)
       localKept += counted.keptBytes
-      // R11.9a (row 23): past the run's kept room, "too much work for one run here".
-      if (localKept > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {
+      // R11.9a (row 23): past the run's kept room, "too much work for one run here". R11.9c fix round 5 (I3): with the
+      // frames already counted (a Shader effect's bake, a LoadImage's animation these nodes may read).
+      if (localKept + bakeBytes > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {
         const [nodeId] = Object.keys(counted.counts)
         throw stopGap({ message: LOCAL_MODEL_WORDS.overCap, nodeId, classType: nodeId ? p[nodeId]?.class_type : undefined })
       }

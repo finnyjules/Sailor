@@ -145,12 +145,15 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
     // its file must be one frame.
     if ((n.class_type === 'SaveImage' || n.class_type === 'PreviewImage') && isLink(inputs.images)) {
       const behind = loaderFileBehind(prompt, inputs.images)
-      if (behind) out.push({ ...behind, oneFrame: true, ...(behind.classType === 'LoadImage' ? { loaderBatch: true as const } : {}) })
+      // Fix round 5 (M4): a LoadImage APNG in the words every batch reader uses ("Save it as a GIF or WebP").
+      if (behind) out.push({ ...behind, oneFrame: true, ...(behind.classType === 'LoadImage' ? { loaderBatch: true as const, animated: LOADER_APNG_WORDS } : {}) })
     }
     // R11.9c fix round 3 (B1): readers that take a LoadImage's batch: the Shader effect (a frame each) and the
     // local-model picture nodes (a call each, counted before the hold): an APNG it can't make a batch of is refused.
-    const batchInput = n.class_type === 'ShaderEffect' ? 'image'
-      : Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type) && localModelOn(n.class_type, families) ? LOCAL_MODEL_PICTURE_INPUT[n.class_type] : undefined
+    // Fix round 5 (M4): Image to mask and Text mask with a source (with a render) take the batch too, as Python's do.
+    const batchInput = n.class_type === 'ShaderEffect' || n.class_type === 'ImageToMask' ? 'image'
+      : n.class_type === 'TextMask' && pyTruthy(bakeParams(inputs.params).rendered) ? 'source'
+        : Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type) && localModelOn(n.class_type, families) ? LOCAL_MODEL_PICTURE_INPUT[n.class_type] : undefined
     if (batchInput && isLink(inputs[batchInput])) {
       const behind = loaderFileBehind(prompt, inputs[batchInput] as ApiLink)
       if (behind?.classType === 'LoadImage') out.push({ ...behind, oneFrame: true, loaderBatch: true, animated: LOADER_APNG_WORDS })

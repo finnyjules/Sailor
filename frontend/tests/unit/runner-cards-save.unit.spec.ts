@@ -23,6 +23,7 @@ import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/
 import { createEngineResultStore, nextCounter, counter05 } from '~~/server/runner/results'
 import { SAVE_FAILED, SAVE_OUTSIDE, asciiJson, insertPngText, pyNormpath, saveImagePrefix, saveSize } from '~~/server/runner/cards/saveImage'
 import { PICTURE_ANIMATED } from '~~/server/runner/pictures/pythonView'
+import { LOADER_APNG_WORDS } from '~~/server/runner/cards/bakeReplay'
 import { pixels } from '~~/server/runner/pixels/core'
 import { inflateSync } from 'node:zlib'
 import { renderFrameInWorker } from '~~/server/runner/compositor/worker'
@@ -582,7 +583,8 @@ describe('the engine (cards on)', () => {
         for (const reader of [saveImage(['0', 0]), previewImage(['0', 0])]) {
           const p: ApiPrompt = { 0: make('anim.bin'), 1: outCard('0'), s: reader, 2: edit(['0', 0]), 3: outCard('2') }
           await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START }), `${name} ${make('x').class_type} ${reader.class_type}`)
-            .rejects.toMatchObject({ statusCode: 400, message: PICTURE_ANIMATED })
+            // R11.9c fix round 5 (M4): a LoadImage APNG in the words every reader of its batch uses.
+            .rejects.toMatchObject({ statusCode: 400, message: make('x').class_type === 'LoadImage' ? LOADER_APNG_WORDS : PICTURE_ANIMATED })
         }
         expect(k.ledger.hold).not.toHaveBeenCalled()
         expect(k.fal.client.submit).not.toHaveBeenCalled()

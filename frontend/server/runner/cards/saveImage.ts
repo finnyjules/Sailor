@@ -64,7 +64,7 @@ import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta } from '../pictures/pyt
 import { pixels } from '../pixels/core'
 import { SAVE_OUTSIDE } from '../results'
 import { filesOf } from '../values'
-import { loaderFileBehind, oneFrameRefused } from './bakeReplay'
+import { LOADER_APNG_WORDS, loaderFileBehind, oneFrameRefused } from './bakeReplay'
 import type { RunnerValue } from '../types'
 import { framesOf } from '../../media/values'
 import { mediaLease } from '../../media/run'
@@ -295,7 +295,8 @@ async function refuseAnimation(io: DeriveIO, prompt: ApiPrompt, link: unknown): 
     frames = behind.classType === 'LoadImage' ? oneFrameRefused({ oneFrame: true, loaderBatch: true }, pictureHasFrames(meta, bytes), meta.pages) : pictureHasFrames(meta, bytes)
   }
   catch { return }
-  if (frames) throw new Error(PICTURE_ANIMATED)
+  // Fix round 5 (M4): a LoadImage APNG in the words the start of a take uses.
+  if (frames) throw new Error(behind.classType === 'LoadImage' ? LOADER_APNG_WORDS : PICTURE_ANIMATED)
 }
 
 // ── Saving ───────────────────────────────────────────────────────────────────

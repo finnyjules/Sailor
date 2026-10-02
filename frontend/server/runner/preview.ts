@@ -26,7 +26,9 @@ import {
 } from '#shared/runner/livePreview'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { planNode, type DeriveIO, type Derived } from './executors'
-import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
+import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
+import { loaderBatchStartProblems } from './cards/loaderBatch'
+import { saveSize } from './cards/saveImage'
 import { pictureSourceOf } from './compositor/plan'
 import { cardPictureFiles, cardPictureRefusal, oneFrameRefused } from './cards/bakeReplay'
 import { effectOutRefusal } from './effects/plan'
@@ -286,6 +288,17 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
         if (tooLarge) throw refuse(tooLarge, 413, { nodeId: c.resized.nodeId, classType: c.resized.classType })
       }
     }
+
+    // R11.9c fix round 5 (I1, I2): a LoadImage the preview runs whose animation a reader takes, checked as the start
+    // of a take checks it (the batch caps and each reader's limits, from the header) before any frame is decoded.
+    const loaders = await loaderBatchStartProblems(sub, families, {
+      hosted, read: f => deps.results.read(f), saveSize, only: new Set(plan.order.filter((id) => {
+        const f = parseInputFileRef(sub[id]!.inputs?.image)
+        return sub[id]!.class_type === 'LoadImage' && !!f && allowed.has(keyOf(f))
+      })),
+    })
+    if (loaders.problem) throw refuse(loaders.problem.message, 413, { nodeId: loaders.problem.nodeId, classType: loaders.problem.classType })
+    stopped()
 
     // Each node's record, as the engine keeps one: pinned nodes carry their files.
     const recs: Record<string, NodeRecord> = {}

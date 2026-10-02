@@ -157,7 +157,12 @@ export function pictureBound(prompt: ApiPrompt, link: ApiLink, families: Readonl
   const inputs = from.inputs ?? {}
   const cls = from.class_type
   if (cls === GATE_CLASS) return link[1] === 0 && isLink(inputs.data_in) ? pictureBound(prompt, inputs.data_in, families, depth + 1, lf) : null
-  if (cls === 'Image') return isLink(inputs.images) ? pictureBound(prompt, inputs.images, families, depth + 1, lf) : link[1] === 0 ? 1 : null
+  if (cls === 'Image') {
+    if (!isLink(inputs.images)) return link[1] === 0 ? 1 : null
+    // R11.9c fix round 5: a numeric batch_index ≥ 0 picks one picture of the batch (executors.ts).
+    if (typeof inputs.batch_index === 'number' && inputs.batch_index >= 0) return Math.min(1, pictureBound(prompt, inputs.images, families, depth + 1, lf) ?? 1)
+    return pictureBound(prompt, inputs.images, families, depth + 1, lf)
+  }
   if (cls === 'EmptyImage') {
     const n = intOf(inputs.batch_size ?? 1)
     return n !== null && n >= 1 ? n : null
@@ -458,6 +463,8 @@ export async function localModelStartProblems(
     let shapesIn: readonly (readonly [number, number])[] | null = null
     // LC2: a batch this node writes at another size than its clip's (Upscale (2×)), for R5's batch caps below.
     let resized: FrameShape | null = null
+    // R11.9c fix round 5 (I3): a picture's size bound (its source's header, the gate's walk), for what each call keeps.
+    let picturePx: number | null | undefined
     if (outputKind(prompt, link, kinds) === 'frames') {
       shapes ??= await o.shapes()
       // R11.8 (ruling (k)): a clip that can't be sized before the run is held at the place's caps (frameShapes holds
@@ -482,12 +489,15 @@ export async function localModelStartProblems(
     }
     else {
       count = pictureBound(prompt, link, families, 0, lf)
+      const size = await linkPictureSize(prompt, link, readerOf(o.read))
       if (maxPixels) {
-        const size = await linkPictureSize(prompt, link, readerOf(o.read))
         pixels = size?.px ?? null
         pixelsSure = size?.exact === true
         if (pixels !== null && pixels > UPSCALE_2X_MAX_PIXELS) shapesIn = await linkPictureShapes(prompt, link, readerOf(o.read))
       }
+      // R11.9c fix round 5 (I3): what each picture's call keeps for the run (its answer, its pictures and masks, what
+      // it hands off), one a picture: a LoadImage's animation now brings hundreds. Counted after the cap below.
+      picturePx = size?.px ?? null
     }
     // R11.8 (ruling (k)): a count that can't be known before the run is held at the cap; the node's turn refuses more.
     if (count === null || !Number.isFinite(count) || count < 0) {
@@ -540,6 +550,16 @@ export async function localModelStartProblems(
       if (resized.w * resized.h > caps.framePixels || (overCount && (resized.exact || resized.counted === true))) return { counts, keptBytes: 0, problem: null, refused: words }
     }
     counts[nodeId] = Math.max(1, count)
+    // A batch of pictures (a LoadImage's animation, an Empty image batch…): a single picture's keeps are left as before
+    // (one picture's few files, within any room).
+    if (picturePx !== undefined && counts[nodeId]! > 1) {
+      // A size that can't be known is held at the largest frame the place lets through (MEDIA_CAPS.framePixels);
+      // Upscale (2×) at the size it is held at above.
+      const px = maxPixels ? pixels! : picturePx !== null && Number.isFinite(picturePx) && picturePx > 0 ? picturePx : caps.framePixels
+      const bytes = counts[nodeId]! * pictureCallKeptBound(n.class_type, px)
+      tiledKept += bytes
+      keptByNode[nodeId] = (keptByNode[nodeId] ?? 0) + bytes
+    }
     // R7.3 (fix round 1): Object removal's mask must be its picture's size (Python fails in numpy's
     // composite otherwise, after any earlier paid node ran): refused before the hold when certain.
     if (n.class_type === OBJECT_REMOVE_CLASS && isLink(n.inputs?.mask)) {
@@ -565,6 +585,31 @@ export async function localModelStartProblems(
     return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId: first, classType: prompt[first]!.class_type } }
   }
   return { counts, sizes, pictures, tiles, keptBytes: peak.bytes + masks + tiledKept, keptByNode, problem: null }
+}
+
+/** An 8-bit PNG of `px` pixels and `channels` channels, at most: its raw bytes, a filter byte a row (at most a row a pixel), deflate's overhead and a margin. */
+const pngBound = (channels: number, px: number) => Math.ceil((channels + 1) * px * 1.01) + 64 * 1024
+/** A service's answer for a picture of `px` pixels, kept as downloaded: at most a 16-bit RGBA PNG's bound. */
+const answerBound = (px: number) => Math.ceil(9 * px * 1.01) + 64 * 1024
+
+/**
+ * R11.9c fix round 5 (I3): the most one picture's call keeps for the run, for a
+ * picture of at most `px` pixels (generators/localModels.ts, a picture's path):
+ * its answer kept as downloaded, the pictures and masks it hands on, and the
+ * picture it hands off to the service (kept to be sent). Upscale (2×) over
+ * its service's largest keeps its 2× picture in `tiledPictureBytesBound`, and
+ * its tiles handed off here.
+ */
+export function pictureCallKeptBound(classType: string, px: number): number {
+  const handOff = pngBound(3, px)
+  switch (classType) {
+    case BG_REMOVE_CLASS: return answerBound(px) + pngBound(4, px) + pngBound(2, px) + handOff
+    case UPSCALE_2X_CLASS: return px > UPSCALE_2X_MAX_PIXELS ? 2 * handOff : answerBound(4 * px) + handOff
+    case OBJECT_REMOVE_CLASS: return answerBound(px) + pngBound(3, px) + handOff + pngBound(2, px)
+    // Its click's mask answer and, cutting the subject out, the remover's answer too.
+    case SUBJECT_MASK_CLASS: return 2 * answerBound(px) + pngBound(2, px) + pngBound(3, px) + handOff
+    default: return answerBound(px) + pngBound(4, px) + pngBound(2, px) + handOff
+  }
 }
 
 /**

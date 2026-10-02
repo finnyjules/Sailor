@@ -203,11 +203,17 @@ describe('LoadImage as a card (nodes.py LoadImage.load_image)', () => {
       const { made, bytesOf } = await derived(prompt, 'l', { [c.image_name]: b64(c.file) })
       expect(made.values[0]!.kind).toBe('files')
       expect(made.values[1]!.kind).toBe('mask')
-      // R11.9c fix round 3 (B1): a GIF's frames are LoadImage's batch, a picture and a mask each (the fixture holds
-      // the first, as a provider is sent it). An APNG is read as its first frame (sharp reads no APNG frames).
-      const n = c.name === 'a two-frame GIF' ? 2 : 1
-      await expectImage(bytesOf(made.values[0], n), c.image, c.name)
-      await expectMask(bytesOf(made.values[1], n), c.mask, c.name)
+      // R11.9c fix round 5 (I2): an edit reads the first picture alone (Python's tensor[0]), so an animation's
+      // frame 0 is all LoadImage decodes for it (the fixture holds that frame, as a provider is sent it).
+      await expectImage(bytesOf(made.values[0], 1), c.image, c.name)
+      await expectMask(bytesOf(made.values[1], 1), c.mask, c.name)
+      // R11.9c fix round 3 (B1): read by Save image, a GIF's frames are LoadImage's batch, a picture and a mask each;
+      // the first is the same frame. An APNG is read as its first frame (sharp reads no APNG frames).
+      if (c.name === 'a two-frame GIF') {
+        const batch = await derived({ ...prompt, s: { class_type: 'SaveImage', inputs: { images: ['l', 0], filename_prefix: 'ComfyUI' } } }, 'l', { [c.image_name]: b64(c.file) })
+        await expectImage(batch.bytesOf(batch.made.values[0], 2), c.image, c.name)
+        await expectMask(batch.bytesOf(batch.made.values[1], 2), c.mask, c.name)
+      }
     })
   }
 
