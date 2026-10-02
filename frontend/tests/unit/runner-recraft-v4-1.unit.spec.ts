@@ -380,11 +380,13 @@ describe('the older Recraft models are untouched', () => {
   it('V4 and V4 Pro: Replicate first, fal behind, as before; the SVG ones not in replicate-image (R11.4: their own family)', () => {
     expect(RUNNER_ROUTES['image:recraft-v4']).toEqual({ first: 'replicate', backup: 'fal' })
     expect(RUNNER_ROUTES['image:recraft-v4-pro']).toEqual({ first: 'replicate', backup: 'fal' })
-    for (const id of ['recraft-v4', 'recraft-v4-pro', 'recraft-v4-svg', 'recraft-v4-pro-svg', 'recraft-v3', 'recraft-v3-svg']) {
+    for (const id of ['recraft-v4', 'recraft-v4-pro', 'recraft-v3']) {
       const m = IMAGE_MODELS_BY_ID[id]!
       expect(m.runnerOnly, id).toBeUndefined()
       expect(m.family, id).toBeUndefined()
     }
+    // R11.4 fix round 1: the SVG ones are runner-only under recraft-svg.
+    for (const id of ['recraft-v4-svg', 'recraft-v4-pro-svg', 'recraft-v3-svg']) expect(IMAGE_MODELS_BY_ID[id], id).toMatchObject({ runnerOnly: true, family: 'recraft-svg' })
     for (const id of ['recraft-v4-svg', 'recraft-v4-pro-svg', 'recraft-v3-svg']) {
       expect(RUNNER_REPLICATE_IMAGE_MODEL_IDS, id).not.toContain(id)
       // R11.4: taken under `recraft-svg` only, Replicate with no backup (runner-image-svg.unit.spec.ts).

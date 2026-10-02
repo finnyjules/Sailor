@@ -57,11 +57,12 @@ function pythonTagsById(): Record<string, string[]> {
 describe('image catalog TS ↔ Python parity', () => {
   const pyTags = pythonTagsById()
 
-  // A runner-only model (GPT Image 2.5, model line-up F2) has no Python builder, so no Python entry.
-  const withPython = IMAGE_MODELS.filter(m => !m.runnerOnly)
+  // A runner-only model (GPT Image 2.5, model line-up F2) has no Python builder, so no Python entry;
+  // except the Recraft SVG models (R11.4 fix round 1): Python lists them but can't decode their SVG.
+  const withPython = IMAGE_MODELS.filter(m => !m.runnerOnly || m.family === 'recraft-svg')
 
   it('both catalogs list the same model ids (the runner-only ones are not in Python)', () => {
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1'])
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'recraft-v4-pro-svg', 'recraft-v4-svg', 'recraft-v3-svg', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1'])
     expect(pyTags['gpt-image-2.5']).toBeUndefined()
     expect(pyTags['ideogram-4']).toBeUndefined()
     expect(pyTags['qwen-image-3']).toBeUndefined()

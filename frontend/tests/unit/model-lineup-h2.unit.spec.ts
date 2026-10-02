@@ -49,6 +49,8 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
 const RUNNER_ONLY_IMAGES = ['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1']
+// R11.4 fix round 1: the Recraft SVG models are runner-only under recraft-svg (ComfyUI can't decode their SVG).
+const SVG_IMAGES = ['recraft-v4-pro-svg', 'recraft-v4-svg', 'recraft-v3-svg']
 // R11.4, ruling (p): no verified price yet, so hidden (and refused) until priced.
 const UNPRICED_IMAGES = ['seedream-5-pro', 'reve-create']
 const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = {
@@ -96,7 +98,8 @@ describe('the hide lists', () => {
     expect(VIDEO_MODELS.filter(m => m.hidden).map(m => m.id).sort()).toEqual([...HIDDEN_VIDEOS].sort())
     expect(VIDEO_MODELS.filter(m => m.discontinued).map(m => [m.id, m.discontinued])).toEqual(DISCONTINUED_VIDEOS.map(id => [id, '2026-09-24']))
     expect(IMAGE_MODELS.filter(m => m.discontinued)).toEqual([])
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => [m.id, m.family])).toEqual(RUNNER_ONLY_IMAGES.map(id => [id, id]))
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly && !SVG_IMAGES.includes(m.id)).map(m => [m.id, m.family])).toEqual(RUNNER_ONLY_IMAGES.map(id => [id, id]))
+    expect(IMAGE_MODELS.filter(m => SVG_IMAGES.includes(m.id)).map(m => [m.id, m.runnerOnly, m.family])).toEqual(SVG_IMAGES.map(id => [id, true, 'recraft-svg']))
   })
 
   it('exactly the retired dropdown values are hidden; every Python value is still an option', () => {
@@ -130,7 +133,9 @@ describe('the hide lists', () => {
   })
 
   it('a hidden model is still served as an option and still runs: never blocked, on either path', () => {
+    // (Recraft V3 SVG is hidden and runner-only since R11.4 fix round 1: blocked on the ComfyUI path, runner-taken.)
     for (const id of HIDDEN_IMAGES) {
+      if (SVG_IMAGES.includes(id)) continue
       expect(blockedModelUses(one(img(id))), id).toEqual([])
       expect(blockedModelUses(one(img(id)), { families: ALL, runnerTakes: true }), id).toEqual([])
     }
@@ -149,7 +154,8 @@ describe('the hide lists', () => {
     expect(images.find(e => e.model.id === 'flux-1.1-pro')).toMatchObject({ hiddenTag: true })
     // Every family off: the runner-only models are left out too.
     for (const id of UNPRICED_IMAGES) expect(images.map(e => e.model.id), id).not.toContain(id)
-    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length - RUNNER_ONLY_IMAGES.length - UNPRICED_IMAGES.length)
+    const svgNotHidden = SVG_IMAGES.filter(id => !HIDDEN_IMAGES.includes(id))
+    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length - RUNNER_ONLY_IMAGES.length - UNPRICED_IMAGES.length - svgNotHidden.length)
     for (const cls of ['GenerateVideoNode', 'FilmShotNode']) {
       const shown = galleryEntries(VIDEO_MODELS, { classType: cls, families: ALL, current: null }).map(e => e.model.id)
       for (const id of [...HIDDEN_VIDEOS, ...DISCONTINUED_VIDEOS]) expect(shown, `${cls} ${id}`).not.toContain(id)

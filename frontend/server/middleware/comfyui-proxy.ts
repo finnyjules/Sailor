@@ -16,10 +16,11 @@ import { blockedPromptRefusal, nodeProblemsBody } from '../utils/blockedModels'
 import { seedanceReferenceSeconds } from '../utils/graphInputSeconds'
 import { GENERATE_3D_RUNNER_ONLY, jsonNamesGenerate3d } from '../../shared/runner/gen3d'
 import { jsonNamesRetiredClass, retiredUnparsedResponse } from '../../shared/runner/retired'
+import { blockedImageModelInJson } from '../../shared/runner/blockedModels'
 
-/** Generate a 3D model found in a prompt too large to read: ComfyUI's 400 shape, no node named (R3.9 fix round 2). */
-function generate3dRefusal(): ReturnType<typeof blockedPromptRefusal> {
-  return { error: { type: 'value_not_valid', message: GENERATE_3D_RUNNER_ONLY, details: '', extra_info: {} }, node_errors: {} } as unknown as ReturnType<typeof blockedPromptRefusal>
+/** A refusal for a prompt too large to read (Generate a 3D model, R3.9 fix round 2; an image model that never runs on ComfyUI, R11.4): ComfyUI's 400 shape, no node named. */
+function unparsedRefusal(message: string = GENERATE_3D_RUNNER_ONLY): ReturnType<typeof blockedPromptRefusal> {
+  return { error: { type: 'value_not_valid', message, details: '', extra_info: {} }, node_errors: {} } as unknown as ReturnType<typeof blockedPromptRefusal>
 }
 
 // Paths under PROXY_PREFIXES that should be handled by Nitro routes, not proxied
@@ -154,8 +155,12 @@ export default defineEventHandler(async (event) => {
       // Unparsed, whether an output reads it isn't knowable, so it is refused anyway (the safe side).
       else if (raw) {
         const text = raw.toString('utf8')
-        if (jsonNamesGenerate3d(text)) oversized = generate3dRefusal()
+        // R11.4 fix round 1: an image model with no price yet, or a Recraft SVG model (ComfyUI would pay
+        // for the SVG and then fail to decode it), the same way: named in the text, refused unparsed.
+        const imageModel = blockedImageModelInJson(text)
+        if (jsonNamesGenerate3d(text)) oversized = unparsedRefusal()
         else if (jsonNamesRetiredClass(text)) oversized = retiredUnparsedResponse(text)
+        else if (imageModel) oversized = unparsedRefusal(imageModel)
       }
     }
     catch { prompt = undefined }

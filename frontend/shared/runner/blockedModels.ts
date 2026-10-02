@@ -24,9 +24,8 @@
  * Pure; relative imports only.
  */
 import type { ApiPrompt } from './graph'
-import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
+import { NO_FAMILIES, type RunnerFamily } from './families'
 import { classUpgradeOn } from './eligibility'
-import { SVG_IMAGE_FAMILY, isSvgImageModel } from './svgImage'
 import { menuDefault, modelEntryFor, modelMenu, modelMenus, runnerTakesClass } from './modelMenus'
 
 export interface BlockedModelUse {
@@ -76,9 +75,6 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
         const runs = !!opts.runnerTakes && !!entry.family && families.has(entry.family) && runnerTakesClass(classType)
         if (!runs) out.push({ nodeId, classType, value, reason: 'runner-only', ...where })
       }
-      // A Recraft SVG model while `recraft-svg` is on (R11.4): only the runner keeps its SVG;
-      // ComfyUI would pay for it and then fail to decode it. Off, it goes to ComfyUI as before.
-      else if (!opts.runnerTakes && svgOn(classType, value, families)) out.push({ nodeId, classType, value, reason: 'runner-only', ...where })
     }
     // A class on its newer model runs only in the runner (the runner takes
     // every class that has an upgrade while the family is on).
@@ -88,9 +84,27 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
   return out
 }
 
-/** Generate an image on a Recraft SVG model with its family on (R11.4): runner-only for now. */
-function svgOn(classType: string, value: unknown, families: ReadonlySet<RunnerFamily>): boolean {
-  return classType === 'GenerateImageNode' && isSvgImageModel(value) && familyOn(SVG_IMAGE_FAMILY, families)
+const GENERATE_IMAGE_IN_JSON = /"class_type"\s*:\s*"GenerateImageNode"/
+
+/**
+ * A prompt too large to parse (the local `/prompt` proxy's cap, R11.4 fix
+ * round 1): the first Generate an image model in its text that never runs on
+ * ComfyUI, one with no price yet or a Recraft SVG model (runner-only), read
+ * without parsing. Only when the text also names Generate an image as a class;
+ * which node holds the value isn't knowable unparsed, so it is refused anyway
+ * (the safe side), as Generate a 3D model and the retired classes are.
+ * The words, or null.
+ */
+export function blockedImageModelInJson(text: string): string | null {
+  if (!GENERATE_IMAGE_IN_JSON.test(text)) return null
+  for (const e of modelMenu('GenerateImageNode')?.entries ?? []) {
+    if (!e.unpriced && !e.runnerOnly) continue
+    if (!text.includes(`"${e.value}"`)) continue
+    return e.unpriced
+      ? `This workflow uses ${e.label}, which has no price yet. Pick another model.`
+      : `This workflow uses ${e.label}, which only runs in Sailor.`
+  }
+  return null
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -168,7 +182,7 @@ export function blockedModelRefusal(
       description: opts.engineReason ?? NOT_TAKEN_AS_SET_UP_REASON,
     }
   }
-  const switchedOn = (!!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)) || svgOn(use.classType, use.value, families)
+  const switchedOn = !!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)
   // Switched on, with no other node to blame: the node itself is set up in a
   // way the runner doesn't take (a Blend scene's keep_subject wired from
   // anything but a Frame's protect_mask, Tasks F11 and F11b).

@@ -255,6 +255,20 @@ describe('on the engine', () => {
     }, 30_000)
   }
 
+  it('through a Gate (bypassed) into Save image: the Gate hands the svg value on, and the SVG lands in Save image\'s folder', async () => {
+    const k = kitOn(true)
+    const p: ApiPrompt = { 1: gen('recraft-v4-svg'), 2: gate(['1', 0]), 3: save(['2', 0], { filename_prefix: 'gated/logo' }) }
+    const started = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(started.runId)
+    const run = (await k.store.get(started.runId))!
+    expect(run.status, JSON.stringify(run.takes[0]?.nodes)).toBe('done')
+    const user = userSubfolder(k.userId, true)
+    expect(filesUnder(join(k.root, 'output')).filter(f => f.startsWith(`${user}/gated/`))).toEqual([`${user}/gated/logo_00001_.svg`])
+    const { readFileSync } = await import('node:fs')
+    expect(new Uint8Array(readFileSync(join(k.root, 'output', user, 'gated', 'logo_00001_.svg')))).toEqual(SVG_BYTES)
+    expect(k.replicate.submitted().map(x => x.endpoint)).toEqual(['recraft-ai/recraft-v4-svg'])
+  }, 30_000)
+
   it('Preview image shows the SVG from temp', async () => {
     const k = kitOn(false)
     const started = await k.engine.startRun({ userId: k.userId, takes: [{ 1: gen('recraft-v3-svg'), 2: preview(['1', 0]) }], ...START })
@@ -286,7 +300,7 @@ describe('on the engine', () => {
     expect([...k.ledger.holds.values()].map(h => [h.state, h.actual ?? 0])).toEqual([['released', 0]])
   }, 30_000)
 
-  it('off: the runner declines an SVG model, as before (it goes to ComfyUI)', async () => {
+  it('off: the runner declines an SVG model (and the ComfyUI path refuses it: runner-only)', async () => {
     const k = kitOn(false, { families: CARDS })
     await expect(k.engine.startRun({ userId: k.userId, takes: [{ 1: gen('recraft-v4-svg'), 2: save(['1', 0]) }], ...START }))
       .rejects.toThrow('This workflow can’t run on the Sailor runner')
@@ -323,9 +337,28 @@ describe('before /prompt (the browser) and on the proxy\'s check', () => {
       title: '“Picture” needs a picture, not an SVG', description: SVG_READERS_ADVICE,
     })
     expect(SVG_READERS_ADVICE).toBe('Only Save image and Preview image take an SVG.')
-    // Off, or the runner off: as before.
-    expect(blockedRunRefusal([{ prompt: p, titleOf }], { runnerOn: true, families: CARDS })).toBeNull()
-    expect(blockedRunRefusal([{ prompt: p, titleOf }], { runnerOn: false, families: ON })).toBeNull()
+    // Off, or the runner off: the SVG model itself is refused (runner-only, fix round 1).
+    for (const opts of [{ runnerOn: true, families: CARDS }, { runnerOn: false, families: ON }]) {
+      expect(blockedRunRefusal([{ prompt: p, titleOf }], opts)).toEqual({ title: '“Logo” uses Recraft V4 SVG, which only runs in Sailor', description: 'Its switch is off.' })
+    }
+  })
+
+  it('off: no gallery offers the SVG models, and a run naming one is refused before /prompt (its switch is off)', () => {
+    const shown = galleryEntries(IMAGE_MODELS, { classType: 'GenerateImageNode', families: CARDS, current: 'nano-banana-2' }).map(e => e.model.id)
+    for (const id of SVG_IMAGE_MODEL_IDS) {
+      expect(IMAGE_MODELS_BY_ID[id]).toMatchObject({ runnerOnly: true, family: 'recraft-svg' })
+      expect(shown, id).not.toContain(id)
+    }
+    const onShown = galleryEntries(IMAGE_MODELS, { classType: 'GenerateImageNode', families: ON, current: 'nano-banana-2' }).map(e => e.model.id)
+    for (const id of ['recraft-v4-pro-svg', 'recraft-v4-svg']) expect(onShown, id).toContain(id)
+    const p: ApiPrompt = { 1: gen('recraft-v4-pro-svg'), 2: save(['1', 0]) }
+    for (const families of [NO_FAMILIES, CARDS]) {
+      expect(blockedModelUses(p, { families }).map(u => u.reason)).toEqual(['runner-only'])
+      expect(blockedRunRefusal([{ prompt: p, titleOf: () => 'Logo' }], { runnerOn: true, families })).toEqual({
+        title: '“Logo” uses Recraft V4 Pro SVG, which only runs in Sailor', description: 'Its switch is off.',
+      })
+      expect(blockedPromptBody(p, { families })!.error.message).toBe('“Generate an image” uses Recraft V4 Pro SVG, which only runs in Sailor. Its switch is off.')
+    }
   })
 
   it('with the family on, an SVG model sent to ComfyUI (another node needs the engine) is refused: only the runner keeps its SVG', () => {
@@ -337,14 +370,14 @@ describe('before /prompt (the browser) and on the proxy\'s check', () => {
     const refusal = blockedRunRefusal([{ prompt: p, titleOf: titles }], { runnerOn: true, families: ON })!
     expect(refusal.title).toBe('“Logo” uses Recraft V4 SVG, which only runs in Sailor')
     expect(refusal.description).toContain('“Restyle”')
-    // Off: ComfyUI's path, as before.
-    expect(blockedModelUses(p, { families: CARDS })).toEqual([])
-    expect(blockedRunRefusal([{ prompt: p, titleOf: titles }], { runnerOn: true, families: CARDS })).toBeNull()
+    // Off: refused too, its switch off (fix round 1).
+    expect(blockedModelUses(p, { families: CARDS }).map(u => u.reason)).toEqual(['runner-only'])
+    expect(blockedRunRefusal([{ prompt: p, titleOf: titles }], { runnerOn: true, families: CARDS })!.description).toBe('Its switch is off.')
   })
 
   afterEach(() => { vi.unstubAllEnvs() })
 
-  it('the ComfyUI proxy\'s check (local /prompt and the hosted meter) refuses it in ComfyUI\'s 400 shape; off, as before', () => {
+  it('the ComfyUI proxy\'s check (local /prompt and the hosted meter) refuses it in ComfyUI\'s 400 shape; off, the model itself is refused', () => {
     const p: ApiPrompt = { 1: gen('recraft-v4-svg'), 2: imageCard(['1', 0]), 3: save(['1', 0]) }
     vi.stubEnv('NUXT_RUNNER_ENABLED', '1')
     vi.stubEnv('NUXT_RUNNER_FAMILIES', 'cards,recraft-svg')
@@ -353,8 +386,9 @@ describe('before /prompt (the browser) and on the proxy\'s check', () => {
     expect(body.node_errors).toEqual({
       2: { errors: [{ type: 'value_not_valid', message: SVG_NEEDS_PICTURE, details: '', extra_info: { input_name: 'images' } }], dependent_outputs: [], class_type: 'Image' },
     })
+    // Off: the SVG model itself is refused, its switch off (fix round 1).
     vi.stubEnv('NUXT_RUNNER_FAMILIES', 'cards')
-    expect(blockedPromptRefusal(p, { isOutputClass: () => true })).toBeNull()
+    expect(blockedPromptRefusal(p, { isOutputClass: () => true })!.error.message).toBe('“Generate an image” uses Recraft V4 SVG, which only runs in Sailor. Its switch is off.')
   })
 })
 
@@ -410,5 +444,44 @@ describe('unpriced image models', () => {
       expect(k.replicate.submitted()).toEqual([])
       expect(k.fal.client.submit).not.toHaveBeenCalled()
     }
+  })
+})
+
+// ── 8. A local /prompt too large to parse (R11.4 fix round 1) ────────────
+
+describe('a local /prompt over the parse cap', () => {
+  const g = globalThis as any
+  let middleware: (event: any) => Promise<any>
+  let capBytes = 0
+  const proxyRequest = vi.fn(async (_event: any, url: string) => ({ proxiedTo: url }))
+  const ev = (body: unknown) => ({ path: '/prompt', method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
+  const big = (prompt: ApiPrompt) => {
+    const base = JSON.stringify({ prompt, pad: '' })
+    return Buffer.from(JSON.stringify({ prompt, pad: 'x'.repeat(capBytes + 1 - base.length) }))
+  }
+  it('still refuses an unpriced or a Recraft SVG model, plainly, never forwarded; a priced one goes through', async () => {
+    vi.doMock('~~/server/native/engineHealth', async orig => ({ ...(await orig() as object), engineHealth: async () => 'up' }))
+    vi.doMock('~~/server/utils/deployMode', () => ({ deployMode: () => 'local', isHosted: () => false, engineMultiUser: () => false }))
+    g.defineEventHandler = (fn: any) => fn
+    g.createError = (opts: { statusCode: number, message?: string }) => Object.assign(new Error(opts.message), { statusCode: opts.statusCode })
+    g.proxyRequest = proxyRequest
+    const mod = await import('~~/server/middleware/comfyui-proxy')
+    middleware = mod.default as any
+    capBytes = mod.PROMPT_CHECK_MAX_BYTES
+    const cases: [string, string][] = [
+      ['reve-create', 'This workflow uses Reve Create, which has no price yet. Pick another model.'],
+      ['seedream-5-pro', 'This workflow uses Seedream 5 Pro, which has no price yet. Pick another model.'],
+      ['recraft-v4-svg', 'This workflow uses Recraft V4 SVG, which only runs in Sailor.'],
+    ]
+    for (const [id, words] of cases) {
+      const e = ev(big({ 1: gen(id), 2: save(['1', 0]) }))
+      const res = await middleware(e)
+      expect(e.node.res.statusCode, id).toBe(400)
+      expect(res.error.message, id).toBe(words)
+    }
+    expect(proxyRequest).not.toHaveBeenCalled()
+    // A priced model is forwarded as before.
+    await middleware(ev(big({ 1: gen('nano-banana-2'), 2: save(['1', 0]) })))
+    expect(proxyRequest).toHaveBeenCalledTimes(1)
   })
 })

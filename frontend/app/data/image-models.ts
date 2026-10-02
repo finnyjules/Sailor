@@ -723,6 +723,10 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v4-pro-svg',
+    // Runner-only (R11.4 fix round 1): only the runner keeps the SVG; ComfyUI
+    // would pay Replicate and then fail to decode it. Offered while recraft-svg is on.
+    runnerOnly: true,
+    family: 'recraft-svg',
     label: 'Recraft V4 Pro SVG',
     brand: 'Recraft',
     replicateSlug: 'recraft-ai/recraft-v4-pro-svg',
@@ -747,6 +751,10 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v4-svg',
+    // Runner-only (R11.4 fix round 1): only the runner keeps the SVG; ComfyUI
+    // would pay Replicate and then fail to decode it. Offered while recraft-svg is on.
+    runnerOnly: true,
+    family: 'recraft-svg',
     label: 'Recraft V4 SVG',
     brand: 'Recraft',
     replicateSlug: 'recraft-ai/recraft-v4-svg',
@@ -783,6 +791,10 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v3-svg',
+    // Runner-only (R11.4 fix round 1): only the runner keeps the SVG; ComfyUI
+    // would pay Replicate and then fail to decode it. Offered while recraft-svg is on.
+    runnerOnly: true,
+    family: 'recraft-svg',
     hidden: true,
     label: 'Recraft V3 SVG',
     brand: 'Recraft',
