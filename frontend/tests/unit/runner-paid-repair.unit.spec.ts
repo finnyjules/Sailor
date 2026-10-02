@@ -389,7 +389,7 @@ describe('prices (ruling (a))', () => {
     // LC4 fix round 1: Clarity and the refiner by GPU time and steps (18, 20 by default): a start cost plus a slope, no floor.
     expect(at('UpscaleImageNode', { model: 'Clarity', scale_factor: 2 })).toBe(creditsForUsd(0.005 + 0.00051 * 4 * 18))
     expect(at('EnhanceDetailNode', { model: 'Faithful' })).toBe(creditsForUsd(0.08))
-    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine' })).toBe(creditsForUsd(0.0046 + 0.000147 * 20))
+    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine' })).toBe(creditsForUsd(0.0047 + 20 * (0.000051 + 0.000038)))
     expect(at('EnhanceDetailNode', { model: 'Creative' })).toBe(creditsForUsd(0.005 + 0.00051 * 18))
     // Unmeasured (the ComfyUI path with no gate): the input cap (19 MP × 4 = 75 MP out: $0.32).
     const cap = priceNode('UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '2x', image: ['p', 0] }) as { credits: number }

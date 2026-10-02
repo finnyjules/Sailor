@@ -79,7 +79,7 @@ describe('estimates corrected', () => {
     // LC4 (USER go 2026-10-02): no floors; a GPU-time ceiling (a start cost plus a slope per megapixel a step),
     // verified by two live runs each (fix round 1).
     expect(EDIT_RATES['philz1337x/clarity-upscaler']).toMatchObject({ unit: 'per_megapixel_step', startUsd: 0.005, perMegapixelStep: 0.00051, confidence: 'verified' })
-    expect(EDIT_RATES['fermatresearch/magic-image-refiner']).toMatchObject({ unit: 'per_megapixel_step', startUsd: 0.0046, perMegapixelStep: 0.000147, confidence: 'verified' })
+    expect(EDIT_RATES['fermatresearch/magic-image-refiner']).toMatchObject({ unit: 'per_megapixel_step', startUsd: 0.0047, perMegapixelStep: 0.000051, perSquareMegapixelStep: 0.000038, confidence: 'verified' })
     expect(PAID_RATES['bytedance/seedream/v5/pro/layerize']?.confidence).toBe('estimate')
     expect(PAID_RATES['lucataco/flux-dev-multi-lora']?.confidence).toBe('estimate')
   })
