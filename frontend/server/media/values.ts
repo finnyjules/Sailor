@@ -30,7 +30,7 @@ import type { FileAccess } from '../runner/fileAccess'
 import type { KeptBytes } from '../runner/keptBytes'
 import type { OutputFile, RunnerValue, SoundNote } from '../runner/types'
 import { decodeAudio, decodeFrames, framesFilter, framesScale, pickFilter, type DecodedSound, type FramePick, type SoundDecoder } from './decode'
-import { FFV1_KEPT_RATE, PYAV_H264_DEFAULT, encodeVideo, floatWav, pyStreamRate, writeFfv1, type SoundLayout } from './encode'
+import { FFV1_KEPT_ENCODE, FFV1_KEPT_RATE, PYAV_H264_DEFAULT, encodeVideo, floatWav, pyStreamRate, writeFfv1, type SoundLayout } from './encode'
 import { ffprobeJson, mediaCapsWord, probeMedia, resolveMediaInput, type MediaProbe, type Rational } from './probe'
 import { MediaError, inputArgs, runMedia, type MediaLease } from './run'
 
@@ -589,7 +589,7 @@ async function keepDecodedFrames(p: MediaProbe, io: MediaValueIO, o: { before?: 
     const args = [
       '-copyts', '-reinit_filter', '0', '-noautorotate', ...inputArgs(p.path, p.format),
       '-filter_complex', graph,
-      '-map', '[k]', '-fps_mode', 'passthrough', '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
+      '-map', '[k]', '-fps_mode', 'passthrough', ...FFV1_KEPT_ENCODE,
       ...frameLimit,
       '-map_metadata', '-1', '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
       '-map', '[c]', '-fps_mode', 'passthrough', '-c:v', 'rawvideo', ...frameLimit,

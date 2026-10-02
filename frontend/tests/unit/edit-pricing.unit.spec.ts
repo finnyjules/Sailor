@@ -435,9 +435,10 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['UpscaleImageNode', { model: 'Crystal' }, 1.60, 240], // 75.5 M px ≤ 110 M
   ['UpscaleImageNode', { model: 'Crystal' }, 0.05, 10, MP1], // 4 M px ≤ 4.4 M
   ['UpscaleImageNode', { model: 'Crystal', scale_factor: 10 }, 3.20, 480],
-  // R7.11: Real-ESRGAN by the picture sent in, $0.003 a megapixel (at least $0.003), at most 1440p (2560 × 1440):
-  // unmeasured, the cap's 3.6864 MP; the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
-  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.0110592, 3],
+  // R7.11: Real-ESRGAN by the picture sent in, $0.003 a megapixel (at least $0.003), at most 2 096 704 px (1448², the
+  // GPU limit Replicate stated on 2026-10-01, R11.6 fix round 2; the page's 1440p was too high):
+  // unmeasured, the limit's 2.0967 MP; the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.006290112, 2],
   ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.003981312, 1, 1152 * 1152],
   ['UpscaleImageNode', { model: 'Real-ESRGAN' }, 0.003, 1, MP1],
   ['UpscaleImageNode', { model: 'Recraft Crisp' }, 0.006, 2],

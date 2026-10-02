@@ -311,6 +311,8 @@ export async function localModelStartProblems(
     let pixels: number | null = null
     // R11.6: the pictures' exact shapes where known (a clip's frame shape; a picture's, by the gate's walk).
     let shapesIn: readonly (readonly [number, number])[] | null = null
+    // LC2: a batch this node writes at another size than its clip's (Upscale (2×)), for R5's batch caps below.
+    let resized: FrameShape | null = null
     if (outputKind(prompt, link, kinds) === 'frames') {
       shapes ??= await o.shapes()
       const s = shapes.get(`${link[0]}:${link[1]}`)
@@ -327,6 +329,7 @@ export async function localModelStartProblems(
         const scale = n.class_type === UPSCALE_2X_CLASS ? 2 : 1
         const out = shapes.get(`${nodeId}:${batchSlotOf(n.class_type)}`) ?? { ...s, w: s.w * scale, h: s.h * scale }
         keptByNode[nodeId] = keptBatchBound(out) + (keepsMasks(n.class_type) ? maskBytesBound(s) : 0)
+        if (out.w !== s.w || out.h !== s.h) resized = out
       }
     }
     else {
@@ -360,6 +363,17 @@ export async function localModelStartProblems(
           keptByNode[nodeId] = (keptByNode[nodeId] ?? 0) + bytes
         }
       }
+    }
+    // LC2: the batch it writes is held to R5's batch caps (values.ts keepFrames, batchWord) as it is
+    // written, after its first paid calls: a 2× clip over them (its frames past MEDIA_CAPS' largest, or
+    // its pixels past the batch's) is refused plainly here, before the hold. A count that is only an
+    // upper bound (`exact: false`) proves nothing over the batch's pixels: that one goes to the engine.
+    if (resized) {
+      const caps = o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+      const words = { message: UPSCALE_2X_WORDS.clipTooLarge, nodeId, classType: n.class_type }
+      const overCount = resized.count > caps.batchFrames || resized.count * resized.w * resized.h > caps.batchPixels
+      if (resized.w * resized.h > caps.framePixels || (overCount && resized.exact)) return { counts, keptBytes: 0, problem: null, refused: words }
+      if (overCount) return { counts, keptBytes: 0, problem: words }
     }
     counts[nodeId] = Math.max(1, count)
     // R7.3 (fix round 1): Object removal's mask must be its picture's size (Python fails in numpy's

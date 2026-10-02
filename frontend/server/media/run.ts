@@ -188,6 +188,8 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-metadata': 1,
     // R5.4 fix round 1: a copied stream's codec tag as PyAV's reset gives it (encode.ts MP4_DEFAULT_TAG).
     '-tag': 1,
+    // LC2: kept frame batches as FFV1 version 4 (encode.ts FFV1_KEPT_ENCODE), which ffmpeg 8.0.3's encoder marks experimental.
+    '-level': 1, '-strict': 1,
   },
   ffprobe: {
     '-probesize': 1, '-analyzeduration': 1,
@@ -418,6 +420,9 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-map_chapters' && v !== '-1') bad()
       if (name === '-metadata' && v !== 'encoder=') bad()
       if (name === '-tag' && v !== 'avc1' && v !== 'hev1') bad()
+      // LC2: only FFV1 version 4, and only the setting that lets ffmpeg write it (encode.ts FFV1_KEPT_ENCODE).
+      if (name === '-level' && v !== '4') bad()
+      if (name === '-strict' && v !== 'experimental') bad()
       if (name === '-i' && v !== 'pipe:0' && !(v!.startsWith('file:') && isAbsolute(v!.slice(5)) && normalize(v!.slice(5)) === v!.slice(5))) bad()
       i += arity!
       continue

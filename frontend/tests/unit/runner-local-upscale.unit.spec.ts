@@ -207,7 +207,8 @@ describe('a picture (the plan, run by hand)', () => {
     const io = { signal: new AbortController().signal, read: async () => big, call } as unknown as PipelineIO
     await expect(plan.run(io)).rejects.toThrow(UPSCALE_2X_WORDS.moreThanHeld)
     expect(call).not.toHaveBeenCalled()
-    expect(UPSCALE_2X_MAX_PIXELS).toBe(2560 * 1440)
+    // R11.6 fix round 2: the service's measured GPU limit (2026-10-01), not the page's 1440p.
+    expect(UPSCALE_2X_MAX_PIXELS).toBe(2_096_704)
   })
 
   it('three pictures: three calls, at most PER_NODE_IN_FLIGHT at once, in order', async () => {
@@ -350,6 +351,24 @@ describe('a clip, one call per frame (ruling (f))', () => {
     // R11.6: over 1440p in tiles (two for 2561 × 1440), past 12288 × 1536's pixels left.
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 2 }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 4400, 4400) })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
+    // LC2: a 2× batch past R5's batch caps is refused plainly before the hold (it would fail as it is
+    // written, after its paid calls): a frame past MEDIA_CAPS' largest, or more pixels than a batch holds.
+    const passes = (r: Awaited<ReturnType<typeof localModelStartProblems>>) => { expect(r.problem).toBeNull(); expect(r.refused).toBeUndefined() }
+    const refusedOf = async (hosted: boolean, s: () => Promise<Map<string, { count: number; w: number; h: number; exact: boolean }>>) => (await localModelStartProblems(p, ON_CLIP, { hosted, shapes: s }))
+    passes(await refusedOf(true, shapes(3, 2048, 2048)))
+    expect((await refusedOf(true, shapes(3, 2049, 2048))).refused?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
+    expect((await refusedOf(true, shapes(3, 3840, 2160))).refused?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
+    passes(await refusedOf(false, shapes(3, 3840, 2160)))
+    passes(await refusedOf(false, shapes(3, 4096, 4096)))
+    expect((await refusedOf(false, shapes(3, 4097, 4096))).refused?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
+    // Hosted, 1080p: 150 frames at 2× fill the batch exactly; 151 counted exactly are refused, 151 as an
+    // upper bound only go to the engine.
+    const exact = (count: number) => async () => new Map([['v:0', { count, w: 1920, h: 1080, exact: true }]])
+    passes(await refusedOf(true, exact(150)))
+    expect((await refusedOf(true, exact(151))).refused?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
+    const bound = await refusedOf(true, shapes(151, 1920, 1080))
+    expect(bound.refused).toBeUndefined()
+    expect(bound.problem?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
     // No masks of its own: the kept bytes are the batches only (R6's peak).
     const withMasks = await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map([['v:0', { count: 3, w: 64, h: 36, exact: false }], ['n:0', { count: 3, w: 128, h: 72, exact: false }]]) })
     expect(withMasks.problem).toBeNull()
@@ -360,7 +379,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
 // ── Prices, families, tooltip ───────────────────────────────────────────────
 
 describe('prices (R7 rule 4)', () => {
-  it('R3.5\'s Real-ESRGAN card, re-carded by R7.11\'s live check (GPU time: $0.003 a megapixel sent, at least $0.003, at most 1440p in; an estimate); no flat row', () => {
+  it('R3.5\'s Real-ESRGAN card, re-carded by R7.11\'s live check (GPU time: $0.003 a megapixel sent, at least $0.003, at most 2 096 704 px in, R11.6 fix round 2); no flat row', () => {
     expect(EDIT_RATES[UPSCALE_2X_SLUG]).toMatchObject({ unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: UPSCALE_2X_MAX_PIXELS, confidence: 'verified', service: 'replicate' })
     // The live check's run: 12.13 s on T4 ($0.000225/s) for 1152² in, $0.00273 — under the card's $0.00398 for it.
     expect(12.13 * 0.000225).toBeLessThan(paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: 1152 * 1152 })!)
@@ -369,24 +388,27 @@ describe('prices (R7 rule 4)', () => {
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, UPSCALE_2X_CLASS)).toBe(false)
   })
 
-  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: five tiles at 1440p), marked up once; one picture when nothing was counted', () => {
+  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: ten tiles at the service\'s limit), marked up once; one picture when nothing was counted', () => {
     const inputs = { frames: ['l', 0], tile_size: 512 }
-    const CAP_USD = 0.0110592 // 2560 × 1440 = 3.6864 MP × $0.003
+    // R11.6 fix round 2: 2 096 704 px (the GPU limit Replicate stated on 2026-10-01) × $0.003 a megapixel; sums rounded to 1e-8.
+    const CAP_USD = 0.006290112
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs, { families: new Set(['upscale-2x']) })).toBe(true)
-    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to six tiles at 1440p each (the largest tiled picture's).
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 6 * CAP_USD, credits: creditsForUsd(6 * CAP_USD) })
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 19.90656, credits: creditsForUsd(19.90656) })
+    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to ten tiles at the limit each (the largest tiled picture's).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 0.0629011, credits: creditsForUsd(0.0629011) })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 18.87033, credits: creditsForUsd(18.87033) })
     // Measured at the start of the run (R7.11): the live check's 1152² picture, three of them.
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 3, picturePixels: 1152 * 1152 } })).toEqual({ usd: 0.01194393, credits: 3 })
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 500 * 375 } })).toEqual({ usd: 0.003, credits: 1 })
     // Each call never above the service's largest picture; R11.6: a larger one in tiles, each held at that largest
-    // (4096 × 4096 with no shape known: the pixel bound's five tiles; runner-upscale-tiles.unit.spec.ts has the rest).
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 5 * CAP_USD, credits: creditsForUsd(5 * CAP_USD) })
+    // (4096 × 4096 with no shape known: the pixel bound's nine tiles; runner-upscale-tiles.unit.spec.ts has the rest).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 0.05661099, credits: creditsForUsd(0.05661099) })
+    // Nine tiles of $0.00629011 (each call's price rounded to 1e-8 dollars).
+    expect(9 * CAP_USD).toBeCloseTo(0.05661099, 6)
     expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.003 })))).toBe(creditsForUsd(0.009))
-    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 18 }] })
+    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 30 }] })
     expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }).nodes['1']).toBeUndefined()
-    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(6 * CAP_USD))
+    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(0.0629011))
   })
 
   it('sends no text; the tooltip names the service while the family is on; its route has no backup', () => {

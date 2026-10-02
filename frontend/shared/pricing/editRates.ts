@@ -205,12 +205,14 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // picture (1.33 MP in) at 2×, about $0.00273 — over the $0.002 a picture this card said (read as "$0.002
   // per image output", marked verified, 2026-09-24). Now a ceiling per megapixel sent in: measured 9.14 s a
   // megapixel ($0.00206); carded at $0.003 a megapixel (13.3 s, about 1.46× the measurement), at least $0.003
-  // a call (13.3 s, a small picture's start-up), the picture taken at most the page's "max recommended
-  // input image resolution is 1440p" (2560 × 1440, shared/runner/localModels.ts UPSCALE_2X_MAX_PIXELS):
-  // at most $0.0111 a call. MEASURED 2026-10-01 (R7.11): 12.13 s at 1.33 MP in, 2×, face_enhance off; the ceiling is above it, so the card is verified.
+  // a call (13.3 s, a small picture's start-up), the picture taken at most the 2 096 704 pixels (1448²) the
+  // service's GPU takes — MEASURED 2026-10-01 by R11.6's live check, whose 1302 × 2160 tile Replicate refused
+  // ("… total number of pixels 2812320 greater than the max size that fits in GPU memory on this hardware,
+  // 2096704"; the page's "1440p", 2560 × 1440, was too high; shared/runner/localModels.ts UPSCALE_2X_MAX_PIXELS):
+  // at most $0.00629 a call. MEASURED 2026-10-01 (R7.11): 12.13 s at 1.33 MP in, 2×, face_enhance off; the ceiling is above it, so the card is verified.
   'nightmareai/real-esrgan': {
-    unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: 2560 * 1440,
-    note: 'T4 at $0.000225/s; live check 2026-10-01: 12.13 s for 1152² in (1.33 MP) at 2× = $0.00273 ($0.00206/MP); ceiling $0.003/MP, at least $0.003, input capped at 1440p (2560 × 1440)',
+    unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: 2_096_704,
+    note: 'T4 at $0.000225/s; live check 2026-10-01: 12.13 s for 1152² in (1.33 MP) at 2× = $0.00273 ($0.00206/MP); ceiling $0.003/MP, at least $0.003, input at most 2 096 704 px (1448², the GPU limit Replicate stated on 2026-10-01)',
     ...verified('replicate', rep('nightmareai/real-esrgan')), read: '2026-10-01',
   },
   // "$6 per thousand output images".

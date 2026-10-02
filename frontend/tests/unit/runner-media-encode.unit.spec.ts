@@ -31,7 +31,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { decodeAudio, decodeFrames, type DecodedSound } from '~~/server/media/decode'
 import {
   OPENH264_FOR, PYAV_H264_DEFAULT, RGB_TO_YUV420P, SAVE_AUDIO_SAMPLE_FMT, encodeAudio, encodeVideo, ffmetadataText, floatWav,
-  h264Args, pyAudioCutSamples, pyStreamRate, writeFfv1, type SoundLayout,
+  FFV1_KEPT_ENCODE, h264Args, pyAudioCutSamples, pyStreamRate, writeFfv1, type SoundLayout,
 } from '~~/server/media/encode'
 import { RESAMPLE_MAX_TAPS, opusRate, resampleChannel, resampleCore, resampleLikeTorchaudio, resampleTaps } from '~~/server/media/resample'
 import { resampleInWorker } from '~~/server/runner/compositor/worker'
@@ -514,6 +514,46 @@ describe('the runner’s own files', () => {
     expect(back.frames.map(sha256Hex)).toEqual(frames.map(sha256Hex))
   })
 
+  // LC2: FFV1 version 3 asked for a worst-case packet of about 63 bytes a pixel (0.52 GB at 4K, near
+  // INT_MAX at 2×), which a loaded machine refused after the paid calls. Version 4's is about 3.4.
+  it('writeFfv1 keeps a 3840 × 2160 frame and its 2× (7680 × 4320) losslessly, a real file written and read back (LC2)', { timeout: 300_000 }, async () => {
+    await requireMediaTools()
+    for (const [w, h] of [[3840, 2160], [7680, 4320]] as const) {
+      // A smooth picture with a band of noise across it: small on disk, every coding path met.
+      const frame = smoothFrame(w, h, 1)
+      frame.set(synth(w, 64, 3, 11), w * 3 * Math.floor(h / 2))
+      const out = outPath('mkv')
+      try {
+        expect((await writeFfv1({ frames: framesOf([frame]), w, h, out, userId: null, outRoots: ROOTS() })).count).toBe(1)
+        const back = await decodeAll(out)
+        expect(back.frames.length).toBe(1)
+        expect(Buffer.compare(back.frames[0]!, frame), `${w} × ${h}`).toBe(0)
+      }
+      finally {
+        rmSync(out, { force: true })
+      }
+    }
+  })
+
+  it('a batch kept before LC2 (FFV1 version 3, the old settings) still reads back exactly', LONG, async () => {
+    await requireMediaTools()
+    // 800 × 600: over 720 × 576, where ffmpeg chose version 3 for the old settings.
+    const frames = [smoothFrame(800, 600, 2), synth(800, 600, 3, 5)]
+    const out = outPath('mkv')
+    await runMedia({
+      tool: 'ffmpeg', userId: null, workDir: realpathSync(scratch), stdin: framesOf(frames),
+      args: [
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '800x600', '-framerate', '1000', '-i', 'pipe:0',
+        '-map', '0:v', '-map_metadata', '-1', '-fps_mode', 'passthrough',
+        '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
+        '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
+      ],
+    })
+    const back = await decodeAll(out)
+    expect(back.frames.map(sha256Hex)).toEqual(frames.map(sha256Hex))
+    rmSync(out, { force: true })
+  })
+
   it('writeFfv1 refuses a frame of the wrong size', LONG, async () => {
     await requireMediaTools()
     const out = outPath('mkv')
@@ -581,7 +621,7 @@ describe('safety', () => {
 
   it('the encoders’ options are allowed only with the values the module writes', () => {
     const head = ['-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '8x8', '-framerate', '1', '-i', 'pipe:0']
-    const ok = [...head, '-map_metadata', '-1', '-fflags', '+bitexact', '-enc_time_base:v', '100/2997', '-movflags', '+faststart+use_metadata_tags', 'pipe:1']
+    const ok = [...head, '-map_metadata', '-1', '-fflags', '+bitexact', '-enc_time_base:v', '100/2997', '-movflags', '+faststart+use_metadata_tags', ...FFV1_KEPT_ENCODE, 'pipe:1']
     expect(() => checkArgs('ffmpeg', ok)).not.toThrow()
     for (const [what, bad] of [
       ['-fflags other than +bitexact', ['-fflags', '+genpts']],
@@ -592,6 +632,9 @@ describe('safety', () => {
       ['-attach', ['-attach', '/etc/passwd']],
       ['-bsf other than the dts delay', ['-bsf:v', 'noise']],
       ['-ss other than 0', ['-ss', '5']],
+      // LC2: FFV1 version 4 only, with only the setting that lets ffmpeg write it.
+      ['-level other than 4', ['-level', '3']],
+      ['-strict other than experimental', ['-strict', 'unofficial']],
     ] as const) expect(() => checkArgs('ffmpeg', [...head, ...bad, 'pipe:1']), what).toThrow(MediaError)
   })
 

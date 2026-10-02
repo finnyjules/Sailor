@@ -59,14 +59,19 @@ export const UPSCALE_2X_SLUG = 'nightmareai/real-esrgan'
 /** `tile_size`: IO.Int.Input(default=512, min=0, max=2048, step=64). Not sent: it only splits Python's own work. */
 export const UPSCALE_2X_TILE_SIZE = { default: 512, min: 0, max: 2048 } as const
 /**
- * The largest picture (pixels) handed to Real-ESRGAN in one call: the model
- * page's "Max recommended input image resolution is 1440p"
- * (replicate.com/nightmareai/real-esrgan, read 2026-09-30), taken as
- * 2560 × 1440. R11.6 (ruling (i)): a larger picture is cut into overlapping
- * tiles of at most this size, one call each, blended back
- * (./upscaleTiles.ts, server/runner/generators/tiles.ts).
+ * The largest picture (pixels) handed to Real-ESRGAN in one call — a
+ * MEASURED limit. R11.6's live check (2026-10-01) sent a 1302 × 2160 tile
+ * and Replicate refused it: "Input image of dimensions (2160, 1302, 3) has a
+ * total number of pixels 2812320 greater than the max size that fits in GPU
+ * memory on this hardware, 2096704" (2 096 704 = 1448²). The model page's
+ * "Max recommended input image resolution is 1440p" (2560 × 1440, R7.2's
+ * cap) was too high: a picture between the two failed at the service.
+ * R11.6 (ruling (i)): a larger picture is cut into overlapping tiles of at
+ * most this many pixels, each tile's 32-pixel overlap inside it, one call
+ * each, blended back (./upscaleTiles.ts, server/runner/generators/tiles.ts).
+ * shared/pricing/editRates.ts's Real-ESRGAN card takes the same ceiling.
  */
-export const UPSCALE_2X_MAX_PIXELS = 2560 * 1440
+export const UPSCALE_2X_MAX_PIXELS = 2_096_704
 /**
  * R11.6: the largest picture (pixels) Upscale (2×) cuts into tiles, in both
  * places. Fix round 1: the largest picture Sailor makes or takes
@@ -521,6 +526,7 @@ export const UPSCALE_2X_WORDS = {
   overCap: 'This clip is too long to upscale here.',
   tooLarge: 'This picture is too large to upscale here.',
   moreThanHeld: 'This picture is larger than was measured before the run, so it was stopped before anything was sent.',
+  clipTooLarge: 'This clip’s upscaled frames would be too large to keep here.',
   tooThin: `This picture is too long and thin to upscale here. Make its shorter side at least ${UPSCALE_TILE_MIN_SIDE} pixels.`,
   unknownSize: 'The size of the picture to upscale can’t be known before the run.',
   noAnswer: 'The service sent back no upscaled picture.',

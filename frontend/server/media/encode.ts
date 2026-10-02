@@ -694,6 +694,26 @@ export function floatWav(s: DecodedSound): Uint8Array {
 export const FFV1_KEPT_RATE = 1000
 
 /**
+ * The FFV1 encoder settings every kept batch is written with (`writeFfv1`,
+ * values.ts keepDecodedFrames). LC2: FFV1 version 4 (`-level 4`). The encoder
+ * allocates each frame's packet at its worst case before coding it
+ * (libavcodec/ffv1enc.c ff_ffv1_encode_buffer_size): for version 3 (what
+ * ffmpeg picks over 720 × 576) that is (3·W·H + slices·(800 + 2(W + H))) ×
+ * (2·8 + 5) bytes, about 63 bytes a pixel of bgr0 — 0.52 GB for one
+ * 3840 × 2160 frame, about 1.05 GB at 16.6 MP, clamped near INT_MAX (2.1 GB)
+ * past 34 MP — and a loaded machine refused it ("Failed to allocate packet").
+ * Version 4's estimate is (3·W·H + slices·800) × (8 + 1) / 8, about 3.4 bytes
+ * a pixel: 28 MB at 3840 × 2160, 226 MB at 8192 × 8192 (MEDIA_CAPS.local's
+ * largest frame). Still lossless (the same reversible RGB transform), still
+ * bit-exact, about the same size (measured on noise: within 0.5 % of version
+ * 3, under KEPT_BATCH_RATIO). ffmpeg 8.0.3's encoder still marks version 4
+ * experimental, hence `-strict experimental`; its decoder reads it without,
+ * and reads the version 3 batches kept before LC2 as before. Sailor's ffmpeg
+ * is pinned (tools.ts), so a kept file is written and read by one build.
+ */
+export const FFV1_KEPT_ENCODE: readonly string[] = ['-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0', '-level', '4', '-strict', 'experimental']
+
+/**
  * An FFV1 Matroska of rgb24 frames (stored as bgr0, lossless: FFV1's RGB is
  * a reversible transform, and rgb24 ↔ bgr0 only moves bytes). Bit-exact
  * muxing, so the same frames make the same file (kept by sha256).
@@ -707,7 +727,7 @@ export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: numbe
     const args = [
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${o.w}x${o.h}`, '-framerate', String(FFV1_KEPT_RATE), '-i', 'pipe:0',
       '-map', '0:v', '-map_metadata', '-1', '-fps_mode', 'passthrough',
-      '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
+      ...FFV1_KEPT_ENCODE,
       '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
     ]
     await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: checkedFrames(o.frames, o.w * o.h * 3, counted, o.signal), workDir: work, cleanup: [out], timeoutMs: o.timeoutMs, ...(o.lease ? { lease: o.lease } : {}) })
