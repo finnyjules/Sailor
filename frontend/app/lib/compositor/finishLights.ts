@@ -25,7 +25,8 @@ import {
 } from './finishPass'
 import { DEFAULT_FRAME_LIGHT } from './frameLight'
 import { MAX_SHADER_LIGHTS, packLight, packLightUniforms, type Vec3 } from '~/lib/frame/lighting/shade'
-import type { FrameLighting, LightLayer } from '~/lib/frame/lighting/settings'
+import { visibleLights, type FrameLighting, type LightLayer } from '~/lib/frame/lighting/settings'
+import { effectStackOf } from './effectStack'
 
 const HIDDEN_LIGHT_DECL = 'uniform vec3 uLight;    // world space, see lightWorld()\n'
 
@@ -276,4 +277,134 @@ export function applyFinishLit(
   ctx.drawImage(out, 0, 0)
   ctx.restore()
   return true
+}
+
+// ---- Painter state. Lives here so the lean web bundle (which never paints lights + finishes,
+// see frameNeedsFullBundle) stubs it all out with no-ops. ----
+
+export type FinishLights = { lights: LightLayer[]; lighting: FrameLighting }
+type SelfLitRec = { w: number; h: number; canvas: HTMLCanvasElement | null }
+/** The visible lights Gold foil / Spot UV read, or null outside a lit paint (hidden light). */
+let _finishLights: FinishLights | null = null
+/** While a foil layer draws in a lit Frame, each foil region's alpha is recorded here at its
+ *  device position, so the layer's lighting stamp can punch it out of the lit map. */
+let _selfLitRecorder: SelfLitRec | null = null
+/** The painted canvas's device size, and the Frame's device rectangle on it (drawn back in Frame units). */
+type FrameDev = { w: number; h: number; x: number; y: number; fw: number; fh: number }
+let _dev: FrameDev | null = null
+
+export function currentFinishLights(): FinishLights | null { return _finishLights }
+
+export type FinishScope = [FinishLights | null, SelfLitRec | null, FrameDev | null]
+/** Start a paint: returns the enclosing paint's state, which starts clean here. */
+export function enterFinishScope(): FinishScope {
+  const prev: FinishScope = [_finishLights, _selfLitRecorder, _dev]
+  _finishLights = null
+  _selfLitRecorder = null
+  _dev = null
+  return prev
+}
+export function leaveFinishScope(prev: FinishScope): void { [_finishLights, _selfLitRecorder, _dev] = prev }
+
+/** The finishes are lit by the visible lights of the folded stack (none visible ⇒ hidden light). */
+export function lightFinishes(
+  layers: Parameters<typeof visibleLights>[0], groups: Parameters<typeof visibleLights>[1], lighting: FrameLighting,
+  ctx: CanvasRenderingContext2D, W: number, H: number, base: DOMMatrix | null,
+): void {
+  const lights = visibleLights(layers, groups)
+  if (!lights.length) return
+  _finishLights = { lights, lighting }
+  const w = Math.max(1, ctx.canvas?.width || 1), h = Math.max(1, ctx.canvas?.height || 1)
+  _dev = base && Math.abs(base.b) < 1e-6 && Math.abs(base.c) < 1e-6
+    ? { w, h, x: base.e, y: base.f, fw: W * base.a, fh: H * base.d }
+    : { w, h, x: 0, y: 0, fw: w, fh: h }
+}
+
+/** A Spot UV layer lit by its own finish shader stamps unlit, so it is lit once. */
+export function spotUvLitOnce(layer: unknown): boolean {
+  return !!_finishLights && effectStackOf(layer as Parameters<typeof effectStackOf>[0]).some(e => e.type === 'spot_uv' && e.visible)
+}
+
+export function armSelfLit(foilLayerInLitFrame: boolean): void {
+  _selfLitRecorder = foilLayerInLitFrame && _dev ? { w: _dev.w, h: _dev.h, canvas: null } : null
+}
+export function clearSelfLit(): void { _selfLitRecorder = null }
+/** The canvas the layer's foil regions were recorded on (taken, so the next layer starts with none). */
+export function takeSelfLit(): HTMLCanvasElement | null {
+  const c = _selfLitRecorder?.canvas ?? null
+  _selfLitRecorder = null
+  return c
+}
+/** The stamp's signature and `selfLit` draw: the recorded canvas back into the lit map in Frame units. */
+export function selfLitStamp(
+  canvas: HTMLCanvasElement | null, sig: string | null, W: number, H: number,
+): { sig: string | null; draw: ((target: CanvasRenderingContext2D) => void) | null } {
+  const d = _dev
+  if (!canvas || !d) return { sig, draw: null }
+  return { sig: sig != null ? `${sig}|sl` : sig, draw: (t) => { t.drawImage(canvas, d.x, d.y, d.fw, d.fh, 0, 0, W, H) } }
+}
+
+/** Records a foil region `s` drawn at (x, y) on a W×H device canvas (any other size is not recorded). */
+export function recordSelfLit(s: CanvasImageSource, x: number, y: number, W: number, H: number): void {
+  const rec = _selfLitRecorder
+  if (!rec || rec.w !== W || rec.h !== H) return
+  if (!rec.canvas && typeof document !== 'undefined') {
+    const c = document.createElement('canvas')
+    c.width = W; c.height = H
+    rec.canvas = c
+  }
+  const rctx = rec.canvas ? rec.canvas.getContext('2d') : null
+  if (rctx) rctx.drawImage(s, x, y)
+}
+
+/**
+ * A PLAIN paint of the layer being recorded lands over its foil: erase it from the self-lit
+ * recorder, so the recorder holds the foil still SEEN at the end of the layer. `draw(c)` repeats
+ * the site's own statements on `c` in an opaque ink, under `ctx`'s current transform and line
+ * state, with `destination-out`. Nothing recorded yet, no recorder, or a canvas of another size
+ * ⇒ nothing runs.
+ */
+export function eraseSelfLit(ctx: CanvasRenderingContext2D, draw: (c: CanvasRenderingContext2D) => void): void {
+  const rec = _selfLitRecorder
+  if (!rec?.canvas) return
+  if ((ctx.canvas?.width || 0) !== rec.w || (ctx.canvas?.height || 0) !== rec.h) return
+  const c = rec.canvas.getContext('2d')
+  if (!c) return
+  c.save()
+  try {
+    c.setTransform(ctx.getTransform())
+    c.globalAlpha = 1
+    c.globalCompositeOperation = 'destination-out'
+    c.lineJoin = ctx.lineJoin
+    c.lineCap = ctx.lineCap
+    c.miterLimit = ctx.miterLimit
+    draw(c)
+  } finally { c.restore() }
+}
+
+/**
+ * A stamp's self-lit parts, kept to what `sctx` (the scratch) still holds of its silhouette
+ * (destination-in: a mask or clip on the layer clips them too), stamped black on the lit map. The
+ * lit map is opaque, so black source-over at the parts' alpha IS "destination-out, then black at
+ * the same alpha": those pixels read unlit, shine 0. Last, because the steps before reuse the
+ * silhouette whole; lift and facing are untouched.
+ */
+export function punchSelfLit(
+  sctx: CanvasRenderingContext2D, selfLit: (target: CanvasRenderingContext2D) => void,
+  mw: number, mh: number, W: number, H: number, ink: string,
+  reset: (c: CanvasRenderingContext2D) => void, litCtx: CanvasRenderingContext2D, scratch: CanvasImageSource,
+): void {
+  sctx.save()
+  reset(sctx)
+  sctx.globalCompositeOperation = 'destination-in'
+  sctx.setTransform(mw / W, 0, 0, mh / H, 0, 0)
+  try { selfLit(sctx) } catch (err) {
+    if (import.meta.dev) console.warn('[lighting maps] self-lit parts failed to draw; skipped', err)
+  }
+  sctx.restore()
+  reset(sctx)
+  sctx.globalCompositeOperation = 'source-in'
+  sctx.fillStyle = ink
+  sctx.fillRect(0, 0, mw, mh)
+  litCtx.drawImage(scratch, 0, 0)
 }

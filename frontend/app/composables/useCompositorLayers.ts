@@ -310,7 +310,10 @@ import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTr
 import { expandRecipe } from '~/lib/compositor/recipes'
 import { applyFinish, finishRegionRect, METALS, type DeviceRect } from '~/lib/compositor/finishPass'
 // Only from finishLights.ts: the lean web-export bundle stubs that one module.
-import { applyFinishLit } from '~/lib/compositor/finishLights'
+import {
+  applyFinishLit, armSelfLit, clearSelfLit, currentFinishLights, enterFinishScope, eraseSelfLit, leaveFinishScope,
+  lightFinishes, recordSelfLit, selfLitStamp, spotUvLitOnce, takeSelfLit,
+} from '~/lib/compositor/finishLights'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
@@ -1638,18 +1641,9 @@ export function setLiveEffectClock(seconds: number | null): number | null {
 let _frameLight: FrameLight = DEFAULT_FRAME_LIGHT
 export function currentFrameLight(): FrameLight { return _frameLight }
 
-// Light layers stage 3: while `paintLayerStack` lights a Frame with its light layers, Gold foil
-// and Spot UV are lit by THOSE (finishLights.ts) instead of `_frameLight`. Null outside a lit
-// paint (hit-tests, copy-as-PNG, a Frame with no light) ⇒ the hidden light, exactly as before.
-let _finishLights: { lights: LightLayer[]; lighting: FrameLighting } | null = null
-export function currentFinishLights(): { lights: LightLayer[]; lighting: FrameLighting } | null { return _finishLights }
-
-// While the layer loop draws a foil-carrying layer in a lit Frame, each foil region's alpha is
-// recorded here at its device position (the canvas is made on the first region), so that
-// layer's lighting stamp can punch its foil out of the lit map: a finish is lit once, by its own
-// shader. `w`/`h` are the painted canvas's device size — a region drawn on any other canvas
-// (a box-sized flow) is not recorded.
-let _selfLitRecorder: { w: number; h: number; canvas: HTMLCanvasElement | null } | null = null
+// Light layers stage 3: the lit-finish state (the Frame's lights for Gold foil / Spot UV, and the
+// self-lit recorder) lives in finishLights.ts, which the lean web bundle stubs out.
+export { currentFinishLights }
 
 // Compare: while the Relight panel's Compare is held, that one layer paints without Relight.
 let _relightBypass: string | null = null
@@ -3507,7 +3501,8 @@ function paintLayer(
               // In a Frame lit by light layers it is lit by those (and stamps unlit, so the
               // lighting pass never lights it again); if that pass cannot run, the hidden light.
               case 'spot_uv':
-                if (!(_finishLights && applyFinishLit(off, e.type, e as unknown as SpotUvEffect, _finishLights.lights, _finishLights.lighting, s))) {
+                const fl = currentFinishLights()
+                if (!(fl && applyFinishLit(off, e.type, e as unknown as SpotUvEffect, fl.lights, fl.lighting, s))) {
                   applyFinish(off, e.type, e as unknown as SpotUvEffect, _frameLight, s)
                 }
                 break
@@ -3736,7 +3731,8 @@ function paintFoilRegion(
   const frame = whole ? undefined : { x: r.x, y: r.y, frameW: W, frameH: H }
   // Lit by the Frame's light layers when there are any; otherwise (or if that pass cannot run)
   // by the hidden light, exactly as before.
-  const ok = (_finishLights && applyFinishLit(s, 'gold_foil', dials, _finishLights.lights, _finishLights.lighting, scale, frame))
+  const fl = currentFinishLights()
+  const ok = (fl && applyFinishLit(s, 'gold_foil', dials, fl.lights, fl.lighting, scale, frame))
     || applyFinish(s, 'gold_foil', dials, _frameLight, scale, frame)
   if (!ok) {
     c.save()
@@ -3750,42 +3746,7 @@ function paintFoilRegion(
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.drawImage(s, r.x, r.y)
   ctx.restore()
-  const rec = _selfLitRecorder
-  if (rec && rec.w === W && rec.h === H) {
-    if (!rec.canvas && typeof document !== 'undefined') {
-      const c = document.createElement('canvas')
-      c.width = W; c.height = H
-      rec.canvas = c
-    }
-    const rctx = rec.canvas ? rec.canvas.getContext('2d') : null
-    if (rctx) rctx.drawImage(s, r.x, r.y)
-  }
-}
-
-/**
- * A PLAIN paint of the layer being recorded lands over its foil: erase it from the self-lit
- * recorder, so the recorder holds the foil still SEEN at the end of the layer, not every foil
- * region drawn. `draw(c)` repeats the site's own statements on `c` in an opaque ink (the same
- * closures `paintFoilRegion` takes), under `ctx`'s current transform and line state, with
- * `destination-out`. Nothing recorded yet (no foil under it), no recorder, or a canvas of another
- * size ⇒ nothing runs: a plain paint BELOW the layer's foil costs nothing extra.
- */
-function eraseSelfLit(ctx: CanvasRenderingContext2D, draw: (c: CanvasRenderingContext2D) => void): void {
-  const rec = _selfLitRecorder
-  if (!rec?.canvas) return
-  if ((ctx.canvas?.width || 0) !== rec.w || (ctx.canvas?.height || 0) !== rec.h) return
-  const c = rec.canvas.getContext('2d')
-  if (!c) return
-  c.save()
-  try {
-    c.setTransform(ctx.getTransform())
-    c.globalAlpha = 1
-    c.globalCompositeOperation = 'destination-out'
-    c.lineJoin = ctx.lineJoin
-    c.lineCap = ctx.lineCap
-    c.miterLimit = ctx.miterLimit
-    draw(c)
-  } finally { c.restore() }
+  recordSelfLit(s, r.x, r.y, W, H)
 }
 
 /**
@@ -7128,9 +7089,7 @@ export function paintLayerStack(
   // seamlessly where the Frame's clock wraps. Put back in the finally.
   const prevFieldLoop = setFieldLoop(motion?.duration ?? 0)
   const prevFacingRecorder = _facingRecorder
-  const prevFinishLights = _finishLights, prevSelfLitRecorder = _selfLitRecorder
-  _finishLights = null       // set below once this paint knows it is lit (a nested paint starts clean)
-  _selfLitRecorder = null
+  const prevFinishScope = enterFinishScope() // a nested paint starts clean; lit below once this paint knows it is
   try {
     // Frame Morph: swap morphing layers for their transient path clone — inside the try, so a
     // throw still clears `_siblingResolveFor`. The resolver keeps the PRE-swap list.
@@ -7185,17 +7144,8 @@ export function paintLayerStack(
     // lights them where it is) — not `loopLights`: the lights sit at the top of the stack and the
     // loop reaches them only after the finishes have drawn.
     if (lightingOn) {
-      const finishLights = visibleLights(localLayers, groups)
-      if (finishLights.length) _finishLights = { lights: finishLights, lighting: lighting ?? DEFAULT_LIGHTING }
+      lightFinishes(localLayers, groups, lighting ?? DEFAULT_LIGHTING, ctx, W, H, _fieldCtx.base)
     }
-    // The device size a foil layer's self-lit regions are recorded at (see `_selfLitRecorder`).
-    const devW = Math.max(1, ctx.canvas?.width || 1), devH = Math.max(1, ctx.canvas?.height || 1)
-    // The Frame's device rectangle on `ctx` (the whole canvas for every current painter): the
-    // recorder's pixels are drawn back into the lit map in Frame units through it.
-    const fb = _fieldCtx.base
-    const frameDev = fb && Math.abs(fb.b) < 1e-6 && Math.abs(fb.c) < 1e-6
-      ? { x: fb.e, y: fb.f, w: W * fb.a, h: H * fb.d }
-      : { x: 0, y: 0, w: devW, h: devH }
     const stamps: LightingStamp[] | null = lightingOn ? [] : null
     const loopLights: LightLayer[] | null = lightingOn ? [] : null
     const pushStamp = !lightingOn ? null : (
@@ -7213,13 +7163,12 @@ export function paintLayerStack(
       // here, not lit by the Frame's lights either — it stamps as an unlit layer while held.
       if (relightBypassed(layer.id)) layer = { ...layer, lit: false } as LocalLayer
       // A Spot UV layer was lit by its own finish shader: it stamps unlit, so it is lit once.
-      if (_finishLights && effectStackOf(layer).some(e => e.type === 'spot_uv' && e.visible)) {
+      if (spotUvLitOnce(layer)) {
         layer = { ...layer, lit: false } as LocalLayer
       }
       // Foil regions this layer's draw recorded (lit by their own shader) are punched out of
       // the lit map through `selfLit`. Taken here, so the next layer starts with none.
-      const selfLitCanvas = _selfLitRecorder?.canvas ?? null
-      _selfLitRecorder = null
+      const selfLitCanvas = takeSelfLit()
       const ghost = paintShown({ ...layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
       const scaled = typeof ms === 'number' && Math.abs(ms - 1) > 1e-4 ? Math.max(0.001, ms) : 0
       const maskLocal = maskItem?.type === 'local' ? maskItem.layer : null
@@ -7238,14 +7187,13 @@ export function paintLayerStack(
       // where the pixels did. Its signature joins the stamp's (dials, depth field, surfaces).
       const rec = _facingRecorder?.get(layer.id)
       const sig0 = lightingStampSig(layer, maskItem, maskLocal, W, t, `${scaled}|${extraSig}`)
-      const base = sig0 != null && selfLitCanvas ? `${sig0}|sl` : sig0
+      const sl = selfLitStamp(selfLitCanvas, sig0, W, H)
+      const base = sl.sig
       stamps!.push({
         layer,
         sig: rec ? (base != null && rec.sig != null ? `${base}|f${rec.sig}|${rec.shine}` : null) : base,
         draw,
-        selfLit: selfLitCanvas
-          ? (target) => target.drawImage(selfLitCanvas, frameDev.x, frameDev.y, frameDev.w, frameDev.h, 0, 0, W, H)
-          : null,
+        selfLit: sl.draw,
         facing: rec ? {
           shine: rec.shine,
           draw: (target) => {
@@ -7264,7 +7212,7 @@ export function paintLayerStack(
     for (const item of items) {
       if (motionScaleOpen) { ctx.restore(); motionScaleOpen = false }
       if (revealOpen) { finishReveal(ctx, revealOpen); revealOpen = null }
-      _selfLitRecorder = null
+      clearSelfLit()
       if (maskSourceKeys.has(item.key) && !keepVisibleKeys.has(item.key)) continue
 
       if (item.type === 'wired') {
@@ -7279,7 +7227,7 @@ export function paintLayerStack(
       const layer = item.layer
       // A foil layer in a Frame lit by its light layers records its regions' alpha while it
       // draws (the canvas itself is made by the first region); every other layer records none.
-      _selfLitRecorder = _finishLights && layerHasFoil(layer) ? { w: devW, h: devH, canvas: null } : null
+      armSelfLit(currentFinishLights() !== null && layerHasFoil(layer))
       // Nested-group cascade (Task 1): absent `groups` ⇒ gc stays null ⇒ opacityMul
       // defaults to 1 everywhere below, byte-identical to pre-cascade behavior.
       const gc = groups ? resolveGroupCascade(layer.groupId, groups) : null
@@ -7452,7 +7400,7 @@ export function paintLayerStack(
     }
     if (motionScaleOpen) ctx.restore()
     if (revealOpen) finishReveal(ctx, revealOpen)
-    _selfLitRecorder = null
+    clearSelfLit()
 
     // The one lighting pass — after every layer, before the post chain.
     if (stamps && loopLights!.length) lightFrame(ctx, W, H, stamps, loopLights!, lighting ?? DEFAULT_LIGHTING)
@@ -7462,8 +7410,7 @@ export function paintLayerStack(
     })
   } finally {
     _facingRecorder = prevFacingRecorder // a nested paint (a glass source) hands it back
-    _finishLights = prevFinishLights
-    _selfLitRecorder = prevSelfLitRecorder
+    leaveFinishScope(prevFinishScope)
     _fieldCtx.token = 0
     _siblingResolveFor = null // F3: unbind so a later out-of-paint render sees no stale resolver
     setFieldLoop(prevFieldLoop)

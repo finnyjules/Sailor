@@ -25,6 +25,7 @@
  * (its dials, depth field and surfaces), so a dial change or a field landing re-stamps.
  */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
+import { punchSelfLit } from '~/lib/compositor/finishLights'
 import { effectiveCasts, effectiveLift, effectiveLit } from './settings'
 
 /** Lift is stored in the map as lift / LIFT_SCALE (prototype HSCALE). */
@@ -215,27 +216,8 @@ function stampInto(maps: MapCanvases, planned: readonly PlannedStamp[], W: numbe
       sctx.fillRect(0, 0, mw, mh)
       facingCtx.drawImage(scratch, 0, 0)
     }
-    if (p.stamp.selfLit) {
-      // 4. Stage 3: its self-lit parts (foil lit by its own shader), kept to what the scratch
-      // still holds of its silhouette (destination-in: a mask or clip on the layer clips them
-      // too), stamped black on the lit map. The lit map is opaque, so black source-over at the
-      // parts' alpha IS "destination-out, then black at the same alpha": those pixels read unlit,
-      // shine 0. Last, because the steps above reuse the silhouette whole; lift and facing are
-      // untouched.
-      sctx.save()
-      reset(sctx)
-      sctx.globalCompositeOperation = 'destination-in'
-      sctx.setTransform(mw / W, 0, 0, mh / H, 0, 0)
-      try { p.stamp.selfLit(sctx) } catch (err) {
-        if (import.meta.dev) console.warn('[lighting maps] self-lit parts failed to draw; skipped', err)
-      }
-      sctx.restore()
-      reset(sctx)
-      sctx.globalCompositeOperation = 'source-in'
-      sctx.fillStyle = litColour(false, 0, facingOn)
-      sctx.fillRect(0, 0, mw, mh)
-      litCtx.drawImage(scratch, 0, 0)
-    }
+    // 4. Stage 3: its self-lit parts (foil lit by its own shader) read unlit on the lit map.
+    if (p.stamp.selfLit) punchSelfLit(sctx, p.stamp.selfLit, mw, mh, W, H, litColour(false, 0, facingOn), reset, litCtx, scratch)
   }
   return true
 }
