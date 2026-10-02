@@ -267,6 +267,19 @@ export function hasVideoSettings(modelId: string): boolean {
   return Object.prototype.hasOwnProperty.call(RULES, modelId)
 }
 
+/**
+ * R11.9a fix round 2 (I1): which of a clip's size settings the model has, so
+ * advice names only those: more than one length, and a resolution that
+ * changes with the option (tried over every tier the services name).
+ */
+export function videoSizeChoices(modelId: string): { duration: boolean; resolution: boolean } | null {
+  if (!hasVideoSettings(modelId)) return null
+  const r = RULES[modelId]!
+  const tiers = ['360p', '480p', '540p', '720p', '768p', '1080p', '2k', '4k']
+  const seen = new Set(tiers.map(t => r.resolution({ resolution: t })))
+  return { duration: !!r.durations && r.durations.length > 1, resolution: seen.size > 1 }
+}
+
 /** The longest clip the model's builder can send — what a linked (unknown) length is priced at. */
 export function maxVideoSeconds(modelId: string): number | null {
   if (!hasVideoSettings(modelId)) return null

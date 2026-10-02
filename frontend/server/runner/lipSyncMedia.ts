@@ -144,8 +144,24 @@ export function httpsHeldBasis(classType: string, inputs: Record<string, unknown
   return null
 }
 
-/** The seconds a delivered clip runs (its video track, read from its bytes), or null when it can't be read. */
-export async function deliveredClipSeconds(bytes: Uint8Array): Promise<number | null> {
-  const info = await mediaInfoOfBytes(bytes, 'video').catch(() => null)
-  return info && Number.isFinite(info.seconds) && info.seconds > 0 ? info.seconds : null
+/**
+ * The seconds a delivered clip is charged on (fix round 2, N4), read from its
+ * bytes: the longer of its video track and its sound track, and of the sound
+ * the start measured (`soundSeconds`), so a sound a little past a whole second
+ * (4.02 s, which the service bills as 5 s) is never charged on the video's
+ * frame-rounded 4.00 s. A Fabric answer with no sound track: its video plus
+ * one frame. The price then rounds it as the service bills (billedSeconds:
+ * whole seconds up). Null when neither track can be read (the hold is charged).
+ */
+export async function deliveredClipSeconds(bytes: Uint8Array, basis: 'audio' | 'video', soundSeconds?: number | null): Promise<number | null> {
+  const ok = (n: number | null | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
+  const video = await mediaInfoOfBytes(bytes, 'video', { frameRate: true }).catch(() => null)
+  const audio = await mediaInfoOfBytes(bytes, 'audio').catch(() => null)
+  const v = ok(video?.seconds) ? video!.seconds : null
+  const a = ok(audio?.seconds) ? audio!.seconds : null
+  if (v === null && a === null) return null
+  const frame = 1 / (ok(video?.fps) ? video!.fps! : 24)
+  const seen = [v ?? 0, a ?? 0, ok(soundSeconds) ? soundSeconds : 0]
+  if (basis === 'audio' && a === null && v !== null) seen.push(v + frame)
+  return Math.max(...seen)
 }

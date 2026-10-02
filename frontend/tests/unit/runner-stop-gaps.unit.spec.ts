@@ -23,11 +23,11 @@ import { EVERY_KNOWN_FAMILY, MEDIA_TOOL_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, LO
 import {
   CARD_EXPORT_ADVICE, CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, LUT_OUTSIDE_WORDS, NOT_INSTALLED_WORDS, PICTURE_BATCH_ADVICE, RUNNER_NOT_ELIGIBLE, SOUND_RATE_ADVICE,
   TOO_MUCH_WORK_WORDS, VIDEO_FORMAT_ADVICE, captionsTooLongWords, lengthWords, madeSoundTooLongWords, oddSettingWords, oddTextWords, paidVideoSettingsAdvice, switchedOffWords,
-  wiredSettingWords, withAdvice, type RunnerReasonCode,
+  wiredSettingWords, wiredValueOutOfRangeWords, withAdvice, type RunnerReasonCode,
 } from '#shared/runner/messages'
-import { FRAME_WIDGET_NAMES, shownLabel, stopGapRefusal, switchedOffNodes, withStaticWiredSettings } from '#shared/runner/stopGaps'
+import { FRAME_WIDGET_NAMES, shownLabel, stopGapRefusal, switchedOffNodes, wiredDearestBound, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
-import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
+import { isRunnerEligible, runnerRuleFor, runnerTakesNode } from '#shared/runner/eligibility'
 import { blockedRunRefusal, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import {
@@ -41,10 +41,10 @@ import { CAPTIONS_MAX_CHARS } from '~~/server/runner/video/table'
 import { WAVE_SOUND_OUTSIDE_WORDS } from '~~/server/runner/video/start'
 import { VIDEO_NOT_MP4 } from '~~/server/runner/media/videoNodes'
 import { MEDIA_TOOLS_MISSING } from '~~/server/media/tools'
-import { startStopGap } from '~~/server/runner/stopGapWords'
+import { paidVideoAdvice, paidVideoMakerOfFrames, startStopGap, wiredValueOutOfRange } from '~~/server/runner/stopGapWords'
 import { localModelStartProblems, slowMotionAiStart } from '~~/server/runner/localModelStart'
-import { saveFramesStartProblem, savedFrameBytesBound } from '~~/server/runner/cards/saveImage'
-import { clipAtCaps } from '~~/server/runner/video/shapes'
+import { saveFramesKeptBytes, saveFramesStartProblem, savedFrameBytesBound, savedFrameTextBytes } from '~~/server/runner/cards/saveImage'
+import { clipAtCaps, paidVideoClipBound } from '~~/server/runner/video/shapes'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { makeKit } from './__runner__/kit'
@@ -261,6 +261,62 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     const p = grain(['z', 0], { z: { class_type: 'GetImageSize', inputs: { image: ['l', 0] } } })
     expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
     expect(stopGapRefusal(withStaticWiredSettings(p, EVERY), EVERY)).toBeNull()
+  })
+
+  // Fix round 2 (N1): the dearest bound is a true bound on what is sent.
+  const music = (duration: unknown, extra: ApiPrompt = {}): ApiPrompt => ({
+    ...extra,
+    m: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration, model_version: 'stereo-melody-large', temperature: 1, top_p: 0, seed: 0 } },
+    s: { class_type: 'SaveAudio', inputs: { audio: ['m', 0], filename_prefix: 'audio/ComfyUI' } },
+  })
+  const sized = { l: loadImage('p.png'), z: { class_type: 'GetImageSize', inputs: { image: ['l', 0] } } } satisfies ApiPrompt
+
+  it('row 17 (N1): Get image size 64 → Generate music duration: taken at its dearest, then failed at its turn before any call, charged nothing', LONG, async () => {
+    const p = music(['z', 0], sized)
+    expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
+    expect(stopGapRefusal(withStaticWiredSettings(p, EVERY), EVERY)).toBeNull()
+    // The label the canvas shows (its rule adds “(frames)” to every `duration`, Generate music's too).
+    const words = wiredValueOutOfRangeWords(shownLabel('GenerateMusicNode', 'duration'), 64, { type: 'INT', min: 1, max: 30 })
+    expect(words).toBe('“Duration (frames)” got 64 from another node; it takes from 1 to 30.')
+    // The turn's check on its own: in range runs, out of range (either end) fails.
+    const at = (value: number) => () => ({ kind: 'number' as const, value, int: true })
+    expect(wiredValueOutOfRange(p, 'm', at(20), EVERY)).toBeNull()
+    expect(wiredValueOutOfRange(p, 'm', at(64), EVERY)).toBe(words)
+    expect(wiredValueOutOfRange(p, 'm', at(0), EVERY)).toBe(wiredValueOutOfRangeWords('Duration (frames)', 0, { type: 'INT', min: 1, max: 30 }))
+    // Through the engine, hosted: held at the dearest, the node fails at its turn, nothing sent, nothing charged.
+    const k = makeKit({ hosted: true, deps: { families: () => EVERY } })
+    await writePng(join(k.root, 'input', 'p.png'), 64, 48)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const t = (await k.store.get(runId))!.takes[0]!
+    expect(t.nodes.z!.status).toBe('done')
+    expect(t.nodes.m!.status).toBe('error')
+    expect(t.nodes.m!.error).toBe(words)
+    expect(k.ledger.hold).toHaveBeenCalled()
+    expect(k.fal.submitted()).toEqual([])
+    expect(k.replicate.submitted()).toEqual([])
+    expect(k.ledger.settle.mock.calls.every(c => c[1] === 0)).toBe(true)
+  })
+
+  it('row 17 (N1): a Primitive 64 wired into Generate music duration is refused before the hold, never sent', LONG, async () => {
+    const p = music(['k', 0], { k: { class_type: 'PrimitiveInt', inputs: { value: 64 } } })
+    const words = wiredValueOutOfRangeWords('Duration (frames)', 64, { type: 'INT', min: 1, max: 30 })
+    expect(stopGapRefusal(withStaticWiredSettings(p, EVERY), EVERY)).toEqual({ nodeId: 'm', classType: 'GenerateMusicNode', code: 'wired-setting', message: words })
+    // In range, it is put in as typed.
+    expect(withStaticWiredSettings(music(['k', 0], { k: { class_type: 'PrimitiveInt', inputs: { value: 12 } } }), EVERY).m!.inputs!.duration).toBe(12)
+    const k = makeKit({ hosted: true, deps: { families: () => EVERY } })
+    await refusedPlainly(k, p, 'wired-setting', words)
+  })
+
+  it('row 17 (N1): the dearest bound needs a least and a most, and R7’s local-model nodes have none', () => {
+    const rule = runnerRuleFor('GenerateMusicNode', music(5).m!.inputs!, EVERY)!
+    expect(wiredDearestBound('GenerateMusicNode', rule, { type: 'INT', min: 1, max: 30 })).toBe(true)
+    expect(wiredDearestBound('GenerateMusicNode', rule, { type: 'INT', max: 30 })).toBe(false)
+    expect(wiredDearestBound('GenerateMusicNode', rule, { type: 'FLOAT', min: 0.5 })).toBe(false)
+    const fi = { image: ['l', 0], multiplier: 2 }
+    const fiRule = runnerRuleFor(FRAME_INTERP_AI_CLASS, fi, EVERY)
+    expect(fiRule).toBeTruthy()
+    expect(wiredDearestBound(FRAME_INTERP_AI_CLASS, fiRule!, fiRule!.widgets?.multiplier)).toBe(false)
   })
 
   it('row 17: a value the run makes for a model choice (no bound), or for a setting the brief names, is refused: "Type this setting in; it can’t be wired."', async () => {
@@ -494,6 +550,86 @@ describe('R11.7 / R11.8 stop-gaps: refused plainly before the hold, never the en
     // Locally the machine is the person's own; Preview image saves at scale 1.
     expect(saveFramesStartProblem(p(4), EVERY, shapes, opts(false))).toBeNull()
     expect(saveFramesStartProblem(p(4, 'PreviewImage'), EVERY, shapes, opts(true))).toBeNull()
+  })
+
+  // ── Fix round 2 ──
+  const paidClip = (model: string, inputs: Record<string, unknown> = {}, title?: string): ApiPrompt => ({
+    v: { class_type: 'GenerateVideoNode', inputs: { model, prompt: 'a boat', aspect_ratio: '16:9', duration: '5', seed: 0, ...inputs }, ...(title ? { _meta: { title } } : {}) } as ApiPrompt[string],
+    c: { class_type: 'Video', inputs: { source: ['v', 0], file: '', export: false, filename_prefix: 'video' } },
+    g: { class_type: 'GetVideoComponents', inputs: { video: ['c', 0] } },
+    t: { class_type: 'VideoTrim', inputs: { frames: ['g', 0], start: 0, end: -1 } },
+    cv: { class_type: 'CreateVideo', inputs: { images: ['t', 0], fps: 24 } },
+    s: saveVideo('cv'),
+  })
+
+  it('fix round 2 (I1 gap): Runway Gen-4.5, Kling 2.5 Turbo Pro and LTX-Video are bounded by their own largest frame: a 5 s clip starts hosted; advice names only settings the model has', async () => {
+    const kit = makeKit({ hosted: true, deps: { families: () => EVERY } })
+    for (const model of ['runway-gen-4.5', 'kling-v2.5-turbo-pro', 'ltx-video']) {
+      const q = await kit.engine.quoteRun({ userId: kit.userId, takes: [paidClip(model)], ...START }).catch(e => e)
+      expect(q instanceof Error ? q.message : null, model).toBeNull()
+    }
+    // Runway at 10 s: past the hosted frames held at once at the 60 fps ceiling; it has a length and no resolution.
+    const err = await kit.engine.quoteRun({ userId: kit.userId, takes: [paidClip('runway-gen-4.5', { duration: '10' })], ...START }).catch(e => e)
+    expect(err.data).toMatchObject({ code: 'too-much-work', nodeId: 't' })
+    expect(err.message.endsWith('Pick a shorter duration on “Generate a video”.'), err.message).toBe(true)
+    expect(paidVideoSettingsAdvice('X', { duration: false, resolution: false })).toBe('Save the video from “X”, then load it with Load video.')
+    expect(paidVideoSettingsAdvice('X', { duration: false, resolution: true })).toBe('Pick a lower resolution on “X”.')
+    expect(kit.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('fix round 2 (I1 gap, m6): a wired duration is to be typed in; the Generate a video named is the one the frames come from', async () => {
+    // A wired duration (bounded at the model's longest): type it in. (Taken only where the runner reads the wire.)
+    const wired = paidClip('veo-3.1', { duration: ['d', 0], model_options: JSON.stringify({ resolution: '4k' }) })
+    expect(paidVideoAdvice(wired, 'v', 'Boat shot')).toBe('Type a shorter duration in on “Boat shot” instead of wiring it, or pick a lower resolution.')
+    expect(paidVideoAdvice(paidClip('runway-gen-4.5', { duration: ['d', 0] }), 'v', 'Boat shot')).toBe('Type a shorter duration in on “Boat shot” instead of wiring it.')
+    // The node is named by its own title through the engine.
+    const kit = makeKit({ hosted: true, deps: { families: () => EVERY } })
+    const titled = paidClip('veo-3.1', { duration: '8', model_options: JSON.stringify({ resolution: '4k' }) }, 'Boat shot')
+    const err = await kit.engine.quoteRun({ userId: kit.userId, takes: [titled], ...START }).catch(e => e)
+    expect(err.data, err.message).toMatchObject({ code: 'too-much-work' })
+    expect(err.message.endsWith('Pick a shorter duration or lower resolution on “Boat shot”.'), err.message).toBe(true)
+    // Only the frames' own chain: a paid video's sound into Create video beside frames from Load video names nothing.
+    const mixed: ApiPrompt = {
+      ...paidClip('veo-3.1'),
+      lv: loadVideo('a.mp4'), lg: { class_type: 'GetVideoComponents', inputs: { video: ['lv', 0] } },
+      cv: { class_type: 'CreateVideo', inputs: { images: ['lg', 0], audio: ['g', 1], fps: 24 } },
+    }
+    expect(paidVideoMakerOfFrames(mixed, 'cv', EVERY)).toBeNull()
+    expect(paidVideoMakerOfFrames(mixed, 't', EVERY)).toBe('v')
+  })
+
+  it('fix round 2 (N3): the saved frames’ embedded prompt and workflow count, and every take’s frames add up with the run’s other kept bytes', async () => {
+    const { v, c, g } = paidClip('veo-3.1', { duration: '8' })
+    const take: ApiPrompt = { v: v!, c: c!, g: g!, si: saveImage(['g', 0]) }
+    const bound = paidVideoClipBound(take, ['c', 0])!
+    const shapes = new Map([['g:0', bound]])
+    const clip = () => clipAtCaps(MEDIA_CAPS.hosted)
+    const plain = saveFramesKeptBytes(take, EVERY, shapes, { clipAtCaps: clip })
+    expect(plain.first).toEqual({ nodeId: 'si', classType: 'SaveImage' })
+    expect(plain.bytes).toBe(bound.count * (savedFrameBytesBound(bound.w, bound.h) + savedFrameTextBytes(take, null)))
+    const workflow = { nodes: 'x'.repeat(1_000_000) }
+    const withWorkflow = saveFramesKeptBytes(take, EVERY, shapes, { clipAtCaps: clip, workflow })
+    expect(withWorkflow.bytes - plain.bytes).toBe(bound.count * savedFrameTextBytes(null, workflow) - bound.count * savedFrameTextBytes(null, null))
+    expect(saveFramesKeptBytes({ ...take, si: { ...take.si!, inputs: { ...take.si!.inputs, embed_metadata: false } } }, EVERY, shapes, { clipAtCaps: clip, workflow }).bytes)
+      .toBe(bound.count * savedFrameBytesBound(bound.w, bound.h))
+    // Through the engine, hosted, with the room set between one take and two: one starts, two are refused.
+    const was = MEDIA_CAPS.hosted.keptBytesPerRun
+    try {
+      ;(MEDIA_CAPS.hosted as { keptBytesPerRun: number }).keptBytesPerRun = Math.floor(plain.bytes * 1.5)
+      const kit = makeKit({ hosted: true, deps: { families: () => EVERY } })
+      const one = await kit.engine.quoteRun({ userId: kit.userId, takes: [take], ...START }).catch(e => e)
+      expect(one instanceof Error ? one.message : null).toBeNull()
+      const two = await kit.engine.quoteRun({ userId: kit.userId, takes: [take, take], ...START }).catch(e => e)
+      expect(two.data, two.message).toMatchObject({ code: 'too-much-work', nodeId: 'si' })
+      // One take with a 1 MB workflow embedded in each of its 193 frames: past the room too.
+      ;(MEDIA_CAPS.hosted as { keptBytesPerRun: number }).keptBytesPerRun = Math.floor(plain.bytes + bound.count * 500_000)
+      const big = await kit.engine.quoteRun({ userId: kit.userId, takes: [take], ...START, workflow }).catch(e => e)
+      expect(big.data, big.message).toMatchObject({ code: 'too-much-work', nodeId: 'si' })
+      expect(kit.ledger.hold).not.toHaveBeenCalled()
+    }
+    finally {
+      ;(MEDIA_CAPS.hosted as { keptBytesPerRun: number }).keptBytesPerRun = was
+    }
   })
 
   it('several still pictures into Slow motion (AI) are refused plainly; one is handed on', async () => {

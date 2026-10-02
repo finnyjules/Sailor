@@ -18,11 +18,11 @@ import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiLink, type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
-import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, paidVideoSettingsAdvice, withAdvice, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
+import { NOT_INSTALLED_WORDS, RUNNER_NOT_ELIGIBLE, withAdvice, RUNNER_SOUND_TOO_LONG, switchedOffWords, type GateChoice, type RunnerMessage, type RunnerReasonCode } from '#shared/runner/messages'
 import { stopGapRefusal, switchedOffNodes, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { objectInfoDisplayName } from '../native/objectInfo'
 import { UNNAMED_NODE, workflowNodeTitles } from '#shared/runner/needsEngine'
-import { madeSoundWords, paidVideoAncestor, paidVideoSoundRefusal, soundReaderName, startStopGap, type StartProblem } from './stopGapWords'
+import { madeSoundWords, paidVideoAdvice, paidVideoMakerOfFrames, paidVideoSoundRefusal, soundReaderName, startStopGap, wiredValueOutOfRange, type StartProblem } from './stopGapWords'
 import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
@@ -65,7 +65,7 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { clipAtCaps, frameShapes, videoSourceShapeOf } from './video/shapes'
-import { saveFramesStartProblem } from './cards/saveImage'
+import { SAVE_FRAMES_TOO_MUCH, saveFramesKeptBytes } from './cards/saveImage'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
 import { lensStartRefusal } from './cards/lensBlur'
 import { keepStartRefusal } from './compositor/keep'
@@ -1254,6 +1254,10 @@ export function createEngine(deps: EngineDeps) {
       // at submit, so it carries on.
       const switched = resuming ? null : switchedSinceHold(take.prompt[id], families, leg.families ? new Set(leg.families) : undefined)
       if (switched) throw new Error(switched)
+      // Fix round 2 (N1): a value another node gave a setting, outside the setting's own range or choices: the node
+      // fails here, before anything is read, handed off or sent (charged nothing), as ComfyUI refuses it.
+      const outOfRange = resuming ? null : wiredValueOutOfRange(take.prompt, id, valueAt(take), families)
+      if (outOfRange) throw new Error(outOfRange)
       // One read of each file for this node's turn (F22 fix round 1): what is
       // measured and priced here is exactly what the hand-off uploads
       // (handoff.ts toUrlBytes, keyed by the bytes' sha256), so a file
@@ -1906,7 +1910,7 @@ export function createEngine(deps: EngineDeps) {
       // delivered, never above the hold (lipSyncMedia.ts httpsHeldBasis); a clip that can't be read charges the hold.
       const basis = resuming ? null : httpsHeldBasis(take.prompt[id]!.class_type, take.prompt[id]!.inputs ?? {}, inputSeconds)
       if (basis && inputSeconds && saved[0]) {
-        const delivered = await deliveredClipSeconds(await files.read(saved[0])).catch(() => null)
+        const delivered = await deliveredClipSeconds(await files.read(saved[0]), basis, inputSeconds.audio).catch(() => null)
         if (delivered != null) {
           const at = basis === 'audio' ? { ...inputSeconds, audio: delivered, audioUpTo: null } : { ...inputSeconds, video: delivered, videoUpTo: null }
           rec.credits = Math.min(rec.credits, nodeCredits(take.prompt[id]!, inputPixels, families, at))
@@ -2231,8 +2235,9 @@ export function createEngine(deps: EngineDeps) {
     const stopGap = (p: StartProblem) => {
       const r = startStopGap(p)
       // Fix round 1 (I1): past a work or batch figure on frames a paid video makes, the advice is that video's own settings.
-      const maker = r.code === 'too-much-work' && p.nodeId !== undefined ? paidVideoAncestor(namingPrompt, p.nodeId) : null
-      const message = maker ? withAdvice(p.message, paidVideoSettingsAdvice(nodeName(namingPrompt, maker) ?? 'Generate a video')) : r.message
+      // Fix round 2 (m6): only the Generate a video the node's own frames come from, and only the settings its model has.
+      const maker = r.code === 'too-much-work' && p.nodeId !== undefined ? paidVideoMakerOfFrames(namingPrompt, p.nodeId, deps.families?.() ?? NO_FAMILIES) : null
+      const message = maker ? withAdvice(p.message, paidVideoAdvice(namingPrompt, maker, nodeName(namingPrompt, maker) ?? 'Generate a video')) : r.message
       return refuse(named(p.nodeId, message), 400, { nodeId: p.nodeId, classType: p.classType, ...(p.file ? { file: p.file } : {}), code: r.code })
     }
     // R11.8's stop-gaps: a made sound past a reader's cap names the maker's setting to shorten; a paid video
@@ -2606,21 +2611,13 @@ export function createEngine(deps: EngineDeps) {
         measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized, ...pictured }, sha: was?.sha ?? {} }
       }
     }
-    // Fix round 1 (I2, ruling (q)): Save image and Preview image saving every frame of a clip, counted against the run's
-    // kept room before the hold (hosted), "too much work for one run here" past it.
-    for (const p of prompts) {
-      if (!Object.values(p).some(n => (n.class_type === 'SaveImage' || n.class_type === 'PreviewImage') && isLink(n.inputs?.images) && outputKind(p, n.inputs.images as ApiLink, outputKindsFor(families)) === 'frames')) continue
-      const caps = deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
-      const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
-      const bad = saveFramesStartProblem(p, families, shapes, { hosted: deps.hosted(), clipAtCaps: () => clipAtCaps(caps) })
-      if (bad) throw stopGap(bad)
-    }
     // The sound effects' start pass (R6.9, ./video/soundShapes.ts): every sound's rate, channels and length
     // through the chain, from the sources' headers and the widgets. Where Python itself raises on what is known
     // now (a sound's channels, a trim of no samples) it is refused in the node's words; a node past a limit (the
     // sound held at once, the sound caps, the run's kept total with the video effects' peak) or reading a sound
     // that can't be known before the run is refused plainly (R11.9a): a made sound named with its maker's
     // setting to shorten, a paid video model's sound with the model and the limit.
+    let soundKept = 0
     if (prompts.some(p => hasSoundEffect(p, families))) {
       const all = await Promise.all(prompts.map(p => soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal }))))
       for (const [k, p] of prompts.entries()) {
@@ -2630,7 +2627,9 @@ export function createEngine(deps: EngineDeps) {
       // Kept bytes: every take's sounds, never let go, and every take's video peak (several takes run side by side).
       let keptAll = 0
       for (const [k, p] of prompts.entries()) {
-        keptAll += soundKeptBytes(p, families, all[k]!, deps.hosted())
+        const sounds = soundKeptBytes(p, families, all[k]!, deps.hosted())
+        keptAll += sounds
+        soundKept += sounds
         if (hasVideoEffect(p, families)) {
           const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
           const peak = keptPeak(p, families, shapes, { release: prompts.length === 1, caps: deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local })
@@ -2641,6 +2640,30 @@ export function createEngine(deps: EngineDeps) {
         const bad = soundEffectStartProblems(p, families, { hosted: deps.hosted(), sounds: all[k]!, keptOther: keptAll - soundKeptBytes(p, families, all[k]!, deps.hosted()) })
         if (bad) throw soundStopGap(p, bad)
       }
+    }
+    // Fix round 1 (I2, ruling (q)), fix round 2 (N3): Save image and Preview image saving every frame of a clip
+    // (each frame's PNG bound and its embedded prompt and workflow), every take's together, counted with the run's
+    // other kept bytes (the local-model batches, the sounds, the video effects' peaks) against its kept room before
+    // the hold (hosted): "too much work for one run here" past it.
+    const framesSaved = (p: ApiPrompt) => Object.values(p).some(n => (n.class_type === 'SaveImage' || n.class_type === 'PreviewImage')
+      && isLink(n.inputs?.images) && outputKind(p, n.inputs.images as ApiLink, outputKindsFor(families)) === 'frames')
+    const room = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
+    if (Number.isFinite(room) && prompts.some(framesSaved)) {
+      const caps = deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+      let total = localKept + soundKept
+      let first: { nodeId: string; classType: string } | null = null
+      for (const p of prompts) {
+        const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
+        if (hasVideoEffect(p, families)) {
+          const peak = keptPeak(p, families, shapes, { release: prompts.length === 1, caps })
+          total += peak ? peak.bytes : Number.POSITIVE_INFINITY
+        }
+        if (!framesSaved(p)) continue
+        const saved = saveFramesKeptBytes(p, families, shapes, { clipAtCaps: () => clipAtCaps(caps), workflow: storableWorkflow(i.workflow) })
+        total += saved.bytes
+        first ??= saved.first
+      }
+      if (first && total > room) throw stopGap({ message: SAVE_FRAMES_TOO_MUCH, ...first })
     }
     // R11.8 fix round 1 (I2): Create video reading a paid maker's sound past R5's sound caps: the engine, as before.
     for (const p of prompts) {

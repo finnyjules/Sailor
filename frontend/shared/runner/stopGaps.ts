@@ -27,12 +27,12 @@ import {
 } from './eligibility'
 import { outputKind } from './values'
 import { EFFECT_FAMILY_OF, asciiRampOf, effectTextNotPortable, painterFileIsPortable } from './effects'
-import { SAM_MASK_WORDS, VOCALS_CLASS, WHISPER_CLASS } from './localModels'
+import { SAM_MASK_WORDS, VOCALS_CLASS, WHISPER_CLASS, isLocalModelClass } from './localModels'
 import { parseMaskPoints } from './samInput'
 import { LIPSYNC_UPLOAD_SOUND, lipSyncEngineMediaWords } from './lipSyncEngines'
 import { LIPSYNC_SILENCE_NEEDS_UPLOAD } from './soundIn'
 import {
-  CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, ODD_SETTING_WORDS, oddSettingWords, oddTextWords, wiredSettingWords, type RunnerReasonCode,
+  CLIP_INTO_PICTURE_WORDS, LETTERS_WORDS, ODD_SETTING_WORDS, oddSettingWords, oddTextWords, wiredSettingWords, wiredValueOutOfRangeWords, type RunnerReasonCode,
 } from './messages'
 
 export interface StopGapRefusal {
@@ -69,18 +69,38 @@ export const ROW_17_NAMED: Readonly<Record<string, readonly string[]>> = {
 }
 
 /**
- * Fix round 1 (M1): whether a setting wired to a value the run makes has a
- * dearest bound the price and the start can rest on: a number with a most,
- * a choice, a switch, on a paid node (priced at its dearest, R3) or a picture
- * effect (its work judged at its turn, before any pixel). Anything else (a
- * free text, a model choice that picks the service, a setting the start
- * passes must read: video and sound effects, R7's nodes, cards) has none.
+ * Fix round 1 (M1), fix round 2 (N1): whether a setting wired to a value the
+ * run makes has a dearest bound the price and the start can rest on: a number
+ * with both a least and a most (a setting can be dearest at either end, e.g.
+ * speech's speed), a choice, a switch, on a paid node (priced at its dearest,
+ * R3) or a picture effect (its work judged at its turn, before any pixel).
+ * What is sent is held to that bound at the node's turn
+ * (server/runner/stopGapWords.ts wiredValueOutOfRange): out of it, the node
+ * fails before any call. Anything else (a free text, a model choice that picks
+ * the service, a setting the start passes must read: video and sound effects,
+ * R7's local-model nodes, cards) has none.
  */
 export function wiredDearestBound(classType: string, rule: RunnerNodeRule, spec: RunnerWidgetSpec | undefined): boolean {
   if (!spec) return false
-  const bounded = spec.type === 'BOOLEAN' || (spec.type === 'COMBO' && !!spec.options?.length) || ((spec.type === 'INT' || spec.type === 'FLOAT') && spec.max !== undefined)
+  const bounded = spec.type === 'BOOLEAN' || (spec.type === 'COMBO' && !!spec.options?.length)
+    || ((spec.type === 'INT' || spec.type === 'FLOAT') && spec.min !== undefined && spec.max !== undefined)
   if (!bounded) return false
+  // R7's local-model nodes: their start passes read the setting as a number (no bound): refused instead.
+  if (isLocalModelClass(classType)) return false
   return rule.local === undefined || Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, classType)
+}
+
+/**
+ * Fix round 2 (N1): a card's own value (withStaticWiredSettings's) that the
+ * setting can't take, with its words, or null. Never sent: refused before the
+ * hold, as ComfyUI refuses it.
+ */
+export function staticWiredValueError(prompt: ApiPrompt, classType: string, name: string, link: ApiLink, spec: RunnerWidgetSpec): string | null {
+  const known = staticValueOf(prompt, throughGates(prompt, link))
+  if (!known) return null
+  const value = known.kind === 'text' ? known.text : known.value
+  const err = widgetError({ [name]: value }, name, spec)
+  return err === null || err === 'wired' ? null : wiredValueOutOfRangeWords(shownLabel(classType, name), value, spec)
 }
 
 /** The input a row keyed by model reads its model from, where it is a plain `model` setting (not Lip-sync's engine). */
@@ -198,6 +218,9 @@ export function nodeStopGap(prompt: ApiPrompt, id: string, families: ReadonlySet
     lenient = true
     // m2: an object value (`{"__value__": …}`) isn't wired: its value can't be read.
     if (!isLink(v)) return out('odd-text', oddSettingWords(shownLabel(n.class_type, name)))
+    // N1: a card's own value the setting can't take (left wired by withStaticWiredSettings): refused, never sent.
+    const badStatic = spec ? staticWiredValueError(prompt, n.class_type, name, v, spec) : null
+    if (badStatic) return out('wired-setting', badStatic)
     const named = ROW_17_NAMED[n.class_type]?.includes(name) ?? false
     if (named || !rule || !wiredDearestBound(n.class_type, rule, spec)) return out('wired-setting', wiredSettingWords(shownLabel(n.class_type, name)))
   }

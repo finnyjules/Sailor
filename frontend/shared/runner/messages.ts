@@ -89,6 +89,22 @@ export function wiredSettingWords(label: string): string {
   return `“${label}” gets its value from another node during the run. Type this setting in; it can’t be wired.`
 }
 
+/**
+ * Fix round 2 (N1): a value another node gives a setting (made in the run, or a
+ * card's own) that the setting can't take, as ComfyUI refuses it: the label the
+ * node shows, the value, and the setting's range or choices.
+ */
+export function wiredValueOutOfRangeWords(label: string, value: unknown, spec: { type: string; min?: number; max?: number; options?: readonly string[] }): string {
+  const got = typeof value === 'string' ? `“${value}”` : String(value)
+  const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 6 })
+  if (spec.type === 'COMBO') return `“${label}” got ${got} from another node, which isn’t one of its choices. Pick one on the node instead.`
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return `“${label}” got ${got} from another node, which isn’t a number. Type this setting in instead.`
+  const range = spec.min !== undefined && spec.max !== undefined ? `from ${fmt(spec.min)} to ${fmt(spec.max)}`
+    : spec.max !== undefined ? `at most ${fmt(spec.max)}` : `at least ${fmt(spec.min!)}`
+  return `“${label}” got ${got} from another node; it takes ${range}.`
+}
+
 /** Row 18: a setting's value Python reads its own way (or an object where a value belongs), by the label the node shows. */
 export function oddSettingWords(label: string): string {
   return `The “${label}” setting can’t be read here. Set it again on the node.`
@@ -102,9 +118,19 @@ export function oddTextWords(what: string): string {
 /** Fix round 1 (m4): a setting the runner can't take, for a reason no word above names. */
 export const ODD_SETTING_WORDS = 'A setting on this node can’t be read here. Set it again on the node.'
 
-/** Fix round 1 (I1): a paid video whose own settings make a clip past what one run here can work on. */
-export function paidVideoSettingsAdvice(title: string): string {
-  return `Pick a shorter duration or lower resolution on “${title}”.`
+/**
+ * Fix round 1 (I1), fix round 2 (I1 gap, m6): a paid video whose own settings
+ * make a clip past what one run here can work on: advice naming only the
+ * settings the model has (`choices`, videoSettings.ts videoSizeChoices); a
+ * wired duration is to be typed in; a model with neither, to save the video
+ * and load it (its real length is then read from the file).
+ */
+export function paidVideoSettingsAdvice(title: string, o: { duration: boolean; resolution: boolean; durationWired?: boolean } = { duration: true, resolution: true }): string {
+  if (o.durationWired && o.duration) return `Type a shorter duration in on “${title}” instead of wiring it${o.resolution ? ', or pick a lower resolution' : ''}.`
+  if (o.duration && o.resolution) return `Pick a shorter duration or lower resolution on “${title}”.`
+  if (o.duration) return `Pick a shorter duration on “${title}”.`
+  if (o.resolution) return `Pick a lower resolution on “${title}”.`
+  return `Save the video from “${title}”, then load it with Load video.`
 }
 
 /** Row 19. */

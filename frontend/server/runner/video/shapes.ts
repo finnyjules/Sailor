@@ -43,27 +43,55 @@ export function clipAtCaps(caps: { batchFrames: number; framePixels: number }): 
 
 /**
  * R11.9a fix round 1 (I1): the most frames a second any paid video model
- * Sailor offers makes. None renders above 60 fps (they render 24–30, LTX up
- * to 50), so a clip's frames are at most its seconds × this, plus one.
+ * Sailor offers makes, where the model's own rate isn't pinned below
+ * (VEO_FPS). None renders above 60 fps, so a clip's frames are at most its
+ * seconds × this, plus one.
  */
 export const PAID_VIDEO_FPS_CEILING = 60
+
+/**
+ * Fix round 2 (N2): Veo 3.1 (all three) renders 24 fps, at 16:9 or 9:16 only,
+ * whatever aspect is typed or the first frame's shape (video.ts sends VEO_AR's
+ * two, else 16:9): its real frame at each resolution, long side × short side.
+ */
+const VEO_MODELS: ReadonlySet<string> = new Set(['veo-3.1', 'veo-3.1-fast', 'veo-3.1-lite'])
+export const VEO_FPS = 24
+/**
+ * A model's own frame rate where its docs pin it (else PAID_VIDEO_FPS_CEILING):
+ * Veo 3.1, 24 fps (Google's docs); LTX-Video, "24 FPS" (its README, read 2026-10-02).
+ */
+const MODEL_FPS: Readonly<Record<string, number>> = { 'veo-3.1': VEO_FPS, 'veo-3.1-fast': VEO_FPS, 'veo-3.1-lite': VEO_FPS, 'ltx-video': 24 }
+const VEO_FRAME: Readonly<Record<string, { long: number; short: number }>> = {
+  '720p': { long: 1280, short: 720 }, '1080p': { long: 1920, short: 1080 }, '4k': { long: 3840, short: 2160 },
+}
 
 /** A resolution setting's shorter side in pixels (the services' own names), or null for one not known. */
 const SHORT_SIDE: Readonly<Record<string, number>> = {
   '360p': 360, '480p': 480, '540p': 540, '580p': 580, '720p': 720, '768p': 768, '1080p': 1080, '1440p': 1440, '2k': 1440, '4k': 2160,
 }
 
-/** The widest aspect a video service takes (21:9), for an aspect ratio that is wired or not readable. */
+/**
+ * The widest aspect a video service renders (21:9): where a model's real frame
+ * isn't pinned, its long side is at most its short side × this, and the frame
+ * is bounded as that long side square (the builders may not send the typed
+ * aspect, and a first frame sets the shape on several models).
+ */
 const WIDEST_ASPECT = 21 / 9
 
-/** An aspect ratio setting ("16:9") as width / height, or null. */
-function aspectOf(v: unknown): number | null {
-  if (typeof v !== 'string') return null
-  const m = /^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/.exec(v)
-  if (!m) return null
-  const w = Number(m[1])
-  const h = Number(m[2])
-  return w > 0 && h > 0 ? w / h : null
+/**
+ * Fix round 2 (I1 gap): the long side of the largest frame of a model with no
+ * resolution setting (bounded as that side square):
+ * - Runway Gen-4.5: Runway's Gen-4 frames are 720p class (1280×720, 1104×832,
+ *   960×960, and 1584×672 at its widest); the builder sends 16:9, 9:16, 1:1,
+ *   4:3 or 3:4. Its widest, 1584.
+ * - Kling 2.5 Turbo Pro: 1080p (fal's and Replicate's pages), at 16:9, 9:16 or 1:1: 1920.
+ * - LTX-Video: "768x512", working best "under 720 x 1280" (its README, read
+ *   2026-10-02); the builder sends no size: 1280.
+ */
+const FIXED_LONG_SIDE: Readonly<Record<string, number>> = {
+  'runway-gen-4.5': 1584,
+  'kling-v2.5-turbo-pro': 1920,
+  'ltx-video': 1280,
 }
 
 /** The paid video maker a VIDEO wire comes from (through Gates and Video cards' sources), or null. */
@@ -77,13 +105,17 @@ export function paidVideoMakerOf(prompt: ApiPrompt, link: ApiLink, depth = 0): s
 }
 
 /**
- * R11.9a fix round 1 (I1): a paid video's clip bounded from its maker's own
- * settings (Generate a video): the length its model renders (a wired length:
- * the model's longest) × PAID_VIDEO_FPS_CEILING, at the resolution it asks for
- * (its shorter side), at its aspect ratio (wired or unreadable: the widest).
- * A true upper bound, never a fact a refusal on the count rests on alone
- * (`exact: false`). Null where the settings can't bound it (another maker, a
- * wired model or options, a resolution not known): held at the caps as before.
+ * R11.9a fix round 1 (I1), fix round 2 (N2, the I1 gap): a paid video's clip
+ * bounded from its maker's own settings (Generate a video): the length its
+ * model renders (a wired length: the model's longest) × its frame rate
+ * (MODEL_FPS, else PAID_VIDEO_FPS_CEILING), plus one, at the largest frame it renders
+ * for its resolution: Veo's real frame (long × short), a model with no
+ * resolution its largest frame's long side square (FIXED_LONG_SIDE), any other
+ * the resolution's short side × 21:9 square. Never the typed aspect (the
+ * builder may not send it). A true upper bound, never a fact a refusal on the
+ * count rests on alone (`exact: false`). Null where the settings can't bound
+ * it (another maker, a wired model or options, a size not known): held at the
+ * caps as before.
  */
 export function paidVideoClipBound(prompt: ApiPrompt, link: ApiLink): (FrameShape & { seconds: number }) | null {
   const id = paidVideoMakerOf(prompt, link)
@@ -94,13 +126,19 @@ export function paidVideoClipBound(prompt: ApiPrompt, link: ApiLink): (FrameShap
   const model = resolveVideoModelId(inputs.model)
   const s = effectiveVideoSettings(model, isLink(inputs.duration) ? Number.MAX_SAFE_INTEGER : inputs.duration, inputs.aspect_ratio, inputs.model_options, inputs.image)
   if (!s || !(s.seconds > 0)) return null
-  const short = s.resolution ? SHORT_SIDE[s.resolution.toLowerCase()] : undefined
-  if (!short) return null
-  const ratio = (isLink(inputs.aspect_ratio) ? null : aspectOf(inputs.aspect_ratio)) ?? WIDEST_ASPECT
   const even = (x: number) => 2 * Math.ceil(x / 2)
-  const w = ratio >= 1 ? even(short * ratio) : short
-  const h = ratio >= 1 ? short : even(short / ratio)
-  return { count: Math.ceil(s.seconds * PAID_VIDEO_FPS_CEILING) + 1, w, h, exact: false, seconds: s.seconds }
+  const res = s.resolution?.toLowerCase() ?? null
+  let w: number
+  let h: number
+  if (VEO_MODELS.has(model) && res && VEO_FRAME[res]) ({ long: w, short: h } = VEO_FRAME[res]!)
+  else if (!res && FIXED_LONG_SIDE[model]) w = h = FIXED_LONG_SIDE[model]!
+  else {
+    const short = res ? SHORT_SIDE[res] : undefined
+    if (!short) return null
+    w = h = even(short * WIDEST_ASPECT)
+  }
+  const fps = MODEL_FPS[model] ?? PAID_VIDEO_FPS_CEILING
+  return { count: Math.ceil(s.seconds * fps) + 1, w, h, exact: false, seconds: s.seconds }
 }
 
 /** Whether a VIDEO wire brings a paid video model's video (through Gates and Video cards' sources): sized only after it runs. */

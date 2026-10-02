@@ -19,6 +19,15 @@
  */
 import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { GATE_CLASS, isLink } from '#shared/runner/graph'
+import { outputKindsFor, resolveVideoModelId, runnerRuleFor, widgetError } from '#shared/runner/eligibility'
+import { outputKind } from '#shared/runner/values'
+import { videoSizeChoices } from '#shared/pricing/videoSettings'
+import { paidVideoMakerOf } from './video/shapes'
+import type { RunnerFamily } from '#shared/runner/families'
+import { shownLabel } from '#shared/runner/stopGaps'
+import { paidVideoSettingsAdvice, wiredValueOutOfRangeWords } from '#shared/runner/messages'
+import { withWiredValues } from './values'
+import type { RunnerValue } from './types'
 import { MEDIA_WORDS } from '#shared/runner/media'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { LOCAL_MODEL_WORDS, OBJECT_REMOVE_WORDS, SLOW_MOTION_AI_WORDS, UPSCALE_2X_WORDS, VOCALS_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
@@ -139,25 +148,35 @@ export function madeSoundWords(prompt: ApiPrompt, link: ApiLink, o: { reader: st
 }
 
 /**
- * Fix round 1 (I1): the Generate a video node a node's frames come from (any
- * ancestor), whose own settings bound the clip, or null.
+ * Fix round 1 (I1), fix round 2 (m6): the Generate a video node a node's
+ * frames come from, following only its frames and video wires back (never a
+ * mask, a sound or a picture from another branch), or null.
  */
-export function paidVideoAncestor(prompt: ApiPrompt, nodeId: string): string | null {
+export function paidVideoMakerOfFrames(prompt: ApiPrompt, nodeId: string, families: ReadonlySet<RunnerFamily>): string | null {
+  const kinds = outputKindsFor(families)
   const seen = new Set<string>()
   const walk = (id: string): string | null => {
     if (seen.has(id) || seen.size > 512) return null
     seen.add(id)
-    const n = prompt[id]
-    if (!n) return null
-    if (n.class_type === 'GenerateVideoNode' && id !== nodeId) return id
-    for (const v of Object.values(n.inputs ?? {})) {
+    for (const v of Object.values(prompt[id]?.inputs ?? {})) {
       if (!isLink(v)) continue
+      const maker = paidVideoMakerOf(prompt, v)
+      if (maker) return prompt[maker]?.class_type === 'GenerateVideoNode' ? maker : null
+      const kind = outputKind(prompt, v, kinds)
+      if (kind !== 'frames' && kind !== 'video') continue
       const got = walk(v[0])
       if (got) return got
     }
     return null
   }
   return walk(nodeId)
+}
+
+/** Fix round 2 (I1 gap, m6): the advice for a paid video's clip past a figure, naming only the settings its model has. */
+export function paidVideoAdvice(prompt: ApiPrompt, makerId: string, title: string): string {
+  const inputs = prompt[makerId]?.inputs ?? {}
+  const choices = isLink(inputs.model) ? null : videoSizeChoices(resolveVideoModelId(inputs.model))
+  return paidVideoSettingsAdvice(title, { ...(choices ?? { duration: true, resolution: true }), durationWired: isLink(inputs.duration) })
 }
 
 /** The paid video model a GetVideoComponents' video comes from (through Gates and Video cards), named plainly, or null. */
@@ -201,4 +220,32 @@ export function paidVideoSoundRefusal(prompt: ApiPrompt, effectId: string, limit
   }
   const model = walk(effectId)
   return model ? paidVideoSoundWords(model, limitSeconds) : null
+}
+
+/**
+ * Fix round 2 (N1): at a node's turn, every setting a wire gives a value
+ * (made in the run: priced and judged at the setting's dearest), checked
+ * against the setting's own least, most and choices, as ComfyUI checks it.
+ * Out of them: the words naming the setting and its range, and the node fails
+ * before any call (charged nothing). Null when every wired setting is in range.
+ */
+export function wiredValueOutOfRange(
+  prompt: ApiPrompt, nodeId: string, valueAt: (link: [string, number]) => RunnerValue | undefined, families: ReadonlySet<RunnerFamily>,
+): string | null {
+  const node = prompt[nodeId]
+  if (!node || node.class_type === GATE_CLASS) return null
+  const inputs = node.inputs ?? {}
+  const rule = runnerRuleFor(node.class_type, inputs, families)
+  const wired = Object.entries(rule?.widgets ?? {}).filter(([name]) => isLink(inputs[name]) && !rule?.valueInputs?.[name])
+  if (!wired.length) return null
+  // A value missing is withWiredValues's own refusal, at the planning step: not judged here.
+  let given: Record<string, unknown>
+  try { given = withWiredValues(prompt, nodeId, valueAt).prompt[nodeId]?.inputs ?? {} }
+  catch { return null }
+  for (const [name, spec] of wired) {
+    if (isLink(given[name])) continue
+    const err = widgetError(given, name, spec)
+    if (err !== null && err !== 'wired') return wiredValueOutOfRangeWords(shownLabel(node.class_type, name), given[name], spec)
+  }
+  return null
 }

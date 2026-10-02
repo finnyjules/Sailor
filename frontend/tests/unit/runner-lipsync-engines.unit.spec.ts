@@ -21,7 +21,7 @@ import { lipSyncEngineMediaCheck } from '~~/server/runner/lipSyncMedia'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
+import { AudioSample, AudioSampleSource, BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
 import { createFakeFal, createFakeReplicate, makeKit, rgbPng1x1, until } from './__runner__/kit'
 import { requireMediaTools } from './__runner__/mediaParity'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -356,6 +356,28 @@ async function mp4(seconds: number, width = 1280, height = 720): Promise<Buffer>
   return Buffer.from((out.target as BufferTarget).buffer!)
 }
 
+/** Fix round 2 (N4): an MP4 with a picture track of `seconds` at `fps` and a silent 16-bit sound track of `soundSeconds`. */
+async function mp4WithSound(seconds: number, fps: number, soundSeconds: number): Promise<Buffer> {
+  const out = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() })
+  const src = new EncodedVideoPacketSource('avc')
+  out.addVideoTrack(src, { frameRate: fps })
+  const sound = new AudioSampleSource({ codec: 'pcm-s16' })
+  out.addAudioTrack(sound)
+  await out.start()
+  const description = new Uint8Array([1, 0x42, 0xC0, 0x1E, 0xFF, 0xE1, 0, 0x0A, 0x67, 0x42, 0xC0, 0x1E, 0xDA, 0x02, 0x80, 0xBF, 0xE5, 0x84, 1, 0, 4, 0x68, 0xCE, 0x3C, 0x80])
+  const frames = Math.round(seconds * fps)
+  for (let i = 0; i < frames; i++) {
+    await src.add(new EncodedPacket(new Uint8Array([0, 0, 0, 1, 0x65]), i === 0 ? 'key' : 'delta', i / fps, 1 / fps),
+      i === 0 ? { decoderConfig: { codec: 'avc1.42c01e', codedWidth: 1280, codedHeight: 720, description } } : undefined)
+  }
+  const rate = 8000
+  const sample = new AudioSample({ data: new Int16Array(Math.round(soundSeconds * rate)), format: 's16', numberOfChannels: 1, sampleRate: rate, timestamp: 0 })
+  await sound.add(sample)
+  sample.close()
+  await out.finalize()
+  return Buffer.from((out.target as BufferTarget).buffer!)
+}
+
 async function kitWith(hosted: boolean, files: Record<string, Uint8Array | Buffer>, families: ReadonlySet<RunnerFamily> = ON) {
   const fal = createFakeFal()
   const k = makeKit({ hosted, available: 50_000, fal, replicate: createFakeReplicate(), deps: { families: () => families } })
@@ -535,7 +557,7 @@ describe('on the engine (fake Replicate and fal)', () => {
         const heldAt = priceGraph(graph(), { families: ON, inputSeconds: { n: { [`${basis}UpTo`]: cap } } }).nodes!.n!
         const deliveredAt = priceGraph(graph(), { families: ON, inputSeconds: { n: basis === 'audio' ? { audio: 4 } : { audio: 2, video: 4 } } }).nodes!.n!
         expect(deliveredAt).toBeLessThan(heldAt)
-        const k = kitAnswering(new Uint8Array(await mp4(4)), files)
+        const k = kitAnswering(new Uint8Array(await mp4WithSound(4, 25, 4)), files)
         const { run } = await runOf(k, graph())
         expect(run.status, JSON.stringify(run.takes[0]?.nodes)).toBe('done')
         const holdCredits = k.ledger.hold.mock.calls[0]![1] as number
@@ -548,7 +570,27 @@ describe('on the engine (fake Replicate and fal)', () => {
         expect(unread.run.status, JSON.stringify(unread.run.takes[0]?.nodes)).toBe('done')
         expect(unread.run.takes[0]!.nodes.n!.credits).toBe(heldAt)
       }, 60_000)
+
+      it(`${name}: fix round 2 (N4): a 4.02 s sound on a 4.00 s video is charged as the service bills it, 5 s`, async () => {
+        await requireMediaTools()
+        const at5 = priceGraph(graph(), { families: ON, inputSeconds: { n: basis === 'audio' ? { audio: 5 } : { audio: 2, video: 5 } } }).nodes!.n!
+        const at4 = priceGraph(graph(), { families: ON, inputSeconds: { n: basis === 'audio' ? { audio: 4 } : { audio: 2, video: 4 } } }).nodes!.n!
+        expect(at5).toBeGreaterThan(at4)
+        const k = kitAnswering(new Uint8Array(await mp4WithSound(4, 25, 4.02)), files)
+        const { run } = await runOf(k, graph())
+        expect(run.status, JSON.stringify(run.takes[0]?.nodes)).toBe('done')
+        expect(run.takes[0]!.nodes.n!.credits).toBe(at5)
+      }, 60_000)
     }
+
+    it('fix round 2 (N4): a Fabric answer with no sound track is charged on its video plus one frame (4.00 s at 10 fps → 5 s billed)', async () => {
+      await requireMediaTools()
+      const graph = () => node(fabricOpts({ audio: 'https://example.com/v.wav' }))
+      const at5 = priceGraph(graph(), { families: ON, inputSeconds: { n: { audio: 5 } } }).nodes!.n!
+      const k = kitAnswering(new Uint8Array(await mp4(4)), { 'face.png': rgbPng1x1(9, 9, 9) })
+      const { run } = await runOf(k, graph())
+      expect(run.takes[0]!.nodes.n!.credits).toBe(at5)
+    }, 60_000)
   })
 
   describe('Sync lips in silence', () => {

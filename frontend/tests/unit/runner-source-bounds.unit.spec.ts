@@ -40,7 +40,8 @@ import { SPEECH_MAX_CHARS } from '#shared/runner/audioGen'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { graphInputSizes, linkPictureSize, pictureSize } from '~~/server/utils/graphInputPixels'
 import { localModelStartProblems, soundBoundOf } from '~~/server/runner/localModelStart'
-import { PAID_VIDEO_FPS_CEILING, frameShapes, paidVideoClipBound, videoSourceShapeOf } from '~~/server/runner/video/shapes'
+import { PAID_VIDEO_FPS_CEILING, VEO_FPS, frameShapes, paidVideoClipBound, videoSourceShapeOf } from '~~/server/runner/video/shapes'
+import { rifePricedPixels } from '#shared/runner/localModels'
 import { soundEffectRaises, soundEffectStartProblems, soundShapes, soundSourceShapeOf } from '~~/server/runner/video/soundShapes'
 import { pythonWavBytesBound, KLING_LIPSYNC_MAX_SOUND_BYTES } from '#shared/runner/lipSyncEngines'
 import { makeKit } from './__runner__/kit'
@@ -188,9 +189,9 @@ describe('what can\'t be known before the run is held at the cap, never left to 
       const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
       const shapes = await frameShapes(p, EVERY, videoSourceShapeOf({ prompt: p, access, userId: null, hosted }))
       // The card's own (stale) file is never read: a paid video always brings its own. Veo 3.1 at 8 s, 720p (its
-      // default), 16:9: at most 8 × 60 fps + 1 frames of 1280 × 720, a bound (never a counted fact).
+      // default): at most 8 × 24 fps + 1 frames of 1280 × 720 (fix round 2, N2: Veo's real frame), a bound.
       const g = shapes.get('g:0')!
-      expect(g).toMatchObject({ count: 8 * PAID_VIDEO_FPS_CEILING + 1, w: 1280, h: 720, exact: false })
+      expect(g).toMatchObject({ count: 8 * VEO_FPS + 1, w: 1280, h: 720, exact: false })
       expect(g.capped).toBeUndefined()
       expect(g.count).toBeLessThanOrEqual(caps.batchFrames)
       const got = await localModelStartProblems(p, EVERY, { hosted, shapes: async () => shapes })
@@ -204,9 +205,49 @@ describe('what can\'t be known before the run is held at the cap, never left to 
     }
     // A wired length takes the model's longest (8 s); a wired model, or a model the settings table doesn't bound,
     // is held at the place's caps, as before.
-    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, duration: ['x', 0] } } }, ['c', 0])).toMatchObject({ count: 8 * PAID_VIDEO_FPS_CEILING + 1 })
+    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, duration: ['x', 0] } } }, ['c', 0])).toMatchObject({ count: 8 * VEO_FPS + 1 })
     expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, model: ['x', 0] } } }, ['c', 0])).toBeNull()
-    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, aspect_ratio: ['x', 0] } } }, ['c', 0])).toMatchObject({ w: 1680, h: 720 })
+    // Fix round 2 (N2): never the typed aspect. Veo renders 16:9 or 9:16 whatever is typed (or a first frame's shape).
+    for (const aspect_ratio of [['x', 0], '1:1', '21:9', '9:16']) {
+      expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, aspect_ratio } } }, ['c', 0]), JSON.stringify(aspect_ratio)).toMatchObject({ w: 1280, h: 720 })
+    }
+    expect(paidVideoClipBound({ ...p, v: { ...p.v!, inputs: { ...p.v!.inputs, model_options: JSON.stringify({ resolution: '1080p' }) } } }, ['c', 0])).toMatchObject({ w: 1920, h: 1080 })
+  })
+
+  it('fix round 2 (N2): Veo 1:1 → Slow motion (AI): the hold covers the 1280 × 720 clip Veo really renders, either way round', async () => {
+    const p: ApiPrompt = {
+      v: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', prompt: 'a boat', aspect_ratio: '1:1', duration: '8', seed: 0 } },
+      c: { class_type: 'Video', inputs: { source: ['v', 0], file: '', export: false } },
+      g: { class_type: 'GetVideoComponents', inputs: { video: ['c', 0] } },
+      n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['g', 0], multiplier: 2 } },
+    }
+    const access = { exists: async () => { throw new Error('not read') } } as never
+    for (const hosted of [true, false]) {
+      const shapes = await frameShapes(p, EVERY, videoSourceShapeOf({ prompt: p, access, userId: null, hosted }))
+      const got = await localModelStartProblems(p, EVERY, { hosted, shapes: async () => shapes })
+      expect(got.problem).toBeNull()
+      const held = got.sizes!.n!
+      // The turn's own check (generators/localModels.ts: rifePricedPixels(real) > rifePricedPixels(held) throws
+      // "more than held" after Veo is paid): what Veo delivers, landscape or portrait, never passes it.
+      for (const [w, h] of [[1280, 720], [720, 1280]] as const) expect(rifePricedPixels(w, h)).toBeLessThanOrEqual(rifePricedPixels(held.w, held.h))
+      expect(8 * VEO_FPS).toBeLessThanOrEqual(got.counts.n!)
+    }
+  })
+
+  it('fix round 2 (N2, I1 gap): every other model bounded by its largest frame, never the typed aspect; models with no resolution by their documented largest', () => {
+    const clip = (model: string, inputs: Record<string, unknown> = {}): ApiPrompt => ({
+      v: { class_type: 'GenerateVideoNode', inputs: { model, prompt: 'a boat', aspect_ratio: '1:1', duration: '5', seed: 0, ...inputs } },
+      c: { class_type: 'Video', inputs: { source: ['v', 0], file: '', export: false } },
+    })
+    // Hailuo 2.3 at 768p renders 1366 × 768 (or the picture's shape): bounded as 768 × 21/9 = 1792 square, whatever is typed.
+    expect(paidVideoClipBound(clip('hailuo-2.3', { duration: '6' }), ['c', 0])).toMatchObject({ w: 1792, h: 1792, count: 6 * PAID_VIDEO_FPS_CEILING + 1 })
+    expect(1792 * 1792).toBeGreaterThanOrEqual(1366 * 768)
+    // Seedance 2.0 at 1080p (1920 × 1088 at 16:9, 2176 × 928 at 21:9 on its table): 2520 square covers both.
+    expect(paidVideoClipBound(clip('seedance-2.0', { model_options: JSON.stringify({ resolution: '1080p' }) }), ['c', 0])).toMatchObject({ w: 2520, h: 2520 })
+    // No resolution setting: Runway Gen-4.5 (1584 at its widest), Kling 2.5 Turbo Pro (1080p: 1920), LTX-Video (1280, 24 fps, 5 s).
+    expect(paidVideoClipBound(clip('runway-gen-4.5'), ['c', 0])).toMatchObject({ w: 1584, h: 1584, count: 5 * PAID_VIDEO_FPS_CEILING + 1 })
+    expect(paidVideoClipBound(clip('kling-v2.5-turbo-pro'), ['c', 0])).toMatchObject({ w: 1920, h: 1920 })
+    expect(paidVideoClipBound(clip('ltx-video'), ['c', 0])).toMatchObject({ w: 1280, h: 1280, count: 5 * 24 + 1 })
   })
 })
 
