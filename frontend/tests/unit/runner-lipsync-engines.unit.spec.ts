@@ -14,11 +14,11 @@
  * LipSyncNode.execute makes (scripts/runner_lipsync_engines_fixtures.py →
  * fixtures/runner-lipsync-engines.json). Nothing reaches a provider.
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
-import { createFakeFal, createFakeReplicate, makeKit, rgbPng1x1 } from './__runner__/kit'
+import { createFakeFal, createFakeReplicate, makeKit, rgbPng1x1, until } from './__runner__/kit'
 import { requireMediaTools } from './__runner__/mediaParity'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { planNode } from '~~/server/runner/executors'
@@ -33,7 +33,7 @@ import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import {
-  FABRIC_LIPSYNC_NEEDS_FACE, FABRIC_LIPSYNC_SLUG, KLING_LIPSYNC_NEEDS_VIDEO, KLING_LIPSYNC_SLUG, KLING_LIPSYNC_SOUND_TOO_LARGE,
+  FABRIC_LIPSYNC_NEEDS_FACE, FABRIC_LIPSYNC_SLUG, KLING_LIPSYNC_NEEDS_VIDEO, KLING_LIPSYNC_SLUG, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, pythonWavBytesBound,
   LIPSYNC_ENGINE_TOO_LONG, LIPSYNC_NEEDS_SOUND, fabricLipSyncResolution, lipSyncRunEngine,
 } from '#shared/runner/lipSyncEngines'
 import { LIPSYNC_SILENCE_TOO_LONG } from '#shared/runner/soundIn'
@@ -167,8 +167,20 @@ describe('each engine\'s request equals Python\'s (fixtures)', () => {
     expect(toUrl).not.toHaveBeenCalled()
   })
 
-  it('Kling: a wired sound whose WAV is over its 5 MB limit is refused before the call', async () => {
+  it('Kling: a wired sound\'s WAV is judged before the hold (fix round 1); the plan keeps a last guard', async () => {
+    // The bound of Python's WAV from the source's shape: its first 60 s, 16-bit, at most stereo.
+    expect(pythonWavBytesBound({ rate: 44100, channels: 1, samples: 44100 * 61, exact: true })).toBe(128 + 60 * 44100 * 2)
+    expect(pythonWavBytesBound({ rate: 8000, channels: 2, samples: 8000 * 10, exact: false })).toBe(128 + 11 * 8000 * 2 * 2)
+    expect(pythonWavBytesBound({ rate: 48000, channels: 6, samples: 48000, exact: true })).toBe(128 + 48000 * 2 * 2)
     const c = SENT.find(x => x.name === 'Kling, a wired sound')!
+    const p = caseGraph(c)
+    const reads = (shape: unknown) => ({ read: async () => new Uint8Array(), strict: true, soundShape: async () => shape as never })
+    // The start of the run (no WAV yet): a long 44.1 kHz sound is over 5 MB, a sound with no shape can't be judged.
+    expect(await nodeMediaCheck(p, 'n', reads({ rate: 44100, channels: 1, samples: 44100 * 61, exact: true }))).toEqual({ problem: KLING_LIPSYNC_SOUND_TOO_LARGE })
+    expect(await nodeMediaCheck(p, 'n', reads(null))).toEqual({ problem: KLING_LIPSYNC_SOUND_UNSIZED })
+    // The node's turn: the WAV itself.
+    const big = { read: async () => new Uint8Array(), strict: true, soundWav: async () => ({ wav: new Uint8Array(5_000_001), seconds: 57 }) as never }
+    expect(await nodeMediaCheck(p, 'n', big)).toEqual({ problem: KLING_LIPSYNC_SOUND_TOO_LARGE })
     await expect(plan(caseGraph(c), { wavBytes: 5_000_001 })).rejects.toThrow(KLING_LIPSYNC_SOUND_TOO_LARGE)
   })
 })
@@ -382,6 +394,53 @@ describe('on the engine (fake Replicate and fal)', () => {
     const k = await kitWith(true, { 'face.mp4': await mp4(5), 'voice.wav': wav(320) })
     await expect(k.engine.startRun({ userId: k.userId, takes: [node(klingOpts())], ...START })).rejects.toThrow(KLING_LIPSYNC_SOUND_TOO_LARGE)
     expect(k.ledger.hold).not.toHaveBeenCalled()
+  }, 60_000)
+
+  it('Kling with Load audio → Audio card: a WAV bound over 5 MB is refused before the hold; a short one runs', async () => {
+    await requireMediaTools()
+    const k = await kitWith(true, { 'face.mp4': await mp4(5), 'voice.wav': wav(61, 44100), 'short.wav': wav(3) })
+    const long = node(klingOpts({ audio: '' }), true)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [long], ...START })).rejects.toThrow(KLING_LIPSYNC_SOUND_TOO_LARGE)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.replicate.submitted()).toEqual([])
+    const short = node(klingOpts({ audio: '' }), true)
+    short.snd!.inputs!.audio = 'short.wav'
+    const { run } = await runOf(k, short)
+    expect(run.status, JSON.stringify(run.takes[0]?.nodes)).toBe('done')
+    expect(k.replicate.submitted()[0]!.payload).toEqual({ video_url: 'https://fal.storage/face.mp4', audio_file: 'https://fal.storage/audio.wav' })
+  }, 60_000)
+
+  it('Kling with a sound made in the run (its size can\'t be bounded): refused plainly before the hold', async () => {
+    await requireMediaTools()
+    const k = await kitWith(true, { 'face.mp4': await mp4(5) }, new Set<RunnerFamily>([...ON, 'audio-gen']))
+    const p = node(klingOpts({ audio: '' }), true)
+    p.snd = { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration: 5, model_version: 'stereo-melody-large', temperature: 1, top_p: 0, seed: 0 } }
+    await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(KLING_LIPSYNC_SOUND_UNSIZED)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  }, 60_000)
+
+  it('Stop while Kling runs (its video and WAV handed off): cancelled on Replicate, the hold released, nothing left behind', async () => {
+    await requireMediaTools()
+    const k = await kitWith(true, { 'face.mp4': await mp4(5), 'voice.wav': wav(3) })
+    k.replicate.holdNext(1)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [node(klingOpts({ audio: '' }), true)], ...START })
+    await until(() => (k.replicate.submitted()[0]?.polls ?? 0) >= 2)
+    // The new uploads went out before the call: the face video and the WAV.
+    expect(k.upload.mock.calls.map(c => c[1]).sort()).toEqual(['audio.wav', 'face.mp4'])
+    await k.engine.stop(k.userId)
+    await k.engine.settled(runId)
+    expect(k.replicate.client.cancel).toHaveBeenCalledWith('replicate://pred1/cancel')
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('stopped')
+    expect(run.takes[0]!.nodes.n!.status).toBe('stopped')
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+    // No lip-sync file, no kept WAV, no partial file: output is empty, and temp holds only the Audio card's
+    // own finished preview (Python's FLAC, shown before the lip-sync started).
+    const left = (dir: string) => (readdirSync(join(k.root, dir), { recursive: true }) as string[]).filter(f => /\.[a-z0-9]+$/i.test(f))
+    expect(left('output')).toEqual([])
+    expect(left('temp').map(f => f.replace(/^.*\//, '').replace(/_[a-z0-9]+_\d+_\./, '_*.'))).toEqual(['ComfyUI_temp_*.flac'])
+    expect(run.takes[0]!.nodes.card!.status).toBe('done')
+    expect(k.upload).toHaveBeenCalledTimes(2)
   }, 60_000)
 
   it('sync-3 with Load audio → Audio card (R5.3 case A): Python\'s WAV sent, charged on the measured sound', async () => {

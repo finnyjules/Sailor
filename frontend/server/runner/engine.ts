@@ -2298,6 +2298,12 @@ export function createEngine(deps: EngineDeps) {
             },
           }),
           videoUploadProblem: f => lipsyncUploadProblem(f, { access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }),
+          // R11.3 fix round 1: a wired sound's shape, from the same start pass (headers and known silences
+          // only), so Kling's 5 MB is judged on the WAV it will be sent before the hold.
+          soundShape: async (link: ApiLink) => {
+            whisperShapes ??= await soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }))
+            return whisperShapes.get(`${link[0]}:${link[1]}`) ?? null
+          },
         })
         if (startSignal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400, { nodeId, classType: n.class_type })
         if (longest) {

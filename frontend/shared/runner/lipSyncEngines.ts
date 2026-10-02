@@ -117,6 +117,22 @@ export const LIPSYNC_ENGINE_CHANGED = 'The sound or face video changed after you
 /** kwaivgi/kling-lip-sync's schema: "Must be .mp3, .wav, .m4a, or .aac and less than 5MB". */
 export const KLING_LIPSYNC_MAX_SOUND_BYTES = 5_000_000
 export const KLING_LIPSYNC_SOUND_TOO_LARGE = 'Kling’s lip-sync takes sounds up to 5 MB. Use a shorter sound.'
+/** Fix round 1: a wired sound whose size can't be bounded before the run (Kling's 5 MB can't be judged). */
+export const KLING_LIPSYNC_SOUND_UNSIZED = 'Kling’s lip-sync takes sounds up to 5 MB, and Sailor can’t tell this sound’s size before the run. Load the sound from a file, or upload it as the voice.'
+
+/** Python's WAV header (`_audio_dict_to_wav_data_url`: a plain 44-byte RIFF header; PyAV adds a LIST chunk, under 64 bytes). */
+const WAV_HEADER_BOUND = 128
+
+/**
+ * Fix round 1: the most bytes Python's WAV of a sound can take, from its
+ * shape (rate, channels, samples; `exact` false = a header's figure, a
+ * second of slack added): its first 60 s, 16-bit, mono or stereo.
+ */
+export function pythonWavBytesBound(shape: { rate: number, channels: number, samples: number, exact: boolean }): number {
+  const samples = shape.samples + (shape.exact ? 0 : shape.rate)
+  const frames = Math.min(samples, Math.floor(60 * shape.rate))
+  return WAV_HEADER_BOUND + frames * Math.min(Math.max(shape.channels, 1), 2) * 2
+}
 
 /** What stops a Fabric or Kling node before anything is read or held (Python's raises), or null. */
 export function lipSyncEngineProblem(inputs: Record<string, unknown>): { input: string, message: string } | null {

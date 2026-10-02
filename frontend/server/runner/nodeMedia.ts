@@ -25,7 +25,8 @@
  * (and a video's size and frame rate) the price reads, and the sha256 of the
  * bytes measured.
  */
-import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
+import { isLink, type ApiLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
+import type { SoundShape } from './video/table'
 import { FABRIC_VIDEO_MODEL_ID, resolveVideoModelId } from '#shared/runner/eligibility'
 import { isSync3LipSync } from '#shared/runner/lipSync'
 import { LIPSYNC_ENGINE_CHANGED, lipSyncRunEngine } from '#shared/runner/lipSyncEngines'
@@ -40,7 +41,14 @@ import { soundInInputFiles, soundInMediaCheck, type SoundInReads } from './sound
 import type { MeasuredMedia, OutputFile } from './types'
 
 /** What a media check may read: the files, and (R3.10) a sound-in node's WAV. */
-export type NodeMediaReads = Sync3MediaReads & Omit<SoundInReads, 'strict'>
+export type NodeMediaReads = Sync3MediaReads & Omit<SoundInReads, 'strict'> & {
+  /**
+   * R11.3 fix round 1, at the start of a run: a wired sound's shape (rate,
+   * channels, samples) from its source's header or a known silence
+   * (./video/soundShapes.ts), or null when it can't be bounded.
+   */
+  soundShape?(link: ApiLink): Promise<SoundShape | null>
+}
 
 /** Which media check a node takes, or null for a node priced without reading its files. */
 export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'lip-sync-engine' | 'topaz-video' | 'person-swap-video' | 'describe-video' | 'sound-in' | null {

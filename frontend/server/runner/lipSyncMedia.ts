@@ -8,19 +8,21 @@
  *     uploaded sound is measured from its file and refused over 60 s (Fabric's
  *     longest clip, the price's cap);
  *   - Kling bills the clip it makes, the face video's length: an uploaded
- *     video, refused over 60 s. Its sound isn't priced; an uploaded one over
- *     the schema's 5 MB is refused here, before the hold.
+ *     video, refused over 60 s. Its sound isn't priced; one over the
+ *     schema's 5 MB is refused here, before the hold (an upload by its size;
+ *     a wired sound by the bound of the WAV sent, fix round 1).
  * A file whose length can't be read is priced at the 60 s cap locally and
  * refused in hosted (`strict`, the media rule's words).
  */
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { LIPSYNC_MAX_SECONDS } from '#shared/pricing/clipSettings'
 import {
-  KLING_LIPSYNC_MAX_SOUND_BYTES, KLING_LIPSYNC_SOUND_TOO_LARGE, LIPSYNC_ENGINE_FILE_MISSING, LIPSYNC_ENGINE_TOO_LONG,
-  lipSyncEngineMedia, lipSyncEngineProblem, lipSyncRunEngine, type LipSyncMediaRef,
+  KLING_LIPSYNC_MAX_SOUND_BYTES, KLING_LIPSYNC_SOUND_TOO_LARGE, KLING_LIPSYNC_SOUND_UNSIZED, LIPSYNC_ENGINE_FILE_MISSING, LIPSYNC_ENGINE_TOO_LONG,
+  lipSyncEngineMedia, lipSyncEngineProblem, lipSyncRunEngine, pythonWavBytesBound, type LipSyncMediaRef,
 } from '#shared/runner/lipSyncEngines'
 import { measureMediaFile, type MediaRule } from './mediaInputs'
-import { wiredSoundCheck } from './soundInMedia'
+import { soundInWords, wiredSoundCheck } from './soundInMedia'
+import type { SoundShape } from './video/table'
 import { soundFileBeforeRun } from './soundWav'
 import { parseInputFileRef } from './inputs'
 import type { NodeMediaCheck, NodeMediaReads } from './nodeMedia'
@@ -69,6 +71,25 @@ export async function lipSyncEngineMediaCheck(prompt: ApiPrompt, nodeId: string,
     if (a.problem !== null) return { problem: a.problem }
     if (over(a.facts.seconds)) return { problem: LIPSYNC_ENGINE_TOO_LONG }
     return { problem: null, measured: { seconds: a.facts.seconds != null ? { audio: a.facts.seconds } : {}, sha: { audio: a.sha } } }
+  }
+  // Fix round 1: a wired sound goes as Python's WAV, judged against Kling's 5 MB before the hold: at the
+  // start of the run, bounded from its source's shape (a header, or a card's known silence); at the node's
+  // turn, the WAV itself. One that can't be bounded is refused plainly (Python would fail at Replicate).
+  if ('wired' in m.audio) {
+    const link = m.audio.wired as ApiLink
+    if (reads.soundWav) {
+      let bytes: number
+      try { bytes = (await reads.soundWav(link)).wav.byteLength }
+      catch (e) { return { problem: soundInWords(e) } }
+      if (bytes > KLING_LIPSYNC_MAX_SOUND_BYTES) return { problem: KLING_LIPSYNC_SOUND_TOO_LARGE }
+    }
+    else if (reads.soundShape) {
+      let shape: SoundShape | null
+      try { shape = await reads.soundShape(link) }
+      catch (e) { return { problem: soundInWords(e) } }
+      if (!shape || !(shape.rate > 0)) return { problem: KLING_LIPSYNC_SOUND_UNSIZED }
+      if (pythonWavBytesBound(shape) > KLING_LIPSYNC_MAX_SOUND_BYTES) return { problem: KLING_LIPSYNC_SOUND_TOO_LARGE }
+    }
   }
   if ('upload' in m.audio && reads.size) {
     const bytes = await reads.size(inputFile(m.audio.upload)).catch(() => null)
