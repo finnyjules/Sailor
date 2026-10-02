@@ -125,8 +125,6 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
   const spec = VIDEO_EFFECTS[cls]!
   const params = mediaEffectParams(MEDIA_EFFECT_SCHEMAS[cls], widgets)
   const ins = [{ count: input.frames.length, w: input.w, h: input.h, exact: true }]
-  const raised = spec.pythonRaises?.(params, ins)
-  if (raised) throw new Error(raised)
   const out = spec.shape(params, ins)
   const [core, fn] = spec.op.split('.') as [string, string]
   const op = (videoCores as unknown as Record<string, Record<string, (...a: unknown[]) => { out: Tensor; state?: ArrayBuffer }>>)[core]![fn]!

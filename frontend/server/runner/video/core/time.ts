@@ -409,8 +409,9 @@ export function timeCore(tk: TensorCore, kn: KernelsCore, rng: RngCore) {
    * every clip longer than one frame (its replicate pad), so this is the
    * blur it was written to make, not a port: each output frame is the
    * weighted mean of the frames within `radius` of it, weighted by
-   * `falloff` as Python's weights are (uniform: the plain mean; linear:
-   * 1 − |d| / r; gaussian: exp(−d² / 2σ²), σ = max(1, r / 2)). At the
+   * `falloff` (uniform: the plain mean; linear: 1 − |d| / (r + 1), fix
+   * round 1: Python's 1 − |d| / r gave the window's ends no weight, so
+   * radius 1 was no blur; gaussian: exp(−d² / 2σ²), σ = max(1, r / 2)). At the
    * clip's ends only the frames there are count (the weights of those
    * frames, normalised again): no fade to black, no repeated end frame.
    * `inputs` are the frames the plan hands it, in order; `_first` is the
@@ -422,7 +423,7 @@ export function timeCore(tk: TensorCore, kn: KernelsCore, rng: RngCore) {
     const sigma = Math.max(1, r / 2)
     for (let i = 0; i < w.length; i++) {
       const d = i - r
-      w[i] = falloff === 'uniform' ? 1 : falloff === 'linear' ? Math.max(0, 1 - Math.abs(d) / r) : Math.exp(-(d * d) / (2 * sigma * sigma))
+      w[i] = falloff === 'uniform' ? 1 : falloff === 'linear' ? 1 - Math.abs(d) / (r + 1) : Math.exp(-(d * d) / (2 * sigma * sigma))
     }
     return w
   }

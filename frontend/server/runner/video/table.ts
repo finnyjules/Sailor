@@ -106,8 +106,6 @@ export interface VideoEffectSpec {
   joinOf?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): JoinLayout
   /** Draws random numbers (Transition's glitch): the plan hands the op glitchSeed's seed as `_seed` (ruling (e)). */
   seeded?(widgets: Record<string, unknown>): boolean
-  /** Where Python itself raises for these widgets and inputs: its plain words (rule 14), said before any work. */
-  pythonRaises?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): string | null
   /**
    * What the op carries from its first frame, read at the node's turn before
    * the lease (the LUT's table, from the file it names): handed to the first

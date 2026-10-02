@@ -101,7 +101,6 @@ import { compositorCore } from '~~/server/runner/compositor/plane'
 import { workerScript } from '~~/server/runner/compositor/worker'
 import { videoCores } from '~~/server/runner/video/cores'
 import { VIDEO_EFFECTS, effectHeldBytes, windowSchedule } from '~~/server/runner/video/table'
-import { mediaEffectRefusals, needsExactCount } from '~~/server/runner/video/start'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import { makeKit } from './__runner__/kit'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
@@ -133,14 +132,14 @@ const saveVideo = (from: string) => ({ class_type: 'SaveVideo', inputs: { video:
 /**
  * Motion blur (time)'s reference (R11.9b), written here from the ruling and
  * not from the core: each frame the weighted mean, in doubles, of the 8-bit
- * frames within `radius` that the clip has (uniform 1; linear 1 − |d| / r;
+ * frames within `radius` that the clip has (uniform 1; linear 1 − |d| / (r + 1);
  * gaussian exp(−d² / 2σ²), σ = max(1, r / 2)), as k / 255, rounded to 8 bits.
  */
 function blurReference(clip: { frames: Uint8Array[]; w: number; h: number }, radius: number, falloff: string): Uint8Array {
   const T = clip.frames.length
   const n = clip.w * clip.h * 3
   const sigma = Math.max(1, radius / 2)
-  const weight = (d: number) => falloff === 'uniform' ? 1 : falloff === 'linear' ? Math.max(0, 1 - Math.abs(d) / radius) : Math.exp(-(d * d) / (2 * sigma * sigma))
+  const weight = (d: number) => falloff === 'uniform' ? 1 : falloff === 'linear' ? 1 - Math.abs(d) / (radius + 1) : Math.exp(-(d * d) / (2 * sigma * sigma))
   const out = new Uint8Array(T * n)
   for (let j = 0; j < T; j++) {
     let total = 0
@@ -495,13 +494,23 @@ describe('Motion blur (time) blurs clips (R11.9b, USER ruling (c))', () => {
     expect(spec.heldBytes({ radius: 12, falloff: 'gaussian' }, hd)).toBeGreaterThan(MEDIA_CAPS.hosted.heldFrameBytes)
   })
 
-  it('is not refused, and needs no packet count, on any clip', () => {
-    for (const shape of [{ count: 2, exact: true }, { count: 2, exact: false, counted: true as const }, { count: 48, exact: false }]) {
-      const p: ApiPrompt = { l: loadVideo(), g: getComp(), m: { class_type: 'TemporalMotionBlur', inputs: { frames: ['g', 0], radius: 2, falloff: 'gaussian' } }, c: createVideo('m'), s: saveVideo('c') }
-      const shapes = new Map([['g:0', { w: 24, h: 16, ...shape }]])
-      expect(mediaEffectRefusals(p, ON, shapes), JSON.stringify(shape)).toBeNull()
-      expect(needsExactCount(p, ON, shapes), JSON.stringify(shape)).toBe(false)
+  it('linear at radius 1 blurs: weights 0.5, 1, 0.5, normalised (fix round 1; Python’s 0, 1, 0 was no blur)', () => {
+    expect([...videoCores.time.blurWeights(1, 'linear')]).toEqual([0.5, 1, 0.5])
+    expect([...videoCores.time.blurWeights(3, 'linear')]).toEqual([0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25])
+    const clip = movingSquare(5)
+    const got = blurBatch(clip, 1, 'linear')
+    const n = clip.w * clip.h * 3
+    // Frame 2 is (f1 + 2·f2 + f3) / 4; frame 0, at the start, (2·f0 + f1) / 3.
+    const mid = new Uint8Array(n)
+    const start = new Uint8Array(n)
+    for (let e = 0; e < n; e++) {
+      mid[e] = Math.round((clip.frames[1]![e]! + 2 * clip.frames[2]![e]! + clip.frames[3]![e]!) / 4)
+      start[e] = Math.round((2 * clip.frames[0]![e]! + clip.frames[1]![e]!) / 3)
     }
+    expect(worstLevel(frameOf(got.round8, clip, 2), mid)).toBeLessThanOrEqual(1)
+    expect(worstLevel(frameOf(got.round8, clip, 0), start)).toBeLessThanOrEqual(1)
+    // Teeth: it is not the frame unchanged.
+    expect(sha256(frameOf(got.round8, clip, 2))).not.toBe(sha256(clip.frames[2]!))
   })
 
   it('Load video → Get video components → Motion blur → Create video → Save video runs in the engine: the same frame count and rate, blurred', LONG, async () => {

@@ -195,50 +195,6 @@ export async function mediaEffectStartProblems(prompt: ApiPrompt, families: Read
   return over ? { message: over.message, nodeId: over.nodeId, classType: prompt[over.nodeId]!.class_type, engine: true } : null
 }
 
-type Refusal = { message: string; nodeId: string; classType: string }
-
-/** A taken effect Python itself raises on (VideoEffectSpec.pythonRaises), with its inputs' shapes; null where it has none or an input isn't shaped. */
-function raisers(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes: ReadonlyMap<string, FrameShape>): { id: string; shaped: FrameShape[]; params: Record<string, unknown> }[] {
-  const out: { id: string; shaped: FrameShape[]; params: Record<string, unknown> }[] = []
-  for (const id of topoOrder(prompt)) {
-    const n = prompt[id]!
-    if (!takenVideoEffect(n.class_type, families)) continue
-    const spec = VIDEO_EFFECTS[n.class_type]!
-    if (!spec.pythonRaises) continue
-    const inputs = n.inputs ?? {}
-    const ins = spec.inputs.map(name => (isLink(inputs[name]) ? shapes.get(`${(inputs[name] as ApiLink)[0]}:${(inputs[name] as ApiLink)[1]}`) : undefined))
-    if (!ins.every(Boolean)) continue
-    out.push({ id, shaped: ins as FrameShape[], params: mediaEffectParams(MEDIA_EFFECT_SCHEMAS[n.class_type], inputs) })
-  }
-  return out
-}
-
-/** A shape whose count is the batch's own: exact, or the source's packets counted (R6.1 fix round 1). */
-const knownCount = (s: FrameShape) => s.exact || !!s.counted
-
-/**
- * Where Python itself raises (R6.2's Motion blur (time) on more than one
- * frame, until R11.9b made it work; no ported effect raises now),
- * refused BEFORE the hold, in the node's own plain words (R6.2 fix round 1):
- * a run must never start and fail after paid nodes. Only on counts known
- * exactly (`knownCount`); on a header bound the node's own check at its turn
- * stays (./plan.ts), and the engine counts the packets first where that
- * could decide it (`needsExactCount`).
- */
-export function mediaEffectRefusals(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes: ReadonlyMap<string, FrameShape>): Refusal | null {
-  for (const r of raisers(prompt, families, shapes)) {
-    if (!r.shaped.every(knownCount)) continue
-    const message = VIDEO_EFFECTS[prompt[r.id]!.class_type]!.pythonRaises!(r.params, r.shaped)
-    if (message) return { message, nodeId: r.id, classType: prompt[r.id]!.class_type }
-  }
-  return null
-}
-
-/** Whether an effect Python raises on would raise on a bound that isn't a known count: the engine then counts the sources' packets. */
-export function needsExactCount(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes: ReadonlyMap<string, FrameShape>): boolean {
-  return raisers(prompt, families, shapes).some(r => !r.shaped.every(knownCount) && !!VIDEO_EFFECTS[prompt[r.id]!.class_type]!.pythonRaises!(r.params, r.shaped))
-}
-
 /**
  * Whether a hosted figure lands within 10% of its limit (NEAR_LIMIT) while a
  * source's frames are only bounded from its header (not `counted`): the

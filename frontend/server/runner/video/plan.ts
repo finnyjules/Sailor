@@ -137,9 +137,6 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
         return v
       })
       const ins: FrameShape[] = values.map(v => ({ count: v.count, w: v.w, h: v.h, exact: true }))
-      // Where Python itself raises, the same plain words, before any work (rule 14).
-      const raised = spec.pythonRaises?.(params, ins)
-      if (raised) throw new Error(raised)
       const out = spec.shape(params, ins)
       // The caps again, from the values themselves (the start pass bounded them before the run).
       const caps = capsOf(media.hosted)
