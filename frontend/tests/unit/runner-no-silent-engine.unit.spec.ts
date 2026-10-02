@@ -18,7 +18,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { EVERY_KNOWN_FAMILY, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, SWITCHED_CLASSES, runnerRuleFor } from '#shared/runner/eligibility'
 import { RETIRED_CLASSES } from '#shared/runner/retired'
-import { LOCAL_ONLY_CLASSES, NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from '#shared/runner/localOnly'
+import { LOCAL_ONLY_CLASSES, NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_SHADER_CASES, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from '#shared/runner/localOnly'
 import { NOT_TAKEN_NODE_WORDS, switchedOffWords } from '#shared/runner/messages'
 import { SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST, shaderBakedText } from '#shared/runner/shaderBakeKey'
 import { RUNNER_OFF_WORDS, WORKFLOW_CANT_RUN_WORDS, engineRoute, engineRunPrompt, localOnlyHostedWords, needsEngineDescription, type EngineRoute } from '~/lib/runner/needsEngine'
@@ -164,14 +164,11 @@ describe('engineRoute: a declined Sailor class never goes to the engine', () => 
 describe('R10.2 closes the Shader effect’s engine cases: each is a plain refusal, locally with the engine up', () => {
   const stale = shader({})
   stale.fx!.inputs.sailor_baked = shaderBakedText([`shader_bake_${'0'.repeat(32)}.png`], 'f'.repeat(64))
-  const madeInRun: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), ...shader({}, ['b', 0]) }
-  delete madeInRun[0]
   const cases: [string, ApiPrompt, string][] = [
     ['an effect the runner doesn’t know', shader({ effect: 'no_such_effect' }), SHADER_ENGINE_WORDS.unknownEffect],
     ['params only Python reads', shader({ params: '{"u_amount":"0.5"}' }), SHADER_ENGINE_WORDS.oddParams],
     ['a wired setting', { ...shader({ seed: ['9', 0] }), 9: { class_type: 'PrimitiveInt', inputs: { value: 3 } } }, SHADER_ENGINE_WORDS.wired],
     ['a bake that no longer agrees with its settings', stale, SHADER_ENGINE_WORDS.keyMismatch],
-    ['its picture made in the run', madeInRun, SHADER_NEEDS_PICTURE_FIRST],
   ]
   for (const [name, p, words] of cases) {
     it(name, () => {
@@ -248,6 +245,23 @@ describe('fix round 1 (c): a Shader effect showing one of your own effects goes 
   it('hosted, or the engine off: words', () => {
     expect(route(mine, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Halftone”: ${SHADER_ENGINE_WORDS.myEffect}` })
     expect(route(mine, { engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) })
+  })
+})
+
+describe('fix round 2: a Shader effect whose picture is made in the same run goes to the local engine, named', () => {
+  // The saved graph's shape: a picture → bloom → vignette (vignette's picture is made in the run).
+  const chain: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), ...shader({}, ['b', 0]) }
+  delete chain[0]
+  it('is on the explicit list by its cause, with its words and plan', () => {
+    expect(NEEDS_LOCAL_ENGINE_SHADER_CASES.pictureMadeInRun).toMatchObject({ words: SHADER_NEEDS_PICTURE_FIRST, plan: 'port' })
+    expect(NEEDS_LOCAL_ENGINE_SHADER_CASES.myEffect).toMatchObject({ words: SHADER_ENGINE_WORDS.myEffect, plan: 'port' })
+  })
+  it('locally with the engine up: there, with the toast naming it', () => {
+    expect(route(chain)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) } })
+  })
+  it('hosted, or the engine off: words', () => {
+    expect(route(chain, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Halftone”: ${SHADER_NEEDS_PICTURE_FIRST}` })
+    expect(route(chain, { engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) })
   })
 })
 

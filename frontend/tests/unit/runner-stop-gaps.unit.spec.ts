@@ -116,7 +116,8 @@ const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
  * machine can't make stops the run in plain words everywhere (layouts/default.vue; the guard is in
  * runner-no-silent-engine.unit.spec.ts). The list of cases silently left to the engine is empty. R10.2 fix
  * round 1 (c): one of your own effects goes to the local engine again, locally with it up, but named (the
- * local-engine toast), never silently; elsewhere it gets its words.
+ * local-engine toast), never silently; elsewhere it gets its words. Fix round 2: so does one whose picture is
+ * made in the same run (NEEDS_LOCAL_ENGINE_SHADER_CASES; runner-no-silent-engine.unit.spec.ts).
  */
 const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {}
 const SHADER_CLOSED_CASES: Readonly<Record<string, string>> = {

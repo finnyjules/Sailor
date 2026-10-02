@@ -17,6 +17,7 @@
  *
  * Pure; relative imports only.
  */
+import { SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST } from './shaderBakeKey'
 
 /** Every local-only class, by its ComfyUI class name, grouped by its Python file. */
 export const LOCAL_ONLY_CLASSES: ReadonlySet<string> = new Set([
@@ -282,8 +283,8 @@ export type NeedsLocalEnginePlan = 'port' | 'retire' | 'keep local'
  * are the saved graphs holding each (2026-10-02: 1,251 graphs of 1,566
  * projects, user/sailor/projects and its migration backup).
  *
- * A Shader effect showing one of your own effects (fix round 1 (c)) is the
- * same case by its setting, not its class (./needsEngine.ts).
+ * Two Shader effect cases are the same by their setting, not their class
+ * (NEEDS_LOCAL_ENGINE_SHADER_CASES, ./needsEngine.ts).
  */
 export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {
   PreviewVideo: { plan: 'port', savedGraphs: 0, why: 'Preview video: a temporary Save video, which the runner already does; no saved graph uses it.' },
@@ -303,3 +304,24 @@ export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEngin
 
 /** Where a node on NEEDS_LOCAL_ENGINE can't go (hosted, or the engine off). */
 export const NEEDS_LOCAL_ENGINE_WORDS = 'Sailor can’t run this node yet. It runs only on the local engine, on your own computer.'
+
+/**
+ * Fix round 1 (c), fix round 2: the Shader effect cases that still need the
+ * local engine, by cause, each with its words for where it can't go (hosted,
+ * the engine off) and its plan. Counts are Shader effect nodes in the saved
+ * graphs (2026-10-02 scan).
+ */
+export const NEEDS_LOCAL_ENGINE_SHADER_CASES: Readonly<Record<'myEffect' | 'pictureMadeInRun', { words: string; plan: NeedsLocalEnginePlan; savedNodes: number; why: string }>> = {
+  myEffect: {
+    words: SHADER_ENGINE_WORDS.myEffect,
+    plan: 'port',
+    savedNodes: 0,
+    why: 'One of your own effects: the browser bakes only the catalogue’s effects, and the server checks a bake against the catalogue.',
+  },
+  pictureMadeInRun: {
+    words: SHADER_NEEDS_PICTURE_FIRST,
+    plan: 'port',
+    savedNodes: 4,
+    why: 'Its picture is made in the same run (one saved graph chains bloom → vignette → outline): the browser bakes before the run. Port by baking after the upstream run, or by the runner baking server-side.',
+  },
+}

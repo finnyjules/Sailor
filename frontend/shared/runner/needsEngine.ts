@@ -9,11 +9,11 @@
  */
 import { isLink, type ApiNode, type ApiPrompt } from './graph'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, isRunnerEligible, nodeValidationErrors, runnerTakesNode, svgReaderProblems } from './eligibility'
-import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from './localOnly'
+import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_SHADER_CASES, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from './localOnly'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, prunedAny, pruneInvalidOutputs, readByOutputs } from './validate'
 import { EVERY_KNOWN_FAMILY, NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
-import { SHADER_ENGINE_WORDS, shaderEngineReason } from './shaderBakeKey'
+import { shaderEngineReason } from './shaderBakeKey'
 import { switchedOffNodes } from './stopGaps'
 import { NOT_TAKEN_NODE_WORDS, switchedOffWords } from './messages'
 import { RETIRED_CLASSES, isEditorOnlyClass, retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
@@ -304,10 +304,11 @@ export function engineRoute(
  * Fix round 1 (a), (c): the words for a Sailor node that still needs the local
  * engine, used where it can't go (hosted, the engine off), or null when it
  * isn't one: its class is in NEEDS_LOCAL_ENGINE and nothing more particular
- * refuses it, or it is a Shader effect showing one of your own effects.
+ * refuses it, or it is a Shader effect in one of NEEDS_LOCAL_ENGINE_SHADER_CASES
+ * (one of your own effects; fix round 2: its picture made in the same run).
  */
 function needsLocalEngineWords(node: ApiNode, shaderWhy: string | null, switchedOff: boolean): string | null {
-  if (node.class_type === 'ShaderEffect') return shaderWhy === SHADER_ENGINE_WORDS.myEffect ? shaderWhy : null
+  if (node.class_type === 'ShaderEffect') return Object.values(NEEDS_LOCAL_ENGINE_SHADER_CASES).some(c => c.words === shaderWhy) ? shaderWhy : null
   if (shaderWhy || switchedOff || !Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, node.class_type)) return null
   return NEEDS_LOCAL_ENGINE_WORDS
 }
