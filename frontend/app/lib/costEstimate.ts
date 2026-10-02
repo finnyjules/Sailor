@@ -31,7 +31,7 @@ import { estimateFloored } from '#shared/pricing/estimateFloor'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY } from '#shared/runner/eligibility'
-import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, SAM_MASK_CLASSES, isLocalModelClass } from '#shared/runner/localModels'
+import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, SAM_MASK_CLASSES, UPSCALE_2X_CLASS, isLocalModelClass } from '#shared/runner/localModels'
 import { LIPSYNC_MAX_SECONDS, allotMediaFiles, gateNodeOrder, mediaFileKey, readViewRef, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
@@ -206,7 +206,8 @@ export function estimateUsdForNodes(
     // static badge's USD goes through the same markup function.
     if (hosted) credits += modelPrice != null ? modelPrice.credits : creditsForUsd(cost.usd)
     approximate = approximate || cost.approximate || creditBilled
-    const upTo = !!(frames?.upTo && modelPrice != null)
+    // R11.6 fix round 1 (H1): Upscale (2×) priced without its picture's size is priced at the most tiles it can make: "up to".
+    const upTo = !!((frames?.upTo || upscaleUnsized(n.type, inputSeconds)) && modelPrice != null)
     breakdown.push({
       id: n.id,
       label: (n.title || n.type) + (creditBilled ? ' (credits)' : '') + (upTo ? ' (up to)' : ''),
@@ -242,6 +243,15 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null, fami
       inputSeconds: upstreamInputSeconds(n, nodes, edges)?.seconds ?? null,
       ...(isLocalModelClass(String(n?.data?.nodeType || '')) ? { pictures: upstreamPictureCount(n, nodes, edges) } : {}),
     }))
+}
+
+/**
+ * R11.6 fix round 1 (H1): Upscale (2×) priced without its picture's size (the
+ * canvas never sees it): held up to the most tiles the largest tiled picture
+ * makes, so its price is marked "up to" (the run measures and may cost less).
+ */
+export function upscaleUnsized(classType: string, seconds: InputSeconds | null | undefined): boolean {
+  return classType === UPSCALE_2X_CLASS && seconds?.picturePixels == null
 }
 
 /**
@@ -351,7 +361,8 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   // frame cap, "up to" (the badge's hosted credits; localModelFrames picks the cap where it runs).
   if (isLocalModelClass(ct)) {
     const f = localModelFrames(upstreamPictureCount(node, nodes, edges), true)
-    return { seconds: localModelSeconds(f, true), upTo: f.upTo }
+    const seconds = localModelSeconds(f, true)
+    return { seconds, upTo: f.upTo || upscaleUnsized(ct, seconds) }
   }
   // Describe a video (R3.4): the canvas can't see the video's length, so it is
   // priced at its ceiling (45 minutes, the longest answer): "up to". The

@@ -166,7 +166,7 @@ import type { Derived, NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { pixelsInWorker } from '../compositor/worker'
 import { pictureMeta, pilRgba, pngColourType, rgbTurnedPng } from '../pictures/pythonView'
-import { tileCount, tileGrid } from '#shared/runner/upscaleTiles'
+import { tileCount, tileGrid, tooThinToTile } from '#shared/runner/upscaleTiles'
 import { cropRgb, tiledCanvas } from './tiles'
 import { pixels as pixelOps } from '../pixels/core'
 import { loaderSourceOf, madeSourceOf } from '../pictureHandoff'
@@ -547,6 +547,8 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
   /** A picture's size checked before any call: at most the largest tiled, and no more tiles than were held for. */
   const checkSize = (w: number, h: number) => {
     if (w * h > UPSCALE_2X_TILED_MAX_PIXELS) throw new Error(UPSCALE_2X_WORDS.tooLarge)
+    // Fix round 1 (L2): tiles thinner than UPSCALE_TILE_MIN_SIDE are never sent.
+    if (tooThinToTile(w, h, UPSCALE_2X_MAX_PIXELS)) throw new Error(UPSCALE_2X_WORDS.tooThin)
     if (tiledSize(w, h) && tileCount(w, h, UPSCALE_2X_MAX_PIXELS) > heldTiles) throw new Error(UPSCALE_2X_WORDS.moreThanHeld)
   }
   // A clip's frames are all one size: checked before any call.
@@ -619,11 +621,13 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
     const src = await p.rgb()
     const canvas = tiledCanvas(grid, p.w, p.h, 2)
     let k = 0
+    let last = ''
     for (const [row, y] of grid.ys.entries()) {
       for (const [col, x] of grid.xs.entries()) {
         if (io.signal.aborted) throw new MediaError('stopped')
         const png = await framePng(cropRgb(src, p.w, x, y, grid.tw, grid.th), grid.tw, grid.th)
-        const url = await send(io, `up-${p.index}-tile-${k}`, await tileUrl(io, png, p.index, k), grid.tw, grid.th)
+        last = `up-${p.index}-tile-${k}`
+        const url = await send(io, last, await tileUrl(io, png, p.index, k), grid.tw, grid.th)
         canvas.put(row, col, await answerAt(io, url, 2 * grid.tw, 2 * grid.th))
         k++
       }
@@ -632,7 +636,9 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
     const dw = 2 * p.w
     const dh = 2 * p.h
     if (clip) return { rgb, w: dw, h: dh }
-    const file = await io.keep(await png8(rgb, dw, dh, 3, 6), 'png')
+    // Fix round 1 (L1): kept once, on the last tile's call — a resumed node finds it there and keeps no second
+    // copy, so the run never keeps more than the room counted before the hold.
+    const file = await io.savedOnce(last, 'tiled', async () => io.keep(await png8(rgb, dw, dh, 3, 6), 'png'))
     return { rgb: p.index === 0 ? rgb : null, w: dw, h: dh, file }
   }
 

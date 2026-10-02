@@ -50,7 +50,7 @@ import {
   BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS, rifeTakes, slowMotionAiCount, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
   OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
 } from '#shared/runner/localModels'
-import { tileCount, tileCountBound } from '#shared/runner/upscaleTiles'
+import { tileCount, tileCountBound, tooThinToTile } from '#shared/runner/upscaleTiles'
 import { linkPictureBound, linkPictureShapes, pictureSize, type Shape } from '../utils/graphInputPixels'
 import { pictureMeta } from './pictures/pythonView'
 import { hasAlphaAsPil } from './pictures/mask'
@@ -346,6 +346,10 @@ export async function localModelStartProblems(
       pictures[nodeId] = pixels
       // R11.6: over the service's largest, in tiles: the most any picture makes (its shapes', else the pixel bound's).
       if (pixels > UPSCALE_2X_MAX_PIXELS) {
+        // Fix round 1 (L2): a shape whose tiles would be thinner than the floor is refused plainly, before the hold.
+        if (shapesIn?.some(([w, h]) => tooThinToTile(w, h, UPSCALE_2X_MAX_PIXELS))) {
+          return { counts, keptBytes: 0, problem: null, refused: { message: UPSCALE_2X_WORDS.tooThin, nodeId, classType: n.class_type } }
+        }
         const bound = tileCountBound(pixels, UPSCALE_2X_MAX_PIXELS)
         const byShape = shapesIn?.length ? Math.max(...shapesIn.map(([w, h]) => tileCount(w, h, UPSCALE_2X_MAX_PIXELS))) : bound
         tiles[nodeId] = Math.min(byShape, bound)

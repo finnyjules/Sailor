@@ -82,12 +82,12 @@ const PIC = (i: number): OutputFile => ({ filename: `p${i}.png`, subfolder: '', 
 
 // ── The plan, run by hand ───────────────────────────────────────────────────
 
-async function planOf(pictures: Uint8Array[], o: { held?: number } = {}): Promise<Extract<NodePlan, { kind: 'pipeline' }>> {
+async function planOf(pictures: Uint8Array[], o: { held?: number; picturePixels?: number } = {}): Promise<Extract<NodePlan, { kind: 'pipeline' }>> {
   const p = await planNode({
     prompt: { l: LOAD, n: upNode() }, nodeId: 'n', gateOpen: false, families: ON,
     filesFrom: link => (link[0] === 'l' ? pictures.map((_x, i) => PIC(i)) : []),
     toUrl: async f2 => `https://fal.storage/${f2.filename}`,
-    measured: { frames: o.held ?? pictures.length },
+    measured: { frames: o.held ?? pictures.length, ...(o.picturePixels ? { picturePixels: o.picturePixels } : {}) },
   })
   if (p.kind !== 'pipeline') throw new Error('Upscale (2×) is a pipeline')
   return p
@@ -201,7 +201,8 @@ describe('a picture (the plan, run by hand)', () => {
 
   it('a picture over the service\'s largest (1440p) with no tiles held is refused at the turn before any call (R11.6: tiles are held at the start)', async () => {
     const big = await noisePng(2600, 1440)
-    const plan = await planOf([big])
+    // Measured at the start at 1440p (one tile held); not measured at all, the plan holds the most tiles (R11.6 fix round 1).
+    const plan = await planOf([big], { picturePixels: UPSCALE_2X_MAX_PIXELS })
     const call = vi.fn()
     const io = { signal: new AbortController().signal, read: async () => big, call } as unknown as PipelineIO
     await expect(plan.run(io)).rejects.toThrow(UPSCALE_2X_WORDS.moreThanHeld)
@@ -267,8 +268,8 @@ describe('the acceptance chains, with ComfyUI off', () => {
   })
 
   it('a picture past the largest tiled (R11.6), or one whose size can\'t be known: the workflow is left to the engine before anything is held', async () => {
-    // One colour: a small file of 4097 × 4096 (past UPSCALE_2X_TILED_MAX_PIXELS).
-    const big = new Uint8Array(await sharp({ create: { width: 4097, height: 4096, channels: 3, background: '#808080' } }).png().toBuffer())
+    // One colour: a small file of 4400 × 4400 (past UPSCALE_2X_TILED_MAX_PIXELS, 12288 × 1536).
+    const big = new Uint8Array(await sharp({ create: { width: 4400, height: 4400, channels: 3, background: '#808080' } }).png().toBuffer())
     const prompt: ApiPrompt = { l: LOAD, n: upNode(), s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } } }
     const replicate = createFakeReplicate()
     const k = makeKit({ hosted: true, replicate, deps: { families: () => ON } })
@@ -346,9 +347,9 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(UPSCALE_2X_WORDS.overCap)
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2560, 1440) })).problem).toBeNull()
-    // R11.6: over 1440p in tiles (two for 2561 × 1440), past 4096 × 4096 left.
+    // R11.6: over 1440p in tiles (two for 2561 × 1440), past 12288 × 1536's pixels left.
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 2 }, problem: null })
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 4097, 4096) })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
+    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 4400, 4400) })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
     // No masks of its own: the kept bytes are the batches only (R6's peak).
     const withMasks = await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map([['v:0', { count: 3, w: 64, h: 36, exact: false }], ['n:0', { count: 3, w: 128, h: 72, exact: false }]]) })
     expect(withMasks.problem).toBeNull()
@@ -368,13 +369,14 @@ describe('prices (R7 rule 4)', () => {
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, UPSCALE_2X_CLASS)).toBe(false)
   })
 
-  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else 1440p), marked up once; one picture when nothing was counted', () => {
+  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else up to the largest tiled: five tiles at 1440p), marked up once; one picture when nothing was counted', () => {
     const inputs = { frames: ['l', 0], tile_size: 512 }
     const CAP_USD = 0.0110592 // 2560 × 1440 = 3.6864 MP × $0.003
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs, { families: new Set(['upscale-2x']) })).toBe(true)
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: CAP_USD, credits: creditsForUsd(CAP_USD) })
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 3.31776, credits: creditsForUsd(3.31776) })
+    // R11.6 fix round 1 (H1): the picture's size not measured (the canvas): up to six tiles at 1440p each (the largest tiled picture's).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 6 * CAP_USD, credits: creditsForUsd(6 * CAP_USD) })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 19.90656, credits: creditsForUsd(19.90656) })
     // Measured at the start of the run (R7.11): the live check's 1152² picture, three of them.
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 3, picturePixels: 1152 * 1152 } })).toEqual({ usd: 0.01194393, credits: 3 })
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 500 * 375 } })).toEqual({ usd: 0.003, credits: 1 })
@@ -382,9 +384,9 @@ describe('prices (R7 rule 4)', () => {
     // (4096 × 4096 with no shape known: the pixel bound's five tiles; runner-upscale-tiles.unit.spec.ts has the rest).
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 5 * CAP_USD, credits: creditsForUsd(5 * CAP_USD) })
     expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.003 })))).toBe(creditsForUsd(0.009))
-    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 3 }] })
+    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 18 }] })
     expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }).nodes['1']).toBeUndefined()
-    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(CAP_USD))
+    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(6 * CAP_USD))
   })
 
   it('sends no text; the tooltip names the service while the family is on; its route has no backup', () => {

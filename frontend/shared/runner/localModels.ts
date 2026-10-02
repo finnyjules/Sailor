@@ -29,7 +29,7 @@ import { SAM_3_IMAGE_APP, subjectCallKinds } from './samInput'
 import { WIZPER_APP } from './soundIn'
 import { MEDIA_CAPS } from './media'
 import { soundPieceBounds } from './soundPieces'
-import { tileCountBound } from './upscaleTiles'
+import { tileCountBound, UPSCALE_TILE_MIN_SIDE } from './upscaleTiles'
 import { isLink, type ApiPrompt } from './graph'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
@@ -69,13 +69,17 @@ export const UPSCALE_2X_TILE_SIZE = { default: 512, min: 0, max: 2048 } as const
 export const UPSCALE_2X_MAX_PIXELS = 2560 * 1440
 /**
  * R11.6: the largest picture (pixels) Upscale (2×) cuts into tiles, in both
- * places: hosted's largest video frame (MEDIA_CAPS.hosted.framePixels),
- * about 16.8 MP — a 4K picture and more; its 2× picture is about 200 MB of
- * pixels held at once. A larger one, or one whose size can't be known before
- * the run, is refused in hosted and left to the engine locally (rule 6, until
- * R11.9's plain words).
+ * places. Fix round 1: the largest picture Sailor makes or takes
+ * (shared/pricing/editSettings.ts LARGEST_INPUT_PIXELS, 12288 × 1536, about
+ * 18.9 MP — a 4K Nano Banana at its widest), so a generator's stated largest
+ * is tiled, never left (the brief). Its 2× picture is about 226 MB of pixels
+ * held at once (the blend's band is a few MB, fix round 1 M1). A larger one,
+ * or one whose size can't be known before the run, is refused in hosted and
+ * left to the engine locally (rule 6, until R11.9's plain words).
  */
-export const UPSCALE_2X_TILED_MAX_PIXELS = 4096 * 4096
+export const UPSCALE_2X_TILED_MAX_PIXELS = 12288 * 1536
+/** R11.6 fix round 1 (H1): the most tiles a picture up to UPSCALE_2X_TILED_MAX_PIXELS makes, whatever its shape. */
+export const UPSCALE_2X_TILED_MAX_TILES = tileCountBound(UPSCALE_2X_TILED_MAX_PIXELS, UPSCALE_2X_MAX_PIXELS)
 
 // ── Object removal (R7.3, family `object-remove`) ──
 
@@ -517,6 +521,7 @@ export const UPSCALE_2X_WORDS = {
   overCap: 'This clip is too long to upscale here.',
   tooLarge: 'This picture is too large to upscale here.',
   moreThanHeld: 'This picture is larger than was measured before the run, so it was stopped before anything was sent.',
+  tooThin: `This picture is too long and thin to upscale here. Make its shorter side at least ${UPSCALE_TILE_MIN_SIDE} pixels.`,
   unknownSize: 'The size of the picture to upscale can’t be known before the run.',
   noAnswer: 'The service sent back no upscaled picture.',
 } as const
@@ -775,6 +780,7 @@ export function localModelCalls(classType: string, frames: number | null | undef
   // R11.6: a picture over the service's largest goes in tiles: tiles × the dearest tile, for every picture.
   if (classType === UPSCALE_2X_CLASS) {
     const tiles = upscale2xTiles(seconds?.picturePixels, seconds?.pictureTiles)
+    // In tiles (or not measured: up to the largest tiled), each call held at the service's largest.
     const inputPixels = tiles > 1 ? UPSCALE_2X_MAX_PIXELS : upscale2xPricedPixels(seconds?.picturePixels)
     return { steps: [{ call: { endpoint, inputPixels }, times: times * tiles }] }
   }
@@ -792,13 +798,17 @@ export function upscale2xPricedPixels(measured: number | null | undefined): numb
 
 /**
  * R11.6: the tiles each picture Upscale (2×) sends is cut into, for its hold:
- * one at or under the service's largest (or not measured); else the count
- * the start of the run worked out from the pictures' shapes (`recorded`), or
- * from the pixel bound alone (upscaleTiles.ts tileCountBound, a true upper
- * bound whatever the shape), whichever is fewer.
+ * one at or under the service's largest; else the count the start of the run
+ * worked out from the pictures' shapes (`recorded`), or from the pixel bound
+ * alone (upscaleTiles.ts tileCountBound, a true upper bound whatever the
+ * shape), whichever is fewer. Fix round 1 (H1): not measured (the canvas,
+ * which can't see the picture's size) — the most the largest tiled picture
+ * makes (UPSCALE_2X_TILED_MAX_TILES), so the price shown is never below the
+ * hold; the canvas marks it "up to".
  */
 export function upscale2xTiles(measured: number | null | undefined, recorded?: number | null): number {
-  if (!(typeof measured === 'number' && Number.isFinite(measured) && measured > UPSCALE_2X_MAX_PIXELS)) return 1
+  if (!(typeof measured === 'number' && Number.isFinite(measured) && measured > 0)) return UPSCALE_2X_TILED_MAX_TILES
+  if (measured <= UPSCALE_2X_MAX_PIXELS) return 1
   const bound = tileCountBound(measured, UPSCALE_2X_MAX_PIXELS)
   return typeof recorded === 'number' && Number.isInteger(recorded) && recorded >= 1 ? Math.min(recorded, bound) : bound
 }

@@ -28,6 +28,16 @@
 /** Neighbouring tiles overlap by at least this many pixels of the picture sent (Python's `overlap=32`). */
 export const UPSCALE_TILE_OVERLAP = 32
 
+/**
+ * R11.6 fix round 1 (L2): the narrowest side a tile may have. A picture
+ * over the cap whose tiles would be thinner (its shorter side under 64
+ * pixels: a strip such as 65 536 × 60) is refused plainly before the hold
+ * (`tooThinToTile`), not sent: the model's own padding is untested on such
+ * slivers. 64 is twice the overlap, so a tile keeps as much of its own
+ * picture as it shares.
+ */
+export const UPSCALE_TILE_MIN_SIDE = 64
+
 /** One picture's tiles: the grid, each tile's size, and where each column and row starts. */
 export interface TileGrid {
   cols: number
@@ -99,6 +109,19 @@ export function tileCount(w: number, h: number, cap: number, overlap = UPSCALE_T
   checkSides(w, h, cap)
   const g = fewest(w, h, cap, overlap)
   return g.cols * g.rows
+}
+
+/**
+ * Whether a W × H picture over the cap would be cut into tiles thinner than
+ * UPSCALE_TILE_MIN_SIDE (refused before the hold). Never for one at or under
+ * the cap (one call, the whole picture, as R7.2).
+ */
+export function tooThinToTile(w: number, h: number, cap: number, overlap = UPSCALE_TILE_OVERLAP): boolean {
+  checkSides(w, h, cap)
+  if (w * h <= cap) return false
+  if (Math.min(w, h) < UPSCALE_TILE_MIN_SIDE) return true
+  const g = fewest(w, h, cap, overlap)
+  return Math.min(g.tw, g.th) < UPSCALE_TILE_MIN_SIDE
 }
 
 const BOUNDS = new Map<string, number>()
