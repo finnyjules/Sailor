@@ -23,7 +23,13 @@
  * (../utils/graphInputPixels.ts linkPictureBound: a loaded file's header, an
  * Image card, Empty image, the Frame, a generator's stated largest…). One
  * larger, or one whose size can't be known, leaves the workflow to the engine
- * the same way (a stop-gap named in R7.2's report).
+ * the same way (a stop-gap named in R7.2's report). R11.6 (ruling (i)): a
+ * picture over Real-ESRGAN's largest is cut into tiles, up to
+ * UPSCALE_2X_TILED_MAX_PIXELS: the most tiles any of its pictures makes is
+ * worked out here (`tiles`, shared/runner/upscaleTiles.ts: from a clip's
+ * frame shape, the pictures' exact shapes, else the pixel bound alone — a
+ * true upper bound whatever the shape), and its 2× pictures are counted in
+ * the kept room.
  *
  * R7.6: Slow motion (AI) sends its whole clip in one RIFE call (not a call
  * per frame): its clip's count T and size (R6's frame shapes) are recorded
@@ -42,8 +48,9 @@ import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
 import {
   BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS, rifeTakes, slowMotionAiCount, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
-  OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
+  OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
 } from '#shared/runner/localModels'
+import { tileCount, tileCountBound } from '#shared/runner/upscaleTiles'
 import { linkPictureBound, linkPictureShapes, pictureSize, type Shape } from '../utils/graphInputPixels'
 import { pictureMeta } from './pictures/pythonView'
 import { hasAlphaAsPil } from './pictures/mask'
@@ -147,6 +154,8 @@ export interface LocalModelStart {
   sizes?: Record<string, { w: number; h: number; place: 'hosted' | 'local' }>
   /** R7.11: node id → the largest picture (pixels) it sends, for a class with a largest picture (Upscale (2×), priced by it). */
   pictures?: Record<string, number>
+  /** R11.6: node id → the most tiles any one of its pictures is cut into (Upscale (2×) over its service's largest), for the hold. */
+  tiles?: Record<string, number>
   /**
    * The most bytes this take keeps for its frame batches while it runs (R6's peak, every batch kept
    * to the end, a clip's cut-out batch among them), plus each clip's masks (16-bit PNGs, at most
@@ -156,7 +165,8 @@ export interface LocalModelStart {
   /**
    * R7.8 fix round 1: node id → the most bytes that node itself keeps for the run (a clip's output
    * batch, its masks; Slow motion (AI)'s output batch), for the run's kept room before each leg's
-   * hold (engine.ts keptRoomBeforeHold). A single picture keeps nothing sized here.
+   * hold (engine.ts keptRoomBeforeHold). A single picture keeps nothing sized here, but for R11.6's
+   * tiled 2× pictures (Upscale (2×) over its service's largest), counted in `keptBytes` too.
    */
   keptByNode?: Record<string, number>
   /** The first node whose count can't be known or is over the cap: the workflow goes to the engine. */
@@ -271,6 +281,8 @@ export async function localModelStartProblems(
   const counts: Record<string, number> = {}
   const sizes: Record<string, { w: number; h: number; place: 'hosted' | 'local' }> = {}
   const pictures: Record<string, number> = {}
+  const tiles: Record<string, number> = {}
+  let tiledKept = 0
   const cap = o.hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local
   const kinds = outputKindsFor(families)
   let shapes: ReadonlyMap<string, FrameShape> | null = null
@@ -297,13 +309,18 @@ export async function localModelStartProblems(
     let count: number | null
     const maxPixels = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_MAX_PIXELS, n.class_type) ? LOCAL_MODEL_MAX_PIXELS[n.class_type]! : null
     let pixels: number | null = null
+    // R11.6: the pictures' exact shapes where known (a clip's frame shape; a picture's, by the gate's walk).
+    let shapesIn: readonly (readonly [number, number])[] | null = null
     if (outputKind(prompt, link, kinds) === 'frames') {
       shapes ??= await o.shapes()
       const s = shapes.get(`${link[0]}:${link[1]}`)
       count = s?.count ?? null
       // A class with a mask slot (Background remove) keeps a mask per frame too.
       if (s && keepsMasks(n.class_type)) masks += maskBytesBound(s)
-      if (s) pixels = s.w * s.h
+      if (s) {
+        pixels = s.w * s.h
+        shapesIn = [[s.w, s.h]]
+      }
       // What it keeps itself: its output batch (R6's shape of it; else its input's, twice each side for
       // Upscale (2×)), and its masks.
       if (s) {
@@ -314,7 +331,10 @@ export async function localModelStartProblems(
     }
     else {
       count = pictureBound(prompt, link, families)
-      if (maxPixels) pixels = await linkPictureBound(prompt, link, readerOf(o.read))
+      if (maxPixels) {
+        pixels = await linkPictureBound(prompt, link, readerOf(o.read))
+        if (pixels !== null && pixels > UPSCALE_2X_MAX_PIXELS) shapesIn = await linkPictureShapes(prompt, link, readerOf(o.read))
+      }
     }
     if (count === null || !Number.isFinite(count) || count < 0) {
       return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId, classType: n.class_type } }
@@ -324,6 +344,18 @@ export async function localModelStartProblems(
       if (pixels === null || !Number.isFinite(pixels) || pixels <= 0) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.unknownSize, nodeId, classType: n.class_type } }
       if (pixels > maxPixels) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.tooLarge, nodeId, classType: n.class_type } }
       pictures[nodeId] = pixels
+      // R11.6: over the service's largest, in tiles: the most any picture makes (its shapes', else the pixel bound's).
+      if (pixels > UPSCALE_2X_MAX_PIXELS) {
+        const bound = tileCountBound(pixels, UPSCALE_2X_MAX_PIXELS)
+        const byShape = shapesIn?.length ? Math.max(...shapesIn.map(([w, h]) => tileCount(w, h, UPSCALE_2X_MAX_PIXELS))) : bound
+        tiles[nodeId] = Math.min(byShape, bound)
+        // Its 2× pictures kept for the run (a clip's batch is counted above): each at most its raw RGB PNG.
+        if (outputKind(prompt, link, kinds) !== 'frames') {
+          const bytes = Math.max(1, count) * tiledPictureBytesBound(pixels)
+          tiledKept += bytes
+          keptByNode[nodeId] = (keptByNode[nodeId] ?? 0) + bytes
+        }
+      }
     }
     counts[nodeId] = Math.max(1, count)
     // R7.3 (fix round 1): Object removal's mask must be its picture's size (Python fails in numpy's
@@ -344,13 +376,23 @@ export async function localModelStartProblems(
       }
     }
   }
-  if (!shapes) return { counts, sizes, pictures, keptBytes: 0, keptByNode, problem: null }
+  if (!shapes) return { counts, sizes, pictures, tiles, keptBytes: tiledKept, keptByNode, problem: null }
   const peak = keptPeak(prompt, families, shapes, { release: false })
   if (!peak) {
     const first = Object.keys(counts)[0]!
     return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId: first, classType: prompt[first]!.class_type } }
   }
-  return { counts, sizes, pictures, keptBytes: peak.bytes + masks, keptByNode, problem: null }
+  return { counts, sizes, pictures, tiles, keptBytes: peak.bytes + masks + tiledKept, keptByNode, problem: null }
+}
+
+/**
+ * R11.6: the most a tiled 2× picture of a picture of at most `pixels` keeps:
+ * an 8-bit RGB PNG of 4 × pixels, at most its raw bytes, a filter byte a row
+ * (at most a row a pixel), deflate's stored-block overhead and a margin.
+ */
+export function tiledPictureBytesBound(pixels: number): number {
+  const raw = 4 * pixels * 3 + 2 * pixels
+  return Math.ceil(raw * 1.001) + 64 * 1024
 }
 
 /** Generate music and its twin: the sound is its `duration` setting long (IO.Int 1–30; MusicGen makes that many seconds). */

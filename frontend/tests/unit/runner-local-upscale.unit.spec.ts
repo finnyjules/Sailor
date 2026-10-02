@@ -199,12 +199,12 @@ describe('a picture (the plan, run by hand)', () => {
     for (const w of Object.values(UPSCALE_2X_WORDS)) expect(w).not.toMatch(/Node|_|Replicate|ESRGAN/)
   })
 
-  it('a picture over the service\'s largest (1440p) is refused at the turn before any call (the start leaves it to the engine)', async () => {
+  it('a picture over the service\'s largest (1440p) with no tiles held is refused at the turn before any call (R11.6: tiles are held at the start)', async () => {
     const big = await noisePng(2600, 1440)
     const plan = await planOf([big])
     const call = vi.fn()
     const io = { signal: new AbortController().signal, read: async () => big, call } as unknown as PipelineIO
-    await expect(plan.run(io)).rejects.toThrow(UPSCALE_2X_WORDS.tooLarge)
+    await expect(plan.run(io)).rejects.toThrow(UPSCALE_2X_WORDS.moreThanHeld)
     expect(call).not.toHaveBeenCalled()
     expect(UPSCALE_2X_MAX_PIXELS).toBe(2560 * 1440)
   })
@@ -266,8 +266,9 @@ describe('the acceptance chains, with ComfyUI off', () => {
     expect(shown.animated).toEqual([false])
   })
 
-  it('a picture over 1440p, or one whose size can\'t be known: the workflow is left to the engine before anything is held', async () => {
-    const big = await noisePng(2600, 1500)
+  it('a picture past the largest tiled (R11.6), or one whose size can\'t be known: the workflow is left to the engine before anything is held', async () => {
+    // One colour: a small file of 4097 × 4096 (past UPSCALE_2X_TILED_MAX_PIXELS).
+    const big = new Uint8Array(await sharp({ create: { width: 4097, height: 4096, channels: 3, background: '#808080' } }).png().toBuffer())
     const prompt: ApiPrompt = { l: LOAD, n: upNode(), s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } } }
     const replicate = createFakeReplicate()
     const k = makeKit({ hosted: true, replicate, deps: { families: () => ON } })
@@ -282,7 +283,7 @@ describe('the acceptance chains, with ComfyUI off', () => {
     expect((await localModelStartProblems(prompt, ON, { hosted: true, shapes, read: async () => big })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
     expect((await localModelStartProblems(prompt, ON, { hosted: true, shapes })).problem?.message).toBe(UPSCALE_2X_WORDS.unknownSize)
     // Empty image is sized from its widgets; a Frame with a size set too.
-    const empty: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 3000, height: 2000, batch_size: 1, color: 0 } }, n: upNode(['e', 0]) }
+    const empty: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 5000, height: 4000, batch_size: 1, color: 0 } }, n: upNode(['e', 0]) }
     expect((await localModelStartProblems(empty, ON, { hosted: true, shapes })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
     const small: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 64, height: 64, batch_size: 2, color: 0 } }, n: upNode(['e', 0]) }
     expect(await localModelStartProblems(small, ON, { hosted: true, shapes })).toMatchObject({ counts: { n: 2 }, problem: null })
@@ -339,13 +340,15 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(charged(k)).toEqual([[credits + 1, credits + 1]])
   })
 
-  it('a clip over the frame cap or over 1440p: left to the engine before the hold, in Upscale\'s words', async () => {
+  it('a clip over the frame cap or past the largest tiled (R11.6): left to the engine before the hold, in Upscale\'s words', async () => {
     const p: ApiPrompt = { v: lvf, n: upNode(['v', 0]), s: saveFrames(['n', 0]) }
     const shapes = (count: number, w = 64, h = 36) => async () => new Map([['v:0', { count, w, h, exact: false }]])
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(UPSCALE_2X_WORDS.overCap)
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2560, 1440) })).problem).toBeNull()
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
+    // R11.6: over 1440p in tiles (two for 2561 × 1440), past 4096 × 4096 left.
+    expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 2 }, problem: null })
+    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 4097, 4096) })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
     // No masks of its own: the kept bytes are the batches only (R6's peak).
     const withMasks = await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map([['v:0', { count: 3, w: 64, h: 36, exact: false }], ['n:0', { count: 3, w: 128, h: 72, exact: false }]]) })
     expect(withMasks.problem).toBeNull()
@@ -375,8 +378,9 @@ describe('prices (R7 rule 4)', () => {
     // Measured at the start of the run (R7.11): the live check's 1152² picture, three of them.
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 3, picturePixels: 1152 * 1152 } })).toEqual({ usd: 0.01194393, credits: 3 })
     expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 500 * 375 } })).toEqual({ usd: 0.003, credits: 1 })
-    // Never above the service's largest picture.
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: CAP_USD, credits: creditsForUsd(CAP_USD) })
+    // Each call never above the service's largest picture; R11.6: a larger one in tiles, each held at that largest
+    // (4096 × 4096 with no shape known: the pixel bound's five tiles; runner-upscale-tiles.unit.spec.ts has the rest).
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: 5 * CAP_USD, credits: creditsForUsd(5 * CAP_USD) })
     expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.003 })))).toBe(creditsForUsd(0.009))
     expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 3 }] })
     expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }).nodes['1']).toBeUndefined()

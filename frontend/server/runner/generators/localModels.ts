@@ -34,9 +34,15 @@
  * is kept as the RGB PNG of its pixels); any other size is resized to 2W × 2H with R0's
  * bilinear (../pixels/core.ts), so later nodes see Python's size. The live
  * preview is the first picture's (save_live_preview(unique=True), RGB,
- * compress level 1). A picture larger than the service's stated largest
- * (UPSCALE_2X_MAX_PIXELS) never reaches the call: the start of the run leaves
- * such a workflow to the engine, and the turn refuses one before any call.
+ * compress level 1). R11.6 (ruling (i)): a picture (or a clip's frame)
+ * larger than the service's stated largest (UPSCALE_2X_MAX_PIXELS) is cut
+ * into overlapping tiles under it (shared/runner/upscaleTiles.ts), one call
+ * a tile, and the 2× tiles faded back into one picture (./tiles.ts). Never
+ * more tiles than the start of the run held for (refused before any call),
+ * nor a picture past UPSCALE_2X_TILED_MAX_PIXELS. A node with a tiled picture
+ * sends one call at a time and delivers only when every tile did: a tile
+ * that fails, or Stop, charges none of its calls (each marked undelivered,
+ * Sailor absorbs it, as R11.5's pieces).
  *
  * Object removal (R7.3, family `object-remove`; comfy_extras/nodes_object_remove.py
  * :54-65 → _inpaint.py lama_inpaint): one call per picture to Replicate's LaMa
@@ -139,7 +145,8 @@ import { pyFloatOf, pyIntOf, pyStrip, pyTruthy } from '#shared/runner/pyText'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
   BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
-  OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass, upscale2xPricedPixels,
+  OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_TILED_MAX_PIXELS, UPSCALE_2X_WORDS, isLocalModelClass,
+  upscale2xPricedPixels, upscale2xTiles,
   MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
   FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
@@ -155,10 +162,12 @@ import { floatWav } from '../../media/encode'
 import { keepSound } from '../../media/values'
 import { wizperInput } from './soundIn'
 import { effectPreviewName } from '#shared/runner/effects'
-import type { NodePlan, PipelineIO, PlanContext } from '../executors'
+import type { Derived, NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { pixelsInWorker } from '../compositor/worker'
-import { pictureMeta, pilRgba, pngColourType } from '../pictures/pythonView'
+import { pictureMeta, pilRgba, pngColourType, rgbTurnedPng } from '../pictures/pythonView'
+import { tileCount, tileGrid } from '#shared/runner/upscaleTiles'
+import { cropRgb, tiledCanvas } from './tiles'
 import { pixels as pixelOps } from '../pixels/core'
 import { loaderSourceOf, madeSourceOf } from '../pictureHandoff'
 import { decodeMask, encodeMask, type Mask } from '../pictures/mask'
@@ -261,7 +270,7 @@ export function heldPictures(ctx: PlanContext): number {
  * confirms it). Frames not delivered are not charged. The caller's lease (if
  * any) ends the decode.
  */
-async function inOrder<T>(pictures: AsyncIterable<InPicture>, each: (p: InPicture) => Promise<T>, done: (r: T, p: InPicture) => Promise<void>, signal: AbortSignal): Promise<number> {
+async function inOrder<T>(pictures: AsyncIterable<InPicture>, each: (p: InPicture) => Promise<T>, done: (r: T, p: InPicture) => Promise<void>, signal: AbortSignal, inFlight = PER_NODE_IN_FLIGHT): Promise<number> {
   const pending: { p: InPicture; work: Promise<T> }[] = []
   let count = 0
   // A box: TypeScript doesn't follow the write in the rejection handler.
@@ -282,7 +291,7 @@ async function inOrder<T>(pictures: AsyncIterable<InPicture>, each: (p: InPictur
     work.catch((e) => { if (!failed.at) { failed.e = e; failed.at = true } })
     pending.push({ p, work })
     count++
-    if (pending.length >= PER_NODE_IN_FLIGHT) await Promise.race([flushOne(), firstFailure(pending.map(x => x.work))])
+    if (pending.length >= inFlight) await Promise.race([flushOne(), firstFailure(pending.map(x => x.work))])
   }
   while (pending.length) await Promise.race([flushOne(), firstFailure(pending.map(x => x.work))])
   return count
@@ -512,6 +521,11 @@ async function tensorSize(bytes: Uint8Array, turned: boolean): Promise<{ w: numb
 
 interface UpAnswer { rgb: Uint8Array | null; w: number; h: number; file?: OutputFile }
 
+/** Whether a picture of this size goes in tiles (R11.6: over the service's largest). */
+function tiledSize(w: number, h: number): boolean {
+  return w * h > UPSCALE_2X_MAX_PIXELS
+}
+
 export function planUpscale2x(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const link = inputs.frames
@@ -522,37 +536,63 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
   if (paidCallUsd({ endpoint: UPSCALE_2X_SLUG }) == null) throw new Error('Upscale has no price yet')
   const incoming = incomingOf(ctx, link)
   const held = heldPictures(ctx)
+  // R11.6: the tiles each picture may be cut into, as the start of the run held for (one when it held none).
+  const heldTiles = upscale2xTiles(ctx.measured?.picturePixels, ctx.measured?.pictureTiles)
   const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
   if (count < 1) throw new Error(UPSCALE_2X_WORDS.noPicture)
   // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
   if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
   const clip = incoming.kind === 'frames'
-  // A clip's frames are all one size: over the service's largest, refused before any call (the start leaves it to the engine).
-  if (clip && incoming.value.w * incoming.value.h > UPSCALE_2X_MAX_PIXELS) throw new Error(UPSCALE_2X_WORDS.tooLarge)
+
+  /** A picture's size checked before any call: at most the largest tiled, and no more tiles than were held for. */
+  const checkSize = (w: number, h: number) => {
+    if (w * h > UPSCALE_2X_TILED_MAX_PIXELS) throw new Error(UPSCALE_2X_WORDS.tooLarge)
+    if (tiledSize(w, h) && tileCount(w, h, UPSCALE_2X_MAX_PIXELS) > heldTiles) throw new Error(UPSCALE_2X_WORDS.moreThanHeld)
+  }
+  // A clip's frames are all one size: checked before any call.
+  if (clip) checkSize(incoming.value.w, incoming.value.h)
   const quant = clip ? framesQuantOf(ctx.prompt, ctx.nodeId, 0, ctx.families) : onlySavesRead(ctx.prompt, ctx.nodeId, 0) ? 'trunc' : 'round'
   const turned = !clip && !!loaderSourceOf(ctx.prompt, link, ctx.families ?? NO_FAMILIES)
 
   /**
-   * One picture's call and its answer at 2W × 2H. A picture's answer is kept
-   * for the run (resumed: not fetched again), as downloaded when it is a PNG of
-   * that size; a frame's is not (a clip's hundreds would fill the kept room).
+   * The calls that answered, while a picture goes in tiles (R11.6): the node
+   * then delivers only when every call did, so a failure or Stop marks them
+   * all undelivered (charged 0), as R11.5's pieces.
    */
-  const upOne = async (io: PipelineIO, p: InPicture & { w: number; h: number }): Promise<UpAnswer> => {
-    const key = `up-${p.index}`
-    const dw = 2 * p.w
-    const dh = 2 * p.h
-    const image = await p.url()
-    const got = await io.call({ key, provider: 'replicate', endpoint: UPSCALE_2X_SLUG, payload: upscale2xInput(image), media: 'image', usd: usdOf(p.w, p.h)! })
+  const answered: string[] = []
+  let tiling = false
+
+  /** One call's answer at `dw` × `dh` (resized with R0's bilinear when it came back another size). */
+  const answerAt = async (io: PipelineIO, url: string, dw: number, dh: number): Promise<Uint8Array> => {
+    const a = await answerRgb((await io.download(url)).bytes)
+    return a.w === dw && a.h === dh ? a.rgb : resizeRgb8(a.rgb, a.w, a.h, dw, dh, quant)
+  }
+
+  /** One call: sent, its answer's URL, or (none named) undelivered and failed. */
+  const send = async (io: PipelineIO, key: string, image: string, w: number, h: number): Promise<string> => {
+    const got = await io.call({ key, provider: 'replicate', endpoint: UPSCALE_2X_SLUG, payload: upscale2xInput(image), media: 'image', usd: usdOf(w, h)! })
     const url = firstOutputUrl(got.result)[0]
     if (!url) {
       // Its answer named no file: nothing delivered, so not charged (R3.17 fix round 1).
       await io.undelivered?.(key, 'no-file')
       throw new Error(UPSCALE_2X_WORDS.noAnswer)
     }
-    if (clip) {
-      const a = await answerRgb((await io.download(url)).bytes)
-      return { rgb: a.w === dw && a.h === dh ? a.rgb : resizeRgb8(a.rgb, a.w, a.h, dw, dh, quant), w: dw, h: dh }
-    }
+    answered.push(key)
+    return url
+  }
+
+  /**
+   * One picture's call and its answer at 2W × 2H. A picture's answer is kept
+   * for the run (resumed: not fetched again), as downloaded when it is a PNG of
+   * that size; a frame's is not (a clip's hundreds would fill the kept room).
+   */
+  const upOne = async (io: PipelineIO, p: UpPicture): Promise<UpAnswer> => {
+    if (tiledSize(p.w, p.h)) return upTiled(io, p)
+    const key = `up-${p.index}`
+    const dw = 2 * p.w
+    const dh = 2 * p.h
+    const url = await send(io, key, await p.url(), p.w, p.h)
+    if (clip) return { rgb: await answerAt(io, url, dw, dh), w: dw, h: dh }
     const fresh: { rgb?: Uint8Array } = {}
     const file = await io.savedOnce(key, 'answer', async () => {
       const bytes = (await io.download(url)).bytes
@@ -567,6 +607,33 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
     // The preview needs the pixels only for the first picture.
     const rgb = fresh.rgb ?? (p.index === 0 ? (await answerRgb(await io.read(file))).rgb : null)
     return { rgb, w: dw, h: dh, file }
+  }
+
+  /**
+   * R11.6: a picture over the service's largest, in tiles (tileGrid), one
+   * call each in grid order, each answer faded into the 2× picture
+   * (./tiles.ts). A picture's result is kept for the run; a frame's is not.
+   */
+  const upTiled = async (io: PipelineIO, p: UpPicture): Promise<UpAnswer> => {
+    const grid = tileGrid(p.w, p.h, UPSCALE_2X_MAX_PIXELS)
+    const src = await p.rgb()
+    const canvas = tiledCanvas(grid, p.w, p.h, 2)
+    let k = 0
+    for (const [row, y] of grid.ys.entries()) {
+      for (const [col, x] of grid.xs.entries()) {
+        if (io.signal.aborted) throw new MediaError('stopped')
+        const png = await framePng(cropRgb(src, p.w, x, y, grid.tw, grid.th), grid.tw, grid.th)
+        const url = await send(io, `up-${p.index}-tile-${k}`, await tileUrl(io, png, p.index, k), grid.tw, grid.th)
+        canvas.put(row, col, await answerAt(io, url, 2 * grid.tw, 2 * grid.th))
+        k++
+      }
+    }
+    const rgb = canvas.done()
+    const dw = 2 * p.w
+    const dh = 2 * p.h
+    if (clip) return { rgb, w: dw, h: dh }
+    const file = await io.keep(await png8(rgb, dw, dh, 3, 6), 'png')
+    return { rgb: p.index === 0 ? rgb : null, w: dw, h: dh, file }
   }
 
   /** The first picture's live preview (save_live_preview(unique=True): RGB, compress level 1). */
@@ -584,70 +651,104 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
     const name = `upscale_frame_${index}.png`
     return ctx.bytesToUrl ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)
   }
+  const tileUrl = (io: PipelineIO, png: Uint8Array, index: number, k: number) => {
+    const name = `upscale_tile_${index}_${k}.png`
+    return ctx.bytesToUrl ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)
+  }
+  /** A picture file's RGB as Python's tensor has it (a loader's file turned by its EXIF orientation, alpha dropped). */
+  const fileRgb = async (io: PipelineIO, f: OutputFile, w: number, h: number): Promise<Uint8Array> => {
+    let bytes = await io.read(f)
+    if (turned) bytes = (await rgbTurnedPng(bytes)).png ?? bytes
+    const a = await answerRgb(bytes)
+    if (a.w !== w || a.h !== h) throw new Error(UPSCALE_2X_WORDS.moreThanHeld)
+    return a.rgb
+  }
+
+  /** The node's work; with a picture in tiles, one call at a time and, on a failure or Stop, nothing charged. */
+  const work = async (io: PipelineIO): Promise<Derived> => {
+    let ui: Record<string, unknown> | null = null
+    if (incoming.kind === 'files') {
+      const files = incoming.files
+      // Each picture's size as Python's tensor has it, read first: one past the largest, or in more tiles than held, is refused before any call.
+      const sizes: { w: number; h: number }[] = []
+      for (const f of files) {
+        const s = await tensorSize(await io.read(f), turned)
+        checkSize(s.w, s.h)
+        sizes.push(s)
+      }
+      tiling = sizes.some(s => tiledSize(s.w, s.h))
+      const out: OutputFile[] = []
+      async function* each(): AsyncIterable<UpPicture> {
+        for (const [index, f] of files.entries()) {
+          const { w, h } = sizes[index]!
+          yield { index, url: fileUrl(f), w, h, rgb: () => fileRgb(io, f, w, h) }
+        }
+      }
+      await inOrder(each(), p => upOne(io, p as UpPicture), async (a, p) => {
+        out.push(a.file!)
+        if (p.index === 0) ui = await previewOf(io, a)
+      }, io.signal, tiling ? 1 : PER_NODE_IN_FLIGHT)
+      return { values: { 0: { kind: 'files', files: out } }, ui }
+    }
+    // A clip (ruling (f)): its frames decoded one at a time, each sent and upscaled, the batch written in order at 2W × 2H.
+    const v = incoming.value
+    tiling = tiledSize(v.w, v.h)
+    const media = io.media
+    if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+    const made = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
+      const sink = framesSink(2 * v.w, 2 * v.h, media, lease)
+      let finished = false
+      try {
+        const frames = framesOf(v, media, lease)[Symbol.asyncIterator]()
+        async function* each(): AsyncIterable<UpPicture> {
+          try {
+            for (let index = 0; ; index++) {
+              const g = await frames.next()
+              if (g.done) return
+              const rgb = g.value as Uint8Array
+              yield { index, w: v.w, h: v.h, url: async () => frameUrl(io, await framePng(rgb, v.w, v.h), index), rgb: async () => rgb }
+            }
+          }
+          finally {
+            await frames.return?.().catch(() => undefined)
+          }
+        }
+        const n = await inOrder(each(), p => upOne(io, p as UpPicture), async (a, p) => {
+          await sink.put(a.rgb!)
+          if (p.index === 0) ui = await previewOf(io, a)
+        }, io.signal, tiling ? 1 : PER_NODE_IN_FLIGHT)
+        if (n !== v.count) throw new MediaError('failed')
+        const out = await sink.done()
+        finished = true
+        return out
+      }
+      finally {
+        if (!finished) await sink.abort()
+      }
+    })
+    if (io.signal.aborted) throw new MediaError('stopped')
+    return { values: { 0: made }, ui }
+  }
 
   return {
     kind: 'pipeline', prefix: 'upscale',
     run: async (io: PipelineIO) => {
-      let ui: Record<string, unknown> | null = null
-      if (incoming.kind === 'files') {
-        const files = incoming.files
-        // Each picture's size as Python's tensor has it, read first: one over the service's largest is refused before any call.
-        const sizes: { w: number; h: number }[] = []
-        for (const f of files) {
-          const s = await tensorSize(await io.read(f), turned)
-          if (s.w * s.h > UPSCALE_2X_MAX_PIXELS) throw new Error(UPSCALE_2X_WORDS.tooLarge)
-          sizes.push(s)
-        }
-        const out: OutputFile[] = []
-        async function* each(): AsyncIterable<InPicture & { w: number; h: number }> {
-          for (const [index, f] of files.entries()) yield { index, url: fileUrl(f), ...sizes[index]! }
-        }
-        await inOrder(each(), p => upOne(io, p as InPicture & { w: number; h: number }), async (a, p) => {
-          out.push(a.file!)
-          if (p.index === 0) ui = await previewOf(io, a)
-        }, io.signal)
-        return { values: { 0: { kind: 'files', files: out } }, ui }
+      answered.length = 0
+      tiling = false
+      try {
+        return await work(io)
       }
-      // A clip (ruling (f)): its frames decoded one at a time, each sent and upscaled, the batch written in order at 2W × 2H.
-      const v = incoming.value
-      const media = io.media
-      if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
-      const made = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
-        const sink = framesSink(2 * v.w, 2 * v.h, media, lease)
-        let finished = false
-        try {
-          const frames = framesOf(v, media, lease)[Symbol.asyncIterator]()
-          async function* each(): AsyncIterable<InPicture> {
-            try {
-              for (let index = 0; ; index++) {
-                const g = await frames.next()
-                if (g.done) return
-                const rgb = g.value as Uint8Array
-                yield { index, w: v.w, h: v.h, url: async () => frameUrl(io, await framePng(rgb, v.w, v.h), index) }
-              }
-            }
-            finally {
-              await frames.return?.().catch(() => undefined)
-            }
-          }
-          const n = await inOrder(each(), p => upOne(io, p as InPicture & { w: number; h: number }), async (a, p) => {
-            await sink.put(a.rgb!)
-            if (p.index === 0) ui = await previewOf(io, a)
-          }, io.signal)
-          if (n !== v.count) throw new MediaError('failed')
-          const out = await sink.done()
-          finished = true
-          return out
-        }
-        finally {
-          if (!finished) await sink.abort()
-        }
-      })
-      if (io.signal.aborted) throw new MediaError('stopped')
-      return { values: { 0: made }, ui }
+      catch (e) {
+        // R11.6: a node with a picture in tiles delivers only when every call did (R11.5's ruling for pieces).
+        if (tiling) await piecesUndelivered(io, answered)
+        throw e
+      }
     },
   }
 }
+
+/** One picture Upscale (2×) works on: its size, a link to it, and (for tiles) its RGB pixels. */
+interface UpPicture extends InPicture { w: number; h: number; rgb: () => Promise<Uint8Array> }
 
 
 // ── Object removal (R7.3) ──

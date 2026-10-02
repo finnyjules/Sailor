@@ -215,6 +215,12 @@ export interface InputSeconds {
    * sent in). Absent or null = not measured: the service's largest.
    */
   picturePixels?: number | null
+  /**
+   * R11.6: the most tiles any one of Upscale (2×)'s pictures is cut into
+   * (over the service's largest), worked out at the start of the run from the
+   * pictures' shapes. Absent: from `picturePixels` alone.
+   */
+  pictureTiles?: number | null
 }
 
 /**

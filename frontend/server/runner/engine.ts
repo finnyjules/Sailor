@@ -2481,7 +2481,9 @@ export function createEngine(deps: EngineDeps) {
         const sized = size ? { videoWidth: size.w, videoHeight: size.h, place: size.place } : {}
         // R7.11: Upscale (2×) is priced by the largest picture it sends.
         const picture = counted.pictures?.[nodeId]
-        const pictured = typeof picture === 'number' ? { picturePixels: picture } : {}
+        // R11.6: and, over the service's largest, by the most tiles any of its pictures is cut into.
+        const tiled = counted.tiles?.[nodeId]
+        const pictured = typeof picture === 'number' ? { picturePixels: picture, ...(typeof tiled === 'number' ? { pictureTiles: tiled } : {}) } : {}
         measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized, ...pictured }, sha: was?.sha ?? {} }
       }
     }

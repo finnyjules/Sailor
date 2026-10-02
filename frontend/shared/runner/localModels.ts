@@ -29,6 +29,7 @@ import { SAM_3_IMAGE_APP, subjectCallKinds } from './samInput'
 import { WIZPER_APP } from './soundIn'
 import { MEDIA_CAPS } from './media'
 import { soundPieceBounds } from './soundPieces'
+import { tileCountBound } from './upscaleTiles'
 import { isLink, type ApiPrompt } from './graph'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
@@ -58,13 +59,23 @@ export const UPSCALE_2X_SLUG = 'nightmareai/real-esrgan'
 /** `tile_size`: IO.Int.Input(default=512, min=0, max=2048, step=64). Not sent: it only splits Python's own work. */
 export const UPSCALE_2X_TILE_SIZE = { default: 512, min: 0, max: 2048 } as const
 /**
- * The largest picture (pixels) handed to Real-ESRGAN: the model page's "Max
- * recommended input image resolution is 1440p" (replicate.com/nightmareai/
- * real-esrgan, read 2026-09-30), taken as 2560 × 1440. A larger one (or one
- * whose size can't be known before the run) leaves the workflow to the
- * engine (rule 6) — a stop-gap named in R7.2's report.
+ * The largest picture (pixels) handed to Real-ESRGAN in one call: the model
+ * page's "Max recommended input image resolution is 1440p"
+ * (replicate.com/nightmareai/real-esrgan, read 2026-09-30), taken as
+ * 2560 × 1440. R11.6 (ruling (i)): a larger picture is cut into overlapping
+ * tiles of at most this size, one call each, blended back
+ * (./upscaleTiles.ts, server/runner/generators/tiles.ts).
  */
 export const UPSCALE_2X_MAX_PIXELS = 2560 * 1440
+/**
+ * R11.6: the largest picture (pixels) Upscale (2×) cuts into tiles, in both
+ * places: hosted's largest video frame (MEDIA_CAPS.hosted.framePixels),
+ * about 16.8 MP — a 4K picture and more; its 2× picture is about 200 MB of
+ * pixels held at once. A larger one, or one whose size can't be known before
+ * the run, is refused in hosted and left to the engine locally (rule 6, until
+ * R11.9's plain words).
+ */
+export const UPSCALE_2X_TILED_MAX_PIXELS = 4096 * 4096
 
 // ── Object removal (R7.3, family `object-remove`) ──
 
@@ -472,9 +483,13 @@ export function localModelMaskSlot(classType: string): number | null {
   return slot === undefined ? null : Number(slot)
 }
 
-/** The largest picture each class's service takes (pixels), where its page states one (rule 6). */
+/**
+ * The largest picture each class takes (pixels), where there is one (rule 6).
+ * R11.6: Upscale (2×) cuts a picture over its service's largest
+ * (UPSCALE_2X_MAX_PIXELS) into tiles, up to UPSCALE_2X_TILED_MAX_PIXELS.
+ */
 export const LOCAL_MODEL_MAX_PIXELS: Readonly<Record<string, number>> = {
-  [UPSCALE_2X_CLASS]: UPSCALE_2X_MAX_PIXELS,
+  [UPSCALE_2X_CLASS]: UPSCALE_2X_TILED_MAX_PIXELS,
 }
 
 /**
@@ -501,6 +516,7 @@ export const UPSCALE_2X_WORDS = {
   noPicture: 'There is no picture to upscale.',
   overCap: 'This clip is too long to upscale here.',
   tooLarge: 'This picture is too large to upscale here.',
+  moreThanHeld: 'This picture is larger than was measured before the run, so it was stopped before anything was sent.',
   unknownSize: 'The size of the picture to upscale can’t be known before the run.',
   noAnswer: 'The service sent back no upscaled picture.',
 } as const
@@ -756,7 +772,12 @@ export function localModelCalls(classType: string, frames: number | null | undef
     return { steps: subjectCallKinds(inputs?.output_mode).map(k => ({ call: { endpoint: k === 'cutout' ? BG_REMOVE_SLUG : SAM_3_SLUG }, times })) }
   }
   // R7.11: Upscale (2×) is priced by the picture it sends (the largest the start of the run measured; else the service's largest).
-  if (classType === UPSCALE_2X_CLASS) return { steps: [{ call: { endpoint, inputPixels: upscale2xPricedPixels(seconds?.picturePixels) }, times }] }
+  // R11.6: a picture over the service's largest goes in tiles: tiles × the dearest tile, for every picture.
+  if (classType === UPSCALE_2X_CLASS) {
+    const tiles = upscale2xTiles(seconds?.picturePixels, seconds?.pictureTiles)
+    const inputPixels = tiles > 1 ? UPSCALE_2X_MAX_PIXELS : upscale2xPricedPixels(seconds?.picturePixels)
+    return { steps: [{ call: { endpoint, inputPixels }, times: times * tiles }] }
+  }
   return { steps: [{ call: { endpoint }, times }] }
 }
 
@@ -767,6 +788,19 @@ export function localModelCalls(classType: string, frames: number | null | undef
  */
 export function upscale2xPricedPixels(measured: number | null | undefined): number {
   return typeof measured === 'number' && Number.isFinite(measured) && measured > 0 ? Math.min(measured, UPSCALE_2X_MAX_PIXELS) : UPSCALE_2X_MAX_PIXELS
+}
+
+/**
+ * R11.6: the tiles each picture Upscale (2×) sends is cut into, for its hold:
+ * one at or under the service's largest (or not measured); else the count
+ * the start of the run worked out from the pictures' shapes (`recorded`), or
+ * from the pixel bound alone (upscaleTiles.ts tileCountBound, a true upper
+ * bound whatever the shape), whichever is fewer.
+ */
+export function upscale2xTiles(measured: number | null | undefined, recorded?: number | null): number {
+  if (!(typeof measured === 'number' && Number.isFinite(measured) && measured > UPSCALE_2X_MAX_PIXELS)) return 1
+  const bound = tileCountBound(measured, UPSCALE_2X_MAX_PIXELS)
+  return typeof recorded === 'number' && Number.isInteger(recorded) && recorded >= 1 ? Math.min(recorded, bound) : bound
 }
 
 /** What Slow motion (AI)'s and Whisper transcribe's prices read of the media (clipSettings.ts InputSeconds' fields). */
@@ -783,6 +817,8 @@ export interface SlowMotionAiMeasured {
   place?: 'hosted' | 'local' | null
   /** R7.11: the largest picture (pixels) Upscale (2×) sends, measured at the start of the run. */
   picturePixels?: number | null
+  /** R11.6: the most tiles any one of Upscale (2×)'s pictures is cut into, worked out at the start of the run. */
+  pictureTiles?: number | null
 }
 
 /**
