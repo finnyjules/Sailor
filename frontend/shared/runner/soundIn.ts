@@ -24,7 +24,7 @@
  * Pure; relative imports only.
  */
 import { isLink } from './graph'
-import { readViewRef } from '../pricing/clipSettings'
+import { LIPSYNC_MAX_SECONDS, readViewRef } from '../pricing/clipSettings'
 
 export const WIZPER_APP = 'fal-ai/wizper'
 export const DIARIZATION_SLUG = 'thomasmol/whisper-diarization'
@@ -78,9 +78,10 @@ export const RVC_OUTPUT_FORMATS = ['mp3', 'wav'] as const
 /** Sync lips' sync modes, in each class's own order. */
 export const LIPSYNC_SYNC_MODES = ['loop', 'bounce', 'cut_off', 'silence', 'remap'] as const
 /**
- * The sync modes the runner takes: `silence` pads the sound to the whole
- * video, whose length Sailor can't read, so it can't be priced
- * (clipSettings.ts syncModeRefusal); such a node is left to the engine.
+ * The sync modes the runner takes without reading the face video. R11.3,
+ * ruling (o): `silence` pads the sound to the whole video, so it is taken
+ * only on a video uploaded to Sailor, measured and priced on its length
+ * (eligibility.ts 'lipsync-silence-video', server/runner/soundInMedia.ts).
  */
 export const LIPSYNC_SYNC_MODES_TAKEN = ['loop', 'bounce', 'cut_off', 'remap'] as const
 
@@ -96,6 +97,9 @@ export const LIPSYNC_NEEDS_VIDEO = 'Sync lips to audio needs a link to the sourc
 /** Ruling (r), hosted: an https address or the user's own upload. */
 export const LIPSYNC_VIDEO_ADDRESS = 'Sync lips to audio takes a web address (https) or a video you uploaded to Sailor.'
 export const LIPSYNC_VIDEO_MISSING = 'The source video to lip-sync is missing. Upload it again.'
+/** R11.3: Sync lips in "silence" needs a face video uploaded to Sailor (its length is the price). */
+export const LIPSYNC_SILENCE_NEEDS_UPLOAD = 'Silence mode needs a face video uploaded to Sailor: it bills the whole video. Upload the video, or choose another sync mode.'
+export const LIPSYNC_SILENCE_TOO_LONG = `Silence mode makes the whole face video, and lip-syncs here are up to ${LIPSYNC_MAX_SECONDS} seconds. Use a shorter video.`
 /** Fix round 1, Minor 1: the longest custom voice model address hosted Sailor sends. */
 export const RVC_CUSTOM_URL_MAX = 2048
 export const RVC_CUSTOM_URL_REFUSED = `A custom voice model must be a web address (https) of at most ${RVC_CUSTOM_URL_MAX.toLocaleString('en-US')} characters.`

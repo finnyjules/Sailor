@@ -5,7 +5,8 @@
 import { isLink, linksOf, type ApiPrompt } from './graph'
 import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
-import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
+import { SYNC_3_ENGINE } from './lipSync'
+import { lipSyncEngineMediaTaken, lipSyncRunEngine } from './lipSyncEngines'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 import { PERSON_SWAP_RESOLUTIONS } from './personSwapVideo'
 import { SHOT_OVERRIDE_WIDGETS, SHOT_PRESET_IDS } from './shotPresets'
@@ -43,8 +44,8 @@ import {
 import { LENS_FOCAL, LENS_NAMES, LENS_STRENGTH, NANO_EXTRAS_CLASSES, POSE_SOURCES } from './nanoExtras'
 import { TURNTABLE_CLASS, TURNTABLE_DIRECTIONS, TURNTABLE_VIEW_INPUTS } from './turntable'
 import {
-  DIARIZATION_MODELS, DIARIZATION_SPEAKERS, LIPSYNC_MODELS, LIPSYNC_SYNC_MODES_TAKEN, RVC_MODELS, RVC_OUTPUT_FORMATS, RVC_PITCH_ALGORITHMS,
-  RVC_PITCH_CHANGES, RVC_PRESET_VOICES, RVC_SEMITONES, SOUND_IN_CLASSES, SOUND_IN_LANGUAGES, TRANSCRIBE_MODELS,
+  DIARIZATION_MODELS, DIARIZATION_SPEAKERS, LIPSYNC_MODELS, LIPSYNC_SYNC_MODES, RVC_MODELS, RVC_OUTPUT_FORMATS, RVC_PITCH_ALGORITHMS,
+  RVC_PITCH_CHANGES, RVC_PRESET_VOICES, RVC_SEMITONES, SOUND_IN_CLASSES, SOUND_IN_LANGUAGES, TRANSCRIBE_MODELS, lipsyncVideoOf,
 } from './soundIn'
 import { FLUX_LORA_ASPECT_RATIOS, FLUX_LORA_MEGAPIXELS, FLUX_LORA_STEPS, LORA_CLASSES, MULTI_LORA_SLOTS, RESTYLE_LORA_CLASS, RESTYLE_LORA_FORMATS, RESTYLE_LORA_RESOLUTIONS } from './lora'
 import {
@@ -272,7 +273,13 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
     if (isLink(v)) return true
     return parseMaskPoints(v, 2, 2).ok
   },
+  // R11.3: Fabric's and Kling's media, each one the runner can read before the run.
+  'lip-sync-media': inputs => lipSyncEngineMediaTaken(inputs),
+  // R11.3, ruling (o): Sync lips in "silence" bills the whole face video: only an uploaded one (measured).
+  'lipsync-silence-video': inputs => inputs.sync_mode !== 'silence' || 'upload' in lipsyncVideoOf(inputs.video_url),
   'audio-card-lip-sync': (inputs, ctx) => {
+    // R11.3: with `sound-in` on, Lip-sync sends any wired sound as Python's WAV (R5.3 case A closed).
+    if (ctx.families && familyOn('sound-in', ctx.families)) return true
     if (!ctx.prompt || ctx.nodeId === undefined || !isLink(inputs.source)) return true
     const from = ctx.prompt[inputs.source[0]]?.class_type
     if (from && (AUDIO_GEN_CLASSES as readonly string[]).includes(from)) return true
@@ -282,6 +289,7 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
 
 /** The name of an input check (INPUT_CHECKS). */
 export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake' | 'audio-card-lip-sync'
+  | 'lip-sync-media' | 'lipsync-silence-video'
   | 'create-video-fps' | 'video-card-made-video' | 'local-model-source' | 'sam-points'
 
 /** Whether a wire brings a made video: Create video's, directly or through Gates and Video cards (their `source`). */
@@ -937,10 +945,15 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // sound the runner takes). The engine, sync mode and options are read before
   // the run, so they must not be wired; a linked picture is a face sync-3 isn't
   // sent here (its video endpoint takes a video).
+  // R11.3: Fabric (`veed/fabric-1.0`) and Kling's lip-sync (`kwaivgi/kling-lip-sync`, Python's
+  // "sync" engine) too, resolved as `_lipsync_resolve_engine` does (./lipSyncEngines.ts), while
+  // `sound-in` is on (its WAV of a wired sound, and its measured lengths): taken only when every
+  // medium they send can be read before the run ('lip-sync-media'; the rest stays with the engine).
   LipSyncNode: {
-    models: { [SYNC_3_ENGINE]: 'sync-3' },
+    models: { [SYNC_3_ENGINE]: 'sync-3', fabric: 'sound-in', kling: 'sound-in' },
     mustNotLink: ['model_options', 'engine', 'sync_mode', 'image'],
     linkSources: { audio: [['Audio', 0]] },
+    inputCheck: 'lip-sync-media',
   },
   // The Audio card a sync-3 lip-sync reads its sound from: its own file,
   // handed on (no call, no charge). Taken only when it feeds lip-sync nodes
@@ -1414,8 +1427,10 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     widgets: {
       ...(c === 'LipsyncNode' ? { model: { type: 'COMBO', required: true, options: LIPSYNC_MODELS } } : {}),
       video_url: { type: 'STRING', required: true },
-      sync_mode: { type: 'COMBO', required: true, options: LIPSYNC_SYNC_MODES_TAKEN },
+      sync_mode: { type: 'COMBO', required: true, options: LIPSYNC_SYNC_MODES },
     },
+    // R11.3, ruling (o): "silence" only on a video uploaded to Sailor, whose length is measured and priced.
+    inputCheck: 'lipsync-silence-video',
   } satisfies RunnerNodeRule])),
   // ── gen-3d (step 3, R3.9): Generate a 3D model (and its hidden twin) and
   // Multi-View → 3D on Replicate. The pictures are linked pictures (the
@@ -1980,10 +1995,7 @@ function asksForSeveralImages(inputs: Record<string, unknown>): boolean {
  */
 function modelKey(classType: string, inputs: Record<string, unknown>): string {
   if (classType === 'GenerateVideoNode') return resolveVideoModelId(inputs.model)
-  if (classType === 'LipSyncNode') {
-    const engine = lipSyncEngine(inputs)
-    return isSync3LipSync(inputs) && typeof engine === 'string' ? engine : ''
-  }
+  if (classType === 'LipSyncNode') return lipSyncRunEngine(inputs) ?? ''
   return typeof inputs.model === 'string' ? inputs.model : ''
 }
 

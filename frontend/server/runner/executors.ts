@@ -113,6 +113,7 @@ import { briaProductShot } from './generators/briaProductShot'
 import { topazFixFaces } from './generators/topazImage'
 import { easelFaceSwap } from './generators/easelFaceSwap'
 import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
+import { planLipSyncEngine } from './generators/lipSync'
 import { topazVideoNodeProblem, topazVideoSource, topazVideoUpscale } from './generators/topazVideo'
 import { TOPAZ_VIDEO_UNMEASURED, topazVideoPlan } from '#shared/runner/topazVideo'
 import { pixverseSwap, pixverseSwapNodeProblem, pixverseSwapSource } from './generators/pixverseSwap'
@@ -1137,13 +1138,25 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // are only named, handed off and sent. Python's other engines never come
     // here (eligibility.ts takes only sync-3).
     case 'LipSyncNode': {
-      if (!isSync3LipSync(inputs)) throw new Error('The runner runs Lip-sync a character on sync-3 only')
+      // R11.3: Fabric and Kling's lip-sync, on Replicate (generators/lipSync.ts).
+      if (!isSync3LipSync(inputs)) return planLipSyncEngine(ctx)
       const problem = sync3NodeProblem(ctx.prompt, ctx.nodeId)
       if (problem) throw new Error(problem.message)
       const sources = sync3Sources(ctx.prompt, ctx.nodeId)
       if (!('file' in sources.video) || 'problem' in sources.audio) throw new Error('This lip-sync has no face video or sound')
       // A linked Audio card hands its file on; the file the link brought is the one sent
       // (a sound made in the run, R3.8: only that).
+      // R11.3 (R5.3 case A): a card's runner sound goes as Python's WAV, the one measured for this turn.
+      if ('wav' in sources.audio) {
+        const wavLink = sources.audio.wav
+        const sent = ctx.recordedPayload?.audio_url
+        const audioUrl = typeof sent === 'string' ? sent : await (async () => {
+          if (!ctx.soundWav || !ctx.bytesToUrl) throw new Error('This lip-sync has no face video or sound')
+          return ctx.bytesToUrl({ filename: 'audio.wav', subfolder: '', type: 'kept' }, (await ctx.soundWav(wavLink)).wav)
+        })()
+        const call = sync3Lipsync({ videoUrl: await ctx.toUrl(sources.video.file), audioUrl, syncMode: String(lipSyncSyncMode(inputs)) })
+        return { kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'lip_sync', uiFor: () => null }
+      }
       const audio = 'produced' in sources.audio
         ? linkedFirstFile('audio')
         : sources.audio.link ? (linkedFirstFile('audio') ?? sources.audio.file) : sources.audio.file

@@ -285,6 +285,8 @@ export interface MeasuredMedia {
     place?: 'hosted' | 'local' | null
     /** R7.11: the largest picture (pixels) Upscale (2×) sends, measured at the start of the run (its price reads it). */
     picturePixels?: number | null
+    /** R11.3: Sync lips in "silence" with its sound made in the run: the face video's measured length, as a bound (the hold's). */
+    videoUpTo?: number | null
   }
   /** The sha256 of each file's bytes, by its part (a sync-3 node has both; a Topaz node only its video). */
   sha: { video?: string; audio?: string }

@@ -324,6 +324,9 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'ProductShotNode': r('replicate', null, 'not on fal'),
   'ProductShotNode+bria-product-shot': r('fal', null, 'Replicate has no Bria Product Shot; its background swap is another model'),
   'LipSyncNode:sync-3': r('fal', null, 'Replicate has no sync-3 (its sync.so models are lipsync-2, lipsync-2-pro and react-1)'),
+  // R11.3: Lip-sync a character's Fabric and Kling engines (family sound-in), on Replicate as Python (lipSync.ts).
+  'LipSyncNode:fabric': r('replicate', null, ON_FAL_UNCHECKED),
+  'LipSyncNode:kling': r('replicate', null, 'fal\'s Kling lip-sync isn\'t carded; its schema isn\'t saved, so its settings aren\'t known to match'),
   'EnhanceVideoNode+topaz-video': r('fal', null, 'Replicate\'s Topaz video upscale bills an unspecified unit: its price can\'t be verified'),
   'FixFacesNode+fix-faces': r('fal', null, 'Replicate\'s Topaz is another app with its own settings and no face-enhancement strength'),
   'FaceSwap+face-swap': r('fal', null, 'Replicate has no Easel face swap'),

@@ -47,7 +47,7 @@ import { creditsForUsd } from './markup'
 import { clipRate, clipUsd } from './clipRates'
 import { readModelOptions } from './videoSettings'
 import { pyIntOf, pyTruthy } from '../runner/pyText'
-import { SYNC_3_ENGINE, lipSyncSyncMode, sync3ModeRefusal } from '../runner/lipSync'
+import { SYNC_3_ENGINE, fabricLipSyncResolution, lipSyncSyncMode, sync3ModeRefusal } from '../runner/lipSync'
 import {
   TOPAZ_VIDEO_ENDPOINT, TOPAZ_VIDEO_MAX_SECONDS, TOPAZ_VIDEO_UNKNOWN_SETTING, topazVideoPlan, topazVideoRateKey, topazVideoTarget, topazVideoTargetFps,
 } from '../runner/topazVideo'
@@ -181,6 +181,13 @@ export interface InputSeconds {
   audioUpTo?: number | null
   video?: number | null
   /**
+   * R11.3: the most seconds of face video a Sync lips node in "silence" mode
+   * may send, where the video itself isn't measured (the canvas: an uploaded
+   * video the runner measures and refuses above 60 s before the hold). The
+   * badge's "up to"; the runner holds and charges the measured `video`.
+   */
+  videoUpTo?: number | null
+  /**
    * The video's display size and frame rate, where the runner measured them
    * (Topaz video upscale, model line-up F23: the price reads the output's size
    * band and frame rate, shared/runner/topazVideo.ts). Absent or null = not measured.
@@ -227,6 +234,19 @@ export function billedSeconds(measured: number | null | undefined, cap: number =
  * until the run) or one the node doesn't offer.
  */
 const SYNC_MODES_PRICED = ['loop', 'bounce', 'cut_off', 'remap']
+
+/**
+ * Sync lips' face video in "silence" mode (R11.3, ruling (o)): its measured
+ * length in billed seconds (or the canvas's "up to", `videoUpTo`), or null
+ * when it wasn't measured or is longer than the 60 s a lip-sync makes here
+ * (the runner refuses that before the hold).
+ */
+export function silenceVideoSeconds(measured: InputSeconds): number | null {
+  const v = measured.video ?? measured.videoUpTo
+  if (typeof v !== 'number' || !Number.isFinite(v) || !(v > 0)) return null
+  if (Math.round(v * 1e6) / 1e6 > LIPSYNC_MAX_SECONDS) return null
+  return billedSeconds(v)
+}
 
 /** Why a sync.so node can't be priced, or null when its sync mode is fine. */
 function syncModeRefusal(v: unknown): string | null {
@@ -502,7 +522,10 @@ function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] | { re
   const opts = readModelOptions(inputs.model_options)
   const engine = hasOwn(opts, 'engine') ? opts.engine : inputs.engine
   const resolution = hasOwn(opts, 'resolution') ? opts.resolution : inputs.resolution
-  const fabricCall = fabric(linked(resolution) ? UNLISTED : sentAsIs(resolution))
+  // R11.3: the resolution the runner sends (480p or 720p, lower-cased; anything else 720p), so the
+  // charge is what Replicate bills. On the ComfyUI path only a value Replicate refuses (sent as typed,
+  // never billed) reads differently; "1080p" was already priced at the dearest, 720p.
+  const fabricCall = fabric(linked(resolution) ? UNLISTED : fabricLipSyncResolution(inputs))
   if (linked(engine)) return [fabricCall, kling]
   // sync-3 runs only in the runner (the ComfyUI path refuses it, shared/runner/blockedModels.ts).
   if (engine === SYNC_3_ENGINE) return sync3Calls(inputs, measured)
@@ -539,6 +562,12 @@ export function remoteVideoCalls(classType: string, inputs: Inputs, measured: In
     // for the clip, in the sync modes that never run past it.
     case 'LipsyncRemoteNode':
     case 'LipsyncNode': {
+      // R11.3, ruling (o): "silence" pads the sound to the whole face video, so it is priced on the
+      // video's measured length (and the sound's, whichever is longer), when the runner measured it
+      // (an uploaded video of at most 60 s). Unmeasured, it can't be priced, as before.
+      if (inputs.sync_mode === 'silence' && silenceVideoSeconds(measured) != null) {
+        return [{ endpoint: 'sync/lipsync-2-pro', seconds: Math.max(billedSeconds(measured.audio), silenceVideoSeconds(measured)!), resolution: null, audio: false }]
+      }
       const refused = syncModeRefusal(inputs.sync_mode)
       if (refused) return { refused }
       return [{ endpoint: 'sync/lipsync-2-pro', seconds: billedSeconds(measured.audio), resolution: null, audio: false }]

@@ -31,6 +31,7 @@ import { LIPSYNC_MAX_SECONDS, type InputSeconds } from '#shared/pricing/clipSett
 import { lipSyncSyncMode, sync3OutputSeconds } from '#shared/runner/lipSync'
 import { measureMediaFile, type MediaReads, type MediaRule } from './mediaInputs'
 import { SYNC_3_NEEDS_SOUND, SYNC_3_NEEDS_VIDEO, sync3Sources, type Sync3Source } from './generators/sync3'
+import { wiredSoundCheck, type SoundInReads } from './soundInMedia'
 import type { MeasuredMedia, OutputFile } from './types'
 
 export const SYNC_3_MAX_VIDEO_BYTES = 100_000_000
@@ -73,9 +74,10 @@ export type Sync3MediaCheck =
    * or speech node's sound), not read yet at the start of the run: the video
    * alone was judged, and the sound is held at the 60 s cap until its turn.
    */
-  | { problem: null, video: OutputFile, audio: OutputFile | null, seconds: InputSeconds, sha: MeasuredMedia['sha'] }
+  /** `audioMeasured` (R11.3): a sound sent as Python's WAV (`audio` null) whose length was measured. */
+  | { problem: null, video: OutputFile, audio: OutputFile | null, seconds: InputSeconds, sha: MeasuredMedia['sha'], audioMeasured?: boolean }
 
-export interface Sync3MediaReads extends MediaReads {
+export interface Sync3MediaReads extends MediaReads, Omit<SoundInReads, 'strict'> {
   /** At the node's turn: the files a link brought (the Audio card's). Absent: the card's own file, from the prompt. */
   filesFrom?(link: ApiLink): OutputFile[]
 }
@@ -89,6 +91,7 @@ export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync
   if (!('file' in sources.video)) return { problem: 'problem' in sources.video ? sources.video.problem : SYNC_3_NEEDS_VIDEO }
   if ('problem' in sources.audio) return { problem: sources.audio.problem }
   const video = sources.video.file
+  if ('wav' in sources.audio) return wavSoundCheck(prompt, nodeId, video, sources.audio.wav, o)
   const produced = 'produced' in sources.audio
   // A sound made in the run: at the node's turn, what its link brought; at the start, nothing yet.
   const audio = 'produced' in sources.audio
@@ -107,6 +110,26 @@ export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync
   if (audioSeconds != null) seconds.audio = audioSeconds
   if (v.facts.seconds != null) seconds.video = v.facts.seconds
   return { problem: null, video, audio, seconds, sha: { video: v.sha, ...(a ? { audio: a.sha } : {}) } }
+}
+
+/**
+ * R11.3 (R5.3 case A): the face video measured, and a card's runner sound as
+ * the WAV sent (at the node's turn the one the wire brought; before the run a
+ * file the prompt names; a sound made in the run is held at the 60 s cap).
+ */
+async function wavSoundCheck(prompt: ApiPrompt, nodeId: string, video: OutputFile, link: ApiLink, o: Sync3MediaReads): Promise<Sync3MediaCheck> {
+  const v = await measureMediaFile(video, SYNC_3_VIDEO_RULE, o, SYNC_3_FILE_MISSING)
+  if (v.problem !== null) return { problem: v.problem }
+  const s = await wiredSoundCheck(prompt, link, 'LipSyncNode', o)
+  if (s && s.problem !== null) return { problem: s.problem }
+  const audioSeconds = s?.measured.seconds.audio ?? null
+  const made = sync3OutputSeconds(lipSyncSyncMode(prompt[nodeId]?.inputs ?? {}), audioSeconds ?? Infinity, v.facts.seconds ?? Infinity)
+  if (made != null && Number.isFinite(made) && tidy(made) > LIPSYNC_MAX_SECONDS) return { problem: SYNC_3_TOO_LONG }
+  const seconds: InputSeconds = {}
+  if (audioSeconds != null) seconds.audio = audioSeconds
+  if (v.facts.seconds != null) seconds.video = v.facts.seconds
+  const sha = { video: v.sha, ...(s?.measured.sha.audio ? { audio: s.measured.sha.audio } : {}) }
+  return { problem: null, video, audio: null, seconds, sha, audioMeasured: !!s }
 }
 
 /**

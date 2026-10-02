@@ -19,6 +19,8 @@
  *     stereo FLAC it sends, the same way (./soundWav.ts vocalsSoundOf).
  *   - Generate a video on VEED Fabric (family replicate-video, R11.2): its
  *     linked sound, as the sound-in nodes send theirs (Python's first 60 s).
+ *   - Lip-sync a character on Fabric or Kling (family sound-in, R11.3): the
+ *     sound Fabric is priced on, the face video Kling is (./lipSyncMedia.ts).
  * Each check returns what it measured as a MeasuredMedia record: the lengths
  * (and a video's size and frame rate) the price reads, and the sha256 of the
  * bytes measured.
@@ -26,6 +28,8 @@
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { FABRIC_VIDEO_MODEL_ID, resolveVideoModelId } from '#shared/runner/eligibility'
 import { isSync3LipSync } from '#shared/runner/lipSync'
+import { LIPSYNC_ENGINE_CHANGED, lipSyncRunEngine } from '#shared/runner/lipSyncEngines'
+import { lipSyncEngineInputFiles, lipSyncEngineMediaCheck } from './lipSyncMedia'
 import { SYNC_3_CHANGED, measuredOf, sync3InputFiles, sync3MediaCheck, type Sync3MediaReads } from './sync3Media'
 import { TOPAZ_VIDEO_CHANGED, topazInputFiles, topazMediaCheck } from './topazMedia'
 import { PERSON_SWAP_CHANGED, personSwapInputFiles, personSwapMediaCheck } from './personSwapMedia'
@@ -39,7 +43,7 @@ import type { MeasuredMedia, OutputFile } from './types'
 export type NodeMediaReads = Sync3MediaReads & Omit<SoundInReads, 'strict'>
 
 /** Which media check a node takes, or null for a node priced without reading its files. */
-export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'topaz-video' | 'person-swap-video' | 'describe-video' | 'sound-in' | null {
+export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'lip-sync-engine' | 'topaz-video' | 'person-swap-video' | 'describe-video' | 'sound-in' | null {
   if (!node) return null
   // R7.7: Whisper transcribe measures its sound as the sound-in nodes do (its own WAV: the engine's reads);
   // R7.8: Vocal separator too (its stereo FLAC).
@@ -47,6 +51,10 @@ export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'topaz-vide
   // R11.2: Generate a video on Fabric sends its linked sound the sound-in way (Python's WAV, its first 60 s).
   if (isFabricVideo(node)) return 'sound-in'
   if (node.class_type === 'LipSyncNode' && isSync3LipSync(node.inputs ?? {})) return 'sync-3'
+  if (node.class_type === 'LipSyncNode') {
+    const engine = lipSyncRunEngine(node.inputs ?? {})
+    if (engine === 'fabric' || engine === 'kling') return 'lip-sync-engine'
+  }
   if (node.class_type === 'EnhanceVideoNode') return 'topaz-video'
   if (node.class_type === 'PersonSwapVideo') return 'person-swap-video'
   if (node.class_type === 'DescribeVideoNode') return 'describe-video'
@@ -68,8 +76,11 @@ export async function nodeMediaCheck(prompt: ApiPrompt, nodeId: string, reads: N
       if (c.problem !== null) return { problem: c.problem }
       // A sound made in the run (R3.8), not read yet at the start: nothing recorded, so the
       // hold is the 60 s cap and the node's turn measures (and charges) the sound it gets.
-      return c.audio ? { problem: null, measured: measuredOf(c) } : null
+      // R11.3: a card's runner sound, sent as Python's WAV, measured as such (c.audioMeasured).
+      return c.audio || c.audioMeasured ? { problem: null, measured: measuredOf(c) } : null
     }
+    case 'lip-sync-engine':
+      return lipSyncEngineMediaCheck(prompt, nodeId, reads)
     case 'topaz-video': {
       const c = await topazMediaCheck(prompt, nodeId, reads)
       return c.problem !== null ? { problem: c.problem } : { problem: null, measured: c.measured }
@@ -91,6 +102,7 @@ export async function nodeMediaCheck(prompt: ApiPrompt, nodeId: string, reads: N
 export function nodeMediaFiles(prompt: ApiPrompt, nodeId: string): OutputFile[] {
   switch (mediaNodeKind(prompt[nodeId])) {
     case 'sync-3': return sync3InputFiles(prompt, nodeId)
+    case 'lip-sync-engine': return lipSyncEngineInputFiles(prompt, nodeId)
     case 'topaz-video': return topazInputFiles(prompt, nodeId)
     case 'person-swap-video': return personSwapInputFiles(prompt, nodeId)
     case 'describe-video': return describeVideoInputFiles(prompt, nodeId)
@@ -103,5 +115,6 @@ export function nodeMediaFiles(prompt: ApiPrompt, nodeId: string): OutputFile[] 
 export function nodeMediaChangedWords(node: ApiNode | undefined): string {
   const kind = mediaNodeKind(node)
   return kind === 'topaz-video' ? TOPAZ_VIDEO_CHANGED : kind === 'person-swap-video' ? PERSON_SWAP_CHANGED
-    : kind === 'describe-video' ? DESCRIBE_VIDEO_CHANGED : kind === 'sound-in' ? SOUND_IN_CHANGED : SYNC_3_CHANGED
+    : kind === 'describe-video' ? DESCRIBE_VIDEO_CHANGED : kind === 'sound-in' ? SOUND_IN_CHANGED
+      : kind === 'lip-sync-engine' ? LIPSYNC_ENGINE_CHANGED : SYNC_3_CHANGED
 }

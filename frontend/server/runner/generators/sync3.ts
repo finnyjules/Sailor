@@ -53,6 +53,14 @@ export type Sync3Source =
    * node's turn reads what the link brought.
    */
   | { produced: ApiLink }
+  /**
+   * R11.3 (R5.3 case A): an Audio card showing any other runner sound (a
+   * Load or Record audio, another card, a sound effect): sent as Python's
+   * 16-bit WAV of its first 60 s (../soundWav.ts), measured as the sound-in
+   * nodes measure theirs. Taken only while `sound-in` is on (eligibility.ts
+   * 'audio-card-lip-sync').
+   */
+  | { wav: ApiLink }
   | { problem: string }
 
 /** The node's face video and sound, as the runner reads them before anything is sent. */
@@ -89,7 +97,7 @@ export function sync3Sources(prompt: ApiPrompt, nodeId: string): Sync3Sources {
     const file = card?.class_type === 'Audio' && !isLink(source) ? parseInputFileRef(card.inputs?.audio) : null
     // A card showing a music or speech node's sound (R3.8): made in the run.
     const made = isLink(source) && isAudioGenClass(prompt[source[0]]?.class_type)
-    audio = file ? { file, link: inputs.audio } : made ? { produced: inputs.audio } : { problem: SYNC_3_NEEDS_SOUND }
+    audio = file ? { file, link: inputs.audio } : made ? { produced: inputs.audio } : isLink(source) ? { wav: inputs.audio } : { problem: SYNC_3_NEEDS_SOUND }
   }
   else {
     audio = viewSource(opts.audio, SYNC_3_NEEDS_SOUND, SYNC_3_SOUND_NOT_A_FILE)

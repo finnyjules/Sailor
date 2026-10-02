@@ -1,0 +1,98 @@
+/**
+ * Lip-sync a character on Fabric or Kling (step 3, R11.3, family
+ * `sound-in`): the media the price reads, read and measured before anything
+ * is held (the start of a run) and again at the node's turn, as sync-3's are
+ * (./sync3Media.ts):
+ *   - Fabric bills the clip it makes, the sound's length: a wired sound is
+ *     Python's WAV of its first 60 s (./soundInMedia.ts wiredSoundCheck); an
+ *     uploaded sound is measured from its file and refused over 60 s (Fabric's
+ *     longest clip, the price's cap);
+ *   - Kling bills the clip it makes, the face video's length: an uploaded
+ *     video, refused over 60 s. Its sound isn't priced; an uploaded one over
+ *     the schema's 5 MB is refused here, before the hold.
+ * A file whose length can't be read is priced at the 60 s cap locally and
+ * refused in hosted (`strict`, the media rule's words).
+ */
+import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import { LIPSYNC_MAX_SECONDS } from '#shared/pricing/clipSettings'
+import {
+  KLING_LIPSYNC_MAX_SOUND_BYTES, KLING_LIPSYNC_SOUND_TOO_LARGE, LIPSYNC_ENGINE_FILE_MISSING, LIPSYNC_ENGINE_TOO_LONG,
+  lipSyncEngineMedia, lipSyncEngineProblem, lipSyncRunEngine, type LipSyncMediaRef,
+} from '#shared/runner/lipSyncEngines'
+import { measureMediaFile, type MediaRule } from './mediaInputs'
+import { wiredSoundCheck } from './soundInMedia'
+import { soundFileBeforeRun } from './soundWav'
+import { parseInputFileRef } from './inputs'
+import type { NodeMediaCheck, NodeMediaReads } from './nodeMedia'
+import type { OutputFile } from './types'
+
+export const LIPSYNC_ENGINE_SOUND_RULE: MediaRule = {
+  kind: 'audio',
+  formats: ['wav', 'mp3', 'ogg', 'flac', 'm4a', 'mp4', 'aac'],
+  maxBytes: 50_000_000,
+  words: {
+    tooLarge: 'Lip-sync takes sounds up to 50 MB. Make this one smaller first.',
+    wrongFormat: 'Lip-sync takes sounds as WAV, MP3, Ogg, FLAC, M4A, MP4 or AAC files. Save this one as one of those first.',
+    unmeasured: 'Sailor can’t read how long this sound is, so it can’t price the lip-sync. Try a WAV or MP3 file.',
+  },
+}
+
+/** kwaivgi/kling-lip-sync's schema: "an .mp4 or .mov file, … less than 100MB". */
+export const KLING_LIPSYNC_VIDEO_RULE: MediaRule = {
+  kind: 'video',
+  formats: ['mp4', 'mov'],
+  maxBytes: 100_000_000,
+  words: {
+    tooLarge: 'Kling’s lip-sync takes face videos up to 100 MB. Make this one smaller first.',
+    wrongFormat: 'Kling’s lip-sync takes MP4 or MOV face videos.',
+    unmeasured: 'Sailor can’t read how long this face video is, so it can’t price the lip-sync. Try an MP4 video.',
+  },
+}
+
+const inputFile = (name: string): OutputFile => ({ filename: name, subfolder: '', type: 'input' })
+const over = (s: number | null) => s != null && Math.round(s * 1e6) / 1e6 > LIPSYNC_MAX_SECONDS
+
+/** A Fabric or Kling node's media judged: a refusal, what was measured, or null (nothing to measure yet). */
+export async function lipSyncEngineMediaCheck(prompt: ApiPrompt, nodeId: string, reads: NodeMediaReads): Promise<NodeMediaCheck | null> {
+  const node = prompt[nodeId]
+  if (!node) return null
+  const inputs = node.inputs ?? {}
+  const engine = lipSyncRunEngine(inputs)
+  if (engine !== 'fabric' && engine !== 'kling') return null
+  const bad = lipSyncEngineProblem(inputs)
+  if (bad) return { problem: bad.message }
+  const m = lipSyncEngineMedia(inputs)
+  if (engine === 'fabric') {
+    if ('wired' in m.audio) return wiredSoundCheck(prompt, m.audio.wired as ApiLink, node.class_type, reads)
+    if (!('upload' in m.audio)) return null
+    const a = await measureMediaFile(inputFile(m.audio.upload), LIPSYNC_ENGINE_SOUND_RULE, reads, LIPSYNC_ENGINE_FILE_MISSING)
+    if (a.problem !== null) return { problem: a.problem }
+    if (over(a.facts.seconds)) return { problem: LIPSYNC_ENGINE_TOO_LONG }
+    return { problem: null, measured: { seconds: a.facts.seconds != null ? { audio: a.facts.seconds } : {}, sha: { audio: a.sha } } }
+  }
+  if ('upload' in m.audio && reads.size) {
+    const bytes = await reads.size(inputFile(m.audio.upload)).catch(() => null)
+    if (bytes != null && bytes > KLING_LIPSYNC_MAX_SOUND_BYTES) return { problem: KLING_LIPSYNC_SOUND_TOO_LARGE }
+  }
+  if (!('upload' in m.video)) return null
+  const v = await measureMediaFile(inputFile(m.video.upload), KLING_LIPSYNC_VIDEO_RULE, reads, LIPSYNC_ENGINE_FILE_MISSING)
+  if (v.problem !== null) return { problem: v.problem }
+  if (over(v.facts.seconds)) return { problem: LIPSYNC_ENGINE_TOO_LONG }
+  return { problem: null, measured: { seconds: v.facts.seconds != null ? { video: v.facts.seconds } : {}, sha: { video: v.sha } } }
+}
+
+/** The input files a Fabric or Kling node would send (for the ownership check at the start of a run). */
+export function lipSyncEngineInputFiles(prompt: ApiPrompt, nodeId: string): OutputFile[] {
+  const inputs = prompt[nodeId]?.inputs ?? {}
+  const m = lipSyncEngineMedia(inputs)
+  const out: OutputFile[] = []
+  const add = (r: LipSyncMediaRef) => { if ('upload' in r) out.push(inputFile(r.upload)) }
+  add(m.image)
+  add(m.video)
+  add(m.audio)
+  if (isLink(inputs.audio)) {
+    const f = soundFileBeforeRun(prompt, inputs.audio as ApiLink, parseInputFileRef)
+    if (f) out.push(f)
+  }
+  return out
+}

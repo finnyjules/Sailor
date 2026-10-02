@@ -158,7 +158,8 @@ describe('lip-sync billed by the measured clip', () => {
 
   it('the runner runs lip-sync as Lip-sync a character on sync-3 (F22, which measures its own files); the older nodes only with sound-in on (R3.10, which measures the WAV it sends)', () => {
     for (const ct of ['LipsyncNode', 'LipsyncRemoteNode']) expect(RUNNER_NODE_RULES[ct]!.family, ct).toBe('sound-in')
-    expect(Object.keys(RUNNER_NODE_RULES.LipSyncNode!.models ?? {})).toEqual(['sync-3'])
+    // R11.3: Fabric and Kling too, while sound-in is on (lipSyncMedia.ts measures what each is priced on).
+    expect(RUNNER_NODE_RULES.LipSyncNode!.models).toEqual({ 'sync-3': 'sync-3', fabric: 'sound-in', kling: 'sound-in' })
   })
 })
 

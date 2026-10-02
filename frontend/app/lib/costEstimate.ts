@@ -32,7 +32,7 @@ import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSetting
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY } from '#shared/runner/eligibility'
 import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, SAM_MASK_CLASSES, isLocalModelClass } from '#shared/runner/localModels'
-import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
+import { LIPSYNC_MAX_SECONDS, allotMediaFiles, gateNodeOrder, mediaFileKey, readViewRef, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
 
@@ -364,6 +364,9 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   const origin = canvasMediaOrigin(node, media.audio, nodes, edges)
   if (origin && 'seconds' in origin) seconds.audio = origin.seconds
   else if (origin && origin.known != null && canvasMediaAllotment(nodes, edges).has(mediaFileKey('audio', origin.file))) seconds.audio = origin.known
+  // Sync lips in "silence" on an uploaded video (R11.3, ruling (o)): the canvas can't read the video's
+  // length; the runner measures it and refuses one over 60 s before the hold, so the badge is "up to" 60 s.
+  if ((ct === 'LipsyncNode' || ct === 'LipsyncRemoteNode') && own.sync_mode === 'silence' && readViewRef(own.video_url)?.name) seconds.videoUpTo = LIPSYNC_MAX_SECONDS
   // Would a short clip lower the price? Then an unknown length is in it.
   const at = (s: InputSeconds) => { const p = priceNode(ct, own, { inputSeconds: s }); return 'refused' in p ? null : p.credits }
   const known = at(seconds)

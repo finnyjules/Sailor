@@ -159,7 +159,13 @@ export async function planSoundIn(ctx: PlanContext): Promise<NodePlan> {
     const s = lipsyncVideoOf(inputs.video_url)
     if ('blank' in s) throw new Error(LIPSYNC_NEEDS_VIDEO)
     if ('refused' in s) throw new Error(s.refused)
-    if (ctx.hosted) {
+    // R11.3, ruling (o): in "silence" the upload measured and priced is the one sent, on both hosts
+    // (Python sends a `/view` link as typed, which no provider can fetch).
+    // (The row takes "silence" only on an upload; any other address is the plan as before.)
+    if (inputs.sync_mode === 'silence' && 'upload' in s) {
+      video = await ctx.toUrl({ filename: s.upload, subfolder: '', type: 'input' })
+    }
+    else if (ctx.hosted) {
       if ('upload' in s) video = await ctx.toUrl({ filename: s.upload, subfolder: '', type: 'input' })
       else if ('https' in s) video = s.https
       else throw new Error(LIPSYNC_VIDEO_ADDRESS)

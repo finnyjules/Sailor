@@ -19,7 +19,7 @@
  */
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import {
-  LIPSYNC_NEEDS_VIDEO, LIPSYNC_VIDEO_ADDRESS, LIPSYNC_VIDEO_MISSING, SOUND_IN_CHANNELS, SOUND_IN_EMPTY, SOUND_IN_NEEDS_SOUND, isLipsync2ProClass, lipsyncVideoOf,
+  LIPSYNC_SILENCE_NEEDS_UPLOAD, LIPSYNC_SILENCE_TOO_LONG, LIPSYNC_NEEDS_VIDEO, LIPSYNC_VIDEO_ADDRESS, LIPSYNC_VIDEO_MISSING, SOUND_IN_CHANNELS, SOUND_IN_EMPTY, SOUND_IN_NEEDS_SOUND, isLipsync2ProClass, lipsyncVideoOf,
 } from '#shared/runner/soundIn'
 import { MEDIA_WORDS } from '#shared/runner/media'
 import { MediaError } from '../media/run'
@@ -29,6 +29,8 @@ import { sha256Hex } from './handoff'
 import { parseInputFileRef } from './inputs'
 import { silenceWav, silentCardAt, soundFileBeforeRun, vocalsSilence, whisperSilenceWav, type PythonWav } from './soundWav'
 import { VOCALS_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
+import { measureMediaFile, type MediaReads, type MediaRule } from './mediaInputs'
+import { LIPSYNC_MAX_SECONDS } from '#shared/pricing/clipSettings'
 import type { MeasuredMedia, OutputFile } from './types'
 
 export interface SoundInReads {
@@ -79,7 +81,7 @@ function videoProblem(classType: string, inputs: Record<string, unknown>, strict
 }
 
 /** The node's sound (and Sync lips' address), judged: a refusal, what was measured, or null (nothing to measure yet). */
-export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads: SoundInReads): Promise<{ problem: string } | { problem: null, measured: MeasuredMedia } | null> {
+export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads: SoundInReads & Partial<MediaReads>): Promise<{ problem: string } | { problem: null, measured: MeasuredMedia } | null> {
   const node = prompt[nodeId]
   if (!node) return null
   const inputs = node.inputs ?? {}
@@ -94,11 +96,32 @@ export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads
   }
   const link = inputs.audio
   if (!isLink(link)) return { problem: SOUND_IN_NEEDS_SOUND }
+  const sound = await wiredSoundCheck(prompt, link, node.class_type, reads)
+  // R11.3, ruling (o): Sync lips in "silence" makes the whole face video, so its length is measured too.
+  if (isLipsync2ProClass(node.class_type) && inputs.sync_mode === 'silence') {
+    if (sound && sound.problem !== null) return sound
+    const video = await silenceVideoCheck(inputs, reads)
+    if ('problem' in video) return { problem: video.problem }
+    // A sound made in the run (not known yet): only the video's bound is recorded, so the hold is
+    // the 60 s sound ceiling against it, and the node's turn measures both.
+    if (!sound) return { problem: null, measured: { seconds: { videoUpTo: video.seconds }, sha: {} } }
+    return { problem: null, measured: { seconds: { ...sound.measured.seconds, video: video.seconds }, sha: { ...sound.measured.sha, video: video.sha } } }
+  }
+  return sound
+}
+
+/**
+ * A wired sound, as a sound-in node sends it (also Lip-sync a character's
+ * Fabric, R11.3): at the node's turn the WAV the wire brought; before the run
+ * an Audio card's 1 s of silence, or the WAV of a file the prompt names; null
+ * when it is made in the run (not known yet).
+ */
+export async function wiredSoundCheck(prompt: ApiPrompt, link: ApiLink, classType: string, reads: Omit<SoundInReads, 'strict'>): Promise<{ problem: string } | { problem: null, measured: MeasuredMedia } | null> {
   try {
     if (reads.soundWav) return { problem: null, measured: measuredWav(await reads.soundWav(link)) }
     // An Audio card's 1 s of silence (fix round 1, Important): known before the run, priced at 1 s
     // (R7.7: Whisper transcribe's own 16 kHz WAV of it; R7.8: Vocal separator's stereo silence).
-    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(cardSilenceFor(node.class_type)) }
+    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(cardSilenceFor(classType)) }
     const file = soundFileBeforeRun(prompt, link, parseInputFileRef)
     if (!file || !reads.soundFileWav) return null
     return { problem: null, measured: measuredWav(await reads.soundFileWav(file)) }
@@ -106,6 +129,31 @@ export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads
   catch (e) {
     return { problem: soundInWords(e) }
   }
+}
+
+/** The face video Sync lips sends in "silence" (an upload): its formats, size, and a length that must be read. */
+export const LIPSYNC_SILENCE_VIDEO_RULE: MediaRule = {
+  kind: 'video',
+  formats: ['mp4', 'mov', 'webm'],
+  maxBytes: 100_000_000,
+  words: {
+    tooLarge: 'Sync lips takes face videos up to 100 MB. Make this one smaller first.',
+    wrongFormat: 'Sync lips takes MP4, MOV or WebM face videos.',
+    unmeasured: 'Sailor can’t read how long this face video is, so it can’t price silence mode. Try an MP4 video.',
+  },
+}
+
+/** Sync lips' uploaded face video in "silence", read and measured (always strictly: its length is the price). */
+async function silenceVideoCheck(inputs: Record<string, unknown>, reads: Omit<SoundInReads, 'strict'> & Partial<MediaReads>): Promise<{ problem: string } | { seconds: number, sha: string }> {
+  const s = lipsyncVideoOf(inputs.video_url)
+  if (!('upload' in s) || !reads.read) return { problem: LIPSYNC_SILENCE_NEEDS_UPLOAD }
+  const file: OutputFile = { filename: s.upload, subfolder: '', type: 'input' }
+  const m = await measureMediaFile(file, LIPSYNC_SILENCE_VIDEO_RULE, { read: reads.read, ...(reads.size ? { size: reads.size } : {}), strict: true }, LIPSYNC_VIDEO_MISSING)
+  if (m.problem !== null) return { problem: m.problem }
+  const seconds = m.facts.seconds
+  if (seconds == null) return { problem: LIPSYNC_SILENCE_VIDEO_RULE.words.unmeasured }
+  if (Math.round(seconds * 1e6) / 1e6 > LIPSYNC_MAX_SECONDS) return { problem: LIPSYNC_SILENCE_TOO_LONG }
+  return { seconds, sha: m.sha }
 }
 
 /** The input files a sound-in node would send (for the ownership check at the start of a run): the sound's file, Sync lips' upload. */

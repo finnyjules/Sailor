@@ -132,9 +132,14 @@ export function prunedAny(r: PrunedPrompt): boolean {
 /**
  * Classes known under more families as well as their SWITCHED_CLASSES one:
  * the Audio card showing a music or speech node's sound (R3.8, audio-gen),
- * and the Audio card in full (R5.3, media-sound).
+ * the Audio card in full (R5.3, media-sound), and Lip-sync a character's
+ * Fabric and Kling engines (R11.3, sound-in).
  */
-const ALSO_SWITCHED: Readonly<Record<string, readonly RunnerFamily[]>> = { Audio: ['audio-gen', 'media-sound', 'sound-in'] }
+const ALSO_SWITCHED: Readonly<Record<string, readonly RunnerFamily[]>> = {
+  Audio: ['audio-gen', 'media-sound', 'sound-in'],
+  // R11.3: Lip-sync a character's Fabric and Kling engines, while `sound-in` is on.
+  LipSyncNode: ['sound-in'],
+}
 
 /**
  * A class the port knows: a runner type, or a family row's class. A class

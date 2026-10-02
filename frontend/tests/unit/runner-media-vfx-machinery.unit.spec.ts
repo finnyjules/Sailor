@@ -760,6 +760,16 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
     expect(hash16(invariantAnswers(g.prompt, ON))).not.toBe(g.answers.cards)
   })
 
+  /**
+   * Answers a later task changed on purpose, for a family that isn't R6's
+   * (the pin itself is never edited): by the saved prompt's hash, the set, and
+   * the new answers' hash.
+   *  - R11.3: a saved Lip-sync a character on Fabric (project 2bd03ba8…, an
+   *    uploaded face and sound) is taken by the runner while `sound-in` is on.
+   */
+  const MOVED_SINCE_PIN: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+    '84c5a886e7292bc5': { 'every family before R6': '616e955e1256b39d', 'every family and R6, media families off': 'c5b6389438f1d6c6' },
+  }
   const PROJECTS = fileURLToPath(new URL('../../../user/sailor/projects/', import.meta.url))
   const projectsIt = existsSync(PROJECTS) ? it : it.skip
   projectsIt('over every saved project graph (made into prompts as the app makes them): the answers pinned from before R6.1', async () => {
@@ -783,7 +793,8 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
         if (!want) continue
         matched++
         for (const [set, fam] of Object.entries(pin.sets)) {
-          expect(hash16(invariantAnswers(p, new Set(fam as RunnerFamily[]))), `${uuid}, ${set}`).toBe(want[set])
+          const moved = Object.prototype.hasOwnProperty.call(MOVED_SINCE_PIN, hash16(p)) ? MOVED_SINCE_PIN[hash16(p)]![set] : undefined
+          expect(hash16(invariantAnswers(p, new Set(fam as RunnerFamily[]))), `${uuid}, ${set}`).toBe(moved ?? want[set])
         }
       }
     }

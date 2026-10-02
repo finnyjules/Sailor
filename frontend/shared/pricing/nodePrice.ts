@@ -70,9 +70,9 @@ import { SETTING_PRICED_NODE_CLASSES, editCalls } from './editSettings'
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
-import { REMOTE_VIDEO_NODE_CLASSES, billedSeconds, personSwapVideoUsd, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
+import { LIPSYNC_MAX_SECONDS, REMOTE_VIDEO_NODE_CLASSES, billedSeconds, personSwapVideoUsd, readViewRef, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
-import type { RunnerFamily } from '../runner/families'
+import { familyOn, type RunnerFamily } from '../runner/families'
 import { BG_REMOVE_CLASS, BG_REMOVE_SLUG, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_SLUG, isLocalModelClass, localModelCalls, localModelOn } from '../runner/localModels'
 
 export type NodeInputs = Record<string, unknown>
@@ -396,7 +396,7 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
   if (REMOTE_VIDEO_CLASS_SET.has(classType)) {
-    const usd = remoteVideoNodeUsd(classType, inputs ?? {}, opts.inputSeconds ?? {})
+    const usd = remoteVideoNodeUsd(classType, inputs ?? {}, silenceBound(classType, inputs ?? {}, opts.inputSeconds ?? {}, opts.families))
     if (usd == null) return { refused: `${classType} has a call with no listed price` }
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
@@ -457,4 +457,18 @@ export function providerUsd(classType: string, inputs: NodeInputs | null | undef
 export function nodeCredits(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
   const p = priceNode(classType, inputs, opts)
   return 'refused' in p ? null : p.credits
+}
+
+/**
+ * R11.3, ruling (o): Sync lips in "silence" on a video uploaded to Sailor,
+ * while `sound-in` is on and nothing was measured: "up to" 60 s of video. The
+ * runner measures the upload before the hold and refuses one over 60 s; the
+ * ComfyUI path sends a `/view` link as typed, which no provider can fetch, so
+ * it is never billed there. Anything else is priced as it was.
+ */
+function silenceBound(classType: string, inputs: Record<string, unknown>, measured: InputSeconds, families?: ReadonlySet<RunnerFamily>): InputSeconds {
+  if (classType !== 'LipsyncNode' && classType !== 'LipsyncRemoteNode') return measured
+  if (inputs.sync_mode !== 'silence' || measured.video != null || measured.videoUpTo != null) return measured
+  if (!families || !familyOn('sound-in', families) || !readViewRef(inputs.video_url)?.name) return measured
+  return { ...measured, videoUpTo: LIPSYNC_MAX_SECONDS }
 }

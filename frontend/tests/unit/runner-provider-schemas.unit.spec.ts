@@ -12,6 +12,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { KLING_LIPSYNC_SLUG } from '#shared/runner/lipSyncEngines'
 import { describe, expect, it } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor } from '~~/server/runner/generators/image'
@@ -368,6 +369,8 @@ function runnerEndpoints(): string[] {
   for (const app of [KLING_V3_FAL_APP, PIXVERSE_V6_FAL_APP]) for (const fn of ['text-to-video', 'image-to-video']) out.add(`fal ${app}/${fn}`)
   for (const app of [FLUX_2_DEV_FAL_APP, FLUX_2_PRO_FAL_APP, FLUX_2_MAX_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP]) out.add(`fal ${app}`)
   for (const slug of [FLUX_3_REPLICATE_SLUG, NANO_BANANA_PRO_REPLICATE, FLUX_2_PRO_REPLICATE]) out.add(`replicate ${slug}`)
+  // R11.3: Lip-sync a character's Kling engine on Replicate (Fabric is already Generate a video's, R11.2).
+  out.add(`replicate ${KLING_LIPSYNC_SLUG}`)
   return [...out].sort()
 }
 

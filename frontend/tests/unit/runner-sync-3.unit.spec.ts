@@ -209,10 +209,10 @@ describe('the request', () => {
     expect(requestProblem('fal', SYNC_3_APP, { video_url: 'a', audio_url: 'b' })).toBe(SYNC_3_MODE_REFUSED)
   })
 
-  it('the other engines never plan here', async () => {
+  it('the other engines never plan sync-3 (R11.3: they plan their own, Fabric or Kling on Replicate)', async () => {
     for (const engine of ['auto', 'fabric', 'sync']) {
-      await expect(planNode({ prompt: { 1: lip({ engine }) }, nodeId: '1', gateOpen: false, filesFrom: () => [], toUrl: async () => 'x' }))
-        .rejects.toThrow('sync-3 only')
+      const p = await planNode({ prompt: { 1: lip({ engine, opts: { face_image: '/view?filename=face.png&type=input' } }) }, nodeId: '1', gateOpen: false, filesFrom: () => [], toUrl: async () => 'x' })
+      expect(p.kind === 'provider' && [p.provider, p.endpoint], engine).toEqual(['replicate', engine === 'fabric' ? 'veed/fabric-1.0' : 'kwaivgi/kling-lip-sync'])
     }
   })
 })

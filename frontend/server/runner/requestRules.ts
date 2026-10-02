@@ -176,6 +176,7 @@ import { SYNC_3_APP, sync3NodeProblem } from './generators/sync3'
 import { TOPAZ_VIDEO_APP, topazVideoNodeProblem } from './generators/topazVideo'
 import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SETTING } from '#shared/runner/topazVideo'
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
+import { lipSyncEngineProblem } from '#shared/runner/lipSyncEngines'
 import { llmRequestProblem } from '#shared/runner/llm'
 import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner/describe'
 import { repairRequestProblem } from '#shared/runner/repair'
@@ -996,6 +997,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // next, before the hold (sync3Media.ts).
     else if (ct === 'LipSyncNode' && opts.runner && isSync3LipSync(inputs)) {
       const p = sync3NodeProblem(prompt, nodeId)
+      if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+    }
+    // R11.3: Lip-sync a character on Fabric or Kling, on a runner run: no sound, no face picture
+    // (Fabric) or no face video (Kling), as Python raises before its call. Read and measured next,
+    // before the hold (lipSyncMedia.ts).
+    else if (ct === 'LipSyncNode' && opts.runner) {
+      const p = lipSyncEngineProblem(inputs)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
     // Enhance a video on fal's Topaz (F23), on a runner run (with its switch on the ComfyUI path

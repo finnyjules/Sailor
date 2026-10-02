@@ -1,0 +1,318 @@
+{
+  "cases": [
+    {
+      "name": "Fabric from the studio, 720p",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"engine\": \"fabric\", \"resolution\": \"720p\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric from the studio, 480p",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"engine\": \"fabric\", \"resolution\": \"480p\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "480p"
+      }
+    },
+    {
+      "name": "Fabric from the studio, 1080p",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"engine\": \"fabric\", \"resolution\": \"1080p\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "1080p"
+      }
+    },
+    {
+      "name": "Kling from the studio",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"engine\": \"sync\", \"resolution\": \"720p\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_video\": \"/view?filename=face.mp4&type=input\", \"sync_mode\": \"cut_off\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-lip-sync",
+      "payload": {
+        "video_url": "UPLOAD:face.mp4",
+        "audio_file": "UPLOAD:voice.mp3"
+      }
+    },
+    {
+      "name": "auto with a face video",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_video\": \"/view?filename=face.mp4&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-lip-sync",
+      "payload": {
+        "video_url": "UPLOAD:face.mp4",
+        "audio_file": "UPLOAD:voice.mp3"
+      }
+    },
+    {
+      "name": "auto with a face picture",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "auto with both: the video wins",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\", \"face_video\": \"/view?filename=face.mp4&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-lip-sync",
+      "payload": {
+        "video_url": "UPLOAD:face.mp4",
+        "audio_file": "UPLOAD:voice.mp3"
+      }
+    },
+    {
+      "name": "an unknown engine is auto",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"engine\": \"mystery\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "the widget's engine without options",
+      "engine": "fabric",
+      "resolution": "480p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "480p"
+      }
+    },
+    {
+      "name": "the widget's sync engine",
+      "engine": "sync",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_video\": \"/view?filename=face.mp4&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-lip-sync",
+      "payload": {
+        "video_url": "UPLOAD:face.mp4",
+        "audio_file": "UPLOAD:voice.mp3"
+      }
+    },
+    {
+      "name": "the options' engine wins over the widget",
+      "engine": "sync",
+      "resolution": "720p",
+      "model_options": "{\"engine\": \"fabric\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "an empty face video is no video",
+      "engine": "auto",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\", \"face_video\": \"\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, the widget's resolution",
+      "engine": "fabric",
+      "resolution": "480p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "480p"
+      }
+    },
+    {
+      "name": "Fabric, an upper-case resolution",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"resolution\": \"480P\", \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "480P"
+      }
+    },
+    {
+      "name": "Fabric, a number for the resolution",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"resolution\": 480, \"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": 480
+      }
+    },
+    {
+      "name": "Fabric, an https face",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\", \"face_image\": \"https://example.com/face.png\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "https://example.com/face.png",
+        "audio": "FILE:voice.mp3",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Kling, an https sound",
+      "engine": "sync",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"https://example.com/voice.mp3\", \"face_video\": \"/view?filename=face.mp4&type=input\"}",
+      "wired_audio": false,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-lip-sync",
+      "payload": {
+        "video_url": "UPLOAD:face.mp4",
+        "audio_file": "https://example.com/voice.mp3"
+      }
+    },
+    {
+      "name": "Fabric, a wired sound",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "data:audio/wav;base64,V0FW",
+        "resolution": "720p"
+      }
+    },
+    {
+      "name": "Fabric, a wired sound wins over the options' sound",
+      "engine": "fabric",
+      "resolution": "480p",
+      "model_options": "{\"face_image\": \"/view?filename=face.png&type=input\", \"audio\": \"/view?filename=voice.mp3&type=input\"}",
+      "wired_audio": true,
+      "provider": "replicate",
+      "endpoint": "veed/fabric-1.0",
+      "payload": {
+        "image": "FILE:face.png",
+        "audio": "data:audio/wav;base64,V0FW",
+        "resolution": "480p"
+      }
+    },
+    {
+      "name": "Kling, a wired sound",
+      "engine": "sync",
+      "resolution": "720p",
+      "model_options": "{\"face_video\": \"/view?filename=face.mp4&type=input\"}",
+      "wired_audio": true,
+      "provider": "replicate",
+      "endpoint": "kwaivgi/kling-lip-sync",
+      "payload": {
+        "video_url": "UPLOAD:face.mp4",
+        "audio_file": "UPLOAD:lipsync-voice.mp3"
+      }
+    },
+    {
+      "name": "broken options",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"engine\":",
+      "wired_audio": false,
+      "error": "Lip-sync requires an audio clip."
+    },
+    {
+      "name": "options that are not an object",
+      "engine": "sync",
+      "resolution": "720p",
+      "model_options": "[\"sync\"]",
+      "wired_audio": false,
+      "error": "Lip-sync requires an audio clip."
+    },
+    {
+      "name": "no sound",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"face_image\": \"/view?filename=face.png&type=input\"}",
+      "wired_audio": false,
+      "error": "Lip-sync requires an audio clip."
+    },
+    {
+      "name": "Fabric with no face picture",
+      "engine": "fabric",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\"}",
+      "wired_audio": false,
+      "error": "Fabric 1.0 requires an input image (face)."
+    },
+    {
+      "name": "Kling with no face video",
+      "engine": "sync",
+      "resolution": "720p",
+      "model_options": "{\"audio\": \"/view?filename=voice.mp3&type=input\"}",
+      "wired_audio": false,
+      "error": "Video lip-sync requires a source video."
+    }
+  ]
+}

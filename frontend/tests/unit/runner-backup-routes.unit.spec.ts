@@ -237,6 +237,13 @@ function nodeFor(key: string): [string, Record<string, unknown>] {
     return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(i2v ? { image: LINK } : {}) }]
   }
   const [ct, model] = key.split(':') as [string, string | undefined]
+  // Lip-sync a character's Fabric and Kling engines (R11.3): the studio's options for that engine.
+  if (ct === 'LipSyncNode' && (model === 'fabric' || model === 'kling')) {
+    const opts = model === 'fabric'
+      ? { engine: 'fabric', resolution: '720p', audio: '/view?filename=voice.wav&type=input', face_image: '/view?filename=face.png&type=input' }
+      : { engine: 'sync', resolution: '720p', audio: '/view?filename=voice.wav&type=input', face_video: '/view?filename=face.mp4&type=input' }
+    return [ct, { engine: opts.engine, resolution: '720p', sync_mode: 'cut_off', model_options: JSON.stringify(opts) }]
+  }
   return [ct, { ...EDIT_BASE[ct], ...(model ? { model } : {}) }]
 }
 

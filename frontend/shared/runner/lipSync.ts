@@ -101,6 +101,22 @@ export function sync3OutputSeconds(mode: unknown, audioSeconds: number, videoSec
   return null
 }
 
+/** veed/fabric-1.0's resolutions (its schema). */
+export const FABRIC_LIPSYNC_RESOLUTIONS = ['480p', '720p'] as const
+
+/**
+ * The resolution Fabric is sent: `opts.get("resolution", resolution)`,
+ * lower-cased when it is one the schema offers, else 720p (the S1b rule,
+ * as R11.2 sends it: Python sends any value as typed, and Replicate refuses
+ * "1080p"). The price reads the same value.
+ */
+export function fabricLipSyncResolution(inputs: Record<string, unknown>): string {
+  const opts = lipSyncOptions(inputs.model_options) ?? {}
+  const v = Object.prototype.hasOwnProperty.call(opts, 'resolution') ? opts.resolution : inputs.resolution
+  const r = typeof v === 'string' ? v.toLowerCase() : ''
+  return (FABRIC_LIPSYNC_RESOLUTIONS as readonly string[]).includes(r) ? r : '720p'
+}
+
 /** Why sync-3 can't run with this sync mode, or null when it can. */
 export function sync3ModeRefusal(mode: unknown): string | null {
   if (Array.isArray(mode)) return SYNC_3_MODE_LINKED
