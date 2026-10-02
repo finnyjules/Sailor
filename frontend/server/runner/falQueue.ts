@@ -249,12 +249,14 @@ export function falGlbUrl(result: unknown): string | null {
  * file (each downloaded and saved), or a value (the answer itself is the
  * result: nothing is downloaded).
  */
-export type OutputMedia = 'image' | 'video' | 'audio' | 'glb' | 'value'
+export type OutputMedia = 'image' | 'video' | 'audio' | 'glb' | 'svg' | 'value'
 
 /** The files a finished fal result points at: every image, or the one video, sound or 3D file; none for a value. */
 export function falOutputUrls(result: unknown, media: OutputMedia): string[] {
   if (media === 'value') return []
   if (media === 'image') return falImageUrls(result)
+  // R11.4: an SVG is one file, where a picture would be.
+  if (media === 'svg') return falImageUrls(result).slice(0, 1)
   const url = media === 'video' ? falVideoUrl(result) : media === 'audio' ? falAudioUrl(result) : falGlbUrl(result)
   return url ? [url] : []
 }

@@ -11,26 +11,29 @@
  *   JSON (R3.6, Layerize's      1 MiB, 30 seconds (Python's own time limit;
  *   layer data)                 a value holds at most 262,144 characters)
  * What is kept is checked by kind too: a sound by its header (WAV, MP3,
- * FLAC, Ogg, MP4 audio, AAC), a 3D file by GLB's magic (`glTF`); a picture
+ * FLAC, Ogg, MP4 audio, AAC), a 3D file by GLB's magic (`glTF`), an SVG by
+ * its root element (R11.4, `<svg`, after any XML declaration); a picture
  * or a video keeps an extension from its kind's list only, never whatever a
  * URL says.
  */
 import { safeFetch, type SafeFetchPolicy } from '../templates/safeFetch'
 import { extFor } from './results'
 
-export type AnswerKind = 'image' | 'video' | 'audio' | 'glb' | 'json'
+export type AnswerKind = 'image' | 'video' | 'audio' | 'glb' | 'json' | 'svg'
 
 const MIB = 1024 * 1024
 /** The most bytes one answer file may be, by kind (controller ruling, R3.1 fix round 1). */
 export const ANSWER_MAX_BYTES: Readonly<Record<AnswerKind, number>> = {
   image: 512 * MIB, audio: 512 * MIB, glb: 512 * MIB, video: 2048 * MIB, json: MIB,
+  // R11.4: a Recraft SVG is text (a few MB at most); well above it, far below a picture's.
+  svg: 64 * MIB,
 }
 /** How long one answer file may take to download, by kind. */
 export const ANSWER_TIMEOUT_MS: Readonly<Record<AnswerKind, number>> = {
-  image: 10 * 60_000, audio: 10 * 60_000, glb: 10 * 60_000, video: 30 * 60_000, json: 30_000,
+  image: 10 * 60_000, audio: 10 * 60_000, glb: 10 * 60_000, video: 30 * 60_000, json: 30_000, svg: 10 * 60_000,
 }
 
-const NOUN: Record<AnswerKind, string> = { image: 'picture', video: 'video', audio: 'sound', glb: '3D model', json: 'data' }
+const NOUN: Record<AnswerKind, string> = { image: 'picture', video: 'video', audio: 'sound', glb: '3D model', json: 'data', svg: 'SVG' }
 const sizeWords = (bytes: number) => bytes >= 1024 * MIB ? `${bytes / (1024 * MIB)} GB` : `${Math.floor(bytes / MIB)} MB`
 
 export const ANSWER_REFUSED = 'The service’s result points at a private network address, which is not allowed'
@@ -39,6 +42,7 @@ const timeWords = (ms: number) => (ms < 60_000 ? `${ms / 1000} seconds` : `${ms 
 export const answerTimeout = (kind: AnswerKind) => `The ${NOUN[kind]} the service made took longer than ${timeWords(ANSWER_TIMEOUT_MS[kind])} to download`
 export const ANSWER_NOT_GLB = 'The 3D model the service made isn’t a GLB file, so it can’t be kept'
 export const ANSWER_NOT_SOUND = 'The sound the service made isn’t a kind Sailor can keep'
+export const ANSWER_NOT_SVG = 'The SVG the service made isn’t an SVG file, so it can’t be kept'
 
 /** The cap a caller asked for, never above its kind's. */
 export function answerCap(kind: AnswerKind, asked?: number): number {
@@ -81,23 +85,36 @@ export function soundExtOf(b: Uint8Array): string | null {
 /** Whether the bytes are a GLB (binary glTF). */
 export const isGlb = (b: Uint8Array): boolean => ascii(b, 0, 'glTF')
 
+/** An SVG's start: a byte-order mark, an XML declaration, comments and a doctype, then the `<svg` root. */
+const SVG_START = /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:(?:<!--[\s\S]*?-->|<!DOCTYPE[^>]*>)\s*)*<svg[\s>/]/i
+
+/** Whether the bytes are an SVG file (its root element, read from the first 64 KiB as UTF-8). */
+export function isSvg(b: Uint8Array): boolean {
+  const head = new TextDecoder('utf-8', { fatal: false }).decode(b.subarray(0, 64 * 1024))
+  return SVG_START.test(head)
+}
+
 /** The extensions a picture or a video may be saved with; anything else takes the kind's default. */
 const SAVED_EXTS: Record<'image' | 'video', readonly string[]> = {
   image: ['png', 'jpg', 'webp', 'gif', 'avif'],
   video: ['mp4', 'webm', 'mov'],
 }
-const DEFAULT_EXT: Record<AnswerKind, string> = { image: 'png', video: 'mp4', audio: 'wav', glb: 'glb', json: 'json' }
+const DEFAULT_EXT: Record<AnswerKind, string> = { image: 'png', video: 'mp4', audio: 'wav', glb: 'glb', json: 'json', svg: 'svg' }
 
 /**
  * The extension an answer file is saved with, checked by its kind: a 3D file
  * must be a GLB and a sound one of the known kinds (else a plain refusal);
- * a picture or a video takes its type's or its address's extension only
+ * an SVG must be an SVG; a picture or a video takes its type's or its address's extension only
  * from its kind's list.
  */
 export function answerExt(kind: AnswerKind, bytes: Uint8Array, contentType: string | null, url: string): string {
   if (kind === 'glb') {
     if (!isGlb(bytes)) throw new Error(ANSWER_NOT_GLB)
     return 'glb'
+  }
+  if (kind === 'svg') {
+    if (!isSvg(bytes)) throw new Error(ANSWER_NOT_SVG)
+    return 'svg'
   }
   if (kind === 'audio') {
     const ext = soundExtOf(bytes)
@@ -114,4 +131,5 @@ export function answerExt(kind: AnswerKind, bytes: Uint8Array, contentType: stri
 export function checkAnswerBytes(kind: AnswerKind, bytes: Uint8Array): void {
   if (kind === 'glb' && !isGlb(bytes)) throw new Error(ANSWER_NOT_GLB)
   if (kind === 'audio' && !soundExtOf(bytes)) throw new Error(ANSWER_NOT_SOUND)
+  if (kind === 'svg' && !isSvg(bytes)) throw new Error(ANSWER_NOT_SVG)
 }

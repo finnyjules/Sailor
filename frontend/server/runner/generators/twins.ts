@@ -237,6 +237,10 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:seedream-4.5': r('replicate', null, 'Replicate makes 2K or 4K at a ratio without saying the pixels; fal takes only width x height'),
   'image:recraft-v4-pro': r('replicate', 'fal'),
   'image:recraft-v4': r('replicate', 'fal'),
+  // R11.4 (family recraft-svg): the SVG is kept and handed on as it came; fal's Recraft makes its own vector styles, a different request.
+  'image:recraft-v4-pro-svg': r('replicate', null, 'fal has no Recraft V4 Pro SVG'),
+  'image:recraft-v4-svg': r('replicate', null, 'fal has no Recraft V4 SVG'),
+  'image:recraft-v3-svg': r('replicate', null, 'fal\'s Recraft V3 makes vectors through its own styles, not this request'),
   'image:gpt-image-2': r('replicate', null, ON_FAL_UNCHECKED),
   'image:gpt-image-2.5': r('fal', 'replicate'),
   'image:qwen-image': r('replicate', null, 'fal has no webp, no enhance-prompt switch and no 1-step run'),

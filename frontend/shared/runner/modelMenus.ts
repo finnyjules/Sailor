@@ -13,7 +13,7 @@
  * galleries filter with `galleryEntries`; the combo widget with `comboMenu`.
  *
  * One rule decides what a menu offers and what a new node starts with
- * (`offerable`): not hidden, not discontinued, and a runner-only model only
+ * (`offerable`): not hidden, not discontinued, not unpriced, and a runner-only model only
  * while its family is switched on AND on a node class the runner takes.
  *
  * Pure; relative imports only (Nitro, the app and vitest all load it).
@@ -57,6 +57,7 @@ function flagsOf(m: ModelFlags): ModelFlags {
   const out: ModelFlags = {}
   if (m.hidden) out.hidden = true
   if (m.discontinued) out.discontinued = m.discontinued
+  if (m.unpriced) out.unpriced = true
   if (m.runnerOnly) out.runnerOnly = true
   if (m.family) out.family = m.family
   return out
@@ -122,9 +123,9 @@ export function runnerTakesClass(classType: string): boolean {
   return RUNNER_NODE_TYPES.has(classType) || Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType)
 }
 
-/** Hidden from the menus by its flags alone: hidden, or discontinued. */
+/** Hidden from the menus by its flags alone: hidden, discontinued, or with no price yet (R11.4). */
 export function hiddenByFlag(e: ModelFlags): boolean {
-  return !!e.hidden || !!e.discontinued
+  return !!e.hidden || !!e.discontinued || !!e.unpriced
 }
 
 /**

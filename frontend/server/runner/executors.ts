@@ -61,7 +61,7 @@ import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner
 import { AUDIO_CARD_MEDIA_RULE, FABRIC_VIDEO_MODEL_ID, VIDEO_CARD_MEDIA_RULE, classUpgradeOn, isShotDirected, resolveVideoModelId, runnerRuleFor } from '#shared/runner/eligibility'
 import { filmShotPrompt } from '#shared/runner/shotPresets'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
+import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, RUNNER_SVG_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
 import { FABRIC_NEEDS_AUDIO, RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject, pyStrip, pyTruthy } from './generators/opts'
 import {
@@ -314,12 +314,13 @@ export type NodePlan =
     kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
     /**
      * What the answer is: pictures, a video, a sound ('audio', saved with the
-     * answer's extension, `wav` by default) or a 3D file ('glb', saved as the
-     * user's asset and handed on as a `glb` value) — each downloaded — or
+     * answer's extension, `wav` by default), a 3D file ('glb', saved as the
+     * user's asset and handed on as a `glb` value) or an SVG ('svg', R11.4:
+     * the same, as an `svg` value) — each downloaded — or
      * 'value': the answer itself is the result (text, JSON…), read by
      * `valuesOf`; nothing is downloaded.
      */
-    media: 'image' | 'video' | 'audio' | 'glb' | 'value'; prefix: string
+    media: 'image' | 'video' | 'audio' | 'glb' | 'svg' | 'value'; prefix: string
     /** What the node shows, from its files (and, for media 'value', the values it hands on). */
     uiFor(files: OutputFile[], values?: Record<number, RunnerValue>): Record<string, unknown> | null
     /**
@@ -802,6 +803,24 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           adv: parseJsonObject(inputs.model_options),
         })
         return stillCall(call, 'generate_image', krea2OnReplicate(call))
+      }
+      // A Recraft SVG model (family recraft-svg, R11.4): Replicate, its Python
+      // primary, no backup. The answer is one SVG, saved as the user's file and
+      // handed on as an `svg` value (shared/runner/svgImage.ts); the node shows it.
+      // No moodboard pictures, as Python's _accepts_refs ignores them.
+      const svgModel = RUNNER_SVG_IMAGE_MODELS[String(inputs.model)]
+      if (svgModel) {
+        const payload = svgModel.build({
+          prompt: nodeImagePrompt(inputs),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+          seed: asInt(inputs.seed, 0),
+          adv: parseJsonObject(inputs.model_options),
+          refs: null,
+        })
+        return {
+          kind: 'provider', provider: 'replicate', endpoint: svgModel.slug, payload, media: 'svg', prefix: 'generate_image', take: 'first',
+          uiFor: files => ({ images: files, animated: [false] }),
+        }
       }
       // A model that isn't one of the fal ids goes to Replicate, its Python
       // primary (family replicate-image). None of these takes moodboard

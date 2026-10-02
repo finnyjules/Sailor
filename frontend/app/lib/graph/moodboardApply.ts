@@ -38,7 +38,7 @@ import type { MoodboardEntry } from '~~/shared/taste/moodboard'
 /** The model an apply switches to when the current one can't take refs: the
  *  "Generate an image" class default (IMAGE_MODEL_PREFERENCE, model line-up
  *  H2), taking the first on that list that takes reference pictures and
- *  runs everywhere (not hidden, discontinued or runner-only); failing that,
+ *  runs everywhere (not hidden, discontinued, unpriced or runner-only); failing that,
  *  the first such model in the catalogue; failing that, it throws at load.
  *  Today that is
  *  Nano Banana 2, verified live (2026-08-07) to carry full pattern-level
@@ -51,7 +51,7 @@ export function moodboardDefaultModel(
   preference: readonly string[] = IMAGE_MODEL_PREFERENCE,
 ): string {
   const usable = (m: ImageModel | undefined): m is ImageModel =>
-    !!m && !m.hidden && !m.discontinued && !m.runnerOnly && m.tags.includes('multi-image')
+    !!m && !m.hidden && !m.discontinued && !m.unpriced && !m.runnerOnly && m.tags.includes('multi-image')
   const preferred = preference.find(id => usable(models.find(m => m.id === id)))
   if (preferred) return preferred
   const any = models.find(usable)

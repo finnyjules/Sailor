@@ -147,6 +147,8 @@ const EXT_BY_TYPE: Record<string, string> = {
   'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/vnd.wave': 'wav',
   'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/flac': 'flac', 'audio/x-flac': 'flac', 'audio/ogg': 'ogg',
   'model/gltf-binary': 'glb',
+  // R11.4: a Recraft SVG model's answer.
+  'image/svg+xml': 'svg',
 }
 
 /** The saved file's extension: by the answer's content type, else the URL's own, else `fallback` (png, mp4, wav or glb by what the plan makes). */

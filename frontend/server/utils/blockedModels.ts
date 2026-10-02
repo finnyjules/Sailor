@@ -10,7 +10,7 @@ import { runnerFamilies } from '../runner/config'
 import { promptNodeTitle } from '../../shared/runner/blockedModels'
 import type { ApiPrompt } from '../../shared/runner/graph'
 import { menuDefault, modelMenu } from '../../shared/runner/modelMenus'
-import { classUpgradeOn } from '../../shared/runner/eligibility'
+import { classUpgradeOn, svgReaderProblems } from '../../shared/runner/eligibility'
 import { requestProblems, type RequestProblem } from '../runner/requestRules'
 import { retiredNodesResponse, type IsOutputClass } from '../../shared/runner/retired'
 import { outputClassesOf } from '../../shared/runner/validate'
@@ -33,12 +33,15 @@ export function retiredPromptRefusal(prompt: unknown, isOutputClass?: IsOutputCl
 
 /**
  * The 400 body for `prompt`, or null when no retired partner node in it runs
- * (retiredPromptRefusal), every model in it can run on ComfyUI and every
- * request is one its provider takes (requestRefusal).
+ * (retiredPromptRefusal), every model in it can run on ComfyUI, no Recraft
+ * SVG model's SVG is wired into a node that needs a picture (R11.4, with
+ * `recraft-svg` on) and every request is one its provider takes (requestRefusal).
  */
 export function blockedPromptRefusal(prompt: unknown, opts: { isOutputClass?: IsOutputClass } = {}): ReturnType<typeof blockedPromptBody> {
   if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null
-  return retiredPromptRefusal(prompt, opts.isOutputClass) ?? blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families: runnerFamilies() })
+  const families = runnerFamilies()
+  return retiredPromptRefusal(prompt, opts.isOutputClass) ?? nodeProblemsBody(svgReaderProblems(prompt as ApiPrompt, families))
+    ?? blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families })
     ?? requestRefusal(prompt)
 }
 

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, nodeRuleAllows, runnerTakesNode,
 } from '#shared/runner/eligibility'
-import { ALL_RUNNER_FAMILIES, LOCAL_MODEL_FAMILIES, NO_FAMILIES, RUNNER_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+import { ALL_RUNNER_FAMILIES, LATE_FAMILIES, LOCAL_MODEL_FAMILIES, NO_FAMILIES, RUNNER_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { runnerFamilies } from '~~/server/runner/config'
 import { shouldUseRunner } from '~/lib/runner/client'
@@ -121,8 +121,9 @@ describe('eligibility with families', () => {
     for (const rule of Object.values(RUNNER_NODE_RULES)) {
       const named = [rule.family, ...Object.values(rule.models ?? {}).map(m => typeof m === 'string' ? m : m.family)]
       // Every family parseFamilies knows (R5.3: the media families are known but kept apart from RUNNER_FAMILIES;
-      // R7.1: R7's are known too, but kept out of ALL_RUNNER_FAMILIES, the pinned "every family" set).
-      for (const f of named.filter(Boolean)) expect([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES]).toContain(f)
+      // R7.1: R7's are known too, but kept out of ALL_RUNNER_FAMILIES, the pinned "every family" set;
+      // R11.4: the late families, recraft-svg, the same way).
+      for (const f of named.filter(Boolean)) expect([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES, ...LATE_FAMILIES]).toContain(f)
     }
   })
   it('the provider set is the two generators, Film a shot (Task 4), plus every rule row the runner does not compute itself', () => {

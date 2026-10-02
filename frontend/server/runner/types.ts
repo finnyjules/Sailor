@@ -61,6 +61,8 @@ export type RunnerValue =
   | { kind: 'boolean'; value: boolean }
   | { kind: 'json'; text: string }
   | { kind: 'glb'; url: string; file: OutputFile | null }
+  /** R11.4: an SVG a Recraft SVG model made (shared/runner/svgImage.ts), saved as the user's file; `url` is its /view address. */
+  | { kind: 'svg'; url: string; file: OutputFile }
   /** An IMAGE batch from a video: one kept FFV1 file of exact 8-bit RGB frames (`count` frames of `w` × `h`). */
   | { kind: 'frames'; file: OutputFile; count: number; w: number; h: number }
   /** CreateVideo's VIDEO (Python's VideoFromComponents): encoded only when saved or shown. */

@@ -49,6 +49,8 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
 const RUNNER_ONLY_IMAGES = ['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1']
+// R11.4, ruling (p): no verified price yet, so hidden (and refused) until priced.
+const UNPRICED_IMAGES = ['seedream-5-pro', 'reve-create']
 const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = {
   'EditImageNode.model': ['GPT Image 2.5', 'Seedream 5 Pro'],
   'BlendSceneNode.model': ['Nano Banana 2'],
@@ -146,7 +148,8 @@ describe('the hide lists', () => {
     for (const id of HIDDEN_IMAGES.filter(i => i !== 'flux-1.1-pro')) expect(images.map(e => e.model.id), id).not.toContain(id)
     expect(images.find(e => e.model.id === 'flux-1.1-pro')).toMatchObject({ hiddenTag: true })
     // Every family off: the runner-only models are left out too.
-    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length - RUNNER_ONLY_IMAGES.length)
+    for (const id of UNPRICED_IMAGES) expect(images.map(e => e.model.id), id).not.toContain(id)
+    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length - RUNNER_ONLY_IMAGES.length - UNPRICED_IMAGES.length)
     for (const cls of ['GenerateVideoNode', 'FilmShotNode']) {
       const shown = galleryEntries(VIDEO_MODELS, { classType: cls, families: ALL, current: null }).map(e => e.model.id)
       for (const id of [...HIDDEN_VIDEOS, ...DISCONTINUED_VIDEOS]) expect(shown, `${cls} ${id}`).not.toContain(id)

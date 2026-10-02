@@ -2,9 +2,10 @@
  * What each runner class's output slots carry (R0, step 3 spec), read by the
  * browser (routing, the needs-the-engine names) and the server (the runner).
  * A class not listed carries files on every slot, as before step 3.
- * Keep this file free of imports but ./graph.
+ * Keep this file free of imports but ./graph and ./svgImage (constants only).
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
+import { SVG_IMAGE_MODEL_IDS } from './svgImage'
 
 /**
  * R5.2: 'frames' (an IMAGE batch from a video, one kept lossless file) and
@@ -13,9 +14,11 @@ import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
  * else they leave the workflow to the engine (valueWiresAllowed).
  */
 export type ValueKind = 'files' | 'mask' | 'text' | 'number' | 'boolean' | 'json' | 'glb' | 'frames' | 'video'
+  /** R11.4: an SVG a Recraft SVG model made, saved as the user's file and handed on by its address (./svgImage.ts). */
+  | 'svg'
 
 /** Every kind a wire can carry that is not files (a Gate hands each on; one stopped on frames or a video shows nothing to pick). */
-export const VALUE_KINDS_ALL: readonly ValueKind[] = ['mask', 'text', 'number', 'boolean', 'json', 'glb', 'frames', 'video']
+export const VALUE_KINDS_ALL: readonly ValueKind[] = ['mask', 'text', 'number', 'boolean', 'json', 'glb', 'frames', 'video', 'svg']
 
 /** Output slots that carry something other than files, by class. Rows are added by the cards (R0.4, R1). */
 export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = {
@@ -76,6 +79,19 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   CreateVideo: { 0: 'video' },
   // R5.5: Load video frames' batch and its rate (fps / stride), also only while `media-video` is on.
   LoadVideoFrames: { 0: 'frames', 1: 'number' },
+  // R11.4: Generate an image carries files on every slot, but an SVG on slot 0
+  // when its model is a Recraft SVG one (KIND_BY_MODEL), only while
+  // `recraft-svg` is on (eligibility.ts outputKindsFor drops this row with it off).
+  GenerateImageNode: {},
+}
+
+/**
+ * R11.4: a slot whose kind depends on the node's `model`: an SVG model of
+ * Generate an image hands on an SVG on slot 0. Applied only where `kinds` has
+ * a row for the class (its family on: eligibility.ts outputKindsFor).
+ */
+export const KIND_BY_MODEL: Readonly<Record<string, { slot: number; models: readonly string[]; kind: ValueKind }>> = {
+  GenerateImageNode: { slot: 0, models: SVG_IMAGE_MODEL_IDS, kind: 'svg' },
 }
 
 /**
@@ -111,6 +127,11 @@ export function outputKind(
   if (follows && follows.slot === link[1]) {
     const d = node.inputs?.[follows.input]
     return isLink(d) && outputKind(prompt, d, kinds, depth + 1) === 'frames' ? 'frames' : 'files'
+  }
+  const byModel = row && Object.prototype.hasOwnProperty.call(KIND_BY_MODEL, node.class_type) ? KIND_BY_MODEL[node.class_type]! : undefined
+  if (byModel && byModel.slot === link[1]) {
+    const model = node.inputs?.model
+    if (typeof model === 'string' && byModel.models.includes(model)) return byModel.kind
   }
   return row && Object.prototype.hasOwnProperty.call(row, link[1]) ? row[link[1]]! : 'files'
 }

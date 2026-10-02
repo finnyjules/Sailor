@@ -295,6 +295,14 @@ export type RunnerFamily =
   | 'whisper-captions'
   | 'vocal-split'
   | 'lens-blur'
+  /**
+   * The three Recraft SVG models of Generate an image on Replicate (step 3,
+   * R11.4; shared/runner/svgImage.ts): the runner saves the SVG and hands on
+   * its address, which only Save image and Preview image read. Off by
+   * default and needs `cards` (LATE_FAMILY_REQUIRES). Off: they go to
+   * ComfyUI, as before (where Python can't decode the SVG).
+   */
+  | 'recraft-svg'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
@@ -340,6 +348,13 @@ export const LOCAL_MODEL_FAMILIES: readonly RunnerFamily[] = [
  * (server/runner/config.ts), as their requirement is.
  */
 export const LOCAL_MODEL_TOOL_FAMILIES: readonly RunnerFamily[] = ['slow-motion-ai', 'whisper-captions', 'vocal-split']
+
+/**
+ * Families added after R7 (R11.4's `recraft-svg`): known to parseFamilies,
+ * but kept apart from every pinned list, as R7's are. Their requirements are
+ * LATE_FAMILY_REQUIRES.
+ */
+export const LATE_FAMILIES: readonly RunnerFamily[] = ['recraft-svg']
 
 /**
  * Every family before R7: RUNNER_FAMILIES, the media families and R6's (the
@@ -415,12 +430,17 @@ export const LOCAL_MODEL_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> =
   'lens-blur': 'cards',
 }
 
-/** The family a family needs on too (FAMILY_REQUIRES, then MEDIA_EFFECT_REQUIRES, then LOCAL_MODEL_REQUIRES), or undefined. */
-export function requirementOf(family: RunnerFamily): RunnerFamily | undefined {
-  return FAMILY_REQUIRES[family] ?? MEDIA_EFFECT_REQUIRES[family] ?? LOCAL_MODEL_REQUIRES[family]
+/** The late families' requirements (R11.4: Recraft SVG's value is read by Save image and Preview image, cards machinery). */
+export const LATE_FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
+  'recraft-svg': 'cards',
 }
 
-const KNOWN: ReadonlySet<string> = new Set([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES])
+/** The family a family needs on too (FAMILY_REQUIRES, then MEDIA_EFFECT_REQUIRES, LOCAL_MODEL_REQUIRES and LATE_FAMILY_REQUIRES), or undefined. */
+export function requirementOf(family: RunnerFamily): RunnerFamily | undefined {
+  return FAMILY_REQUIRES[family] ?? MEDIA_EFFECT_REQUIRES[family] ?? LOCAL_MODEL_REQUIRES[family] ?? LATE_FAMILY_REQUIRES[family]
+}
+
+const KNOWN: ReadonlySet<string> = new Set([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES, ...LATE_FAMILIES])
 
 /** No family switched on. */
 export const NO_FAMILIES: ReadonlySet<RunnerFamily> = new Set()
@@ -471,12 +491,15 @@ export function parseFamilies(raw: unknown): ReadonlySet<RunnerFamily> {
  * rules that read it are in ./modelMenus.ts and ./blockedModels.ts.
  *   hidden        left out of the menus; still runs, prices and remaps
  *   discontinued  the ISO date its service stopped it: hidden, and a run using it is refused
+ *   unpriced      no verified price yet: hidden, and a run using it is refused, until priced
  *   runnerOnly    no engine (ComfyUI) builder: runs only in Sailor's runner
  *   family        the runner switch that turns a runner-only model on
  */
 export interface ModelFlags {
   hidden?: true
   discontinued?: string
+  /** No verified price yet (R11.4, ruling (p)): hidden, and a run using it is refused before any hold, on every path. */
+  unpriced?: true
   runnerOnly?: true
   family?: RunnerFamily
 }

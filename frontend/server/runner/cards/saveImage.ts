@@ -31,6 +31,11 @@
  * one level apart from Python's save on some edge pixels. Of Python's
  * extra_pnginfo only `workflow` is embedded: it is all the app sends.
  *
+ * An SVG (R11.4: a Recraft SVG model's `svg` value, shared/runner/svgImage.ts)
+ * is written as it came, `<name>_00001_.svg`, named as a picture is (its
+ * width and height from the SVG's own); the format, scale and size settings
+ * are a picture's and don't apply to it. Python can't decode it at all.
+ *
  * A list value (R1.6) is saved item by item, as ComfyUI runs the node once
  * per item. A loader's animation (Python's batch of frames) is refused at the
  * start of the take (engine.ts, cardPictureFiles) and here again.
@@ -339,8 +344,73 @@ async function saveAll(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { fol
   return { values: {}, ui: { images: images.map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type })) } }
 }
 
+// ── An SVG (R11.4) ───────────────────────────────────────────────────────────
+
+/** The SVG wired into `images` (a Recraft SVG model's value), or null for pictures. */
+function svgWiredIn(ctx: PlanContext): OutputFile | null {
+  const v = ctx.prompt[ctx.nodeId]!.inputs?.images
+  if (!isLink(v)) return null
+  const value = ctx.valueFrom?.(v)
+  return value?.kind === 'svg' ? value.file : null
+}
+
+/** A length attribute as a whole number of pixels (`512`, `512px`, `512.4`), or null for anything else (`100%`, `10cm`). */
+function svgLength(raw: string | undefined): number | null {
+  const m = raw ? /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i.exec(raw) : null
+  return m ? Math.max(0, Math.round(Number(m[1]))) : null
+}
+
+/**
+ * An SVG's size for the name's `%width%` and `%height%`: its root's `width`
+ * and `height` in pixels, else its `viewBox`'s, else 0 × 0.
+ */
+export function svgSize(bytes: Uint8Array): { w: number; h: number } {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, 64 * 1024))
+  const root = /<svg\b([^>]*)>/i.exec(text)?.[1] ?? ''
+  const attr = (name: string) => new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(root)
+  const value = (name: string) => { const m = attr(name); return m ? (m[1] ?? m[2]) : undefined }
+  let w = svgLength(value('width'))
+  let h = svgLength(value('height'))
+  if (w === null || h === null) {
+    const box = (value('viewBox') ?? '').trim().split(/[\s,]+/).map(Number)
+    if (box.length === 4 && box.every(Number.isFinite)) {
+      w ??= Math.max(0, Math.round(box[2]!))
+      h ??= Math.max(0, Math.round(box[3]!))
+    }
+  }
+  return { w: w ?? 0, h: h ?? 0 }
+}
+
+/** Writes the SVG as it came, named as save_images names a picture (one file, `%batch_num%` 0). */
+function saveSvg(file: OutputFile, prefix: string, o: { folder: 'output' | 'temp'; prefixAppend: string; now: Date }): NodePlan {
+  return {
+    kind: 'derive',
+    async derive(io) {
+      const bytes = await io.read(file)
+      const { w, h } = svgSize(bytes)
+      const { subfolder, filename } = saveImagePrefix(prefix + o.prefixAppend, w, h, o.now)
+      const named = filename.replaceAll('%batch_num%', '0')
+      if (io.signal.aborted) throw new Error('Stopped')
+      let saved: OutputFile
+      try {
+        saved = await io.saveAsset(bytes, {
+          prefix: named, ext: 'svg', subfolder, folder: o.folder,
+          ...(named !== filename ? { counter: { prefix: filename, offset: 0 } } : {}),
+        })
+      }
+      catch (e) {
+        if (e instanceof Error && (e.message === SAVE_OUTSIDE || e.message === 'The file store is not available')) throw e
+        throw new Error(SAVE_FAILED)
+      }
+      return { values: {}, ui: { images: [{ filename: saved.filename, subfolder: saved.subfolder, type: saved.type }] } }
+    },
+  }
+}
+
 export function planSaveImage(ctx: PlanContext): NodePlan {
   const node = ctx.prompt[ctx.nodeId]!
+  const svg = svgWiredIn(ctx)
+  if (svg) return saveSvg(svg, pyStr(node.inputs?.filename_prefix ?? 'ComfyUI'), { folder: 'output', prefixAppend: '', now: new Date() })
   const settings = saveSettings(node.inputs ?? {})
   const batches = batchesOf(ctx)
   return {
@@ -362,9 +432,11 @@ export function previewImageLetters(): string {
 
 export function planPreviewImage(ctx: PlanContext): NodePlan {
   const node = ctx.prompt[ctx.nodeId]!
+  const letters = previewImageLetters()
+  const svg = svgWiredIn(ctx)
+  if (svg) return saveSvg(svg, 'ComfyUI', { folder: 'temp', prefixAppend: `_temp_${letters}`, now: new Date() })
   const batches = batchesOf(ctx)
   const settings: SaveSettings = { prefix: 'ComfyUI', format: 'png', quality: 90, lossless: false, compression: 1, scale: 1, maxDimension: 0, embed: true }
-  const letters = previewImageLetters()
   return {
     kind: 'derive',
     async derive(io) {

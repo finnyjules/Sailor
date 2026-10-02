@@ -11,6 +11,7 @@ import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 import { PERSON_SWAP_RESOLUTIONS } from './personSwapVideo'
 import { SHOT_OVERRIDE_WIDGETS, SHOT_PRESET_IDS } from './shotPresets'
 import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
+import { SVG_IMAGE_FAMILY, SVG_IMAGE_MODEL_IDS, SVG_NEEDS_PICTURE } from './svgImage'
 import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
 import {
@@ -366,8 +367,9 @@ export interface RunnerWidgetSpec {
 /**
  * The image models whose Python primary is Replicate, that have a price and
  * are not SVG (family `replicate-image`, Task B4). Left out: the three *-svg
- * models (decision D4: Python cannot decode SVG either) and reve-create
- * (unpriced). The flux-2-* models are here: Replicate is their Python
+ * models (decision D4: Python cannot decode SVG either; the runner takes them
+ * under their own family, `recraft-svg`, R11.4: ./svgImage.ts) and
+ * reve-create (unpriced: refused everywhere, ./blockedModels.ts). The flux-2-* models are here: Replicate is their Python
  * primary, fal only their fallback (D5).
  */
 export const RUNNER_REPLICATE_IMAGE_MODEL_IDS = [
@@ -513,6 +515,9 @@ export const MAX_FRAME_WORK = 256 * 4 * 1024 * 1024
 
 /** A MASK input the runner can supply: a LoadImage's MASK output (1 − alpha of its file). */
 const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
+
+/** What Save image's and Preview image's `images` take: pictures as before, or a Recraft SVG model's SVG (R11.4). */
+const SVG_READER_KINDS: readonly ValueKind[] = ['files', 'svg']
 
 /**
  * The node classes (or extra models of a runner class) the families add,
@@ -832,6 +837,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'recraft-v4.1': 'recraft-v4.1',
       'krea-2-large': 'krea-2',
       'krea-2-medium': 'krea-2',
+      // R11.4: the Recraft SVG models on Replicate; their SVG is handed on as an `svg` value (./svgImage.ts).
+      ...Object.fromEntries(SVG_IMAGE_MODEL_IDS.map(id => [id, SVG_IMAGE_FAMILY])),
     },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
     // R0.4, R1.2: the words take a text wire (a card's value arrives as if typed).
@@ -1157,8 +1164,10 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // only cards and a Save image runs in the runner. The widgets as nodes.py
   // SaveImage declares them; Preview image has none but its pictures, and
   // nothing may read the pictures it hands on.
+  // R11.4: both also take a Recraft SVG model's `svg` value (Save image writes the SVG into its folder).
   SaveImage: {
     family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'],
+    valueInputs: { images: SVG_READER_KINDS },
     widgets: {
       filename_prefix: { type: 'STRING', required: true },
       format: { type: 'COMBO', required: true, options: ['png', 'webp', 'jpeg'] },
@@ -1170,7 +1179,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       embed_metadata: { type: 'BOOLEAN', required: true },
     },
   },
-  PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], outputsNotLinked: [0] },
+  PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], valueInputs: { images: SVG_READER_KINDS }, outputsNotLinked: [0] },
   // ── cards (step 3, R1.6): Smart Layout (server/runner/cards/smartLayout.ts) ──
   // It renders, so it counts as work. Its pictures are a list (one per
   // output), which only Save image and Preview image may read; its layout
@@ -2269,6 +2278,8 @@ const effectKindsCache = new Map<string, OutputKinds>()
  * its family is on. With it off, that class's slots carry files, as before R3.
  */
 const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
+  // R11.4: Generate an image's SVG on slot 0 (values.ts KIND_BY_MODEL).
+  GenerateImageNode: SVG_IMAGE_FAMILY,
   ChatLLMNode: 'llm-text',
   ImprovePromptNode: 'llm-text',
   SummarizeTextNode: 'llm-text',
@@ -2370,6 +2381,38 @@ export function valueWiresAllowed(
     if (!allowed?.includes(kind)) return false
   }
   return true
+}
+
+/** One node an SVG is wired into that needs pixels (R11.4). */
+export interface SvgReaderProblem {
+  nodeId: string
+  classType: string
+  input: string
+  message: string
+}
+
+/**
+ * Every wire that brings a Recraft SVG model's SVG (an `svg` value,
+ * ./svgImage.ts) into an input that doesn't take one, in prompt order: only
+ * Save image, Preview image and the Gate (which hands it on) take it. Each is
+ * refused plainly, before anything is held, on every path (the runner, the
+ * browser and the ComfyUI proxy): ComfyUI can't decode an SVG either. Empty
+ * with `recraft-svg` off: the models go to ComfyUI as before.
+ */
+export function svgReaderProblems(prompt: ApiPrompt | null | undefined, families: ReadonlySet<RunnerFamily>): SvgReaderProblem[] {
+  if (!prompt || typeof prompt !== 'object' || !familyOn(SVG_IMAGE_FAMILY, families)) return []
+  const kinds = outputKindsFor(families)
+  const out: SvgReaderProblem[] = []
+  for (const [nodeId, node] of Object.entries(prompt)) {
+    if (!node || typeof node.class_type !== 'string') continue
+    const takes = valueInputsOf(node.class_type, families)
+    for (const l of linksOf(node)) {
+      if (!(l.from in prompt) || outputKind(prompt, [l.from, l.slot], kinds) !== 'svg') continue
+      const allowed = Object.prototype.hasOwnProperty.call(takes, l.input) ? takes[l.input] : undefined
+      if (!allowed?.includes('svg')) out.push({ nodeId, classType: node.class_type, input: l.input, message: SVG_NEEDS_PICTURE })
+    }
+  }
+  return out
 }
 
 /**

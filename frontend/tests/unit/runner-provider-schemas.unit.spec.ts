@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { KLING_LIPSYNC_SLUG } from '#shared/runner/lipSyncEngines'
 import { describe, expect, it } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
-import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor } from '~~/server/runner/generators/image'
+import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, RUNNER_SVG_IMAGE_MODELS, imageAppFor } from '~~/server/runner/generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from '~~/server/runner/generators/video'
 import { videoPriceUsd } from '#shared/pricing/videoRates'
 import { FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP } from '~~/server/runner/generators/edit'
@@ -358,6 +358,8 @@ function runnerEndpoints(): string[] {
   // R7.8: Vocal separator on Replicate's demucs (generators/localModels.ts; its grid is runner-local-vocals.unit.spec.ts).
   out.add('replicate ryan5453/demucs')
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
+  // R11.4: the three Recraft SVG models (family recraft-svg; their grid is runner-image-svg.unit.spec.ts).
+  for (const d of Object.values(RUNNER_SVG_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
   for (const slug of [NANO_BANANA_2_SLUG, NANO_BANANA_SLUG, PRODUCT_SHOT_SLUG, STYLE_TRANSFER_SLUG]) out.add(`replicate ${slug}`)

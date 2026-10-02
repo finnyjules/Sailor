@@ -623,6 +623,9 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'seedream-5-pro',
+    // No verified price on Generate an image (fal publishes only tentative
+    // pricing): hidden, and refused before any hold, until it has one (R11.4).
+    unpriced: true,
     label: 'Seedream 5 Pro',
     brand: 'ByteDance',
     replicateSlug: 'bytedance/seedream-5-pro',
@@ -1202,6 +1205,8 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'reve-create',
+    // No verified price: hidden, and refused before any hold, until it has one (R11.4).
+    unpriced: true,
     label: 'Reve Create',
     brand: 'Reve',
     replicateSlug: 'reve/create',

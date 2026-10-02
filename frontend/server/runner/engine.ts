@@ -6,7 +6,7 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, rendersLocally } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, rendersLocally, svgReaderProblems } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
@@ -310,11 +310,12 @@ const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string
 type Sendable = Pick<NodeRecord, 'request' | 'switchedFrom'> & { endpoint: string | null; payload: Record<string, unknown> | null }
 
 /** A job's result in a node's words (a time-out names it). */
-const MEDIA_NOUN: Record<OutputMedia, string> = { image: 'image', video: 'video', audio: 'sound', glb: '3D model', value: 'answer' }
+const MEDIA_NOUN: Record<OutputMedia, string> = { image: 'image', video: 'video', audio: 'sound', glb: '3D model', svg: 'SVG', value: 'answer' }
 /** When the provider's answer names no file to download. */
 const NO_FILE: Record<Exclude<OutputMedia, 'value'>, string> = {
   image: 'The provider returned no image', video: 'The provider returned no video',
   audio: 'The provider returned no sound', glb: 'The provider returned no 3D model',
+  svg: 'The provider returned no SVG',
 }
 /** A leg whose nodes would keep more files than the run may hold (R3.17 fix round 1), refused before the hold. */
 export const KEPT_ROOM_REFUSED = 'This run would keep more video than Sailor can hold for one run. Run fewer turntables with extra views at once.'
@@ -1819,15 +1820,18 @@ export function createEngine(deps: EngineDeps) {
         }
       }
       const saved: OutputFile[] = []
-      if (plan.media === 'glb') {
-        // A 3D file (spec ruling 1, R3 ruling (k)): Sailor's own copy, saved in
-        // the user's output folder as an asset, handed on as a `glb` value
-        // naming it. Python hands on the provider's link, which expires.
+      if (plan.media === 'glb' || plan.media === 'svg') {
+        // A 3D file (spec ruling 1, R3 ruling (k)), or a Recraft SVG model's SVG
+        // (R11.4): Sailor's own copy, checked by its bytes, saved in the user's
+        // output folder as an asset, handed on as a `glb` / `svg` value naming
+        // it. Python hands on the 3D file's provider link, which expires, and
+        // can't decode the SVG at all.
+        const media = plan.media
         const url = urls[0]!
         const file = await fetchAnswer(url, (bytes, contentType) =>
-          deps.results.save(bytes, { userId: run.userId, prefix: plan.prefix, ext: answerExt('glb', bytes, contentType, url) }))
+          deps.results.save(bytes, { userId: run.userId, prefix: plan.prefix, ext: answerExt(media, bytes, contentType, url) }))
         await deps.metering.addOutput(run.userId, stageKey, file)
-        const values: Record<number, RunnerValue> = { 0: { kind: 'glb', url: viewUrlOf(file), file } }
+        const values: Record<number, RunnerValue> = { 0: media === 'glb' ? { kind: 'glb', url: viewUrlOf(file), file } : { kind: 'svg', url: viewUrlOf(file), file } }
         for (const v of Object.values(values)) checkValue(v)
         rec.values = values
         rec.outputs = [file]
@@ -2179,6 +2183,16 @@ export function createEngine(deps: EngineDeps) {
       // validation". No marker: ComfyUI would refuse it too. Nothing is held.
       if (pruned.noOutputs) throw refuse(NO_OUTPUTS_MESSAGE, 400)
       if (pruned.failed) throw refuse(NO_VALID_OUTPUTS_MESSAGE, 400, { node_errors: pruned.nodeErrors })
+      // R11.4: a model with no price yet (ruling (p)) never runs, and a Recraft SVG model's SVG wired
+      // into a node that needs a picture can't be read: both refused now, before anything is priced or
+      // held, and with no marker, since ComfyUI can't run either (shared/runner/blockedModels.ts, svgImage.ts).
+      const unpriced = blockedModelUses(pruned.prompt, { families, runnerTakes: true }).filter(u => u.reason === 'unpriced')
+      if (unpriced.length) {
+        const body = blockedModelsResponse(pruned.prompt, unpriced, { families })
+        throw refuse(body.error.message, 400, { node_errors: body.node_errors })
+      }
+      const svgReader = svgReaderProblems(pruned.prompt, families)[0]
+      if (svgReader) throw refuse(svgReader.message, 400, { nodeId: svgReader.nodeId, classType: svgReader.classType })
       if (!isRunnerEligible(pruned.prompt, families, { hosted: deps.hosted(), afterPruning: prunedAny(pruned) })) {
         throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
       }

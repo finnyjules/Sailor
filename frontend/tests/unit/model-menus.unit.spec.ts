@@ -59,7 +59,7 @@ function flag(target: ModelFlags, flags: ModelFlags) {
   const before = { ...target }
   Object.assign(target, flags)
   undo.push(() => {
-    for (const k of ['hidden', 'discontinued', 'runnerOnly', 'family'] as const) delete target[k]
+    for (const k of ['hidden', 'discontinued', 'unpriced', 'runnerOnly', 'family'] as const) delete target[k]
     Object.assign(target, before)
   })
   __resetModelMenusForTests()
@@ -81,7 +81,7 @@ function editOption(key: string, value: string): ModelFlags {
 
 /** Clears one entry's flags (put back afterwards). */
 function unflag(target: ModelFlags) {
-  const keys = (['hidden', 'discontinued', 'runnerOnly', 'family'] as const).filter(k => k in target)
+  const keys = (['hidden', 'discontinued', 'unpriced', 'runnerOnly', 'family'] as const).filter(k => k in target)
   if (!keys.length) return
   const before = { ...target }
   for (const k of keys) delete target[k]

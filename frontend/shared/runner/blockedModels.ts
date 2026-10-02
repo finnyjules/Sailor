@@ -5,10 +5,12 @@
  *     `/prompt` (layouts/default.vue `runVueWorkflow`);
  *   - the server, wherever `/prompt` goes to ComfyUI: the hosted meter
  *     (`meterGraphSubmit`, before pricing and any hold) and the local proxy;
- *   - the runner (`startRun`), before any hold: only discontinued models.
+ *   - the runner (`startRun`), before any hold: only discontinued and
+ *     unpriced models.
  *
  * A discontinued model is refused everywhere: Sailor never quietly swaps in
- * another one. A runner-only model has no engine builder, so the ComfyUI
+ * another one. So is a model with no verified price yet (`unpriced`, R11.4):
+ * it never runs, on the runner or on ComfyUI. A runner-only model has no engine builder, so the ComfyUI
  * path refuses it; the runner takes it only while its family is on.
  *
  * A node class with no model menu can be moved onto a newer model as a whole
@@ -22,8 +24,9 @@
  * Pure; relative imports only.
  */
 import type { ApiPrompt } from './graph'
-import { NO_FAMILIES, type RunnerFamily } from './families'
+import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
 import { classUpgradeOn } from './eligibility'
+import { SVG_IMAGE_FAMILY, isSvgImageModel } from './svgImage'
 import { menuDefault, modelEntryFor, modelMenu, modelMenus, runnerTakesClass } from './modelMenus'
 
 export interface BlockedModelUse {
@@ -31,7 +34,7 @@ export interface BlockedModelUse {
   classType: string
   /** The value the node holds, as saved (a legacy label stays as it is). */
   value: string
-  reason: 'runner-only' | 'discontinued'
+  reason: 'runner-only' | 'discontinued' | 'unpriced'
   /** The input the value is read from, when it isn't `model` (Lip-sync a character's `engine`). */
   input?: string
   /** The node's whole class runs a newer model while its family is on (no menu value): `value` is that model's name. */
@@ -67,10 +70,15 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
       if (!entry || typeof value !== 'string') continue
       const where = menu.input === 'model' ? {} : { input: menu.input }
       if (entry.discontinued) out.push({ nodeId, classType, value, reason: 'discontinued', ...where })
+      // No verified price yet (R11.4, ruling (p)): refused wherever the run goes, the runner included.
+      else if (entry.unpriced) out.push({ nodeId, classType, value, reason: 'unpriced', ...where })
       else if (entry.runnerOnly) {
         const runs = !!opts.runnerTakes && !!entry.family && families.has(entry.family) && runnerTakesClass(classType)
         if (!runs) out.push({ nodeId, classType, value, reason: 'runner-only', ...where })
       }
+      // A Recraft SVG model while `recraft-svg` is on (R11.4): only the runner keeps its SVG;
+      // ComfyUI would pay for it and then fail to decode it. Off, it goes to ComfyUI as before.
+      else if (!opts.runnerTakes && svgOn(classType, value, families)) out.push({ nodeId, classType, value, reason: 'runner-only', ...where })
     }
     // A class on its newer model runs only in the runner (the runner takes
     // every class that has an upgrade while the family is on).
@@ -78,6 +86,11 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
     if (upgrade && !opts.runnerTakes) out.push({ nodeId, classType, value: upgrade.label, reason: 'runner-only', upgrade: true })
   }
   return out
+}
+
+/** Generate an image on a Recraft SVG model with its family on (R11.4): runner-only for now. */
+function svgOn(classType: string, value: unknown, families: ReadonlySet<RunnerFamily>): boolean {
+  return classType === 'GenerateImageNode' && isSvgImageModel(value) && familyOn(SVG_IMAGE_FAMILY, families)
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -105,7 +118,7 @@ export function classDefaultLabel(classType: string, families: ReadonlySet<Runne
   if (!menu) return undefined
   const def = menuDefault(menu, families)
   const e = menu.entries.find(x => x.value === def)
-  return e && !e.hidden && !e.discontinued ? e.label : undefined
+  return e && !e.hidden && !e.discontinued && !e.unpriced ? e.label : undefined
 }
 
 /** Why a runner-only model didn't go to the runner, when its switch is off. */
@@ -123,6 +136,8 @@ export const NOT_TAKEN_AS_SET_UP_REASON = 'Sailor can’t run it as it is set up
  * The refusal for one blocked use, as a toast: a title and a description.
  *   discontinued  "Sora 2 was discontinued by its service on 24 Sep 2026" /
  *                 "Pick another model in “Title”, such as Hailuo H3 Max." (the class default, by name)
+ *   unpriced      "“Title” uses Model, which has no price yet" /
+ *                 "Pick another model in “Title”, such as Nano Banana 2." (R11.4)
  *   runner-only   "“Title” uses Model, which only runs in Sailor" / the reason
  * `engineReason` is why the runner didn't take the workflow when the model's
  * switch is on (needsEngineDescription); with the switch off it is
@@ -135,10 +150,12 @@ export function blockedModelRefusal(
   const entry = modelEntryFor(use.classType, use.value, use.input)
   const label = entry?.label ?? use.value
   const families = opts.families ?? NO_FAMILIES
-  if (use.reason === 'discontinued') {
+  if (use.reason === 'discontinued' || use.reason === 'unpriced') {
     const suggestion = classDefaultLabel(use.classType, families)
     return {
-      title: `${label} was discontinued by its service on ${serviceDate(entry?.discontinued ?? '')}`,
+      title: use.reason === 'discontinued'
+        ? `${label} was discontinued by its service on ${serviceDate(entry?.discontinued ?? '')}`
+        : `“${opts.title}” uses ${label}, which has no price yet`,
       description: suggestion
         ? `Pick another model in “${opts.title}”, such as ${suggestion}.`
         : `Pick another model in “${opts.title}”.`,
@@ -151,7 +168,7 @@ export function blockedModelRefusal(
       description: opts.engineReason ?? NOT_TAKEN_AS_SET_UP_REASON,
     }
   }
-  const switchedOn = !!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)
+  const switchedOn = (!!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)) || svgOn(use.classType, use.value, families)
   // Switched on, with no other node to blame: the node itself is set up in a
   // way the runner doesn't take (a Blend scene's keep_subject wired from
   // anything but a Frame's protect_mask, Tasks F11 and F11b).

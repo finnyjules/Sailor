@@ -24,7 +24,7 @@ export function slotValue(rec: NodeRecord | undefined, slot: number): RunnerValu
   return { kind: 'files', files: rec.outputs }
 }
 
-/** The files a value names (none for text, numbers, booleans and JSON; a frame batch's kept file; a made video's frames and sound). */
+/** The files a value names (none for text, numbers, booleans and JSON; a frame batch's kept file; a made video's frames and sound; an SVG's file). */
 export function filesOf(v: RunnerValue | undefined): OutputFile[] {
   if (!v) return []
   switch (v.kind) {
@@ -33,6 +33,8 @@ export function filesOf(v: RunnerValue | undefined): OutputFile[] {
       return v.files
     case 'glb':
       return v.file ? [v.file] : []
+    case 'svg':
+      return [v.file]
     case 'frames':
       return [v.file]
     case 'video':
@@ -80,7 +82,7 @@ export const WIRED_VALUE_MISSING = 'A value this step reads was not made'
  * The workflow as one node's builder reads it: every wire into that node
  * that carries a value (text, a number, true/false, JSON text, an address)
  * replaced by the value itself, exactly as ComfyUI's execute() receives it.
- * Wires that carry files, masks, frame batches or videos (R5.2) are left as
+ * Wires that carry files, masks, frame batches, videos (R5.2) or SVGs (R11.4) are left as
  * wires: the node reads them through `valueFrom`. `injected` lists the
  * non-blank texts substituted (moderated at the node's turn, R0.5). A value
  * wire whose value is missing is refused: never sent as blank. A Gate
@@ -97,7 +99,7 @@ export function withWiredValues(
   for (const [name, v] of Object.entries(node.inputs ?? {})) {
     if (!isLink(v)) continue
     const kind = outputKind(prompt, v)
-    if (kind === 'files' || kind === 'mask' || kind === 'frames' || kind === 'video') continue
+    if (kind === 'files' || kind === 'mask' || kind === 'frames' || kind === 'video' || kind === 'svg') continue
     const lit = literalOf(valueAt(v))
     if (lit === undefined) throw new Error(WIRED_VALUE_MISSING)
     inputs ??= { ...node.inputs }

@@ -14,6 +14,7 @@
  * outside its range is clamped). The Python path is legacy and unchanged.
  */
 import { RUNNER_IMAGE_MODEL_IDS, RUNNER_REPLICATE_IMAGE_MODEL_IDS } from '#shared/runner/eligibility'
+import { SVG_IMAGE_MODEL_IDS } from '#shared/runner/svgImage'
 import { FLUX_2_RESOLUTIONS, FLUX_KLEIN_MEGAPIXELS, flux2DevSize } from '#shared/pricing/imageSettings'
 import { arOr, asText, maybeSetSeed, optBool, optEnum, optFloat, optFloatIn, optInt, optIntIn, optStr, optText, outputFormatIn } from './opts'
 import type { ImageBuildArgs, ImageModelDesc, ReplicateImageModelDesc } from './types'
@@ -536,6 +537,36 @@ export const RUNNER_REPLICATE_IMAGE_MODELS: Record<string, ReplicateImageModelDe
   'photon': R('photon', 'Photon', 'luma/photon', rPhoton),
   'photon-flash': R('photon-flash', 'Photon Flash', 'luma/photon-flash', rPhoton),
   'minimax-image-01': R('minimax-image-01', 'MiniMax Image 01', 'minimax/image-01', rMinimaxImage01),
+}
+
+// ── Recraft SVG (family `recraft-svg`, R11.4) ────────────────────────────
+// Python's _b_recraft_v4 (both V4 SVG models) and _b_recraft_v3_svg, written
+// to the saved schemas (tests/unit/fixtures/provider-schemas/replicate/
+// recraft-ai__recraft-v4-svg.json, …-v4-pro-svg.json, …-v3-svg.json, read
+// 2026-10-01): no seed (none of the three has one), and V3 SVG's style from
+// its own five. The answer is one SVG file (shared/runner/svgImage.ts).
+
+/** recraft-ai/recraft-v3-svg `style` (its schema's enum). */
+export const RECRAFT_V3_SVG_STYLES = ['any', 'engraving', 'line_art', 'line_circuit', 'linocut']
+
+const rRecraftV3Svg = unseeded(({ prompt, aspectRatio, adv }) => ({
+  prompt,
+  aspect_ratio: arOr(RECRAFT_AR, aspectRatio, '1:1'),
+  style: optEnum(adv, 'style', RECRAFT_V3_SVG_STYLES, 'any'),
+}))
+
+export const RUNNER_SVG_IMAGE_MODELS: Record<string, ReplicateImageModelDesc> = {
+  'recraft-v4-pro-svg': R('recraft-v4-pro-svg', 'Recraft V4 Pro SVG', 'recraft-ai/recraft-v4-pro-svg', rRecraftV4),
+  'recraft-v4-svg': R('recraft-v4-svg', 'Recraft V4 SVG', 'recraft-ai/recraft-v4-svg', rRecraftV4),
+  'recraft-v3-svg': R('recraft-v3-svg', 'Recraft V3 SVG', 'recraft-ai/recraft-v3-svg', rRecraftV3Svg),
+}
+
+// Fail at import if the shared list and this table ever disagree.
+for (const id of SVG_IMAGE_MODEL_IDS) {
+  if (!RUNNER_SVG_IMAGE_MODELS[id]) throw new Error(`runner SVG image model ${id} has no description`)
+}
+if (Object.keys(RUNNER_SVG_IMAGE_MODELS).length !== SVG_IMAGE_MODEL_IDS.length) {
+  throw new Error('runner SVG image models: the table and the shared list differ')
 }
 
 // Fail at import if the shared list and this table ever disagree.

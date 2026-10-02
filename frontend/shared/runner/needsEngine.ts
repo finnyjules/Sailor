@@ -8,7 +8,7 @@
  * (server/utils/blockedModels.ts) share them, so there is one rule.
  */
 import type { ApiPrompt } from './graph'
-import { isRunnerEligible, runnerTakesNode } from './eligibility'
+import { isRunnerEligible, runnerTakesNode, svgReaderProblems } from './eligibility'
 import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
@@ -126,9 +126,10 @@ export function needsEngineDescription(titles: string[], reasons: readonly strin
 
 /**
  * The refusal for a run about to go to ComfyUI (the runner declined or was
- * skipped) that holds a retired partner node (shared/runner/retired.ts) or
- * uses a model ComfyUI can't run: a discontinued one, or a
- * runner-only one. Null when every take is fine. Names the first such node
+ * skipped) that holds a retired partner node (shared/runner/retired.ts),
+ * uses a model ComfyUI can't run (a discontinued one, one with no price yet,
+ * or a runner-only one), or wires a Recraft SVG model's SVG into a node that
+ * needs a picture (R11.4, only with `recraft-svg` on). Null when every take is fine. Names the first such node
  * by its title. A runner-only model whose switch is on was left out because
  * other nodes need the engine: the reason names them (needsEngineDescription);
  * with its switch off, the reason says so.
@@ -151,6 +152,14 @@ export function blockedRunRefusal(
     const title = isEditorOnlyClass(classType) ? `“${take.titleOf(id)}” can’t run in a workflow` : `“${take.titleOf(id)}” was retired`
     return { title, description: retiredAdviceOf(classType) }
   }
+  // A Recraft SVG model's SVG wired into a node that needs pixels (R11.4):
+  // neither the runner nor ComfyUI can read it, so it is refused here, before the
+  // model check (the reader is why the runner left it).
+  for (const take of takes) {
+    const problem = svgReaderProblems(take.prompt, families)[0]
+    if (!problem) continue
+    return svgReaderRefusal(take.titleOf(problem.nodeId))
+  }
   for (const take of takes) {
     const prompt = take.prompt
     if (!prompt) continue
@@ -165,6 +174,14 @@ export function blockedRunRefusal(
     })
   }
   return null
+}
+
+/** What Save image and Preview image say they take, the description of an SVG refusal. */
+export const SVG_READERS_ADVICE = 'Only Save image and Preview image take an SVG.'
+
+/** The toast for an SVG wired into a node that needs a picture (R11.4), naming that node. */
+export function svgReaderRefusal(title: string): { title: string; description: string } {
+  return { title: `“${title}” needs a picture, not an SVG`, description: SVG_READERS_ADVICE }
 }
 
 /**

@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import { planNode, type NodePlan, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
-import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS } from '~~/server/runner/generators/image'
+import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, RUNNER_SVG_IMAGE_MODELS } from '~~/server/runner/generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
 import {
   NANO_BANANA_2_REPLICATE, RECRAFT_V4_SIZES, RUNNER_ROUTES, flux2DevOnFal, flux2LabelSize, flux2MaxOnFal, flux2ProOnFal, nanoBananaOnFal,
@@ -306,7 +306,9 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:recraft-v4.1')).toBe(true)
     expect(keys.has('image:krea-2-large')).toBe(true)
     expect(keys.has('image:krea-2-medium')).toBe(true)
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10)
+    // + the three Recraft SVG models (R11.4, family recraft-svg), their own table.
+    for (const id of Object.keys(RUNNER_SVG_IMAGE_MODELS)) expect(keys.has(`image:${id}`), id).toBe(true)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10 + Object.keys(RUNNER_SVG_IMAGE_MODELS).length)
     // + Wan 3.0 and Wan 3.0 Prime (Task F1), Hailuo H3 Max Turbo (F3), Gemini Omni Flash (F4), Veo 3.1 Lite (F5),
     // HappyHorse 1.1 (Task F18), Grok Imagine Video 1.5 (Task F19), LTX-2.5 Fast (Task F20) and Luma Ray 3.2
     // (Task F21), runner-only video models outside the two builder tables.
