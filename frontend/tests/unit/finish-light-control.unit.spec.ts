@@ -2,7 +2,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import FinishLightControl from '~/components/vue-canvas/compositor/FinishLightControl.vue'
-import StudioHint from '~/components/vue-canvas/studio/StudioHint.vue'
 import { LIGHT_PRESETS, DEFAULT_FRAME_LIGHT } from '~/lib/compositor/frameLight'
 
 describe('FinishLightControl', () => {
@@ -29,7 +28,7 @@ describe('FinishLightControl, lit by the Frame lights', () => {
     expect(btn.text()).toBe("Lit by the Frame's lights")
     expect(w.find('[data-testid="finish-light-preset"]').exists()).toBe(false)
     expect(w.text()).not.toContain('Raking')
-    expect(w.findComponent(StudioHint).props('text')).toBe('Every light on this Frame lights the finish.')
+    expect(w.find('span[title]').attributes('title')).toBe('Every light on this Frame lights the finish.')
     await btn.trigger('click')
     expect(w.emitted('select-light')).toHaveLength(1)
   })

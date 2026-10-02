@@ -3,7 +3,6 @@
 // on-canvas handle. Shared by Gold foil and Spot UV so the two never drift.
 import { computed } from 'vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
-import StudioHint from '~/components/vue-canvas/studio/StudioHint.vue'
 import { LIGHT_PRESETS, LIGHT_PRESET_LABELS, presetOf, type FrameLight, type LightPreset } from '~/lib/compositor/frameLight'
 
 // `framelit`: the Frame has light layers, so the finish is lit by them and the hidden light's presets retire.
@@ -19,9 +18,7 @@ const current = computed<string>({
 <template>
   <div v-if="framelit" class="space-y-1" data-testid="finish-light-framelit-row">
     <p class="text-xs text-white/50">
-      <StudioHint text="Every light on this Frame lights the finish.">
-        <span class="cursor-help underline decoration-dotted decoration-white/20 underline-offset-2">Light</span>
-      </StudioHint>
+      <span title="Every light on this Frame lights the finish." class="cursor-help underline decoration-dotted decoration-white/20 underline-offset-2">Light</span>
     </p>
     <button type="button" data-testid="finish-light-framelit"
       class="w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-left text-xs text-white/80 hover:bg-white/10"
