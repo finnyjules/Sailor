@@ -53,8 +53,11 @@ export async function pictureRgb(ctx: PlanContext, file: OutputFile, link: unkno
   let bytes = await ctx.readFile(file)
   const loader = !!loaderSourceOf(ctx.prompt, link, ctx.families ?? NO_FAMILIES)
   // Its size from the header first: a picture at or under the limit is never decoded here (R3.5's one call).
-  const meta = await pictureMeta(bytes)
-  if (meta.width && meta.height && meta.width * meta.height <= realEsrganMaxPixels()) return null
+  // R11.8 (R11.6 re-review): a picture whose size the header can't give (a format the service takes but sharp
+  // can't read) keeps R3.5's one untouched call, as before tiles, so no working graph newly fails here.
+  const meta = await pictureMeta(bytes).catch(() => null)
+  if (!meta?.width || !meta.height) return null
+  if (meta.width * meta.height <= realEsrganMaxPixels()) return null
   if (loader) bytes = (await rgbTurnedPng(bytes)).png ?? bytes
   return answerRgb(bytes)
 }

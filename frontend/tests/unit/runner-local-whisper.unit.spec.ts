@@ -459,7 +459,7 @@ describe('fix round 1 · Finding 2: a sound made in the run is bounded before th
     expect(take.nodes.n!.credits).toBeLessThanOrEqual(credits({ audioUpTo: sent }))
   }, 120_000)
 
-  it('whisperSoundBound: the sound start pass\'s shapes; Generate music by its duration; speech and a cloned voice can\'t be bounded', () => {
+  it('whisperSoundBound: the sound start pass\'s shapes; Generate music by its duration; R11.8: speech by its text, a cloned voice by its input', () => {
     const shapes = new Map([['s:0', { rate: 8000, channels: 1, samples: 16000, exact: false }]])
     const p: ApiPrompt = {
       s: loadAudio(),
@@ -472,11 +472,14 @@ describe('fix round 1 · Finding 2: a sound made in the run is bounded before th
     }
     expect(whisperSoundBound(p, ['s', 0], shapes)).toBe(2 + WHISPER_RESAMPLE_SLACK)
     expect(whisperSoundBound(p, ['g', 0], shapes)).toBe(2 + WHISPER_RESAMPLE_SLACK)
-    expect(whisperSoundBound(p, ['m', 0], shapes)).toBe(9)
-    expect(whisperSoundBound(p, ['a', 0], shapes)).toBe(9)
-    expect(whisperSoundBound(p, ['w', 0], shapes)).toBe(31)
-    expect(whisperSoundBound(p, ['sp', 0], shapes)).toBeNull()
-    expect(whisperSoundBound(p, ['cl', 0], shapes)).toBeNull()
+    // R11.8: every paid maker from its settings (#shared/runner/sourceBounds), a second of slack each, plus the resample's.
+    expect(whisperSoundBound(p, ['m', 0], shapes)).toBeCloseTo(9 + WHISPER_RESAMPLE_SLACK, 9)
+    expect(whisperSoundBound(p, ['a', 0], shapes)).toBeCloseTo(9 + WHISPER_RESAMPLE_SLACK, 9)
+    expect(whisperSoundBound(p, ['w', 0], shapes)).toBeCloseTo(31 + WHISPER_RESAMPLE_SLACK, 9)
+    // "Hello." is 6 characters at one a second (speed 1), and a second.
+    expect(whisperSoundBound(p, ['sp', 0], shapes)).toBeCloseTo(7 + WHISPER_RESAMPLE_SLACK, 9)
+    // Its input's 2 s bound, and a second.
+    expect(whisperSoundBound(p, ['cl', 0], shapes)).toBeCloseTo(3 + WHISPER_RESAMPLE_SLACK, 9)
     // The hold reads the bound, never past the place's cap.
     expect(whisperCalls({ audioUpTo: 9, place: 'hosted' }).steps?.[0]?.call.inputSeconds).toBe(9)
     expect(whisperCalls({ audioUpTo: 5000, place: 'hosted' }).steps?.[0]?.call.inputSeconds).toBe(1800)

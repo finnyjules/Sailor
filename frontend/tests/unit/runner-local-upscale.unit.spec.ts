@@ -31,7 +31,7 @@ import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import {
   LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, SERVICE_OF, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG,
-  UPSCALE_2X_WORDS, localModelCalls, serviceTooltip,
+  UPSCALE_2X_TILED_MAX_PIXELS, UPSCALE_2X_TILED_MAX_TILES, UPSCALE_2X_WORDS, localModelCalls, serviceTooltip,
 } from '#shared/runner/localModels'
 import { EDIT_RATES } from '#shared/pricing/editRates'
 import { paidCallUsd } from '#shared/pricing/paidRates'
@@ -268,7 +268,7 @@ describe('the acceptance chains, with ComfyUI off', () => {
     expect(shown.animated).toEqual([false])
   })
 
-  it('a picture past the largest tiled (R11.6), or one whose size can\'t be known: the workflow is left to the engine before anything is held', async () => {
+  it('a picture known to be past the largest tiled (R11.6): the workflow is left to the engine before anything is held; one whose size can\'t be known is held at the largest tiled (R11.8)', async () => {
     // One colour: a small file of 4400 × 4400 (past UPSCALE_2X_TILED_MAX_PIXELS, 12288 × 1536).
     const big = new Uint8Array(await sharp({ create: { width: 4400, height: 4400, channels: 3, background: '#808080' } }).png().toBuffer())
     const prompt: ApiPrompt = { l: LOAD, n: upNode(), s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } } }
@@ -278,12 +278,15 @@ describe('the acceptance chains, with ComfyUI off', () => {
     await expect(k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })).rejects.toThrow(UPSCALE_2X_WORDS.tooLarge)
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(replicate.submitted()).toEqual([])
-    // The start pass by hand: exact at the cap passes; a reader that can't size the file, or none, leaves it.
+    // The start pass by hand: exact at the cap passes; a file known to be larger leaves it; R11.8 (ruling (k)): a
+    // reader that can't size the file, or none, holds it at the largest tiled (its most tiles), never the engine.
     const shapes = async () => new Map()
     const at = await noisePng(2560, 1440)
     expect((await localModelStartProblems(prompt, ON, { hosted: true, shapes, read: async () => at })).problem).toBeNull()
     expect((await localModelStartProblems(prompt, ON, { hosted: true, shapes, read: async () => big })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
-    expect((await localModelStartProblems(prompt, ON, { hosted: true, shapes })).problem?.message).toBe(UPSCALE_2X_WORDS.unknownSize)
+    expect(await localModelStartProblems(prompt, ON, { hosted: true, shapes })).toMatchObject({
+      problem: null, pictures: { n: UPSCALE_2X_TILED_MAX_PIXELS }, tiles: { n: UPSCALE_2X_TILED_MAX_TILES },
+    })
     // Empty image is sized from its widgets; a Frame with a size set too.
     const empty: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 5000, height: 4000, batch_size: 1, color: 0 } }, n: upNode(['e', 0]) }
     expect((await localModelStartProblems(empty, ON, { hosted: true, shapes })).problem?.message).toBe(UPSCALE_2X_WORDS.tooLarge)
@@ -342,11 +345,11 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(charged(k)).toEqual([[credits + 1, credits + 1]])
   })
 
-  it('a clip over the frame cap or past the largest tiled (R11.6): left to the engine before the hold, in Upscale\'s words', async () => {
+  it('a clip past the largest tiled (R11.6): left to the engine before the hold; over the frame cap on an uncounted bound: held at the cap (R11.8)', async () => {
     const p: ApiPrompt = { v: lvf, n: upNode(['v', 0]), s: saveFrames(['n', 0]) }
     const shapes = (count: number, w = 64, h = 36) => async () => new Map([['v:0', { count, w, h, exact: false }]])
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(`${UPSCALE_2X_WORDS.overCap} Use a clip of ${LOCAL_MODEL_MAX_FRAMES.hosted} frames or fewer.`)
+    expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2560, 1440) })).problem).toBeNull()
     // R11.6: over 1440p in tiles (two for 2561 × 1440), past 12288 × 1536's pixels left.
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(3, 2561, 1440) })).toMatchObject({ tiles: { n: 2 }, problem: null })
@@ -362,13 +365,13 @@ describe('a clip, one call per frame (ruling (f))', () => {
     passes(await refusedOf(false, shapes(3, 4096, 4096)))
     expect((await refusedOf(false, shapes(3, 4097, 4096))).refused?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
     // Hosted, 1080p: 150 frames at 2× fill the batch exactly; 151 counted exactly are refused, 151 as an
-    // upper bound only go to the engine.
+    // upper bound only are taken (R11.8): the node's turn refuses the clip itself past the caps, before any call.
     const exact = (count: number) => async () => new Map([['v:0', { count, w: 1920, h: 1080, exact: true }]])
     passes(await refusedOf(true, exact(150)))
     expect((await refusedOf(true, exact(151))).refused?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
     const bound = await refusedOf(true, shapes(151, 1920, 1080))
     expect(bound.refused).toBeUndefined()
-    expect(bound.problem?.message).toBe(UPSCALE_2X_WORDS.clipTooLarge)
+    expect(bound.problem).toBeNull()
     // No masks of its own: the kept bytes are the batches only (R6's peak).
     const withMasks = await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map([['v:0', { count: 3, w: 64, h: 36, exact: false }], ['n:0', { count: 3, w: 128, h: 72, exact: false }]]) })
     expect(withMasks.problem).toBeNull()

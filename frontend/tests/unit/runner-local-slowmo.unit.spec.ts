@@ -81,7 +81,7 @@ import { modelPricedUsd, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { stageEstimate } from '~~/server/runner/metering'
 import { planNode, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
 import { RIFE_SEND_FPS, fitRifeFrame, rifeAnswerIndex, rifeVideoInput } from '~~/server/runner/generators/localModels'
-import { localModelStartProblems, slowMotionAiStart } from '~~/server/runner/localModelStart'
+import { localModelStartProblems, slowMotionAiAtCap, slowMotionAiStart, slowMotionAiTurnRefusal } from '~~/server/runner/localModelStart'
 import { frameShapes, batchesOf } from '~~/server/runner/video/shapes'
 import { KEPT_MEDIA_MAKERS } from '~~/server/runner/keptRelease'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
@@ -474,7 +474,7 @@ describe('Load video → Get video components → Slow motion (AI) → Create vi
 /** Why the start pass won't run a clip (R11.7: a plain refusal, or the engine when the count is only an upper bound), or null. */
 const whyNot = (r: ReturnType<typeof slowMotionAiStart>) => ('refused' in r ? r.refused : 'problem' in r ? r.problem : null)
 
-describe('the start of the run: the clip counted and sized for the hold; past a limit, refused plainly (R11.7) or, on an uncounted bound, the engine', () => {
+describe('the start of the run: the clip counted and sized for the hold; past a limit, refused plainly (R11.7) or, on an uncounted bound, held at the cap (R11.8)', () => {
   const p: ApiPrompt = {
     l: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }, g: { class_type: 'GetVideoComponents', inputs: { video: ['l', 0] } },
     n: { class_type: FRAME_INTERP_AI_CLASS, inputs: { frames: ['g', 0], multiplier: 3 } },
@@ -482,15 +482,22 @@ describe('the start of the run: the clip counted and sized for the hold; past a 
   }
   const at = (count: number, w = 640, h = 360) => async () => new Map([['g:0', { count, w, h, exact: false }]])
 
-  it('the count and size recorded; over the frame cap or an output past the batch caps (an uncounted bound), or unknown: to the engine', async () => {
+  it('the count and size recorded; over the frame cap or an output past the batch caps on an uncounted bound, or unknown: held at the cap, never the engine (R11.8)', async () => {
     const ok = await localModelStartProblems(p, ON, { hosted: true, shapes: at(48) })
     expect(ok).toMatchObject({ counts: { n: 48 }, sizes: { n: { w: 640, h: 360 } }, problem: null })
     expect(ok.keptBytes).toBeGreaterThan(0)
-    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: at(SLOW_MOTION_AI_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(overCapWords(FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES.hosted))
+    // R11.8 (M3): an uncounted bound past a cap is held at the most a clip may be there (×3 at 640 × 360 hosted:
+    // 200 frames, 598 out within the 600-frame batch), and its turn refuses the clip itself past the caps.
+    expect(await localModelStartProblems(p, ON, { hosted: true, shapes: at(SLOW_MOTION_AI_MAX_FRAMES.hosted + 1) })).toMatchObject({ counts: { n: 200 }, problem: null })
     expect((await localModelStartProblems(p, ON, { hosted: false, shapes: at(SLOW_MOTION_AI_MAX_FRAMES.hosted + 1) })).problem).toBeNull()
-    // Hosted, 240 frames × 3 is 718 frames: past the 600-frame batch cap.
-    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: at(240) })).problem?.message).toBe(slowMotionAiOutWords(600))
-    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: async () => new Map() })).problem?.message).toBeDefined()
+    // Hosted, 240 frames × 3 is 718 frames: past the 600-frame batch cap (on a bound: held at 200).
+    expect(await localModelStartProblems(p, ON, { hosted: true, shapes: at(240) })).toMatchObject({ counts: { n: 200 }, problem: null })
+    expect(slowMotionAiTurnRefusal(3, { count: 240, w: 640, h: 360 }, true)).toBe(slowMotionAiOutWords(600))
+    expect(slowMotionAiTurnRefusal(3, { count: SLOW_MOTION_AI_MAX_FRAMES.hosted + 1, w: 64, h: 36 }, true)).toBe(overCapWords(FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES.hosted))
+    expect(slowMotionAiTurnRefusal(3, { count: 200, w: 640, h: 360 }, true)).toBeNull()
+    // Unknown (R11.8, ruling (k)): held at the cap where it runs, priced at the canvas's own ceiling there.
+    const unknown = await localModelStartProblems(p, ON, { hosted: true, shapes: async () => new Map() })
+    expect(unknown).toMatchObject({ counts: { n: 200 }, sizes: { n: { upTo: true, place: 'hosted' } }, problem: null })
     // ×7 (Sailor's own interpolation) holds R6.6's limits: hosted 1080p is past what it may hold, 720p runs.
     expect(whyNot(slowMotionAiStart({ multiplier: 7 }, { count: 24, w: 1920, h: 1080, exact: false }, true))).toBe(SLOW_MOTION_AI_WORDS.tooBig)
     expect(slowMotionAiStart({ multiplier: 7 }, { count: 24, w: 1280, h: 720, exact: false }, true)).toEqual({ frames: 24, w: 1280, h: 720 })
@@ -571,9 +578,10 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
     expect(f).toEqual({ frames: 900, upTo: true })
     let checked = 0
     for (const [t, m, w, h] of edges(false)) {
-      if (whyNot(slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, false))) continue
+      const got = slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, false)
+      if (!('frames' in got)) continue
       const badge = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
-      expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, t, w, h).usd)
+      expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, got.frames, w, h).usd)
       checked++
     }
     expect(checked).toBeGreaterThanOrEqual(3)
@@ -593,7 +601,8 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
     expect(secs).toMatchObject({ upTo: true, seconds: { framesUpTo: 'hosted' } })
     let checked = 0
     for (const [t, m, w, h] of edges(true)) {
-      if (whyNot(slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, true))) continue
+      const got = slowMotionAiStart({ multiplier: m }, { count: t, w, h, exact: false }, true)
+      if (!('frames' in got)) continue
       const c = canvas(m)
       const s = upstreamInputSeconds(c.nodes[2], c.nodes, c.edges)!
       const badge = nodeCreditEstimate(FRAME_INTERP_AI_CLASS, { multiplier: m, frames: ['g', 0] }, { inputSeconds: s.seconds, families: ON })!
@@ -601,7 +610,11 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
       expect(est.hostedCredits).toBe(badge)
       expect(est.breakdown[0]!.upTo).toBe(true)
       // The stage's hold: the node's credits and the render credit.
-      expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, t, w, h).credits + 1)
+      expect(badge, `×${m}, ${t} frames of ${w} × ${h}`).toBeGreaterThanOrEqual(held(m, got.frames, w, h).credits + 1)
+      // R11.8: a clip held at the cap (unknown, or a paid video's) is priced at that same ceiling.
+      const cap = slowMotionAiAtCap(m, true)
+      const capped = nodeCreditEstimate(FRAME_INTERP_AI_CLASS, { multiplier: m, frames: ['g', 0] }, { inputSeconds: { frames: cap.frames, videoWidth: cap.w, videoHeight: cap.h, place: 'hosted', framesUpTo: 'hosted' }, families: ON })!
+      expect(capped, `×${m} at the cap`).toBe(badge)
       checked++
     }
     expect(checked).toBeGreaterThanOrEqual(3)

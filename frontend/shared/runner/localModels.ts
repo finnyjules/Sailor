@@ -613,6 +613,17 @@ export function overCapWords(classType: string, cap?: number): string {
   return cap === undefined ? base : `${base} Use a clip of ${cap} frames or fewer.`
 }
 
+/**
+ * R11.8 (ruling (k), M3): the words a node's turn refuses a clip with when it
+ * has more pictures than the start of the run held for: past the place's
+ * frame cap (a clip held at the cap, its count not known or only bounded),
+ * the cap in words, as the start refuses a sure one; else the count changed.
+ */
+export function moreThanHeldWords(classType: string, count: number, hosted: boolean): string {
+  const cap = hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local
+  return count > cap ? overCapWords(classType, cap) : LOCAL_MODEL_WORDS.tooManyFrames
+}
+
 /** R11.7: locally, a clip past 4K that Sailor's own interpolation can't take either: refused plainly, the largest frame in words. */
 export const SLOW_MOTION_AI_PAST_4K_WORDS = `${SLOW_MOTION_AI_WORDS.tooBig} Use frames of ${RIFE_LOCAL_MAX.long} × ${RIFE_LOCAL_MAX.short} or smaller.`
 
@@ -920,7 +931,8 @@ export function slowMotionAiCalls(multiplier: unknown, frames: number | null | u
   // Each frame at most that place's largest RIFE is sent (locally 4K, fix round 2; hosted its frame cap), and a
   // segment's frames × size at most the batch's pixels (its frames are among the clip's output).
   const largest = place === 'local' ? RIFE_LOCAL_MAX.long * RIFE_LOCAL_MAX.short : caps.framePixels
-  const outputPixels = sized ? rifePricedPixels(w, h) : Math.ceil(Math.min(largest, caps.batchPixels / segOut))
+  // R11.8: a clip held at the cap (its size recorded as the largest, `framesUpTo` set) is priced as the canvas prices it.
+  const outputPixels = Math.ceil(Math.min(sized ? rifePricedPixels(w, h) : largest, caps.batchPixels / segOut))
   return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: segOut, outputPixels }, times: n }] }
 }
 

@@ -23,6 +23,16 @@
  *  - a node that makes a new picture: its stated largest (madePictureBound,
  *    editSettings.ts: a generator's settings, a Nano Banana tier, FLUX.2's
  *    2048²);
+ *  - R11.8 (every runner source declares its bound): the R2 effects (each
+ *    one's output size from its first picture and its settings, as the
+ *    runner's EFFECTS table sizes it: Resize, Crop, Kuwahara's odd radius,
+ *    the generators' width × height, Painter's base or canvas; one whose
+ *    input can't be sized, at most the effects' largest picture, past which
+ *    the runner refuses it), R7's classes (Background remove, Object removal,
+ *    Subject mask, Slow motion (AI) hand on their picture's size; Upscale (2×)
+ *    twice each side), and the cards (Text on path and Text mask by their
+ *    baked file, Text mask over a source at the source's size, the Shader
+ *    effect at its picture's size or its aspect at its resolution);
  *  - anything else, a loop, or a chain past MAX_HOPS: unsized.
  *
  * A size-priced node is then priced on an exact size, or a largest at or
@@ -42,6 +52,11 @@ import {
 import { actionPassThrough } from '../runner/generators/actions'
 import { tooManyPicturesWords, unreadableInputWords, unsizedInputWords, type RequestProblem } from '../runner/requestRules'
 import { LIPSYNC_MEDIA_READS } from '../../shared/pricing/clipSettings'
+import { EFFECT_MAX_PICTURE_PIXELS, effectParams, effectSchemaOf } from '../../shared/runner/effects'
+import { BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS } from '../../shared/runner/localModels'
+import { aspectSize } from '../../shared/runner/shaderBakeKey'
+import { EFFECTS } from '../runner/effects/table'
+import { bakeParams } from '../runner/inputs'
 
 const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
 
@@ -544,6 +559,8 @@ export type PictureRule =
   | { atMost: number } // no larger than this, whatever comes in
   | { exact: number, width?: number, height?: number }
   | { unsized: true }
+  // R11.8: an R2 effect's output, from its first picture (`input`) and its settings, by the runner's own EFFECTS table.
+  | { effect: string, input: unknown, params: Record<string, unknown> }
 
 const UNSIZED = { unsized: true } as const
 
@@ -668,7 +685,34 @@ export function pictureRule(classType: string, inputs: NodeInputs): PictureRule 
     case 'BlendSceneNode':
       if (inputs.keep_subject !== undefined && inputs.keep_subject !== null) return { same: inputs.image }
       break
+    // R11.8, R7's classes: a cut-out, a filled picture, a subject's cut-out and a still picture handed on are
+    // their picture's size (a clip's frames too); Upscale (2×) twice each side (nodes_upscale.py at scale 2).
+    case BG_REMOVE_CLASS:
+    case OBJECT_REMOVE_CLASS:
+    case SUBJECT_MASK_CLASS:
+    case FRAME_INTERP_AI_CLASS:
+      return { same: inputs.frames }
+    case UPSCALE_2X_CLASS:
+      return { scaled: inputs.frames, side: 2, round: 'up' }
+    // R11.8, the bake cards (R1.3): the file their studio baked; Text mask over a source, the source's size.
+    case 'TextOnPath':
+    case 'TextMask': {
+      if (classType === 'TextMask' && isLinkValue(inputs.source)) return { same: inputs.source }
+      const rendered = bakeParams(inputs.params).rendered
+      return typeof rendered === 'string' && rendered ? { file: rendered } : UNSIZED
+    }
+    // R11.8, the Shader effect (R2.10): its picture's size, else `_aspect_size` of its resolution and aspect.
+    case 'ShaderEffect': {
+      if (isLinkValue(inputs.image)) return { same: inputs.image }
+      const res = literalSize(inputs.resolution)
+      if (!res || typeof inputs.aspect !== 'string') return UNSIZED
+      const a = aspectSize(res, inputs.aspect)
+      return { exact: a.w * a.h, width: a.w, height: a.h }
+    }
   }
+  // R11.8: an R2 effect (shared/runner/effects.ts), sized as the runner's EFFECTS table sizes it.
+  const effect = effectRule(classType, inputs)
+  if (effect) return effect
   // The Nano Banana actions (nodes_edit_actions.py and friends) hand their
   // picture on unchanged when there is nothing to change: the rule the
   // runner plans by (actionPassThrough). With the deciding text linked, the
@@ -682,6 +726,34 @@ export function pictureRule(classType: string, inputs: NodeInputs): PictureRule 
 }
 
 const isLinkValue = (v: unknown) => Array.isArray(v)
+
+/**
+ * R11.8: an R2 effect's picture rule. Painter: its base picture's size, else
+ * its width × height canvas (nodes_painter.py). A generator (no picture in):
+ * its width × height. Any other: its first picture wired in (the runner's
+ * planJobs sizes the output from it), through the effect's own outSize.
+ * Null for a class that is no effect.
+ */
+function effectRule(classType: string, inputs: NodeInputs): PictureRule | null {
+  const schema = effectSchemaOf(classType)
+  const spec = Object.prototype.hasOwnProperty.call(EFFECTS, classType) ? EFFECTS[classType] : undefined
+  if (!schema || !spec) return null
+  const params = effectParams(schema, inputs)
+  if (classType === 'Painter') {
+    if (isLinkValue(inputs.image)) return { same: inputs.image }
+    const w = literalSize(params.width)
+    const h = literalSize(params.height)
+    return w && h ? { exact: w * h, width: w, height: h } : { atMost: EFFECT_MAX_PICTURE_PIXELS }
+  }
+  const first = schema.images.find(i => isLinkValue(inputs[i.name]))
+  if (first) return { effect: classType, input: inputs[first.name], params }
+  // A generator: its width × height (an effect whose size rests on a mask is not sized here).
+  if (spec.batch === 'generator' && spec.outSize) {
+    const out = spec.outSize(params, null)
+    return out.w > 0 && out.h > 0 ? { exact: out.w * out.h, width: out.w, height: out.h } : { atMost: EFFECT_MAX_PICTURE_PIXELS }
+  }
+  return UNSIZED
+}
 
 /** nodes_compositor.py's motion path: `motion_params` is JSON whose `rendered` is a non-empty list (or linked: may be). */
 function bakedForMotion(v: unknown): boolean {
@@ -759,6 +831,16 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
     if ('exact' in rule) return rule.width && rule.height ? fromShapes([[rule.width, rule.height]], true) : { px: rule.exact, exact: true }
     if ('atMost' in rule) return { px: rule.atMost, exact: false }
     if ('unsized' in rule) return { unknown: 'unsized' }
+    if ('effect' in rule) {
+      // R11.8: the runner refuses an effect's picture past its largest (planJobs), so one whose input can't be
+      // sized is at most that; with the input's shapes, each through the effect's own outSize.
+      const input = await onLink(rule.input, path)
+      if ('unknown' in input) return { px: EFFECT_MAX_PICTURE_PIXELS, exact: false }
+      const outSize = EFFECTS[rule.effect]!.outSize
+      if (!outSize) return input
+      if (input.shapes) return fromShapes(input.shapes.map(([w, h]) => { const o = outSize(rule.params, { w, h }); return [o.w, o.h] as const }), input.exact)
+      return { px: EFFECT_MAX_PICTURE_PIXELS, exact: false }
+    }
     const input = await onLink('scaled' in rule ? rule.scaled : 'resize' in rule ? rule.resize : 'crop' in rule ? rule.crop : rule.atLeast, path)
     if ('unknown' in input) return input
     if ('atLeast' in rule) return { px: Math.max(input.px, rule.bound), exact: false }
@@ -889,6 +971,33 @@ export async function linkPictureBound(
   }
   const s = await pictureSizer(prompt, measure).ofLink(link)
   return 'px' in s ? s.px : null
+}
+
+/**
+ * R11.8: linkPictureBound's bound and whether it is exact (a measured file,
+ * or worked out exactly from one), or null when it can't be known before the
+ * run. A bound that isn't exact proves nothing past a cap: Upscale (2×) holds
+ * at its largest instead of refusing on it (server/runner/localModelStart.ts).
+ */
+export async function linkPictureSize(
+  prompt: Prompt,
+  link: unknown,
+  readFile: GateFileReader = engineFileSize,
+  reads: GateReads = createGateReads(),
+): Promise<{ px: number, exact: boolean } | null> {
+  const measure = async (value: string): Promise<FileRead> => {
+    const r = await reads.measure<FileRead>(`pixels:${value}`, async () => {
+      try {
+        const got = await readFile(value)
+        if (typeof got === 'number') return got > 0 ? { pixels: got } : 'unreadable'
+        return got && got.pixels > 0 ? got : 'unreadable'
+      }
+      catch { return 'unreadable' }
+    }, 'pictures')
+    return r ?? 'unread'
+  }
+  const s = await pictureSizer(prompt, measure).ofLink(link)
+  return 'px' in s ? { px: s.px, exact: s.exact } : null
 }
 
 /**

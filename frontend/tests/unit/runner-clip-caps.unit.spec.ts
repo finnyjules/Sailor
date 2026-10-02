@@ -32,6 +32,19 @@ vi.mock('node:child_process', async (importOriginal) => {
   }
 })
 
+/** R11.8 (M2): a hook in the encoder: its Nth clip reports one frame fewer than asked for. */
+const ENC = vi.hoisted(() => ({ calls: 0, shortAt: 0 }))
+vi.mock('~~/server/media/encode', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/media/encode')>()
+  return {
+    ...real,
+    encodeVideo: (async (...a: Parameters<typeof real.encodeVideo>) => {
+      const got = await real.encodeVideo(...a)
+      return ENC.shortAt && ++ENC.calls === ENC.shortAt ? { ...got, frames: got.frames - 1 } : got
+    }) as typeof real.encodeVideo,
+  }
+})
+
 /** A hook in the writer: on its Nth frame, fail the write. */
 const HOOK = vi.hoisted(() => ({ puts: 0, at: 0 }))
 vi.mock('~~/server/media/values', async (importOriginal) => {
@@ -322,6 +335,22 @@ describe('a 300-frame clip through the plan: two segments, joined without doubli
     expect(readdirSync(join(h.root, 'kept', runId))).toEqual([input.file.filename])
   })
 
+  it('R11.8 (M2): a segment whose clip is not the frames asked for is never sent; the segment answered before it is charged nothing', LONG, async () => {
+    await requireMediaTools()
+    const h = vfxHarness(scratch)
+    const runId = vfxRunId(++runs)
+    const input = await keptBatch(h, runId, { frames: inputFrames(300), w: W, h: H })
+    Object.assign(ENC, { calls: 0, shortAt: 2 })
+    try {
+      const r = await byHand(h, runId, input, 2)
+      await expect(r.run).rejects.toThrow()
+      expect(r.calls.length).toBe(1)
+      expect(r.undelivered).toEqual([['rife-1', 'sailor-fault']])
+      expect(readdirSync(join(h.root, 'kept', runId))).toEqual([input.file.filename])
+    }
+    finally { Object.assign(ENC, { calls: 0, shortAt: 0 }) }
+  })
+
   it('the first segment with no answer: the second is never sent', LONG, async () => {
     await requireMediaTools()
     const h = vfxHarness(scratch)
@@ -424,8 +453,12 @@ describe('the start of the run: a clip past a cap is refused plainly before the 
         expect(over.refused?.message, `${cls} ${hosted}`).toBe(overCapWords(cls, cap))
         expect(over.problem).toBeNull()
         expect((await localModelStartProblems(p, fams, { hosted, shapes: counted(cap) })).refused, `${cls} ${hosted} at the cap`).toBeUndefined()
-        // A count that is only an upper bound (its packets not counted) proves nothing: the engine, as before.
-        expect((await localModelStartProblems(p, fams, { hosted, shapes: bound(cap + 1) })).problem?.message).toBe(overCapWords(cls, cap))
+        // R11.8 (M3): a count that is only an upper bound (its packets not counted) proves nothing: held at the cap,
+        // never the engine (its turn refuses a clip past the cap, in the same words).
+        const held = await localModelStartProblems(p, fams, { hosted, shapes: bound(cap + 1) })
+        expect(held.problem, `${cls} ${hosted} bound`).toBeNull()
+        expect(held.refused).toBeUndefined()
+        expect(held.counts.n).toBe(cap)
       }
     }
     expect(overCapWords(BG_REMOVE_CLASS, 300)).toBe('This clip is too long to cut out here. Use a clip of 300 frames or fewer.')
@@ -457,8 +490,13 @@ describe('the start of the run: a clip past a cap is refused plainly before the 
     expect(slowMotionAiStart({ multiplier: 2 }, { count: 240, w: 8, h: 8, exact: true }, true)).toEqual({ frames: 240, w: 8, h: 8 })
     // RIFE (16 pixels a side and up) takes the full 300 hosted.
     expect(slowMotionAiStart({ multiplier: 2 }, { count: 300, w: 16, h: 16, exact: true }, true)).toEqual({ frames: 300, w: 16, h: 16 })
-    // Unknown: the engine (R11.8 bounds it).
-    expect((await localModelStartProblems(p, ON, { hosted: true, shapes: async () => new Map() })).problem?.message).toBe(LOCAL_MODEL_WORDS.unknownCount)
+    // R11.8 (ruling (k)): unknown, held at the cap where it runs (the canvas's own ceiling there), never the engine.
+    for (const hosted of [true, false]) {
+      const unknown = await localModelStartProblems(p, ON, { hosted, shapes: async () => new Map() })
+      expect(unknown.problem).toBeNull()
+      expect(unknown.counts.n).toBe(SLOW_MOTION_AI_MAX_FRAMES[hosted ? 'hosted' : 'local'])
+      expect(unknown.sizes?.n).toMatchObject({ upTo: true, place: hosted ? 'hosted' : 'local' })
+    }
   })
 })
 

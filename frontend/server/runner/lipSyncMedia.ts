@@ -88,7 +88,9 @@ export async function lipSyncEngineMediaCheck(prompt: ApiPrompt, nodeId: string,
       try { shape = await reads.soundShape(link) }
       catch (e) { return { problem: soundInWords(e) } }
       if (!shape || !(shape.rate > 0)) return { problem: KLING_LIPSYNC_SOUND_UNSIZED }
-      if (pythonWavBytesBound(shape) > KLING_LIPSYNC_MAX_SOUND_BYTES) return { problem: KLING_LIPSYNC_SOUND_TOO_LARGE }
+      // R11.8: a paid maker's sound (music, speech, a cloned voice) is bounded from its settings (`upTo`): taken,
+      // and refused only at the node's turn, on its WAV itself, before anything is sent.
+      if (!shape.upTo && pythonWavBytesBound(shape) > KLING_LIPSYNC_MAX_SOUND_BYTES) return { problem: KLING_LIPSYNC_SOUND_TOO_LARGE }
     }
   }
   if ('upload' in m.audio && reads.size) {

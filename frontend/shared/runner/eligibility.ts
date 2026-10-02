@@ -21,9 +21,9 @@ import {
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
 import { parseMaskPoints } from './samInput'
 import { LENS_BLUR_CLASS, LENS_BLUR_WIDGETS } from './lensBlur'
-import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
+import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_FAMILY_OF, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
-  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_SLOTS, LOCAL_MODEL_SOURCE_INPUT, VOCALS_CLASS, localModelOn, localModelRows, localModelSwitchedClasses,
+  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_SLOTS, LOCAL_MODEL_SOURCE_INPUT, VOCALS_CLASS, WHISPER_CLASS, localModelOn, localModelRows, localModelSwitchedClasses,
 } from './localModels'
 import {
   ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
@@ -544,6 +544,23 @@ export const SOUND_OUTPUTS: readonly (readonly [string, number])[] = [
 
 /** The sound nodes that read a sound (R5.3): what a music or speech node may feed while `media-sound` is on. */
 const SOUND_READERS = ['SaveAudio', 'SaveAudioMP3', 'PreviewAudio'] as const
+
+/**
+ * R11.8 (ruling (k)): the readers a paid maker's sound (music, speech, a
+ * cloned voice) may feed now that its maker declares its bound
+ * (#shared/runner/sourceBounds): every sound effect (R6.9, Save audio (Opus)
+ * among them), Create video's sound (R5.4), Whisper transcribe (R7.7) and
+ * Vocal separator (R7.8), each while its own family is on.
+ */
+const MADE_SOUND_READERS: readonly FeedsAlso[] = [
+  ...(['sound-effects', 'sound-denoise'] as const).map(family => ({
+    family,
+    classes: [...Object.keys(MEDIA_EFFECT_FAMILY_OF).filter(c => MEDIA_EFFECT_FAMILY_OF[c] === family), ...(family === 'sound-effects' ? ['SaveAudioOpus'] : [])],
+  })),
+  { family: 'media-video', classes: ['CreateVideo'] },
+  { family: 'whisper-captions', classes: [WHISPER_CLASS] },
+  { family: 'vocal-split', classes: [VOCALS_CLASS] },
+]
 
 /**
  * Every (class, output slot) that hands on a VIDEO the runner's video nodes
@@ -1367,7 +1384,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     required: ['prompt'],
     feedsOnly: ['Audio'],
     // R3.10: a sound-in node may read it directly too, while `sound-in` is on.
-    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }],
+    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }, ...MADE_SOUND_READERS],
     needsReader: true,
     widgets: {
       ...(c === 'GenerateMusicNode' ? { model: { type: 'COMBO', required: true, options: MUSIC_MODELS } } : {}),
@@ -1384,7 +1401,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     required: ['text'],
     feedsOnly: ['Audio'],
     // R3.10: a sound-in node may read it directly too, while `sound-in` is on.
-    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }],
+    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }, ...MADE_SOUND_READERS],
     needsReader: true,
     widgets: {
       ...(c === 'GenerateSpeechNode' ? { model: { type: 'COMBO', required: true, options: SPEECH_MODELS } } : {}),
@@ -1431,7 +1448,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['audio'], required: ['audio'],
     linkSources: { audio: SOUND_OUTPUTS },
     feedsOnly: ['Audio'],
-    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }],
+    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }, ...MADE_SOUND_READERS],
     needsReader: true,
     widgets: {
       model: { type: 'COMBO', required: true, options: RVC_MODELS },

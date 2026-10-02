@@ -26,6 +26,29 @@ import { probeVideoFile } from '../../media/values'
 import { pyFrameBound, type MediaProbe } from '../../media/probe'
 import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape } from './table'
 import { BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, localModelOn, localModelPictureSlot, slowMotionAiCount } from '#shared/runner/localModels'
+import { PAID_VIDEO_OUTPUTS } from '#shared/runner/eligibility'
+import { MEDIA_CAPS } from '#shared/runner/media'
+
+/**
+ * R11.8 (ruling (k)): a clip that can't be sized before the run, held at the
+ * place's caps: R5's most frames, each R5's largest frame (`capped`, so its
+ * count and size are never facts a refusal rests on). Every batch is kept
+ * within those caps (values.ts keepFrames), so they bound what it can be.
+ */
+export function clipAtCaps(caps: { batchFrames: number; framePixels: number }): FrameShape {
+  const side = Math.floor(Math.sqrt(caps.framePixels))
+  return { count: caps.batchFrames, w: side, h: side, exact: false, capped: true }
+}
+
+/** Whether a VIDEO wire brings a paid video model's video (through Gates and Video cards' sources): sized only after it runs. */
+export function paidVideoLink(prompt: ApiPrompt, link: ApiLink, depth = 0): boolean {
+  const from = prompt[link[0]]
+  if (!from || depth > 64) return false
+  if (PAID_VIDEO_OUTPUTS.some(([cls, slot]) => cls === from.class_type && slot === link[1])) return true
+  if (from.class_type === GATE_CLASS) return isLink(from.inputs?.data_in) && paidVideoLink(prompt, from.inputs.data_in as ApiLink, depth + 1)
+  if (from.class_type === 'Video') return isLink(from.inputs?.source) && paidVideoLink(prompt, from.inputs.source as ApiLink, depth + 1)
+  return false
+}
 
 const key = (l: ApiLink) => `${l[0]}:${l[1]}`
 
@@ -219,6 +242,8 @@ export function videoFileOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Output
     if (isLink(inputs.source)) {
       const up = videoFileOf(prompt, inputs.source, depth + 1)
       if (up) return up
+      // R11.8: a paid video wired in always brings its video, so the card's own file is never the one read.
+      if (paidVideoLink(prompt, inputs.source)) return null
     }
     return typeof inputs.file === 'string' && inputs.file !== '' ? parseInputFileRef(inputs.file) : null
   }
@@ -254,6 +279,13 @@ export function videoSourceShapeOf(o: { prompt: ApiPrompt; access: FileAccess; u
     const inputs = n.inputs ?? {}
     try {
       if (classType === 'GetVideoComponents' || classType === 'SaveVideo') {
+        // R11.8 (ruling (k)): a paid video model's clip can't be sized before it runs: Get video components
+        // holds it at the place's caps, its sound at R5's sound cap.
+        // Save video re-encoding one keeps its frames on the way, held the same way.
+        if (isLink(inputs.video) && paidVideoLink(o.prompt, inputs.video)) {
+          const caps = o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+          return classType === 'GetVideoComponents' ? { ...clipAtCaps(caps), soundBytes: caps.soundSamples * 4 + 4096 } : clipAtCaps(caps)
+        }
         const file = isLink(inputs.video) ? videoFileOf(o.prompt, inputs.video) : null
         if (!file || !(await o.access.exists(file))) return null
         const p = await probeVideoFile(file, o)

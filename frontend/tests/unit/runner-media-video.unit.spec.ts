@@ -736,11 +736,6 @@ describe('the family', () => {
       'a card with a made video read by a Gate': { l: loadVideo('a.mp4'), g: getComp('l'), v: createVideo(['g', 0], 24), c: videoCard({ source: ['v', 0] }), gt: { class_type: GATE_CLASS, inputs: { data_in: ['c', 0], bypass: true } }, c2: videoCard({ source: ['gt', 0] }) },
       'a wired file name': { t: { class_type: 'PrimitiveString', inputs: { value: 'x' } }, l: { class_type: 'LoadVideo', inputs: { file: ['t', 0] } }, s: saveVideo('l') },
       'Preview video, not ported': { l: loadVideo('a.mp4'), p: { class_type: 'PreviewVideo', inputs: { video: ['l', 0] } } },
-      'a music node into CreateVideo': {
-        l: loadVideo('a.mp4'), g: getComp('l'),
-        m: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration: 8, model_version: 'stereo-large', temperature: 1, top_p: 0, seed: 0 } },
-        v: createVideo(['g', 0], 24, ['m', 0]), s: saveVideo('v'),
-      },
     }
     const every = new Set<RunnerFamily>([...ALL_RUNNER_FAMILIES])
     for (const [name, p] of Object.entries(left)) {
@@ -749,6 +744,15 @@ describe('the family', () => {
         expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }).length, `${name}: named`).toBeGreaterThan(0)
       }
     }
+    // R11.8 (ruling (k)): a music node into CreateVideo is taken once its own family is on (its maker bounds its
+    // sound, #shared/runner/sourceBounds); with audio-gen off it stays with the engine, as before.
+    const music: ApiPrompt = {
+      l: loadVideo('a.mp4'), g: getComp('l'),
+      m: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration: 8, model_version: 'stereo-large', temperature: 1, top_p: 0, seed: 0 } },
+      v: createVideo(['g', 0], 24, ['m', 0]), s: saveVideo('v'),
+    }
+    expect(runnerTakesWorkflow(music, every), 'a music node into CreateVideo, every family on').toBe(true)
+    for (const fam of [ON, ON_BOTH]) expect(runnerTakesWorkflow(music, fam), `a music node into CreateVideo with ${fam.size} families`).toBe(false)
     // Frames wired into a Frame's layer: the Frame is not taken (its picture inputs take pictures only).
     const frame: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), f: { class_type: 'Compositor', inputs: { layer1: ['g', 0] } } }
     for (const fam of [ON, every]) expect(runnerTakesNode(frame, 'f', fam), 'a Frame reading frames').toBe(false)

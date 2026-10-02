@@ -37,7 +37,7 @@ import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import { PHOTO_FILL_SLUGS } from '#shared/runner/layers'
 import {
   BG_REMOVE_SLUG, LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW, OBJECT_REMOVE_SLUG,
-  OBJECT_REMOVE_WORDS, SERVICE_OF, localModelCalls, serviceTooltip,
+  OBJECT_REMOVE_WORDS, SERVICE_OF, localModelCalls, moreThanHeldWords, serviceTooltip,
 } from '#shared/runner/localModels'
 import { PAID_RATES } from '#shared/pricing/paidRates'
 import { FAMILY_PRICED_CLASSES, perFrameCredits, priceNode } from '#shared/pricing/nodePrice'
@@ -589,14 +589,18 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(charged(k)).toEqual([[credits + 1, credits + 1]])
   })
 
-  it('a clip over the frame cap: left to the engine before the hold, in Object removal\'s words', async () => {
+  it('a clip over the frame cap on an uncounted bound: held at the cap (R11.8), and its turn refuses past it in Object removal\'s words', async () => {
     const p: ApiPrompt = { v: lvf, b: bg, n: eraseNode(2, ['v', 0], ['b', 1]), s: saveFrames(['n', 0]) }
     const shapes = (count: number) => async () => new Map([['v:0', { count, w: 64, h: 36, exact: false }], ['b:0', { count, w: 64, h: 36, exact: false }], ['n:0', { count, w: 64, h: 36, exact: false }]])
     const at = await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })
     expect(at.problem).toBeNull()
     expect(at.counts.n).toBe(LOCAL_MODEL_MAX_FRAMES.hosted)
     const over = await localModelStartProblems({ v: lvf, n: eraseNode(2, ['v', 0], ['l', 1]), l: LOAD }, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })
-    expect(over.problem?.message).toBe(`${OBJECT_REMOVE_WORDS.overCap} Use a clip of ${LOCAL_MODEL_MAX_FRAMES.hosted} frames or fewer.`)
+    expect(over.problem).toBeNull()
+    expect(over.counts.n).toBe(LOCAL_MODEL_MAX_FRAMES.hosted)
+    // The turn's words past the cap (R11.8, M3): the cap in words, as a counted clip is refused at the start.
+    expect(moreThanHeldWords(OBJECT_REMOVE_CLASS, LOCAL_MODEL_MAX_FRAMES.hosted + 1, true)).toBe(`${OBJECT_REMOVE_WORDS.overCap} Use a clip of ${LOCAL_MODEL_MAX_FRAMES.hosted} frames or fewer.`)
+    expect(moreThanHeldWords(OBJECT_REMOVE_CLASS, 12, true)).toBe(LOCAL_MODEL_WORDS.tooManyFrames)
   })
 })
 

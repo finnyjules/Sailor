@@ -148,7 +148,7 @@ import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
   BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
   OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_TILED_MAX_PIXELS, UPSCALE_2X_WORDS, isLocalModelClass,
-  upscale2xPricedPixels, upscale2xTiles,
+  upscale2xPricedPixels, upscale2xTiles, moreThanHeldWords,
   MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
   FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
@@ -157,6 +157,8 @@ import {
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
 import { clipSegments, segmentOutputFrames, segmentOutputStart } from '#shared/runner/clipSegments'
+import { MEDIA_CAPS } from '#shared/runner/media'
+import { slowMotionAiTurnRefusal } from '../localModelStart'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds, subjectClick } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
 import { isPieced, vocalsSilentStems, vocalsSound, wavIsSilent, type PiecedSound, type PythonWav, type VocalsSound } from '../soundWav'
@@ -334,7 +336,7 @@ export function planBackgroundRemove(ctx: PlanContext): NodePlan {
   const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
   if (count < 1) throw new Error(LOCAL_MODEL_WORDS.noPicture)
   // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
-  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  if (count > held) throw new Error(moreThanHeldWords(ctx.prompt[ctx.nodeId]!.class_type, count, !!ctx.hosted))
   const clip = incoming.kind === 'frames'
   // The picture's 8 bits: as its readers write it (Save image truncates) or the hand-off's rounding;
   // a clip's batch by rule 4 (trunc when only encoders read it). Both are k for every k / 255.
@@ -544,7 +546,7 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
   const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
   if (count < 1) throw new Error(UPSCALE_2X_WORDS.noPicture)
   // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
-  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  if (count > held) throw new Error(moreThanHeldWords(ctx.prompt[ctx.nodeId]!.class_type, count, !!ctx.hosted))
   const clip = incoming.kind === 'frames'
 
   /** A picture's size checked before any call: at most the largest tiled, and no more tiles than were held for. */
@@ -555,7 +557,15 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
     if (tiledSize(w, h) && tileCount(w, h, UPSCALE_2X_MAX_PIXELS) > heldTiles) throw new Error(UPSCALE_2X_WORDS.moreThanHeld)
   }
   // A clip's frames are all one size: checked before any call.
-  if (clip) checkSize(incoming.value.w, incoming.value.h)
+  if (clip) {
+    checkSize(incoming.value.w, incoming.value.h)
+    // R11.8 (LC2): its 2× batch within R5's batch caps, judged on the clip itself before any call (the start of the
+    // run refuses only what it knows for sure; a clip held at the caps, or on a count only bounded, is judged here).
+    const caps = ctx.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+    const ow = 2 * incoming.value.w
+    const oh = 2 * incoming.value.h
+    if (ow * oh > caps.framePixels || count > caps.batchFrames || count * ow * oh > caps.batchPixels) throw new Error(UPSCALE_2X_WORDS.clipTooLarge)
+  }
   const quant = clip ? framesQuantOf(ctx.prompt, ctx.nodeId, 0, ctx.families) : onlySavesRead(ctx.prompt, ctx.nodeId, 0) ? 'trunc' : 'round'
   const turned = !clip && !!loaderSourceOf(ctx.prompt, link, ctx.families ?? NO_FAMILIES)
 
@@ -813,7 +823,7 @@ export function planObjectRemove(ctx: PlanContext): NodePlan {
   const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
   if (count < 1) throw new Error(OBJECT_REMOVE_WORDS.noPicture)
   // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
-  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  if (count > held) throw new Error(moreThanHeldWords(ctx.prompt[ctx.nodeId]!.class_type, count, !!ctx.hosted))
   const mv = ctx.valueFrom?.(maskLink)
   if (mv?.kind !== 'mask' || !mv.files.length) throw new Error(OBJECT_REMOVE_WORDS.noMask)
   const maskFiles = mv.files
@@ -1186,7 +1196,7 @@ export function planSubjectMask(ctx: PlanContext): NodePlan {
   const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
   if (count < 1) throw new Error(SUBJECT_MASK_WORDS.noPicture)
   // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
-  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  if (count > held) throw new Error(moreThanHeldWords(ctx.prompt[ctx.nodeId]!.class_type, count, !!ctx.hosted))
   const clip = incoming.kind === 'frames'
   // Python's picture (R3.7's splitPictures): behind a loader the loader's tensor, made in the run its node's.
   const behind = !clip ? loaderFileBehind(ctx.prompt, link) : null
@@ -1410,6 +1420,11 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
 
   // Fix round 2: on this computer RIFE takes 4K at most (the start of the run recorded where it runs).
   const place = ctx.measured?.place ?? (ctx.hosted ? 'hosted' : 'local')
+  // R11.8 (ruling (k), M3): the clip itself against the start's caps (its frame cap, R5's batch caps for what it hands
+  // on, the largest frame and Sailor's own interpolation's limits), in the start's words, before anything is sent: a
+  // clip held at the cap, or on a count that was only an upper bound, is judged here.
+  const refusal = slowMotionAiTurnRefusal(m, { count: T, w: v.w, h: v.h }, place === 'hosted')
+  if (refusal) throw new Error(refusal)
   if (!rifeTakes(m, v.w, v.h, place)) {
     // A multiplier RIFE doesn't make, a clip under 16 pixels a side (the encoder refuses it), or locally one past 4K: Sailor's own
     // interpolation (R6.6), free, (T − 1)·m + 1 frames, the originals exact.
@@ -1482,11 +1497,14 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
           if (!payload) {
             const media = mediaOf()
             const clip = join(work, `clip_${k + 1}.mp4`)
-            await encodeVideo({
+            const encoded = await encodeVideo({
               input: { kind: 'ffv1', path: await media.access.verifiedPath(v.file), w: v.w, h: v.h, ...(several ? { range: { start: part.seg.start, count: part.seg.count } } : {}) },
               out: clip, fps: RIFE_SEND_FPS, quality: RIFE_SEND_QUALITY, padToEven: true,
               userId: media.userId, signal: io.signal, roots: [media.access.rootOf(v.file)], outRoots: [work],
             })
+            // R11.8 (R11.7 review M2): the segment sent must be the frames asked for; one that isn't is never sent
+            // (no call, nothing charged; in segments, the ones already answered are not charged either).
+            if (encoded.frames !== part.seg.count) throw new MediaError('failed')
             const bytes = new Uint8Array(await readFile(clip))
             await rm(clip, { force: true })
             const name = several ? `slow_motion_ai_clip_${k + 1}.mp4` : 'slow_motion_ai_clip.mp4'

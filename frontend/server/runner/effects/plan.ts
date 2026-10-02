@@ -20,10 +20,9 @@ import { isLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
   EFFECT_ERROR_MESSAGES, EFFECT_IO_WORK_PER_VALUE, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
-  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, EFFECT_TOO_MUCH_MEMORY, effectOutSize, effectPeakFits, effectPictureCap, effectPreviewName, effectSchemaOf,
+  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, EFFECT_TOO_MUCH_MEMORY, effectOutSize, effectParams, effectPeakFits, effectPictureCap, effectPreviewName, effectSchemaOf,
 } from '#shared/runner/effects'
 import type { EffectSchema } from '#shared/runner/effectSchemas.generated'
-import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 import { maskPngFromScanlines, readMaskPng } from '../compositor/keep'
 import { EFFECT_TIMEOUT_MESSAGE, pixelsInWorker, type EffectMaskIn, type EffectRunResult, type EffectTensorIn } from '../compositor/worker'
 import type { PixelsPicture } from '../pixels/core'
@@ -37,31 +36,8 @@ import { floatReadBy, keptTensorsBehind } from './tensorFiles'
 export const EFFECT_MASK_MISSING = 'A mask this effect reads was not made'
 export const EFFECT_MASK_UNREAD = 'A mask this effect reads could not be read'
 
-/** A widget as ComfyUI's validate_inputs converts it (int(), float(), str(), bool()); eligibility has checked it converts. */
-function widgetValue(type: string, v: unknown): unknown {
-  if (v === undefined) return undefined
-  switch (type) {
-    case 'FLOAT': return typeof v === 'number' ? v : typeof v === 'boolean' ? Number(v) : typeof v === 'string' ? pyFloatOf(v) : v
-    case 'INT': return typeof v === 'number' ? Math.trunc(v) : typeof v === 'boolean' ? Number(v) : typeof v === 'string' ? pyIntOf(v) : v
-    case 'BOOLEAN': return pyTruthy(v)
-    case 'STRING':
-    case 'COLOR':
-      if (typeof v === 'string') return v
-      if (typeof v === 'boolean') return v ? 'True' : 'False'
-      return v === null ? 'None' : String(v)
-    default: return v
-  }
-}
-
-/** The node's widgets as its execute() receives them. */
-export function effectParams(schema: EffectSchema, inputs: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const [name, w] of Object.entries(schema.widgets)) {
-    const v = widgetValue(w.type, inputs[name])
-    if (v !== undefined) out[name] = v
-  }
-  return out
-}
+// R11.8: effectParams moved to #shared/runner/effects (the start-of-run picture sizes read it too).
+export { effectParams }
 
 /**
  * At the start of the take (R2.7, engine.ts beside cardPictureFiles): an

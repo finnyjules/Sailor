@@ -577,13 +577,19 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(keptFiles.length).toBe(1)
   })
 
-  it('over the frame cap on an uncounted bound, or a count that can\'t be known: the workflow is left to the engine before anything is held (R11.7: a counted clip is refused plainly, runner-clip-caps)', async () => {
+  it('over the frame cap on an uncounted bound, or a count that can\'t be known: held at the cap, never the engine (R11.8; R11.7: a counted clip is refused plainly, runner-clip-caps)', async () => {
     const p: ApiPrompt = { v: lvf, n: bgNode(c, ['v', 0]), s: saveFrames(['n', 0]) }
     const shapes = (count: number) => async () => new Map([['v:0', { count, w: 64, h: 36, exact: false }]])
     expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem?.message).toBe(overCapWords(BG_REMOVE_CLASS, LOCAL_MODEL_MAX_FRAMES.hosted))
+    // R11.8 (M3): an uncounted bound over the cap is held at the cap; the node's turn refuses a clip past it.
+    expect(await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: false, shapes: shapes(LOCAL_MODEL_MAX_FRAMES.hosted + 1) })).problem).toBeNull()
-    expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map() })).problem?.message).toBe(LOCAL_MODEL_WORDS.unknownCount)
+    // R11.8 (ruling (k)): a clip that can't be known is held at the cap too (its frames at R5's largest: in hosted
+    // that is past the run's kept room, which the engine refuses plainly before the hold).
+    const unknown = await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: async () => new Map() })
+    expect(unknown).toMatchObject({ counts: { n: LOCAL_MODEL_MAX_FRAMES.hosted }, problem: null })
+    expect(unknown.refused).toBeUndefined()
+    expect(LOCAL_MODEL_WORDS.unknownCount).toBeTruthy()
     // The batches kept while it runs (the clip's, the cut-out's) and the masks, for the run's kept room (hosted 4 GiB):
     // 300 frames of 1080p are past it (the engine says so before the hold), 100 are not.
     const full = (count: number) => async () => new Map([['v:0', { count, w: 1920, h: 1080, exact: false }], ['n:0', { count, w: 1920, h: 1080, exact: false }]])
@@ -593,7 +599,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect((await localModelStartProblems(p, ON_CLIP, { hosted: true, shapes: full(100) })).keptBytes).toBeLessThan(MEDIA_CAPS.hosted.keptBytesPerRun)
     // A picture's node keeps no batch.
     expect((await localModelStartProblems({ l: LOAD, n: bgNode(c) }, ON, { hosted: true, shapes: full(1) })).keptBytes).toBe(0)
-    // A picture source whose count can't be known (Smart Layout's list): to the engine too.
+    // A picture source whose count can't be known (Smart Layout's list): held at the cap (R11.8).
     expect(pictureBound({ s: { class_type: 'SmartLayout', inputs: {} } }, ['s', 0], ON)).toBeNull()
   })
 })

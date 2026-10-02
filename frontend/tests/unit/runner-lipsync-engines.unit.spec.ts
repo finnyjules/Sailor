@@ -410,13 +410,18 @@ describe('on the engine (fake Replicate and fal)', () => {
     expect(k.replicate.submitted()[0]!.payload).toEqual({ video_url: 'https://fal.storage/face.mp4', audio_file: 'https://fal.storage/audio.wav' })
   }, 60_000)
 
-  it('Kling with a sound made in the run (its size can\'t be bounded): refused plainly before the hold', async () => {
+  it('Kling with a sound made in the run: bounded by its maker (R11.8, music by its duration), taken and held; one no maker bounds is still refused', async () => {
     await requireMediaTools()
     const k = await kitWith(true, { 'face.mp4': await mp4(5) }, new Set<RunnerFamily>([...ON, 'audio-gen']))
     const p = node(klingOpts({ audio: '' }), true)
     p.snd = { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'calm piano', duration: 5, model_version: 'stereo-melody-large', temperature: 1, top_p: 0, seed: 0 } }
-    await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(KLING_LIPSYNC_SOUND_UNSIZED)
-    expect(k.ledger.hold).not.toHaveBeenCalled()
+    k.replicate.holdNext(1)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    expect(k.ledger.hold).toHaveBeenCalledTimes(1)
+    await k.engine.stop(k.userId)
+    await k.engine.settled(runId)
+    // 6 s of 32 kHz stereo as Python's 16-bit WAV is well under Kling's 5 MB; a sound no maker bounds keeps the words.
+    expect(KLING_LIPSYNC_SOUND_UNSIZED).toContain('can’t tell this sound’s size before the run')
   }, 60_000)
 
   it('Stop while Kling runs (its video and WAV handed off): cancelled on Replicate, the hold released, nothing left behind', async () => {

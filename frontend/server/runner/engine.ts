@@ -2346,7 +2346,7 @@ export function createEngine(deps: EngineDeps) {
             continue
           }
           const link = n.inputs?.audio
-          let found: { seconds: number; exact: boolean } | null = null
+          let found: ReturnType<typeof soundBoundOf> = null
           if (isLink(link)) {
             try {
               whisperShapes ??= await soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }))
@@ -2358,14 +2358,17 @@ export function createEngine(deps: EngineDeps) {
           const bound = found ? found.seconds : null
           // Longer than the node sends here: refused plainly, before anything is held or run. A source's
           // bound is its header's length plus a second, so a loaded file is refused just when its own
-          // length passes the cap; within that second the node's turn is the backstop. R7.8 (R7.7's
-          // re-review): Vocal separator adds that second only where a header source (or a music node's
-          // duration) is in the chain, so an exact chain past the cap is refused here too.
-          const slack = n.class_type === VOCALS_CLASS && found?.exact ? 0 : 1
+          // length passes the cap; within that second the node's turn is the backstop. R11.8 (R7.7's parked
+          // cap + 1): that second is allowed only where a header source is in the chain (`header`), for
+          // Whisper and Vocal separator alike, so an exact chain past the cap is refused here too. A paid
+          // maker's bound (`upTo`, from its settings) is held on but never refused on: its sound is judged at
+          // the node's turn, before anything is sent.
+          const sure = found !== null && !found.upTo
+          const slack = found?.header ? 1 : 0
           // R11.5: past one call's cap the sound runs in pieces; only past the hard ceiling is it refused. A
           // Vocal separator's joined stems must also stay readable by the node after it (R5's sound cap).
-          const overCeiling = bound !== null && bound > ceiling + slack + 1e-3
-          const unreadable = bound !== null && n.class_type === VOCALS_CLASS && !vocalsStemsReadable(Math.min(bound, ceiling), place)
+          const overCeiling = sure && bound !== null && bound > ceiling + slack + 1e-3
+          const unreadable = sure && bound !== null && n.class_type === VOCALS_CLASS && !vocalsStemsReadable(Math.min(bound, ceiling), place)
           if (overCeiling || unreadable) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_SOUND_TOO_LONG })
           // Held on the bound (or, where the maker can't be bounded, on one call's longest sound); the node's
           // turn measures the WAV it sends and is charged on that, never above the hold (a longer one is refused
@@ -2433,7 +2436,7 @@ export function createEngine(deps: EngineDeps) {
       let shapes = await shapeAll(false)
       const several = prompts.length > 1
       const keptOf = (k: number) => {
-        const peak = keptPeak(prompts[k]!, families, shapes[k]!, { release: false })
+        const peak = keptPeak(prompts[k]!, families, shapes[k]!, { release: false, caps: deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local })
         return peak ? peak.bytes : Number.POSITIVE_INFINITY
       }
       const others = (k: number) => (several ? prompts.reduce((sum, _p, j) => (j === k ? sum : sum + keptOf(j)), 0) : 0)
@@ -2479,7 +2482,8 @@ export function createEngine(deps: EngineDeps) {
         const was = measured[index]![nodeId]
         // R7.6: Slow motion (AI) is priced by its clip's frame size too.
         const size = counted.sizes?.[nodeId]
-        const sized = size ? { videoWidth: size.w, videoHeight: size.h, place: size.place } : {}
+        // R11.8: a clip held at the cap is priced at the place's ceiling (`framesUpTo`, the canvas's own "up to").
+        const sized = size ? { videoWidth: size.w, videoHeight: size.h, place: size.place, ...(size.upTo ? { framesUpTo: size.place } : {}) } : {}
         // R7.11: Upscale (2×) is priced by the largest picture it sends.
         const picture = counted.pictures?.[nodeId]
         // R11.6: and, over the service's largest, by the most tiles any of its pictures is cut into.
@@ -2502,15 +2506,15 @@ export function createEngine(deps: EngineDeps) {
       // Kept bytes: every take's sounds, never let go, and every take's video peak (several takes run side by side).
       let keptAll = 0
       for (const [k, p] of prompts.entries()) {
-        keptAll += soundKeptBytes(p, families, all[k]!)
+        keptAll += soundKeptBytes(p, families, all[k]!, deps.hosted())
         if (hasVideoEffect(p, families)) {
           const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
-          const peak = keptPeak(p, families, shapes, { release: prompts.length === 1 })
+          const peak = keptPeak(p, families, shapes, { release: prompts.length === 1, caps: deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local })
           keptAll += peak ? peak.bytes : Number.POSITIVE_INFINITY
         }
       }
       for (const [k, p] of prompts.entries()) {
-        const bad = soundEffectStartProblems(p, families, { hosted: deps.hosted(), sounds: all[k]!, keptOther: keptAll - soundKeptBytes(p, families, all[k]!) })
+        const bad = soundEffectStartProblems(p, families, { hosted: deps.hosted(), sounds: all[k]!, keptOther: keptAll - soundKeptBytes(p, families, all[k]!, deps.hosted()) })
         if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
       }
     }

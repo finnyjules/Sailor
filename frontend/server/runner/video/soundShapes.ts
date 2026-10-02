@@ -16,8 +16,13 @@
  *   - a Gate hands on what reached it;
  *   - a sound effect: its own shape, from its widgets and its inputs';
  *   - Vocal separator (R7.8, its family on): two stereo 44.1 kHz stems, its
- *     sound's length resampled plus a second.
- * Any other source (a music or speech node) can't be known before the run: a
+ *     sound's length resampled plus a second;
+ *   - R11.8 (ruling (k)): Generate music, Generate speech (and their twins)
+ *     and Clone a singing voice, from their own settings
+ *     (#shared/runner/sourceBounds): `upTo` shapes, a bound for the holds and
+ *     the kept room only (their rate and channels are the service's); a paid
+ *     video model's sound (Get video components of it) at R5's sound cap.
+ * A sound whose source is none of these can't be known before the run: a
  * sound effect reading it leaves the workflow to the engine.
  *
  * Every length is a TRUE upper bound (`exact: false` where it is one). Each
@@ -40,7 +45,15 @@ import type { OutputFile } from '../types'
 import { probeMedia, type MediaProbe } from '../../media/probe'
 import type { SoundReadIO } from '../../media/values'
 import { mediaEffectParams, type SoundShape } from './table'
-import { topoOrder, videoFileOf } from './shapes'
+import { isMusicClass, isSpeechClass, withStaticSpeechText } from '#shared/runner/audioGen'
+import {
+  CLONE_CHANNELS_BOUND, CLONE_RATE_BOUND, MUSIC_RATE, SPEECH_CHANNELS, SPEECH_RATE,
+  cloneSecondsBound, madeSoundShape, musicChannelsBound, musicSecondsBound, speechSecondsBound,
+} from '#shared/runner/sourceBounds'
+import { paidVideoLink, topoOrder, videoFileOf } from './shapes'
+
+/** R11.8: the lowest sound rate a paid video's sound is taken at, for its length bound (Whisper's own 16 kHz is above it). */
+export const PAID_VIDEO_SOUND_RATE_FLOOR = 8000
 import { soundCore } from './core/sound'
 
 const { pyRound } = soundCore()
@@ -83,6 +96,36 @@ export function trimSamples(w: Record<string, unknown>, rate: number, N: number)
 /** An input sound's shape, or undefined. */
 type At = (v: unknown) => SoundShape | undefined
 
+/** R11.8: the flags a sound made from these keeps (a header source's slack, a paid maker's `upTo`). */
+export function soundFlagsOf(...xs: readonly (SoundShape | undefined)[]): { header?: true; upTo?: true } {
+  return {
+    ...(xs.some(x => x?.header) ? { header: true as const } : {}),
+    ...(xs.some(x => x?.upTo) ? { upTo: true as const } : {}),
+  }
+}
+
+/** The class of Clone a singing voice (R3.10, family `sound-in`). */
+const CLONE_CLASS = 'CloneSingingVoiceNode'
+
+/**
+ * R11.8 (ruling (k)): the sound a paid maker hands on (slot 0), bounded from
+ * its own settings (#shared/runner/sourceBounds), or undefined for any other
+ * class. `prompt` has a speech node's text known before the run in place
+ * (withStaticSpeechText); a text made in the run is bounded at the longest.
+ */
+export function madeSoundShapeOf(classType: string, inputs: Record<string, unknown>, at: At): SoundShape | undefined {
+  if (isMusicClass(classType)) return madeSoundShape(musicSecondsBound(inputs.duration), MUSIC_RATE, musicChannelsBound(inputs.model_version))
+  if (isSpeechClass(classType)) {
+    const text = inputs.text
+    return madeSoundShape(speechSecondsBound(typeof text === 'string' ? text : isLink(text) ? null : text === undefined || text === null ? '' : String(text), inputs.speed), SPEECH_RATE, SPEECH_CHANNELS)
+  }
+  if (classType === CLONE_CLASS) {
+    const src = at(inputs.audio)
+    return madeSoundShape(cloneSecondsBound(src && src.rate > 0 ? src.samples / src.rate : null), CLONE_RATE_BOUND, CLONE_CHANNELS_BOUND)
+  }
+  return undefined
+}
+
 /**
  * A sound effect's output shapes by slot, from its widgets and its inputs'
  * (undefined where an input isn't known). Silence cut's slot 1 (its sound)
@@ -112,21 +155,21 @@ export function soundEffectShapes(classType: string, inputs: Record<string, unkn
       const b = one('audio_right')
       if (!a || !b) return undefined
       const r = rateOf(a, b)
-      return { 0: { rate: r, channels: 2, samples: Math.min(len(a, r), len(b, r)), exact: false } }
+      return { 0: { rate: r, channels: 2, samples: Math.min(len(a, r), len(b, r)), exact: false, ...soundFlagsOf(a, b) } }
     }
     case 'AudioConcat': {
       const a = one('audio1')
       const b = one('audio2')
       if (!a || !b) return undefined
       const r = rateOf(a, b)
-      return { 0: { rate: r, channels: Math.max(2, a.channels, b.channels), samples: len(a, r) + len(b, r), exact: false } }
+      return { 0: { rate: r, channels: Math.max(2, a.channels, b.channels), samples: len(a, r) + len(b, r), exact: false, ...soundFlagsOf(a, b) } }
     }
     case 'AudioMerge': {
       const a = one('audio1')
       const b = one('audio2')
       if (!a || !b) return undefined
       const r = rateOf(a, b)
-      return { 0: { rate: r, channels: Math.max(a.channels, b.channels), samples: len(a, r), exact: a.exact && a.rate === r } }
+      return { 0: { rate: r, channels: Math.max(a.channels, b.channels), samples: len(a, r), exact: a.exact && a.rate === r, ...soundFlagsOf(a, b) } }
     }
     case 'EmptyAudio': {
       const rate = typeof w.sample_rate === 'number' ? w.sample_rate : 44100
@@ -161,6 +204,8 @@ export async function soundShapes(
 ): Promise<Map<string, SoundShape>> {
   const shapes = new Map<string, SoundShape>()
   const at: At = v => (isLink(v) ? shapes.get(key(v)) : undefined)
+  // R11.8: a speech node's text known before the run (a Text card wired in) is read as typed.
+  let known: ApiPrompt | null = null
   for (const id of topoOrder(prompt)) {
     const n = prompt[id]!
     const inputs = n.inputs ?? {}
@@ -184,13 +229,17 @@ export async function soundShapes(
         // its sound once resampled, plus a second (the service resamples and encodes it itself).
         const src = localModelOn(n.class_type, families) ? at(inputs.audio) : undefined
         if (src) {
-          const stem = { rate: VOCALS_RATE, channels: 2, samples: resampledBound(src.samples, src.rate, VOCALS_RATE) + VOCALS_RATE, exact: false }
+          const stem = { rate: VOCALS_RATE, channels: 2, samples: resampledBound(src.samples, src.rate, VOCALS_RATE) + VOCALS_RATE, exact: false, ...soundFlagsOf(src) }
           set(0, stem)
           set(1, stem)
         }
         break
       }
       default: {
+        // R11.8: a paid maker's sound, from its settings.
+        if (isSpeechClass(n.class_type) && isLink(inputs.text)) known ??= withStaticSpeechText(prompt)
+        const made = madeSoundShapeOf(n.class_type, isSpeechClass(n.class_type) ? (known?.[id]?.inputs ?? inputs) : inputs, at)
+        if (made) { set(0, made); break }
         if (!takenSoundEffect(n.class_type, families)) break
         for (const [slot, s] of Object.entries(soundEffectShapes(n.class_type, inputs, at) ?? {})) set(Number(slot), s)
       }
@@ -218,7 +267,7 @@ function streamBound(p: MediaProbe, which: 'first' | 'last'): SoundShape | null 
     : p.containerDuration !== null ? p.containerDuration / 1e6
       : t.measuredSeconds
   if (secs === null || !Number.isFinite(secs) || secs < 0 || !(t.rate > 0) || !(t.channels > 0)) return null
-  return { rate: t.rate, channels: t.channels, samples: Math.ceil(secs * t.rate) + t.rate, exact: false }
+  return { rate: t.rate, channels: t.channels, samples: Math.ceil(secs * t.rate) + t.rate, exact: false, header: true }
 }
 
 /**
@@ -247,6 +296,13 @@ export function soundSourceShapeOf(o: { prompt: ApiPrompt } & SoundReadIO): (nod
         return file ? await probe(file, 'first', 'sound', classType !== 'Audio' && soundReadOnlyByPieces(o.prompt, nodeId)) : null
       }
       if (classType === 'GetVideoComponents') {
+        // R11.8 (ruling (k)): a paid video model's sound can't be sized before it runs: held at R5's sound cap where
+        // it runs (keepSound keeps no more), at the lowest rate taken (8 kHz, one channel), so its seconds are a
+        // bound too; `upTo`, never a fact a refusal rests on.
+        if (isLink(inputs.video) && paidVideoLink(o.prompt, inputs.video)) {
+          const caps = o.hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+          return { rate: PAID_VIDEO_SOUND_RATE_FLOOR, channels: 1, samples: caps.soundSamples, exact: false, upTo: true }
+        }
         const file = isLink(inputs.video) ? videoFileOf(o.prompt, inputs.video) : null
         return file ? await probe(file, 'last', 'video') : null
       }
@@ -259,8 +315,13 @@ export function soundSourceShapeOf(o: { prompt: ApiPrompt } & SoundReadIO): (nod
 type Problem = { message: string; nodeId: string; classType: string; engine: true }
 type Refusal = { message: string; nodeId: string; classType: string }
 
-/** The bytes a kept float WAV of this shape takes, at most. */
-export const keptSoundBound = (s: SoundShape) => s.channels * s.samples * 4 + 4096
+/**
+ * The bytes a kept float WAV of this shape takes, at most. R11.8: a sound is
+ * only kept within R5's sound cap where it runs (keepSound refuses past it),
+ * so with `soundSamples` an `upTo` shape (a paid maker's bound) is counted at
+ * that cap at most.
+ */
+export const keptSoundBound = (s: SoundShape, soundSamples = Number.POSITIVE_INFINITY) => Math.min(s.channels * s.samples, soundSamples) * 4 + 4096
 
 /** The input sounds a taken sound effect reads (by its schema), in order; undefined entries where not known. */
 function soundInputs(prompt: ApiPrompt, id: string, shapes: ReadonlyMap<string, SoundShape>): (SoundShape | undefined)[] {
@@ -290,15 +351,18 @@ export function soundEffectStartProblems(prompt: ApiPrompt, families: ReadonlySe
     const outs = [0, 1].flatMap(slot => (o.sounds.has(`${id}:${slot}`) ? [o.sounds.get(`${id}:${slot}`)!] : []))
     if (!outs.length) return problem(id, MEDIA_EFFECT_WORDS.soundUnknown)
     const samples = (s: SoundShape) => s.channels * s.samples
+    // R11.8 (ruling (k)): a sound from a paid maker (`upTo`) is only a bound: past these limits it is taken all the
+    // same, and the node's turn judges the sound itself (planSoundEffect: the held samples; keepSound: R5's cap).
+    const upTo = (ins as SoundShape[]).some(s => s.upTo)
     // Held at once: every input, each resampled to the output's rate (a copy while it is made), and every output.
     const rate = outs[0]!.rate
     let held = 0
     for (const s of ins as SoundShape[]) held += samples(s) + (s.rate !== rate ? s.channels * resampledBound(s.samples, s.rate, rate) : 0)
     for (const s of outs) held += samples(s)
-    if (held > caps.effectSoundSamples) return problem(id, MEDIA_EFFECT_WORDS.soundTooLong)
+    if (held > caps.effectSoundSamples && !upTo) return problem(id, MEDIA_EFFECT_WORDS.soundTooLong)
     for (const s of outs) {
-      if (samples(s) > caps.soundSamples) return problem(id, MEDIA_WORDS.tooLong)
-      kept += keptSoundBound(s)
+      if (samples(s) > caps.soundSamples && !upTo) return problem(id, MEDIA_WORDS.tooLong)
+      kept += keptSoundBound(s, caps.soundSamples)
     }
   }
   if (first && kept > caps.keptBytesPerRun) return problem(first, MEDIA_EFFECT_WORDS.soundKeptTooMuch)
@@ -306,13 +370,14 @@ export function soundEffectStartProblems(prompt: ApiPrompt, families: ReadonlySe
 }
 
 /** The kept bytes the sound effects of a workflow keep at most (every output, never let go). */
-export function soundKeptBytes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, sounds: ReadonlyMap<string, SoundShape>): number {
+export function soundKeptBytes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, sounds: ReadonlyMap<string, SoundShape>, hosted?: boolean): number {
+  const cap = hosted === undefined ? Number.POSITIVE_INFINITY : (hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).soundSamples
   let kept = 0
   for (const id of Object.keys(prompt)) {
     if (!takenSoundEffect(prompt[id]!.class_type, families)) continue
     for (const slot of [0, 1]) {
       const s = sounds.get(`${id}:${slot}`)
-      if (s) kept += keptSoundBound(s)
+      if (s) kept += keptSoundBound(s, cap)
     }
   }
   return kept
@@ -335,8 +400,17 @@ export function soundEffectRefusals(prompt: ApiPrompt, families: ReadonlySet<Run
   return null
 }
 
-/** Python's raises, in plain words, from the inputs' channels and rates (and, for Trim, its length when it is exact). */
-export function soundEffectRaises(classType: string, w: Record<string, unknown>, ins: readonly Pick<SoundShape, 'channels' | 'rate' | 'samples' | 'exact'>[]): string | null {
+/**
+ * Python's raises, in plain words, from the inputs' channels and rates (and,
+ * for Trim, its length when it is exact). R11.8: a paid maker's sound
+ * (`upTo`) has only bounds, so nothing is refused on it before the run but
+ * what holds whatever its rate (a trim of no time); its turn judges the sound.
+ */
+export function soundEffectRaises(classType: string, w: Record<string, unknown>, ins: readonly Pick<SoundShape, 'channels' | 'rate' | 'samples' | 'exact' | 'upTo'>[]): string | null {
+  if (ins.some(x => x.upTo)) {
+    const dur = typeof w.duration === 'number' ? w.duration : 60
+    return classType === 'TrimAudioDuration' && !(dur > 0) ? MEDIA_EFFECT_WORDS.trimEmpty : null
+  }
   switch (classType) {
     case 'TrimAudioDuration': {
       const x = ins[0]!

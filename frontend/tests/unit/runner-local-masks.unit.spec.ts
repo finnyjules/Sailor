@@ -883,11 +883,12 @@ describe('Subject mask on a clip: one call per frame, in Sailor', () => {
     expect(charged(k)).toEqual([[held + 1, creditsForUsd(3 * REM_USD) + 1]])
   })
 
-  it('over the frame cap: the workflow is left to the engine before anything is held (a stop-gap), in its own words', async () => {
+  it('over the frame cap on an uncounted bound: held at the cap (R11.8), never the engine; its own words past the cap', async () => {
     const p: ApiPrompt = { v: LVF, m: subjectNode({}, ['v', 0]), s: saveFrames(['m', 1]) }
     const shapes = (count: number) => async () => new Map([['v:0', { count, w: 64, h: 36, exact: false }]])
     expect(await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(300) })).toMatchObject({ counts: { m: 300 }, problem: null })
-    expect((await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(301) })).problem?.message).toBe(overCapWords(SUBJECT_MASK_CLASS, 300))
+    expect(await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(301) })).toMatchObject({ counts: { m: 300 }, problem: null })
+    expect(overCapWords(SUBJECT_MASK_CLASS, 300)).toBe(`${SUBJECT_MASK_WORDS.overCap} Use a clip of 300 frames or fewer.`)
     expect(overCapWords(SUBJECT_MASK_CLASS)).toBe(SUBJECT_MASK_WORDS.overCap)
   })
 })

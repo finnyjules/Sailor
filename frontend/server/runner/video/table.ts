@@ -55,11 +55,21 @@ import { CAPTION_LINE_SPACING, CAPTION_RENDERS_KEPT, bundledFontFile, captionFee
  * A frame batch's count and size; `exact: false` when the count is an upper
  * bound. `counted`: the bound comes from the file's packets, counted (R6.1 fix
  * round 1). `soundBytes`: the sound a source keeps beside the batch (Get video
- * components' float WAV), bounded.
+ * components' float WAV), bounded. `capped` (R11.8, ruling (k)): a clip whose
+ * maker can't be sized before the run (a paid video model's), held at the
+ * place's caps: its count and frame size are each only the most the run lets
+ * through, never facts a refusal may rest on.
  */
-export interface FrameShape { count: number; w: number; h: number; exact: boolean; counted?: true; soundBytes?: number }
-/** A sound's rate, channels and length (R6.9's sound start pass); `exact: false` when the length is an upper bound. */
-export interface SoundShape { rate: number; channels: number; samples: number; exact: boolean }
+export interface FrameShape { count: number; w: number; h: number; exact: boolean; counted?: true; soundBytes?: number; capped?: true }
+/**
+ * A sound's rate, channels and length (R6.9's sound start pass); `exact:
+ * false` when the length is an upper bound. R11.8: `header`, the bound has a
+ * header source's second of slack in it (a loaded file, a video's sound);
+ * `upTo`, it comes from a paid maker's settings (#shared/runner/sourceBounds):
+ * its rate, channels and length are each at most these, never facts a
+ * refusal may rest on.
+ */
+export interface SoundShape { rate: number; channels: number; samples: number; exact: boolean; header?: true; upTo?: true }
 
 export interface VideoEffectSpec {
   family: MediaEffectFamily

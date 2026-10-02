@@ -20,7 +20,7 @@ import type { RunnerFamily } from './families'
 import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 import { isLink } from './graph'
-import { pyFloatOf, pyIntOf } from './pyText'
+import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 
 export type EffectFamily = EffectSchemaFamily
 
@@ -57,6 +57,34 @@ export function effectSchemaOf(classType: string): EffectSchema | undefined {
 export function effectFamilyOn(classType: string, families: ReadonlySet<RunnerFamily>): boolean {
   const family = Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, classType) ? EFFECT_FAMILY_OF[classType] : undefined
   return !!family && families.has(family) && families.has('cards')
+}
+
+// ── Widgets as execute() receives them ───────────────────────────────────────
+
+/** A widget as ComfyUI's validate_inputs converts it (int(), float(), str(), bool()); eligibility has checked it converts. */
+function widgetValue(type: string, v: unknown): unknown {
+  if (v === undefined) return undefined
+  switch (type) {
+    case 'FLOAT': return typeof v === 'number' ? v : typeof v === 'boolean' ? Number(v) : typeof v === 'string' ? pyFloatOf(v) : v
+    case 'INT': return typeof v === 'number' ? Math.trunc(v) : typeof v === 'boolean' ? Number(v) : typeof v === 'string' ? pyIntOf(v) : v
+    case 'BOOLEAN': return pyTruthy(v)
+    case 'STRING':
+    case 'COLOR':
+      if (typeof v === 'string') return v
+      if (typeof v === 'boolean') return v ? 'True' : 'False'
+      return v === null ? 'None' : String(v)
+    default: return v
+  }
+}
+
+/** The node's widgets as its execute() receives them. */
+export function effectParams(schema: EffectSchema, inputs: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [name, w] of Object.entries(schema.widgets)) {
+    const v = widgetValue(w.type, inputs[name])
+    if (v !== undefined) out[name] = v
+  }
+  return out
 }
 
 // ── Limits (rule 7) ──────────────────────────────────────────────────────────

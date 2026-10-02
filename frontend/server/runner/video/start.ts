@@ -55,6 +55,18 @@ export function keptBatchBound(s: FrameShape): number {
   return Math.ceil(s.count * (s.w * s.h * 3 * KEPT_BATCH_RATIO + KEPT_BATCH_FRAME_BYTES)) + KEPT_BATCH_FILE_BYTES
 }
 
+/**
+ * R11.8 (ruling (k)): keptBatchBound for a batch held at the caps, where it is
+ * kept: every batch is kept within R5's batch caps (values.ts keepFrames
+ * refuses past them as it writes), so its frames are at most `batchFrames`
+ * and its pixels at most `batchPixels`, whatever its bound says.
+ */
+export function keptBatchBoundWithin(s: FrameShape, caps: { batchFrames: number; batchPixels: number }): number {
+  const frames = Math.min(s.count, caps.batchFrames)
+  const pixels = Math.min(s.count * s.w * s.h, caps.batchPixels)
+  return Math.ceil(frames * KEPT_BATCH_FRAME_BYTES + pixels * 3 * KEPT_BATCH_RATIO) + KEPT_BATCH_FILE_BYTES
+}
+
 /** Whether the workflow has a video effect the runner takes (the start pass has nothing to check otherwise). */
 export function hasVideoEffect(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): boolean {
   return Object.values(prompt).some(n => takenVideoEffect(n.class_type, families))
@@ -88,14 +100,16 @@ function ancestorsOf(prompt: ApiPrompt, order: readonly string[]): Map<string, S
  * Save video's re-encode are never counted as let go. Null when a kept
  * output can't be bounded.
  */
-export function keptPeak(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes: ReadonlyMap<string, FrameShape>, o: { release: boolean }): { bytes: number; at: string | null } | null {
+export function keptPeak(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, shapes: ReadonlyMap<string, FrameShape>, o: { release: boolean; caps?: { batchFrames: number; batchPixels: number } }): { bytes: number; at: string | null } | null {
   const { order, batches } = batchesOf(prompt, families, shapes)
   const anc = ancestorsOf(prompt, order)
   const isAnc = (a: string, b: string) => anc.get(b)?.has(a) ?? false
   const comparable = (a: string, b: string) => a === b || isAnc(a, b) || isAnc(b, a)
   const size = new Map<string, number>()
   // A maker's batch is in its own slot (R7.5: Subject mask's cutout is slot 1).
-  for (const b of batches.keys()) size.set(b, keptBatchBound(shapes.get(`${b}:${batchSlotOf(prompt[b]!.class_type)}`)!))
+  // R11.8: with the place's caps, each batch at most what keepFrames lets through (a clip held at the caps).
+  const bound = (s: FrameShape) => (o.caps ? keptBatchBoundWithin(s, o.caps) : keptBatchBound(s))
+  for (const b of batches.keys()) size.set(b, bound(shapes.get(`${b}:${batchSlotOf(prompt[b]!.class_type)}`)!))
   // Kept outputs never let go: Get video components' sound, a Save video's re-encoded frames.
   const extra = new Map<string, number>()
   for (const id of order) {
@@ -156,7 +170,7 @@ function figuresOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, caps:
     )
   }
   if (Number.isFinite(caps.keptBytesPerRun)) {
-    const kept = keptPeak(prompt, families, shapes, { release: o.release })
+    const kept = keptPeak(prompt, families, shapes, { release: o.release, caps })
     const first = Object.keys(prompt).find(id => takenVideoEffect(prompt[id]!.class_type, families))!
     if (!kept) return { unknown: problem(first, MEDIA_EFFECT_WORDS.unknownLength), figures }
     figures.push({ nodeId: kept.at ?? first, message: MEDIA_EFFECT_WORDS.keptTooMuch, value: kept.bytes + o.keptOthers, limit: caps.keptBytesPerRun })
