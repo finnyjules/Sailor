@@ -11,7 +11,8 @@ import { ownedOutputKeys, ownedPromptIds, ownsPrompt, outputKey, pendingRuns } f
 import { resolveWorkerTarget } from './workerRoute'
 import { settleGraphSuccess } from './meterGraphRun'
 import { assertCanonicalMultipart, parseUploadForm } from './multipart'
-import { canonicalUploadKey, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
+import { canonicalUploadKey, engineDirForType, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
+import { bakeFolderAbandoned } from '../runner/shaderBakeFiles'
 import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
@@ -430,6 +431,11 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
     const name = (await form.file('image'))?.filename || ''
     if (!/^shader_bake_[0-9a-f]{32}\.png$/.test(name)) {
       throw createError({ statusCode: 400, message: 'Only a shader’s own frames can be uploaded there' })
+    }
+    // Fix round 3 (B2): a bake given up (Stop, a failure) takes no more frames.
+    const inputRoot = engineDirForType('input')
+    if (inputRoot && await bakeFolderAbandoned(inputRoot, bakeTarget)) {
+      throw createError({ statusCode: 409, message: 'This shader’s frames were given up. Run it again.' })
     }
   }
 

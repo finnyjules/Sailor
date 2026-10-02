@@ -21,7 +21,7 @@
  * start and on an abandon). Bakes named before fix round 1 (flat
  * `shader_bake_<hash>.png`) are still read; they are not swept.
  */
-import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
@@ -31,6 +31,13 @@ import { parseInputFileRef } from './inputs'
 export const SHADER_BAKE_ROOT = 'shader_bake'
 /** A bake folder as its frames' subfolder names it. */
 const BAKE_FOLDER = /^shader_bake\/([0-9a-f]{32})$/
+/**
+ * R11.9c fix round 3 (B2): where an abandoned bake leaves a tombstone (its hex), so an upload already in flight
+ * can't bring the folder back for good: the hosted upload gate refuses a write into it, and the sweep deletes a
+ * folder that comes back anyway (the upload passed the gate before the abandon).
+ */
+export const TOMBSTONES = '.abandoned'
+
 /** The marker a run's start writes into each bake folder it reads. */
 export const CLAIMED_MARKER = '.claimed'
 /** How old an unclaimed bake folder may get before the sweep deletes it (a bake in progress keeps touching it). */
@@ -158,7 +165,21 @@ export async function abandonShaderBake(inputRoot: string, folder: string, owns:
   if (names.includes(CLAIMED_MARKER)) return false
   for (const n of names) if (!(await owns(n))) return false
   await rm(p, { recursive: true, force: true })
+  // Fix round 3 (B2): a tombstone, for an upload still on its way.
+  try {
+    const tombs = join(resolve(inputRoot), SHADER_BAKE_ROOT, TOMBSTONES)
+    await mkdir(tombs, { recursive: true })
+    await writeFile(join(tombs, folder.slice(SHADER_BAKE_ROOT.length + 1)), '')
+  }
+  catch { /* the sweep still deletes the folder by age */ }
   return true
+}
+
+/** Fix round 3 (B2): whether this bake folder was abandoned (a tombstone stands for it). */
+export async function bakeFolderAbandoned(inputRoot: string, folder: string): Promise<boolean> {
+  const f = bakeFolderOf(folder)
+  if (!f) return false
+  return stat(join(resolve(inputRoot), SHADER_BAKE_ROOT, TOMBSTONES, f.slice(SHADER_BAKE_ROOT.length + 1))).then(() => true, () => false)
 }
 
 let lastSweep = 0
@@ -178,9 +199,28 @@ export async function sweepShaderBakes(inputRoot: string, now = Date.now()): Pro
   let dirs: string[]
   try { dirs = await readdir(base) }
   catch { return 0 }
+  // Fix round 3 (B2): tombstones older than the unclaimed window go; a folder an in-flight upload brought back after
+  // its abandon goes now.
+  const tombs = new Set<string>()
+  try {
+    for (const t of await readdir(join(base, TOMBSTONES))) {
+      const tp = join(base, TOMBSTONES, t)
+      try {
+        if (now - (await stat(tp)).mtimeMs >= SHADER_BAKE_UNCLAIMED_MS) await rm(tp, { force: true })
+        else tombs.add(t)
+      }
+      catch { /* gone meanwhile */ }
+    }
+  }
+  catch { /* none */ }
   for (const d of dirs) {
     if (!/^[0-9a-f]{32}$/.test(d)) continue
     const p = join(base, d)
+    if (tombs.has(d)) {
+      try { await rm(p, { recursive: true, force: true }); removed++ }
+      catch { /* gone */ }
+      continue
+    }
     try {
       // Fix round 2 (N4): a claimed folder is skipped from its marker alone (its frames aren't listed).
       if (await stat(join(p, CLAIMED_MARKER)).then(() => true, () => false)) continue

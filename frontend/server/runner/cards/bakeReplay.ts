@@ -38,6 +38,8 @@ import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
 import { IMAGE_LAYERS } from '#shared/runner/smartLayout'
 import { EFFECT_PICTURE_ANIMATED, EFFECT_START_SIZED_CLASSES, effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
+import { LOCAL_MODEL_PICTURE_INPUT, localModelOn } from '#shared/runner/localModels'
+import { FACE_SWAP_ONE_PICTURE } from '#shared/runner/faceSwap'
 
 export const TEXT_ON_PATH_UNLOADABLE = 'Text on path couldn’t load its picture. Change a setting to bake it again.'
 export const TEXT_MASK_UNLOADABLE = 'Text mask couldn’t load its picture. Change a setting to bake it again.'
@@ -137,11 +139,27 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       if (loader) out.push(loader)
     }
     // Save image and Preview image (R1.5) save every frame of the batch a
-    // loader makes of an animation; the runner hands on its first frame, so
-    // the loader's file must be one frame.
+    // loader makes of an animation. R11.9c fix round 3 (B1): LoadImage hands
+    // on that batch (a GIF's or WebP's frames), so only what it can't make a
+    // batch of (an APNG) is refused; an Image card hands its one file on, so
+    // its file must be one frame.
     if ((n.class_type === 'SaveImage' || n.class_type === 'PreviewImage') && isLink(inputs.images)) {
       const behind = loaderFileBehind(prompt, inputs.images)
-      if (behind) out.push({ ...behind, oneFrame: true })
+      if (behind) out.push({ ...behind, oneFrame: true, ...(behind.classType === 'LoadImage' ? { loaderBatch: true as const } : {}) })
+    }
+    // R11.9c fix round 3 (B1): readers that take a LoadImage's batch: the Shader effect (a frame each) and the
+    // local-model picture nodes (a call each, counted before the hold): an APNG it can't make a batch of is refused.
+    const batchInput = n.class_type === 'ShaderEffect' ? 'image'
+      : Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type) && localModelOn(n.class_type, families) ? LOCAL_MODEL_PICTURE_INPUT[n.class_type] : undefined
+    if (batchInput && isLink(inputs[batchInput])) {
+      const behind = loaderFileBehind(prompt, inputs[batchInput] as ApiLink)
+      if (behind?.classType === 'LoadImage') out.push({ ...behind, oneFrame: true, loaderBatch: true, animated: LOADER_APNG_WORDS })
+    }
+    // Face swap takes one picture (executors.ts FACE_SWAP_ONE_PICTURE): a LoadImage's animation, now a batch, is
+    // refused before the hold rather than at its turn.
+    if (n.class_type === 'FaceSwap' && isLink(inputs.target_frames)) {
+      const behind = loaderFileBehind(prompt, inputs.target_frames)
+      if (behind?.classType === 'LoadImage') out.push({ ...behind, oneFrame: true, animated: FACE_SWAP_ONE_PICTURE })
     }
   }
   return out
@@ -153,6 +171,11 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
  */
 export interface CardPictureFile {
   nodeId: string; classType: string; file: OutputFile; oneFrame?: true; animated?: string
+  /**
+   * R11.9c fix round 3: with `oneFrame`, refused only when the loader can't make a batch of it (an animated PNG,
+   * which sharp reads as one frame); an animated GIF or WebP is LoadImage's batch (cards/loadImage.ts).
+   */
+  loaderBatch?: true
   /** The effect reading this file that changes its size (R2.7): its output is checked against the caps from the file's header (effects/plan.ts effectOutRefusal). */
   resized?: { nodeId: string; classType: string; inputs: Record<string, unknown> }
 }
@@ -420,4 +443,12 @@ export function planTextMask(ctx: PlanContext): NodePlan {
       return { values: { 0: filesValue(await io.keep(new Uint8Array(png), 'png')), 1: await maskValue(io, mask, float) }, ui: null }
     },
   }
+}
+
+/** R11.9c fix round 3: an animated PNG on a LoadImage, read by a node that takes its frames. */
+export const LOADER_APNG_WORDS = 'This animated PNG can’t be read frame by frame here. Save it as a GIF or WebP and load it again.'
+
+/** Whether a start check's `oneFrame` file is refused: animated, and (with `loaderBatch`) not a batch LoadImage makes. */
+export function oneFrameRefused(c: Pick<CardPictureFile, 'oneFrame' | 'loaderBatch'>, frames: boolean, pages: number | undefined): boolean {
+  return !!c.oneFrame && frames && !(c.loaderBatch && (pages ?? 1) > 1)
 }

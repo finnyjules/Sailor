@@ -59,7 +59,7 @@ import {
 } from '#shared/runner/localModels'
 import { tileCount, tileCountBound, tooThinToTile } from '#shared/runner/upscaleTiles'
 import { linkPictureShapes, linkPictureSize, pictureSize, type Shape } from '../utils/graphInputPixels'
-import { pictureMeta } from './pictures/pythonView'
+import { pictureFrameCount, pictureHasFrames, pictureMeta } from './pictures/pythonView'
 import { hasAlphaAsPil } from './pictures/mask'
 import type { FrameShape } from './video/table'
 import { keptBatchBoundWithin, keptPeak } from './video/start'
@@ -69,6 +69,28 @@ import { parseInputFileRef } from './inputs'
 import type { OutputFile } from './types'
 import type { SoundShape } from './video/table'
 import { madeSoundShapeOf } from './video/soundShapes'
+
+/** R11.9c fix round 3: LoadImage node id → the frames it hands on (an animated GIF's or WebP's pages), read before the hold. */
+export type LoaderFrames = ReadonlyMap<string, number>
+
+/** Each LoadImage's frame count from its file's header (pages; 1 for a still or what can't be read). */
+export async function loaderFramesOf(prompt: ApiPrompt, read?: (f: OutputFile) => Promise<Uint8Array>): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (!read) return out
+  for (const [id, n] of Object.entries(prompt)) {
+    if (n.class_type !== 'LoadImage') continue
+    const f = parseInputFileRef(n.inputs?.image)
+    if (!f) continue
+    try {
+      // The count the Shader effect's check uses too (pythonView.ts pictureFrameCount): an upper bound of the frames kept.
+      const bytes = await read(f)
+      const meta = await pictureMeta(bytes)
+      out.set(id, pictureHasFrames(meta, bytes) ? pictureFrameCount(meta, bytes) : 1)
+    }
+    catch { /* unreadable: its turn (and the start's card check) refuse it */ }
+  }
+  return out
+}
 
 /** Sources that hand on one picture (a provider's first answer, a loader's first frame, a render). */
 const ONE_PICTURE: ReadonlySet<string> = new Set(['LoadImage', 'Compositor', 'Scene3DStudio', 'TextOnPath', 'TextMask', 'ShaderEffect'])
@@ -83,39 +105,41 @@ function intOf(v: unknown): number | null {
 }
 
 /** The most masks a mask wire can bring, or null when that can't be known. */
-function maskBound(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<RunnerFamily>, depth: number): number | null {
+function maskBound(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<RunnerFamily>, depth: number, lf?: LoaderFrames): number | null {
   const from = prompt[link[0]]
   if (!from || depth > 64) return null
   const inputs = from.inputs ?? {}
-  if (from.class_type === GATE_CLASS) return isLink(inputs.data_in) ? maskBound(prompt, inputs.data_in, families, depth + 1) : null
+  if (from.class_type === GATE_CLASS) return isLink(inputs.data_in) ? maskBound(prompt, inputs.data_in, families, depth + 1, lf) : null
+  // R11.9c fix round 3 (B1): LoadImage's masks, one a frame of its animation.
+  if (from.class_type === 'LoadImage') return lf?.get(link[0]) ?? 1
   if (ONE_MASK.has(from.class_type)) return 1
   // R7.4: Mask by text and Mask extractor hand on one mask ([1, H, W]), while their family is on.
   if (SAM_MASK_CLASSES.has(from.class_type) && link[1] === 0 && localModelOn(from.class_type, families)) return 1
-  if (from.class_type === 'ImageToMask') return isLink(inputs.image) ? pictureBound(prompt, inputs.image, families, depth + 1) : null
+  if (from.class_type === 'ImageToMask') return isLink(inputs.image) ? pictureBound(prompt, inputs.image, families, depth + 1, lf) : null
   // A picture class's mask (Background remove's slot 1, R7.5 Subject mask's slot 0): one per picture.
   if (localModelOn(from.class_type, families) && Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, from.class_type) && link[1] === localModelMaskSlot(from.class_type)) {
     const name = LOCAL_MODEL_PICTURE_INPUT[from.class_type]!
-    return isLink(inputs[name]) ? pictureBound(prompt, inputs[name], families, depth + 1) : null
+    return isLink(inputs[name]) ? pictureBound(prompt, inputs[name], families, depth + 1, lf) : null
   }
-  if (effectSchemaOf(from.class_type) && effectFamilyOn(from.class_type, families)) return effectBound(prompt, from.class_type, inputs, families, depth)
+  if (effectSchemaOf(from.class_type) && effectFamilyOn(from.class_type, families)) return effectBound(prompt, from.class_type, inputs, families, depth, lf)
   return null
 }
 
 /** An effect's batch: the most any of its wired pictures and masks brings (one with none wired). */
-function effectBound(prompt: ApiPrompt, cls: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>, depth: number): number | null {
+function effectBound(prompt: ApiPrompt, cls: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>, depth: number, lf?: LoaderFrames): number | null {
   const schema = effectSchemaOf(cls)!
   let most = 1
   for (const i of schema.images) {
     const v = inputs[i.name]
     if (!isLink(v)) continue
-    const n = pictureBound(prompt, v, families, depth + 1)
+    const n = pictureBound(prompt, v, families, depth + 1, lf)
     if (n === null) return null
     most = Math.max(most, n)
   }
   for (const m of schema.masks) {
     const v = inputs[m.name]
     if (!isLink(v)) continue
-    const n = maskBound(prompt, v, families, depth + 1)
+    const n = maskBound(prompt, v, families, depth + 1, lf)
     if (n === null) return null
     most = Math.max(most, n)
   }
@@ -126,27 +150,29 @@ function effectBound(prompt: ApiPrompt, cls: string, inputs: Record<string, unkn
  * The most pictures a picture wire can bring (an upper bound), or null when
  * that can't be known before the run.
  */
-export function pictureBound(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<RunnerFamily>, depth = 0): number | null {
+export function pictureBound(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<RunnerFamily>, depth = 0, lf?: LoaderFrames): number | null {
   const from = prompt[link[0]]
   if (!from || depth > 64) return null
   const inputs = from.inputs ?? {}
   const cls = from.class_type
-  if (cls === GATE_CLASS) return link[1] === 0 && isLink(inputs.data_in) ? pictureBound(prompt, inputs.data_in, families, depth + 1) : null
-  if (cls === 'Image') return isLink(inputs.images) ? pictureBound(prompt, inputs.images, families, depth + 1) : link[1] === 0 ? 1 : null
+  if (cls === GATE_CLASS) return link[1] === 0 && isLink(inputs.data_in) ? pictureBound(prompt, inputs.data_in, families, depth + 1, lf) : null
+  if (cls === 'Image') return isLink(inputs.images) ? pictureBound(prompt, inputs.images, families, depth + 1, lf) : link[1] === 0 ? 1 : null
   if (cls === 'EmptyImage') {
     const n = intOf(inputs.batch_size ?? 1)
     return n !== null && n >= 1 ? n : null
   }
   // R11.7: Slow motion (AI) hands a still picture on as it came (more than one goes to the engine before the run).
-  if (cls === FRAME_INTERP_AI_CLASS) return localModelOn(cls, families) && link[1] === 0 && isLink(inputs.frames) ? pictureBound(prompt, inputs.frames, families, depth + 1) : null
+  if (cls === FRAME_INTERP_AI_CLASS) return localModelOn(cls, families) && link[1] === 0 && isLink(inputs.frames) ? pictureBound(prompt, inputs.frames, families, depth + 1, lf) : null
   if (localModelOn(cls, families) && Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, cls)) {
     const name = LOCAL_MODEL_PICTURE_INPUT[cls]!
     // Its picture's slot (R7.5: Subject mask's cutout is slot 1).
-    return link[1] === localModelPictureSlot(cls) && isLink(inputs[name]) ? pictureBound(prompt, inputs[name], families, depth + 1) : null
+    return link[1] === localModelPictureSlot(cls) && isLink(inputs[name]) ? pictureBound(prompt, inputs[name], families, depth + 1, lf) : null
   }
   if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, cls)) {
-    return EFFECT_PICTURE_OUTPUTS[cls]!.includes(link[1]) && effectFamilyOn(cls, families) ? effectBound(prompt, cls, inputs, families, depth) : null
+    return EFFECT_PICTURE_OUTPUTS[cls]!.includes(link[1]) && effectFamilyOn(cls, families) ? effectBound(prompt, cls, inputs, families, depth, lf) : null
   }
+  // R11.9c fix round 3 (B1): LoadImage hands on every frame of an animated GIF or WebP (cards/loadImage.ts).
+  if (cls === 'LoadImage') return link[1] === 0 ? (lf?.get(link[0]) ?? 1) : null
   if (ONE_PICTURE.has(cls)) return 1
   if (Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, cls)) {
     const slots = Object.prototype.hasOwnProperty.call(PAID_PICTURE_SLOTS, cls) ? PAID_PICTURE_SLOTS[cls]! : [0]
@@ -365,6 +391,8 @@ export async function localModelStartProblems(
   let shapes: ReadonlyMap<string, FrameShape> | null = null
   let masks = 0
   const keptByNode: Record<string, number> = {}
+  // R11.9c fix round 3 (B1): an animated LoadImage's frames, a call each.
+  const lf = await loaderFramesOf(prompt, o.read)
   for (const [nodeId, n] of Object.entries(prompt)) {
     // R7.6: Slow motion (AI), its clip's count and size (one call for the whole clip).
     if (n.class_type === FRAME_INTERP_AI_CLASS && localModelOn(n.class_type, families)) {
@@ -373,7 +401,7 @@ export async function localModelStartProblems(
       // R11.7: a still picture is handed on as Python does (one frame, no call); a batch of pictures, which
       // Python would slow down, goes to the engine (a stop-gap R11.9 closes with plain words).
       if (outputKind(prompt, link, kinds) !== 'frames') {
-        const pictures = pictureBound(prompt, link, families)
+        const pictures = pictureBound(prompt, link, families, 0, lf)
         // Fix round 1 (L3): a count that can't be known goes to the engine as before (a batch fails at the turn after
         // earlier paid nodes otherwise); R11.9's plain words close it.
         if (pictures !== 1) return { counts, keptBytes: 0, problem: { message: pictures === null ? LOCAL_MODEL_WORDS.unknownCount : SLOW_MOTION_AI_WORDS.pictureBatch, nodeId, classType: n.class_type } }
@@ -428,7 +456,7 @@ export async function localModelStartProblems(
       if (!s.capped && (out.w !== s.w || out.h !== s.h)) resized = out
     }
     else {
-      count = pictureBound(prompt, link, families)
+      count = pictureBound(prompt, link, families, 0, lf)
       if (maxPixels) {
         const size = await linkPictureSize(prompt, link, readerOf(o.read))
         pixels = size?.px ?? null

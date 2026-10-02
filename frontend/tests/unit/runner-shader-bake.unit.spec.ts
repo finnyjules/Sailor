@@ -23,8 +23,12 @@ import {
   SHADER_MAX_FRAMES, shaderMakesBatch, shaderOverCapWords, shaderPlanCount, shaderSourceOfNode, shaderSourcesOf, shaderTooManyFramesWords,
   SHADER_ENGINE_WORDS, SHADER_FRAMES_TOO_MUCH, shaderBakeProblem, shaderEngineReason, shaderFrameCount,
 } from '#shared/runner/shaderBakeKey'
-import { CLAIMED_MARKER, SHADER_BAKE_UNCLAIMED_MS, __resetShaderBakeSweepForTests, abandonShaderBake, bakeFolderOf, bakeFoldersOf, claimShaderBakes, releaseInactiveShaderBakes, releaseShaderBakes, sweepShaderBakes } from '~~/server/runner/shaderBakeFiles'
+import { CLAIMED_MARKER, SHADER_BAKE_UNCLAIMED_MS, __resetShaderBakeSweepForTests, abandonShaderBake, bakeFolderAbandoned, bakeFolderOf, bakeFoldersOf, claimShaderBakes, releaseInactiveShaderBakes, releaseShaderBakes, sweepShaderBakes } from '~~/server/runner/shaderBakeFiles'
 import { outputKind } from '#shared/runner/values'
+import { LOADER_FRAMES_TOO_MUCH, pictureBatchOverCaps } from '#shared/runner/media'
+import { FACE_SWAP_ONE_PICTURE } from '#shared/runner/faceSwap'
+import { LOADER_APNG_WORDS, cardPictureFiles } from '~~/server/runner/cards/bakeReplay'
+import { loaderFramesOf, pictureBound } from '~~/server/runner/localModelStart'
 import { outputKindsFor } from '#shared/runner/eligibility'
 import { frameShapes } from '~~/server/runner/video/shapes'
 import { hasVideoEffect, keptBatchBound, keptPeak } from '~~/server/runner/video/start'
@@ -969,5 +973,106 @@ describe('R11.9c: an animated Shader effect is baked frame by frame and kept as 
     const peak = keptPeak(p, SHADER, shapes, { release: true })!
     expect(peak.at).toBe('fx')
     expect(peak.bytes).toBeGreaterThanOrEqual(keptBatchBound({ count: 2, w: 256, h: 144, exact: true }))
+  })
+
+  // ── Fix round 3 (B1, B2) ──
+  const loadImageNode = (image: string) => ({ class_type: 'LoadImage', inputs: { image, upload: 'image' } })
+  /** A GIF of `n` frames of w × h, each a different colour (no see-through pixels). */
+  async function gifOf(n: number, w: number, h: number): Promise<Uint8Array> {
+    const px = new Uint8Array(w * h * n * 3)
+    for (let f = 0; f < n; f++) px.fill(40 + f * 50, f * w * h * 3, (f + 1) * w * h * 3)
+    const b = new Uint8Array(await sharp(px, { raw: { width: w, height: h * n, channels: 3, pageHeight: h } as never }).gif().toBuffer())
+    // sharp marks a transparent index in every frame's control block: cleared, as a GIF with no see-through parts.
+    for (let i = 0; i + 3 < b.length; i++) if (b[i] === 0x21 && b[i + 1] === 0xF9 && b[i + 2] === 4) b[i + 3] = b[i + 3]! & ~1
+    return b
+  }
+
+  it('fix round 3 (B1): LoadImage of a 4-frame GIF hands on 4 frames and 4 masks (Python\'s batch), and Save image saves all 4', async () => {
+    const k = await setUp()
+    put(k.root, 'anim4.gif', await gifOf(4, 10, 6))
+    const p: ApiPrompt = { l: loadImageNode('anim4.gif'), s: saveImage(['l', 0]) }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status, JSON.stringify(Object.values(run.takes[0]!.nodes).map(n => n.error))).toBe('done')
+    const v = run.takes[0]!.nodes.l!.values!
+    expect((v[0] as Extract<RunnerValue, { kind: 'files' }>).files).toHaveLength(4)
+    expect((v[1] as Extract<RunnerValue, { kind: 'mask' }>).files).toHaveLength(4)
+    const saved = savedFrames(k)
+    expect(saved).toHaveLength(4)
+    // Each frame its own colour, in order (sharp's decode of the GIF's palette, as PIL's), RGB at the frame's size.
+    for (const [i, f] of saved.entries()) {
+      const got = await rawOf(new Uint8Array(readFileSync(join(k.root, 'output', f))))
+      expect([got.w, got.h, got.c, got.px[0]], f).toEqual([10, 6, 3, 40 + i * 50])
+    }
+    // Python's 64 × 64 zero mask for each frame with no see-through pixels: the same mask, kept once.
+    expect(new Set((v[1] as Extract<RunnerValue, { kind: 'mask' }>).files.map(f => f.filename)).size).toBe(1)
+  })
+
+  it('fix round 3 (B1): the browser-check repro — LoadImage (4-frame GIF) → Shader wave → Save image — saves 4 frames', async () => {
+    const k = await setUp()
+    put(k.root, 'r119c_anim.gif', await gifOf(4, 16, 12))
+    const { files, rgb } = await bake(k, 4, 16, 12, 9)
+    const p: ApiPrompt = { l: loadImageNode('r119c_anim.gif'), fx: { class_type: 'ShaderEffect', inputs: { image: ['l', 0], ...shaderInputs({ effect: 'wave' }) } }, s: saveImage(['fx', 0]) }
+    baked(p, 'fx', files, ['r119c_anim.gif'])
+    expect(runnerTakesWorkflow(p, MEDIA_SHADER)).toBe(true)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status, run.takes[0]!.nodes.fx!.error ?? '').toBe('done')
+    const v = run.takes[0]!.nodes.fx!.values![0] as Extract<RunnerValue, { kind: 'frames' }>
+    expect([v.kind, v.count, v.w, v.h]).toEqual(['frames', 4, 16, 12])
+    const saved = savedFrames(k)
+    expect(saved).toHaveLength(4)
+    for (const [i, f] of saved.entries()) {
+      const got = await rawOf(new Uint8Array(readFileSync(join(k.root, 'output', f))))
+      expect(Buffer.compare(Buffer.from(got.px), Buffer.from(rgb[i]!)), f).toBe(0)
+    }
+  })
+
+  it('fix round 3 (B1): a LoadImage APNG it can\'t make a batch of, read by the Shader effect, is refused before the hold', async () => {
+    const VALUES = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as { rgb_turned: { name: string; file: string }[] }
+    const apng = new Uint8Array(Buffer.from(VALUES.rgb_turned.find(c => c.name === 'a two-frame animated PNG')!.file, 'base64'))
+    const k = await setUp()
+    put(k.root, 'anim.png', apng)
+    const p: ApiPrompt = { l: loadImageNode('anim.png'), fx: { class_type: 'ShaderEffect', inputs: { image: ['l', 0], ...shaderInputs() } }, s: saveImage(['fx', 0]) }
+    baked(p, 'fx', names(2), ['anim.png'])
+    await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toMatchObject({ statusCode: 400, message: LOADER_APNG_WORDS })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('fix round 3 (B1): its frames are counted for a reader that takes them, and checked against the batch caps before the hold', async () => {
+    const k = await setUp({ hosted: true })
+    put(k.root, 'anim4.gif', await gifOf(4, 10, 6))
+    const p: ApiPrompt = { l: loadImageNode('anim4.gif'), s: saveImage(['l', 0]) }
+    const lf = await loaderFramesOf(p, async f => new Uint8Array(readFileSync(join(k.root, f.type, f.subfolder, f.filename))))
+    expect(lf.get('l')).toBe(4)
+    expect(pictureBound(p, ['l', 0], MEDIA_SHADER, 0, lf)).toBe(4)
+    expect(pictureBound(p, ['l', 0], MEDIA_SHADER)).toBe(1)
+    // Past R5's batch caps (hosted 600 frames): plain words, nothing held.
+    expect(pictureBatchOverCaps(601, 2, 2, true)).toBe(true)
+    expect(pictureBatchOverCaps(600, 2, 2, true)).toBe(false)
+    put(k.root, 'long.gif', await gifOf(601, 2, 2))
+    const q: ApiPrompt = { l: loadImageNode('long.gif'), s: saveImage(['l', 0]) }
+    await expect(k.engine.startRun({ userId: k.userId, takes: [q], ...START })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(LOADER_FRAMES_TOO_MUCH) })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    // Face swap takes one picture: a LoadImage's animation is refused before the hold, in its words.
+    const fs: ApiPrompt = { l: loadImageNode('anim4.gif'), f: { class_type: 'FaceSwap', inputs: { source_face: ['l', 0], target_frames: ['l', 0] } } }
+    expect(cardPictureFiles(fs, new Set(['cards', 'face-swap']))).toContainEqual(expect.objectContaining({ classType: 'LoadImage', oneFrame: true, animated: FACE_SWAP_ONE_PICTURE }))
+  })
+
+  it('fix round 3 (B2): an abandoned bake leaves a tombstone; a folder an upload in flight brings back is swept', async () => {
+    const k = await setUp()
+    const input = join(k.root, 'input')
+    const folder = `shader_bake/${'67'.repeat(16)}`
+    put(k.root, `${folder}/${bakeNameOf(new Uint8Array([1]))}`, new Uint8Array([1]))
+    expect(await abandonShaderBake(input, folder, async () => true)).toBe(true)
+    expect(await bakeFolderAbandoned(input, folder)).toBe(true)
+    expect(await bakeFolderAbandoned(input, `shader_bake/${'89'.repeat(16)}`)).toBe(false)
+    // The upload that was already on its way lands after the abandon: the next sweep deletes the folder.
+    put(k.root, `${folder}/${bakeNameOf(new Uint8Array([2]))}`, new Uint8Array([2]))
+    __resetShaderBakeSweepForTests()
+    expect(await sweepShaderBakes(input)).toBe(1)
+    expect(existsSync(join(input, folder))).toBe(false)
   })
 })

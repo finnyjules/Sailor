@@ -220,3 +220,24 @@ export async function answerRgbaPng(bytes: Uint8Array): Promise<Uint8Array> {
   const png = await sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } }).png({ compressionLevel: 6 }).toBuffer()
   return new Uint8Array(png)
 }
+
+/**
+ * R11.9c (fix round 3: shared by the Shader effect's count and the LoadImage card): Python's LoadImage frame count of an animated picture: an APNG's acTL (plus its default image when that isn't a frame, as PIL counts it), else sharp's pages. */
+export function pictureFrameCount(meta: { pages?: number }, b: Uint8Array): number {
+  const chunks = pngChunksBeforePixels(b)
+  if (chunks?.includes('acTL')) {
+    const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
+    for (let o = 8; o + 12 <= b.length;) {
+      const len = view.getUint32(o)
+      const type = String.fromCharCode(b[o + 4]!, b[o + 5]!, b[o + 6]!, b[o + 7]!)
+      if (type === 'acTL' && len >= 8) {
+        const n = view.getUint32(o + 8)
+        // PIL: an IDAT with no fcTL before it is a default image, not a frame, and is counted as one more.
+        return n + (chunks.includes('fcTL') ? 0 : 1)
+      }
+      if (type === 'IDAT') break
+      o += 12 + len
+    }
+  }
+  return Math.max(1, meta.pages ?? 1)
+}

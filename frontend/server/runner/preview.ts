@@ -28,7 +28,7 @@ import { MeterRefusalError } from '../utils/requestMeter'
 import { planNode, type DeriveIO, type Derived } from './executors'
 import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
 import { pictureSourceOf } from './compositor/plan'
-import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
+import { cardPictureFiles, cardPictureRefusal, oneFrameRefused } from './cards/bakeReplay'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { sha256Hex } from './handoff'
@@ -279,7 +279,8 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
       stopped()
       const why = await pictureRefusal(bytes)
       if (why) throw refuse(cardPictureRefusal(c.classType, why), 400, { nodeId: c.nodeId, classType: c.classType })
-      if (c.oneFrame && pictureHasFrames(await pictureMeta(bytes), bytes)) throw refuse(c.animated ?? PICTURE_ANIMATED, 400, { nodeId: c.nodeId, classType: c.classType })
+      const frameMeta = c.oneFrame ? await pictureMeta(bytes) : null
+      if (frameMeta && oneFrameRefused(c, pictureHasFrames(frameMeta, bytes), frameMeta.pages)) throw refuse(c.animated ?? PICTURE_ANIMATED, 400, { nodeId: c.nodeId, classType: c.classType })
       if (c.resized) {
         const tooLarge = effectOutRefusal(c.resized, c.classType, await pictureMeta(bytes), hosted)
         if (tooLarge) throw refuse(tooLarge, 413, { nodeId: c.resized.nodeId, classType: c.resized.classType })

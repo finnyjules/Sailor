@@ -72,9 +72,10 @@ async function derived(prompt: ApiPrompt, nodeId: string, inputs: Record<string,
     hosted: false, signal: new AbortController().signal, nodeId, runWorkflow: null,
   }
   const made: Derived = await (plan as Extract<NodePlan, { kind: 'derive' }>).derive(io)
-  const bytesOf = (v: RunnerValue | undefined): Uint8Array => {
+  /** The value's first file (R11.9c fix round 3: `n` files, an animated LoadImage's batch). */
+  const bytesOf = (v: RunnerValue | undefined, n = 1): Uint8Array => {
     if (!v || (v.kind !== 'files' && v.kind !== 'mask')) throw new Error(`not a file value: ${JSON.stringify(v)}`)
-    expect(v.files).toHaveLength(1)
+    expect(v.files).toHaveLength(n)
     return store.get(keyOf(v.files[0]!))!
   }
   return { made, bytesOf }
@@ -202,8 +203,11 @@ describe('LoadImage as a card (nodes.py LoadImage.load_image)', () => {
       const { made, bytesOf } = await derived(prompt, 'l', { [c.image_name]: b64(c.file) })
       expect(made.values[0]!.kind).toBe('files')
       expect(made.values[1]!.kind).toBe('mask')
-      await expectImage(bytesOf(made.values[0]), c.image, c.name)
-      await expectMask(bytesOf(made.values[1]), c.mask, c.name)
+      // R11.9c fix round 3 (B1): a GIF's frames are LoadImage's batch, a picture and a mask each (the fixture holds
+      // the first, as a provider is sent it). An APNG is read as its first frame (sharp reads no APNG frames).
+      const n = c.name === 'a two-frame GIF' ? 2 : 1
+      await expectImage(bytesOf(made.values[0], n), c.image, c.name)
+      await expectMask(bytesOf(made.values[1], n), c.mask, c.name)
     })
   }
 

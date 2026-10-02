@@ -32,8 +32,8 @@ import { aspectSize, bakedFileHash, parseShaderBaked, shaderBakeProblem, shaderF
 import { keepFrames } from '../../media/values'
 import { FRAMES_NEED_RUN } from '../media/frameNodes'
 import { sha256Hex } from '../handoff'
-import { EFFECT_PICTURE_ANIMATED, effectPictureCap } from '#shared/runner/effects'
-import { pictureHasFrames, pictureMeta, pictureRefusalOf, pngChunksBeforePixels } from '../pictures/pythonView'
+import { effectPictureCap } from '#shared/runner/effects'
+import { pictureFrameCount, pictureHasFrames, pictureMeta, pictureRefusalOf, pngChunksBeforePixels } from '../pictures/pythonView'
 import { PICTURE_NOT_MADE, PICTURE_UNREAD } from '../effects/io'
 
 export const SHADER_BAKE_MISSING = 'The shader’s baked picture is missing. Run it again.'
@@ -68,25 +68,8 @@ export function bakedPngSize(b: Uint8Array): { w: number; h: number } | null {
   return { w, h }
 }
 
-/** R11.9c: Python's LoadImage frame count of an animated picture: an APNG's acTL (plus its default image when that isn't a frame, as PIL counts it), else sharp's pages. */
-export function pictureFrameCount(meta: { pages?: number }, b: Uint8Array): number {
-  const chunks = pngChunksBeforePixels(b)
-  if (chunks?.includes('acTL')) {
-    const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
-    for (let o = 8; o + 12 <= b.length;) {
-      const len = view.getUint32(o)
-      const type = String.fromCharCode(b[o + 4]!, b[o + 5]!, b[o + 6]!, b[o + 7]!)
-      if (type === 'acTL' && len >= 8) {
-        const n = view.getUint32(o + 8)
-        // PIL: an IDAT with no fcTL before it is a default image, not a frame, and is counted as one more.
-        return n + (chunks.includes('fcTL') ? 0 : 1)
-      }
-      if (type === 'IDAT') break
-      o += 12 + len
-    }
-  }
-  return Math.max(1, meta.pages ?? 1)
-}
+/** R11.9c: Python's LoadImage frame count of an animated picture (shared with the LoadImage card, fix round 3). */
+export { pictureFrameCount }
 
 /** What the node renders over, as the run has it: its size, and its frames (1 for a still or no picture). */
 async function sourceOf(ctx: PlanContext, io: DeriveIO, inputs: Record<string, unknown>): Promise<{ w: number; h: number; frames: number; clip: boolean }> {
@@ -96,8 +79,6 @@ async function sourceOf(ctx: PlanContext, io: DeriveIO, inputs: Record<string, u
   if (value?.kind === 'frames') return { w: value.w, h: value.h, frames: value.count, clip: true }
   const files = ctx.filesFrom(inputs.image)
   if (!files.length) throw new Error(PICTURE_NOT_MADE)
-  // Python's loader makes a batch of every file's frames; the runner hands one file on (an Image card, LoadImage).
-  if (files.length > 1) throw new Error(EFFECT_PICTURE_ANIMATED)
   let bytes: Uint8Array
   try { bytes = await io.read(files[0]!) }
   catch { throw new Error(PICTURE_UNREAD) }
@@ -105,8 +86,9 @@ async function sourceOf(ctx: PlanContext, io: DeriveIO, inputs: Record<string, u
   const why = pictureRefusalOf(meta, bytes)
   if (why) throw new Error(why)
   if (!meta.width || !meta.height) throw new Error(PICTURE_UNREAD)
-  // R11.9c: an animated picture is a batch of its frames (LoadImage), each its first frame's size.
-  const frames = pictureHasFrames(meta, bytes) ? pictureFrameCount(meta, bytes) : 1
+  // R11.9c: an animated picture is a batch of its frames, each its first frame's size: an Image card hands the
+  // file on (its frames counted here); fix round 3 (B1): LoadImage hands on every frame, a file each.
+  const frames = files.length > 1 ? files.length : pictureHasFrames(meta, bytes) ? pictureFrameCount(meta, bytes) : 1
   const size = (meta.orientation ?? 1) >= 5 ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
   return { ...size, frames, clip: false }
 }

@@ -716,4 +716,11 @@ describe('R11.9c fix round 2 (N3): a shader bake folder takes only the bake’s 
     }
     expect(written()).toEqual([])
   })
+  it('fix round 3 (B2): a bake given up takes no more frames (its tombstone), before disk', async () => {
+    realFs.mkdirSync(`${root}/input/shader_bake/.abandoned`, { recursive: true })
+    realFs.writeFileSync(`${root}/input/shader_bake/.abandoned/${'b'.repeat(32)}`, '')
+    rawBody.mockResolvedValue(upload({ filename: FRAME, fields: { subfolder: FOLDER, overwrite: 'true' } }))
+    await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 409 })
+    expect(written()).toEqual([`input/shader_bake/.abandoned/${'b'.repeat(32)}`])
+  })
 })

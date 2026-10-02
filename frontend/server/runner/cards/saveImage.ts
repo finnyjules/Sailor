@@ -64,7 +64,7 @@ import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta } from '../pictures/pyt
 import { pixels } from '../pixels/core'
 import { SAVE_OUTSIDE } from '../results'
 import { filesOf } from '../values'
-import { loaderFileBehind } from './bakeReplay'
+import { loaderFileBehind, oneFrameRefused } from './bakeReplay'
 import type { RunnerValue } from '../types'
 import { framesOf } from '../../media/values'
 import { mediaLease } from '../../media/run'
@@ -289,7 +289,11 @@ async function refuseAnimation(io: DeriveIO, prompt: ApiPrompt, link: unknown): 
   try { bytes = await io.read(behind.file) }
   catch { return }
   let frames = false
-  try { frames = pictureHasFrames(await pictureMeta(bytes), bytes) }
+  try {
+    const meta = await pictureMeta(bytes)
+    // R11.9c fix round 3 (B1): a LoadImage's GIF or WebP is its batch of frames, saved frame by frame.
+    frames = behind.classType === 'LoadImage' ? oneFrameRefused({ oneFrame: true, loaderBatch: true }, pictureHasFrames(meta, bytes), meta.pages) : pictureHasFrames(meta, bytes)
+  }
   catch { return }
   if (frames) throw new Error(PICTURE_ANIMATED)
 }

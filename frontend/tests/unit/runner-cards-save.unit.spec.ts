@@ -570,11 +570,13 @@ describe('the engine (cards on)', () => {
     expect((await decode(new Uint8Array(readFileSync(join(k.root, 'output', 'ComfyUI_00001_.png'))))).w).toBe(40)
   })
 
-  it('a loader’s animation (Python saves each frame) is refused at the start, before any hold', async () => {
+  it('a loader’s animation (Python saves each frame) is refused at the start, before any hold, where the runner can\'t make it a batch (an Image card\'s file; a LoadImage\'s APNG)', async () => {
     const VALUES = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as { rgb_turned: { name: string; file: string }[] }
     for (const name of ['a two-frame GIF', 'a two-frame animated PNG']) {
       const file = b64(VALUES.rgb_turned.find(c => c.name === name)!.file)
-      for (const make of [(n: string) => loadImage(n), (n: string) => card(n)]) {
+      // R11.9c fix round 3 (B1): LoadImage hands on a GIF's frames as its batch (saved frame by frame, below).
+      const makers = name === 'a two-frame GIF' ? [(n: string) => card(n)] : [(n: string) => loadImage(n), (n: string) => card(n)]
+      for (const make of makers) {
         const k = makeKit({ hosted: true, deps: { families: () => EDIT_CARDS } })
         put(k.root, 'anim.bin', file)
         for (const reader of [saveImage(['0', 0]), previewImage(['0', 0])]) {

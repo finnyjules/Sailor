@@ -137,3 +137,16 @@ export const MEDIA_ROUTE_JOBS_PER_USER = { running: 1, waiting: 4 } as const
 export const MEDIA_ROUTE_WAIT_MS = 10_000
 /** Rule 5: the most stderr kept from one job (logged, never shown). */
 export const MEDIA_STDERR_BYTES = 64 * 1024
+
+/** R11.9c fix round 3 (B1): an animated picture LoadImage makes a batch of, past the batch caps. */
+export const LOADER_FRAMES_TOO_MUCH = 'This animated picture has too many frames, or frames too large, to work with here. Use a shorter animation or a smaller picture.'
+
+/**
+ * R11.9c fix round 3 (B1): a batch of `count` pictures of w × h against R5's
+ * batch caps (MEDIA_CAPS: a frame's pixels, the batch's frames and pixels),
+ * as the start checks a LoadImage's animation before the hold. True when over.
+ */
+export function pictureBatchOverCaps(count: number, w: number, h: number, hosted: boolean): boolean {
+  const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  return w * h > caps.framePixels || count > caps.batchFrames || count * w * h > caps.batchPixels
+}
