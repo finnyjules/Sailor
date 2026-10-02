@@ -1,4 +1,6 @@
+import { mkdir } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
+import { stackPixels } from './_helpers'
 
 /**
  * Compositor agent vocabulary — the F-cap slice, proven end to end.
@@ -158,5 +160,96 @@ test.describe('Compositor agent vocabulary (F-cap)', () => {
     await expect.poll(async () => (await motionBands(page)).map((t: any) => t.path),
       { timeout: 15_000 }).toContain('layers.L1.effects.e-grain.amount')
     expectBand(await motionBands(page))
+  })
+
+  // ── Light layers stage 4: the assistant adds, sets and animates lights ─────────────────────
+  /** Seed a rect, hide the grid, then ask for night: a mocked plan of addLight + setLighting
+   *  {darkness 0.85} + animateLight (brightness 0 → 3). Resolves once all three have landed. */
+  async function proposeNight(page: Page) {
+    await page.setViewportSize({ width: 1600, height: 1100 })
+    if (await page.getByTestId('compositor-grid-overlay').count()) {     // ⇧G: no grid lines in the pixels
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+      await page.keyboard.press('Shift+G')
+      await expect(page.getByTestId('compositor-grid-overlay')).toHaveCount(0)
+    }
+    await seedSingleLayer(page, {
+      id: 'L1', kind: 'rect', x: 0.5, y: 0.6, w: 0.4, h: 0.2, rotation: 0, opacity: 1,
+      fill: '#e0b040', stroke: '', strokeWidth: 0, radius: 0,
+    })
+    const before = await frameProps(page)
+    const pixels0 = await stackPixels(page)
+    const far0 = await lum(page, FAR)
+    let planned = 0
+    await page.route('**/api/agent-plan', async (route) => {
+      planned++
+      await route.fulfill({ json: { text: planText([
+        { op: 'addLight', args: { id: 'lamp', type: 'lamp', x: 0.15, y: 0.35, color: '#ffb066' } },
+        { op: 'setLighting', args: { darkness: 0.85 } },
+        { op: 'animateLight', target: 'lamp', args: { key: 'brightness', from: 0, to: 3 } },
+      ], 'A warm lamp at night.') } })
+    })
+    await askAgent(page, 'make it night with a warm lamp that fades in')
+    await expect.poll(async () => (await layers(page)).map((l: any) => l.kind), { timeout: 15_000 }).toEqual(['rect', 'light'])
+    await expect.poll(async () => (await frameProps(page)).lighting?.darkness, { timeout: 10_000 }).toBe(0.85)
+    await expect.poll(async () => (await frameProps(page)).motionx, { timeout: 10_000 }).toContain('layers.lamp.light.brightness')
+    expect(planned).toBe(1)
+    return { before, pixels0, far0 }
+  }
+  const frameProps = (page: Page) => page.evaluate(() => {
+    const p = (window as any).__frameLab.node.data.properties
+    return { lighting: p.sailor_localLighting ?? null, motionx: (p.sailor_motion?.motionx ?? []).map((t: any) => t.path) as string[] }
+  })
+  /** The Frame's far corner from the lamp (fractions of the stack canvas). */
+  const FAR = [0.82, 0.04, 0.97, 0.3]
+  /** Mean luminance of a region (fractions) of the stack canvas, read through a copy. */
+  const lum = (page: Page, b: number[]) => page.evaluate((b) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height
+    const g = c.getContext('2d')!; g.drawImage(cv, 0, 0)
+    const [x0, y0, x1, y1] = [b[0]! * c.width, b[1]! * c.height, b[2]! * c.width, b[3]! * c.height].map(Math.round)
+    const d = g.getImageData(x0!, y0!, x1! - x0!, y1! - y0!).data
+    let s = 0; for (let i = 0; i < d.length; i += 4) s += 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!
+    return Math.round((s / (d.length / 4)) * 100) / 100
+  }, b)
+  const SHOTS = process.env.LL4_SHOTS ?? 'test-results/agent-lights'
+
+  test('lights: a mocked plan adds a lamp, darkens the Frame and its band shows in the Motion tab (light layers stage 4)', async ({ page }) => {
+    await mkdir(SHOTS, { recursive: true })
+    const { far0 } = await proposeNight(page)
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
+    await stackPixels(page)
+    const far1 = await lum(page, FAR)
+    console.log('[agent lights] far corner luminance before', far0, 'after', far1, '| lighting', JSON.stringify((await frameProps(page)).lighting))
+    expect(far1).toBeLessThan(far0 * 0.8)          // the Frame darkened away from the lamp (the lab background is dark already)
+    await page.screenshot({ path: `${SHOTS}/6-assistant-proposal.png` })
+    // Approve (the tabs wait on an open proposal); the band is on the lamp's row in the Motion tab.
+    await page.getByTestId('compositor-prompt-dock').getByRole('button', { name: 'Approve', exact: true }).click()
+    await page.getByRole('button', { name: 'Motion', exact: true }).click()
+    await expect(page.getByTestId('band-layers.lamp.light.brightness')).toBeVisible()
+    await page.screenshot({ path: `${SHOTS}/6-assistant-band-in-motion.png` })
+  })
+
+  test('lights: one undo after approving removes the lamp, the Darkness and the band together (light layers stage 4)', async ({ page }) => {
+    // KNOWN BUG (found by this check, 2026-10-01): a Frame assistant proposal records no undo
+    // step of its own (useCompositorAgent / CompositorModal setState never call recordHistory).
+    // setState's `editor.setLighting` records one AFTER `commit(s.layers)` has already put the
+    // lamp in, so the only undo step restores the old Darkness and drops the band but keeps the
+    // lamp — and no later ⌘Z can remove it. Remove `test.fail` once a proposal is one undo step.
+    test.fail()
+    const { before, pixels0 } = await proposeNight(page)
+    await page.getByTestId('compositor-prompt-dock').getByRole('button', { name: 'Approve', exact: true }).click()
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    await page.keyboard.press('Meta+z')
+    await page.waitForTimeout(800)
+    const after = { kinds: (await layers(page)).map((l: any) => l.kind), ...(await frameProps(page)) }
+    await page.keyboard.press('Meta+z')
+    await page.waitForTimeout(800)
+    const after2 = { kinds: (await layers(page)).map((l: any) => l.kind), ...(await frameProps(page)) }
+    console.log('[agent lights undo] before', JSON.stringify(before), '| after one undo', JSON.stringify(after), '| after a second undo', JSON.stringify(after2))
+    expect(after.kinds).toEqual(['rect'])
+    expect(after.motionx).not.toContain('layers.lamp.light.brightness')
+    expect(after.lighting?.darkness ?? null).toBe(before.lighting?.darkness ?? null)
+    await expect(page.getByTestId('light-dot')).toHaveCount(0)
+    expect(await stackPixels(page)).toBe(pixels0)
   })
 })

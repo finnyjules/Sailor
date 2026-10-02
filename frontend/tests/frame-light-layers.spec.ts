@@ -1406,3 +1406,284 @@ test.describe('Frame light layers (stage 3) — foil and Spot UV lit by Frame li
     expect(Math.max(...Object.values(reg).map(([e, , p]) => Math.abs(e! - p!)))).toBeGreaterThan(10)
   })
 })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Stage 4: lights, Lift and Darkness animate. Bands are made through the real Motion tab (Add
+// property → Light → …), their two points set in the band inspector, and the playhead moved by
+// dragging on the timeline ruler. Pixels are read the stage-1 way. No network calls.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+/** Where the stage-4 screenshots go (LL4_SHOTS keeps them somewhere else). */
+const LL4 = process.env.LL4_SHOTS ?? `${SHOTS}/ll4`
+async function ll4Shot(page: Page, file: string, what: 'page' | 'canvas' = 'page') {
+  await mkdir(LL4, { recursive: true })
+  if (what === 'canvas') await page.getByTestId('compositor-stack-canvas').screenshot({ path: `${LL4}/${file}` })
+  else await page.screenshot({ path: `${LL4}/${file}` })
+}
+const tid = (path: string) => path.replace(/[^a-z0-9]+/gi, '-')
+async function enterMotion(page: Page) {
+  await page.getByRole('button', { name: 'Motion', exact: true }).click()
+  await expect(page.getByTestId('timeline-ruler')).toBeVisible()
+}
+async function enterDesign(page: Page) {
+  await page.getByRole('button', { name: 'Design', exact: true }).click()
+  await expect(page.getByTestId('timeline-ruler')).toHaveCount(0)
+}
+/** Add property → the property at `path` (the selected layer's, or the All lights row's). */
+async function addProperty(page: Page, path: string, shot?: string) {
+  await page.getByTestId('add-property-toggle').click()
+  const btn = page.getByTestId(`property-add-${tid(path)}`)
+  await expect(btn).toBeVisible()
+  if (shot) await ll4Shot(page, shot)
+  await btn.click()
+  await expect(page.getByTestId(`band-${path}`)).toBeVisible()
+}
+/** Select a band's control point and type its value (number, or a #rrggbb colour). */
+async function setPoint(page: Page, path: string, i: number, value: number | string) {
+  await page.getByTestId(`point-${path}-${i}`).click()
+  if (typeof value === 'number') {
+    await setRow(page, 'inspector-number', value)
+  } else {
+    await page.getByTestId('inspector-color').getByRole('button', { name: /^Color / }).click()
+    const hex = page.locator('[data-studio-color-pop] input:not([type])')
+    await hex.fill(value)
+    await hex.press('Enter')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('[data-studio-color-pop]')).toHaveCount(0)
+  }
+}
+/** Pixels of two snapshots whose any channel differs by more than `th` levels, and the largest gap. */
+const pixOff = (page: Page, a: string, b: string, th = 2) => page.evaluate(([a, b, th]) => {
+  const S = (window as any).__snaps, x = S[a as string], y = S[b as string]
+  let n = 0, max = 0
+  for (let i = 0; i < x.d.length; i += 4) {
+    let m = 0
+    for (let c = 0; c < 3; c++) m = Math.max(m, Math.abs(x.d[i + c] - y.d[i + c]))
+    if (m > (th as number)) n++
+    max = Math.max(max, m)
+  }
+  return { over: n, max, total: x.d.length / 4, sizes: `${x.w}×${x.h} / ${y.w}×${y.h}` }
+}, [a, b, th] as const)
+/** Select a band (click its bar) and set its Active switch. */
+async function setBandActive(page: Page, path: string, on: boolean) {
+  await page.getByTestId(`band-${path}`).click()
+  const sw = page.getByTestId('band-active')
+  await expect(sw).toBeVisible()
+  await sw.getByRole('switch').click()
+  if (on) await expect(page.getByTestId(`band-${path}`)).not.toHaveAttribute('data-muted', '')
+  else await expect(page.getByTestId(`band-${path}`)).toHaveAttribute('data-muted', '')
+}
+/** Mean R, G, B (0..255) of a region of a snapshot. */
+const rgbMean = (page: Page, name: string, b: Box) => page.evaluate(([n, b]) => {
+  const s = (window as any).__snaps[n as string]
+  const [x0, y0, x1, y1] = (b as number[]).map((v, i) => Math.round(v * (i % 2 ? s.h : s.w)))
+  const sum = [0, 0, 0]; let k = 0
+  for (let y = y0!; y < y1!; y++) for (let x = x0!; x < x1!; x++) { const i = (y * s.w + x) * 4; for (let c = 0; c < 3; c++) sum[c]! += s.d[i + c]; k++ }
+  return sum.map(v => Math.round((v / k) * 10) / 10)
+}, [name, b] as const)
+/** A layer's row header in the Motion tab's timeline (its label: a light reads "light"). */
+const motionRow = (page: Page, label: string) => page.getByTestId('band-timeline').getByRole('button', { name: `▾ ${label}`, exact: true })
+/** ⇧-drag on the ruler (⇧ resets the timeline's zoom to the whole length) past its left (t = 0)
+ *  or right (t = the end) edge. Returns the time the playhead flag shows. */
+async function scrubEdge(page: Page, edge: 'start' | 'end'): Promise<number> {
+  const r = (await page.getByTestId('timeline-ruler').boundingBox())!
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2)
+  await page.keyboard.down('Shift')
+  await page.mouse.down()
+  await page.keyboard.up('Shift')
+  await page.mouse.move(edge === 'start' ? r.x - 60 : r.x + r.width + 60, r.y + r.height / 2, { steps: 6 })
+  await page.mouse.up()
+  return Number(await page.getByTestId('playhead-flag').textContent())
+}
+
+test.describe('Frame light layers (stage 4) — lights, Lift and Darkness animate', () => {
+  test.use({ viewport: { width: 1600, height: 1100 } })   // a larger stage under the timeline
+  test('a Brightness band 0 → 3: t = 0 paints like a static lamp at 0, the end brightens the lit side like a static lamp at 3', async ({ page }) => {
+    await openFrame(page)
+    const lampAt = (b: number) => [...BASE, light('lamp', 'lamp', 0.14, 0.5, { brightness: b })]
+    await setLayers(page, lampAt(1.6))
+    await enterMotion(page)
+    await motionRow(page, 'light').click()
+    await addProperty(page, 'layers.lamp.light.brightness', '1-motion-light-group.png')
+    await setPoint(page, 'layers.lamp.light.brightness', 0, 0)
+    await setPoint(page, 'layers.lamp.light.brightness', 1, 3)
+    // The static references: the same lamp at 0 and at 3 with the band switched off (Active off),
+    // painted with the timeline exactly as it is (a new band row resizes the stage canvas).
+    await setBandActive(page, 'layers.lamp.light.brightness', false)
+    await setLayers(page, lampAt(0)); await snap(page, 'static0')
+    await setLayers(page, lampAt(3)); await snap(page, 'static3')
+    await setLayers(page, lampAt(1.6))
+    await setBandActive(page, 'layers.lamp.light.brightness', true)
+    const t0 = await scrubEdge(page, 'start'); await snap(page, 'b0')
+    await ll4Shot(page, '3-brightness-t0.png', 'canvas')
+    const t1 = await scrubEdge(page, 'end'); await snap(page, 'b1')
+    await ll4Shot(page, '3-brightness-tend.png', 'canvas')
+    const s0 = await halves(page, 'static0'), s3 = await halves(page, 'static3'), b0 = await halves(page, 'b0'), b1 = await halves(page, 'b1')
+    // t = 0 is the static paint exactly; the end matches a static lamp at 3 (a band lands on the
+    // same sanitized value the dial would).
+    const g = { b0vsStatic0: maxCellDiff(await gridMeans(page, 'b0'), await gridMeans(page, 'static0')), b1vsStatic3: maxCellDiff(await gridMeans(page, 'b1'), await gridMeans(page, 'static3')) }
+    const px = { t0: await pixOff(page, 'b0', 'static0'), end: await pixOff(page, 'b1', 'static3') }
+    console.log('[s4 brightness] t', t0, '→', t1, '| halves static0', s0, 'static3', s3, 'band t0', b0, 'band end', b1, '| max 6×6 cell diffs', g, '| pixels off by >2', px)
+    expect(t0).toBe(0)
+    expect(b1.left - b0.left).toBeGreaterThan(10)         // the lit (left) side brightens
+    expect(px.t0.over).toBe(0)
+    expect(px.end.over).toBe(0)
+  })
+  test('a Colour band white → red: the end frame’s lit side is red-tinted, t = 0 is not', async ({ page }) => {
+    await openFrame(page)
+    await setLayers(page, [...BASE, light('lamp', 'lamp', 0.14, 0.5, { color: '#ffffff', brightness: 2.4 })])
+    await enterMotion(page)
+    await motionRow(page, 'light').click()
+    await addProperty(page, 'layers.lamp.light.color')
+    await setPoint(page, 'layers.lamp.light.color', 0, '#ffffff')
+    await setPoint(page, 'layers.lamp.light.color', 1, '#ff0000')
+    await scrubEdge(page, 'start'); await snap(page, 'c0')
+    await scrubEdge(page, 'end'); await snap(page, 'c1')
+    await ll4Shot(page, '4-colour-tend.png', 'canvas')
+    const lit: Box = [0.02, 0.35, 0.3, 0.65]
+    const a = await rgbMean(page, 'c0', lit), b = await rgbMean(page, 'c1', lit)
+    console.log('[s4 colour] lit side mean RGB — t = 0:', a, 'end:', b)
+    const redness = (c: number[]) => c[0]! - (c[1]! + c[2]!) / 2
+    // The background is a grey-blue (#56657a); under red light red holds while green and blue fall.
+    expect(redness(b) - redness(a)).toBeGreaterThan(30)
+    expect(a[1]! - b[1]!).toBeGreaterThan(20)
+    expect(a[2]! - b[2]!).toBeGreaterThan(20)
+  })
+
+  test('All lights: the row comes with a lamp, a Darkness band 0 → 1 darkens far pixels over time, the row goes with the last light', async ({ page }) => {
+    await openFrame(page)
+    await setLayers(page, BASE)
+    await enterMotion(page)
+    await expect(page.getByTestId('all-lights-row')).toHaveCount(0)
+    await enterDesign(page)
+    await page.getByTestId('add-light').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
+    await dragDotTo(page, page.getByTestId('light-dot'), 0.12, 0.5)
+    await enterMotion(page)
+    const row = page.getByTestId('all-lights-row')
+    await expect(row).toHaveCount(1)
+    // The All lights row heads the timeline.
+    const tops = await page.getByTestId('band-timeline').locator('button.col-span-2').evaluateAll(els => els.map(e => e.textContent!.replace('▾', '').trim()))
+    expect(tops[0]).toBe('All lights')
+    await row.click()
+    await addProperty(page, 'frame.darkness')
+    await setPoint(page, 'frame.darkness', 0, 0)
+    await setPoint(page, 'frame.darkness', 1, 1)
+    await scrubEdge(page, 'start'); await snap(page, 'd0')
+    await scrubEdge(page, 'end'); await snap(page, 'd1')
+    await page.getByTestId('band-frame.darkness').click()
+    await ll4Shot(page, '2-all-lights-darkness-band.png')
+    const far: Box = [0.85, 0.05, 0.98, 0.95], near: Box = [0.02, 0.4, 0.14, 0.6]
+    const m = { far0: await mean(page, 'd0', far), far1: await mean(page, 'd1', far), near0: await mean(page, 'd0', near), near1: await mean(page, 'd1', near) }
+    console.log('[s4 darkness] far / near means at t = 0 and the end:', m)
+    expect(m.far0 - m.far1).toBeGreaterThan(30)                       // far from the lamp, the Frame goes dark
+    expect(m.far1 / m.far0).toBeLessThan(m.near1 / m.near0 - 0.1)    // far keeps less of its light than the lamp's side
+
+    // The review minor: does the row stay highlighted after a click on empty canvas?
+    await row.click()
+    const cls = () => row.getAttribute('class')
+    const selected = await cls()
+    const stage = await canvasRect(page)
+    await page.mouse.click(stage.x + stage.width + 40, stage.y + stage.height / 2)   // empty stage, off the Frame
+    await page.waitForTimeout(300)
+    const afterClick = await cls()
+    console.log('[s4 all lights row] selected:', /\btext-white\b(?!\/)/.test(selected ?? ''), '| after an empty-canvas click:', /\btext-white\b(?!\/)/.test(afterClick ?? ''))
+
+    // The last light deleted: the row goes.
+    await enterDesign(page)
+    await page.getByTestId('light-dot').click()
+    await page.getByTestId('light-delete').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(0)
+    await enterMotion(page)
+    await expect(page.getByTestId('all-lights-row')).toHaveCount(0)
+  })
+
+  test('a Lift band on the headline lengthens its shadow over time', async ({ page }) => {
+    await openFrame(page)
+    await setLayers(page, BASE)
+    await snap(page, 'unlit')
+    const tb = await textBox(page, 'unlit')
+    const f = { x0: tb.x0 / tb.w, x1: tb.x1 / tb.w, y0: tb.y0 / tb.h, y1: tb.y1 / tb.h }
+    await setLayers(page, [...BASE, light('lamp', 'lamp', 0.14, 0.38, { height: 0.25, brightness: 3, reach: 2 })])
+    await enterMotion(page)
+    await motionRow(page, 'LIGHT').click()
+    await addProperty(page, 'layers.word.lift')
+    await setPoint(page, 'layers.word.lift', 0, 0.005)
+    await setPoint(page, 'layers.word.lift', 1, 0.15)
+    await scrubEdge(page, 'start'); await snap(page, 'l0')
+    await ll4Shot(page, '5-lift-t0.png', 'canvas')
+    await scrubEdge(page, 'end'); await snap(page, 'l1')
+    await ll4Shot(page, '5-lift-tend.png', 'canvas')
+    // Strips past the word on the side away from the lamp: just past it, and further out.
+    const strip = (from: number, to: number): Box => [f.x1 + from, f.y0, f.x1 + to, f.y1]
+    const m = {
+      nearT0: await mean(page, 'l0', strip(0.005, 0.03)), nearEnd: await mean(page, 'l1', strip(0.005, 0.03)),
+      farT0: await mean(page, 'l0', strip(0.04, 0.09)), farEnd: await mean(page, 'l1', strip(0.04, 0.09)),
+    }
+    console.log('[s4 lift] text box (fractions)', f, '| strip means', m)
+    expect(m.farT0 - m.farEnd).toBeGreaterThan(5)          // at full Lift the shadow reaches the far strip
+  })
+
+  test('a light x band moves the bright side (regression)', async ({ page }) => {
+    await openFrame(page)
+    await setLayers(page, [...BASE, light('lamp', 'lamp', 0.5, 0.5)])
+    await enterMotion(page)
+    await motionRow(page, 'light').click()
+    await addProperty(page, 'layers.lamp.x')
+    await setPoint(page, 'layers.lamp.x', 0, 0.08)
+    await setPoint(page, 'layers.lamp.x', 1, 0.92)
+    await scrubEdge(page, 'start'); await snap(page, 'x0')
+    await scrubEdge(page, 'end'); await snap(page, 'x1')
+    const a = await halves(page, 'x0'), b = await halves(page, 'x1')
+    console.log('[s4 light x] halves t = 0:', a, 'end:', b)
+    expect(a.left - a.right).toBeGreaterThan(5)
+    expect(b.right - b.left).toBeGreaterThan(5)
+  })
+  test('web export file of an animated lamp plays: the end differs from t = 0 near the lamp and matches the editor at the same time', async ({ page, context }) => {
+    const errors: string[] = []
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+    await openFrame(page, 1000, 1000)
+    // Shapes only, so the file needs no font cut (see the stage-1 file test).
+    const shapes = [
+      { ...SHAPE, id: 'a', x: 0.35, y: 0.45, w: 0.22, h: 0.3 },
+      { id: 'b', kind: 'ellipse', x: 0.7, y: 0.6, w: 0.18, h: 0.3, rotation: 0, opacity: 1, fill: '#e2554f', stroke: '', strokeWidth: 0 },
+    ]
+    await setLayers(page, [...shapes, light('lamp', 'lamp', 0.12, 0.35, { height: 0.35 })])
+    await enterMotion(page)
+    await motionRow(page, 'light').click()
+    await addProperty(page, 'layers.lamp.light.brightness')
+    await setPoint(page, 'layers.lamp.light.brightness', 0, 0.2)
+    await setPoint(page, 'layers.lamp.light.brightness', 1, 3)
+    await scrubEdge(page, 'start'); await snap(page, 'ed0')
+    await scrubEdge(page, 'end'); await snap(page, 'ed1')
+    await page.getByTestId('compositor-right-panel').getByRole('button', { name: /^Download/ }).click()
+    await page.getByTestId('frame-web-export').click()
+    const sheet = page.getByTestId('frame-web-export-sheet')
+    const ready = sheet.getByText('One file · plays anywhere'), failed = sheet.getByText("The export couldn't be built", { exact: false })
+    await expect(ready.or(failed)).toBeVisible({ timeout: 90_000 })
+    if (await failed.isVisible()) throw new Error(`web export failed: ${errors.find(e => e.includes('[Frame] web export failed')) ?? errors.join(' | ')}`)
+    const [wdl] = await Promise.all([page.waitForEvent('download'), sheet.getByRole('button', { name: 'Download' }).click()])
+    const html = await readFile((await wdl.path())!, 'utf8')
+    expect(html).toContain('"kind":"light"')
+    expect(html).toContain('layers.lamp.light.brightness')
+    expect(html).not.toContain('"needsOutlines":false')     // the full frame.js, not frame-lean.js
+    const r = await canvasRect(page)
+    const vp = { width: Math.round(r.width), height: Math.round(r.height) }
+    const e0 = await renderExported(context, html, 0, vp)
+    const e1 = await renderExported(context, html, 1, vp)
+    await snapUrl(page, 'web0', e0.png, 'ed0')
+    await snapUrl(page, 'web1', e1.png, 'ed1')
+    await mkdir(LL4, { recursive: true })
+    await writeFile(`${LL4}/7-web-export-t0.png`, Buffer.from(e0.png.replace(/^data:image\/png;base64,/, ''), 'base64'))
+    await writeFile(`${LL4}/7-web-export-tend.png`, Buffer.from(e1.png.replace(/^data:image\/png;base64,/, ''), 'base64'))
+    const regions: Record<string, Box> = { nearLamp: [0.02, 0.2, 0.2, 0.5], shapeA: [0.27, 0.33, 0.43, 0.57], ground: [0.05, 0.6, 0.3, 0.8], far: [0.85, 0.05, 0.98, 0.3] }
+    const reg: Record<string, number[]> = {}
+    for (const [k, b] of Object.entries(regions)) reg[k] = [await mean(page, 'ed0', b), await mean(page, 'web0', b), await mean(page, 'ed1', b), await mean(page, 'web1', b)]
+    const cells = { t0: maxCellDiff(await gridMeans(page, 'web0'), await gridMeans(page, 'ed0')), end: maxCellDiff(await gridMeans(page, 'web1'), await gridMeans(page, 'ed1')) }
+    console.log('[s4 web export] requests', e0.requests.length, e1.requests.length, '| regions [editor t0, file t0, editor end, file end]:', JSON.stringify(reg), '| max 6×6 cell diff file vs editor:', cells)
+    expect(e0.requests).toEqual([])
+    expect(reg.nearLamp![3]! - reg.nearLamp![1]!).toBeGreaterThan(15)    // the file plays: brighter by the lamp at the end
+    expect(cells.t0).toBeLessThan(3)
+    expect(cells.end).toBeLessThan(3)
+    for (const [ed0, w0, ed1, w1] of Object.values(reg)) { expect(Math.abs(ed0! - w0!)).toBeLessThan(3); expect(Math.abs(ed1! - w1!)).toBeLessThan(3) }
+  })
+})
