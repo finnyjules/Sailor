@@ -10,7 +10,7 @@ import { createError, getRequestHeader, readRawBody, setResponseHeader, setRespo
 import { ownedOutputKeys, ownedPromptIds, ownsPrompt, outputKey, pendingRuns } from './graphRuns'
 import { resolveWorkerTarget } from './workerRoute'
 import { settleGraphSuccess } from './meterGraphRun'
-import { parseUploadForm } from './multipart'
+import { assertCanonicalMultipart, parseUploadForm } from './multipart'
 import { canonicalUploadKey, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
@@ -399,6 +399,11 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
   }
 
   const contentType = getRequestHeader(event, 'content-type')
+  // LC3: the part headers must be in the one shape every real client sends
+  // BEFORE undici reads them. Which non-canonical spellings undici refuses
+  // changes with the Node version (Node 26's undici 8 accepts `name= "x"` and
+  // `name*=utf-8''x`), so that cannot be the defence; this check is.
+  assertCanonicalMultipart(body ?? Buffer.alloc(0), contentType || '')
   const form = await parseUploadForm(body ?? Buffer.alloc(0), contentType || 'application/octet-stream')
 
   // A backslash in a part NAME is the last place the two parsers can disagree

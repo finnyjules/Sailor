@@ -274,6 +274,75 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
   })
 })
 
+// --------------------------------------------------------------------- LC3
+
+describe('LC3 — part headers must be canonical, whatever the Node version\'s undici accepts', () => {
+  // Node 26's undici 8 parses every one of these without complaint, so "undici
+  // refused it" no longer covers them. Each is refused for the OWNER — the
+  // case where ownership alone would have let the write through.
+  const NON_CANONICAL: [string, string][] = [
+    ['unquoted value', `name=overwrite`],
+    ['upper-case parameter', `NAME="overwrite"`],
+    ['duplicate name parameter (undici takes the last)', `name="note"; name="overwrite"`],
+    ['extended parameter after a plain one', `name="note"; name*=utf-8''overwrite`],
+    ['unknown extra parameter', `name="overwrite"; size="4"`],
+    ['tab instead of space', `name="overwrite";\tfilename="x"`],
+  ]
+  for (const [label, disposition] of NON_CANONICAL) {
+    it(`refuses ${label}`, async () => {
+      owners.set('input::mine.png', 'u1')
+      rawBody.mockResolvedValue(raw([
+        { disposition: `name="image"; filename="mine.png"`, value: 'PIXELS' },
+        { disposition, value: 'true' },
+      ]))
+      await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
+      expect(written()).toEqual([])
+    })
+  }
+
+  /** A body with hand-written header blocks, for the line-level smuggles. */
+  function rawHeaders(parts: { headers: string, value: string }[]): Buffer {
+    return Buffer.from(parts.map(p => `--${BOUNDARY}\r\n${p.headers}\r\n\r\n${p.value}\r\n`).join('')
+      + `--${BOUNDARY}--\r\n`, 'latin1')
+  }
+  const IMAGE = { headers: `Content-Disposition: form-data; name="image"; filename="mine.png"`, value: 'PIXELS' }
+  const LINE_SMUGGLES: [string, string][] = [
+    ['a bare-LF header line (a line reader splitting on \\n sees a second header)',
+      `Content-Disposition: form-data; name="note"\nContent-Disposition: form-data; name ="overwrite"`],
+    ['two Content-Disposition headers', `Content-Disposition: form-data; name="note"\r\nContent-Disposition: form-data; name="overwrite"`],
+    ['a folded header line', `Content-Disposition: form-data;\r\n name="overwrite"`],
+    ['a space before the colon', `Content-Disposition : form-data; name="overwrite"`],
+    ['a part with no Content-Disposition', `Content-Type: text/plain`],
+  ]
+  for (const [label, headers] of LINE_SMUGGLES) {
+    it(`refuses ${label}`, async () => {
+      owners.set('input::mine.png', 'u1')
+      rawBody.mockResolvedValue(rawHeaders([IMAGE, { headers, value: 'true' }]))
+      await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
+      expect(written()).toEqual([])
+    })
+  }
+
+  it('refuses a body whose Content-Type names no boundary', async () => {
+    requestHeader.mockReturnValue('multipart/form-data')
+    rawBody.mockResolvedValue(upload({ filename: 'mine.png' }))
+    await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
+    expect(written()).toEqual([])
+  })
+
+  it('accepts what a real encoder writes — Node\'s own FormData, non-ASCII and backslash in the filename', async () => {
+    const fd = new FormData()
+    fd.append('image', new Blob(['PIXELS'], { type: 'image/png' }), 'été a\\b.png')
+    fd.append('overwrite', 'false')
+    const req = new Request('http://x/upload/image', { method: 'POST', body: fd })
+    const ct = req.headers.get('content-type')!
+    requestHeader.mockImplementation((_e, n) => n.toLowerCase() === 'content-type' ? ct : undefined)
+    rawBody.mockResolvedValue(Buffer.from(await req.arrayBuffer()))
+    await handleHostedUpload(ev())
+    expect(written()).toHaveLength(1)
+  })
+})
+
 // --------------------------------------------------------------------- R2
 
 describe('R2 — overwrite is scoped to the owner, not refused outright', () => {
