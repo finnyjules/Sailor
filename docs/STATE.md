@@ -522,6 +522,41 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 
 **Known limits for slice 2:** layer blur, torn edge, grain and `localLayerBox` still ride the unscaled device scale; members of a rigid unit share the unit's motion map (exact for edge and centre pins, drifts for a manually relative-pinned or Keep-size group); a re-wrapped text's reported box uses the design height when its vertical pin is centre or relative. The three review findings above all landed, so slice 2 inherits nothing new from them.
 
+### Sailor without ComfyUI, step 3 — COMPLETE: R9, R10 and R11 landed and the divorce check passes — 2026-10-02 (plan R9–R11 sections; ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`; check reports `r11-10-scripted.md`, `r11-10-live.md`)
+
+- **Result.** Every Sailor node runs in Sailor's own runner, or refuses plainly before anything is held.
+  - The divorce check ran with ComfyUI stopped. Scripted: 1,571 saved projects and all 862 node classes, locally and hosted, with 0 sent to the engine. Live: 40 projects opened, free runs completed, and 0 engine requests or socket attempts.
+  - Guards: 156/156. Money: 50 paid families, quote = hold. Stop leaves nothing running.
+  - Unit suite: 55,795 passed. Typecheck at baseline.
+- **Still uses the local engine, by design (decision 4), always named, never silently:**
+  - the 445 stock local-diffusion classes (KSampler and so on), and installed custom nodes;
+  - the named `NEEDS_LOCAL_ENGINE` list. Its plans come from a saved-project scan: Smart Layout read by an Image card (29 graphs, port), Text showing a LoRA log (4, port), Film a shot (port), a Shader effect fed by a picture made in the run (2, port), My effects; Preview video, Font Playground, Kinetic Typography and 7 hidden Replicate nodes (0 graphs, port or retire).
+  - With the engine off, or in hosted, these refuse with "needs the local engine" or "can't run here".
+- **Hosted never reaches ComfyUI.** Every engine path is a plain 404. The image has no Python: Node 22, Sailor's own ffmpeg and the depth model. Frame Animate and YouTube voice capture refuse in hosted; LoRA weight unpacking is in Node.
+  - **Owed by the user:** `docker build`, a smoke run, then `fly deploy`. Every live-checked family is switched on in `fly.toml`.
+- **Built in R9–R11:**
+  - Timeline exports in the browser only.
+  - Relight, Fabric and the lip-sync engines are ported.
+  - Recraft SVG, with unpriced models hidden.
+  - Long sounds run in pieces; Upscale runs in tiles (128 px overlap, tone-matched; Real-ESRGAN limited to 1.57 MP per call); Slow motion (AI) runs in 240-frame segments.
+  - Every source has a bound.
+  - Every stop-gap is closed with plain words.
+  - Motion blur (time) works.
+  - Animated Shader effects are drawn in the browser.
+  - Load image hands on every frame of an animated GIF or WebP.
+- **Removed in R10:**
+  - the mini apps' fallback to the engine and the canvas's silent fallback;
+  - the worker pool, model downloads, the server video export and the local LoRA trainer;
+  - the server's direct calls to :8188.
+- **Live checks:** about $8.40 in all (user go each time).
+  - Off for now: Reve 2.1 (fal returns 404 for its published id), DeepSeek R1 and multi-LoRA (provider-side failures).
+  - Clarity and Refine are now priced from measured runs.
+- **Open:**
+  - The meterGraphRun.ts deletion.
+  - Hosted kept-room and frame-cap measurements on Fly.
+  - A DB index on runs (user, created_at).
+  - A shared-index stealth-revert risk on `LoraTrainerSurface.vue`: check `buildTrainingPrompt` is absent at HEAD.
+
 ### Sailor without ComfyUI, step 3 — stage R8 BUILT (the mini apps run on Sailor) — 2026-10-01 (plan R8 section; ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`)
 
 - **Shared:** a free price quote (`/api/runs/quote`) that shares the run start's checks and hold (`prepareStart`), so the price shown always covers the hold; one app helper (`useAppRun`) to quote, confirm on that exact prompt, run, wait and Stop (a timeout or closing the app stops the run).
