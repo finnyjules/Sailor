@@ -143,6 +143,7 @@ const { batchBytes, hash16, invariantAnswers, rule12Pin, keptBatch, runVfxNode, 
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { takenOnlyByLc8CardsRule } from './__runner__/lc8CardsOnly'
+import { hasLc9SmartLayoutCard } from './__runner__/lc9SmartLayoutCard'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 
 const LONG = { timeout: 120_000 }
@@ -789,6 +790,7 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
     let graphs = 0
     let matched = 0
     const lc8 = new Set<string>()
+    const lc9 = new Set<string>()
     for (const uuid of readdirSync(PROJECTS).sort()) {
       let wf: { canvases?: { workflow: unknown }[] } | undefined
       try { wf = JSON.parse(readFileSync(join(PROJECTS, uuid, 'versions', 'current.json'), 'utf8')).workflow }
@@ -806,13 +808,16 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
           const moved = Object.prototype.hasOwnProperty.call(MOVED_SINCE_PIN, hash16(p)) ? MOVED_SINCE_PIN[hash16(p)]![set] : undefined
           // LC8 (F1): cards that show what a card made, now taken with `cards` on (__runner__/lc8CardsOnly.ts).
           if (takenOnlyByLc8CardsRule(p, new Set(fam as RunnerFamily[]))) { lc8.add(uuid); continue }
+          // LC9: Smart Layout read by an Image card is the runner's with `cards` on (__runner__/lc9SmartLayoutCard.ts).
+          if (hasLc9SmartLayoutCard(p, new Set(fam as RunnerFamily[]))) { lc9.add(uuid); continue }
           expect(hash16(invariantAnswers(p, new Set(fam as RunnerFamily[]))), `${uuid}, ${set}`).toBe(moved ?? want[set])
         }
       }
     }
     expect(matched).toBeGreaterThanOrEqual(800)
     expect(lc8.size).toBeLessThanOrEqual(20)
-    console.info(`[media-vfx] rule 12 held over ${matched} of ${graphs} saved graphs, against the answers pinned at ${pin.commit} (${lc8.size} taken by LC8's cards rule: ${[...lc8].join(', ')})`)
+    expect(lc9.size).toBeLessThanOrEqual(20)
+    console.info(`[media-vfx] rule 12 held over ${matched} of ${graphs} saved graphs, against the answers pinned at ${pin.commit} (${lc8.size} taken by LC8's cards rule: ${[...lc8].join(', ')}; ${lc9.size} by LC9's Smart Layout into an Image card: ${[...lc9].join(', ')})`)
   }, 300_000)
 })
 
