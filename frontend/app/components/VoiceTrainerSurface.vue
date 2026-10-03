@@ -128,72 +128,6 @@ async function startClone() {
   }
 }
 
-// ── Capture from a YouTube timestamp range (additive; independent of the file
-// upload path). Grabs a [start,end] segment as the voice sample instead of an
-// uploaded file, then feeds the same training queue. ────────────────────────
-// Hosted has no Python or yt-dlp (LC7): the YouTube capture route refuses there, so
-// the capture section is not offered. Uploading a sample works everywhere.
-import { hostedModeEnabled } from '~/lib/hostedMode'
-const youtubeCapture = !hostedModeEnabled(useRuntimeConfig().public)
-const ytUrl = ref('')
-const ytStart = ref('')   // mm:ss or plain seconds
-const ytEnd = ref('')
-const ytRights = ref(false)
-
-/** Parse "mm:ss" or a plain seconds number → seconds, else null. */
-function parseTimeSec(s: string): number | null {
-  const t = s.trim()
-  if (!t) return null
-  if (/^\d+(\.\d+)?$/.test(t)) return Number(t)
-  const m = t.match(/^(\d+):([0-5]?\d)$/)
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null
-}
-
-const ytCanSubmit = computed(() => {
-  const a = parseTimeSec(ytStart.value), b = parseTimeSec(ytEnd.value)
-  return !!name.value.trim()
-    && /^https?:\/\//.test(ytUrl.value.trim())
-    && ytRights.value
-    && a != null && b != null && (b - a) >= 10 && (b - a) <= 60
-    && !busy.value
-})
-
-async function startYoutubeClone() {
-  if (!ytCanSubmit.value) return
-  const startSec = parseTimeSec(ytStart.value)!
-  const endSec = parseTimeSec(ytEnd.value)!
-  const displayName = name.value.trim()
-  job.status = 'uploading'
-  job.error = null
-  try {
-    const cap = await $fetch<{ voiceFileUrl: string }>('/api/voice-clone/from-youtube', {
-      method: 'POST', body: { url: ytUrl.value.trim(), startSec, endSec },
-    })
-    job.status = 'starting'
-    await $fetch('/api/training-queue', {
-      method: 'POST',
-      body: {
-        kind: 'voice',
-        datasetUrl: cap.voiceFileUrl,
-        outputName: displayName,
-        displayName,
-        params: {
-          accuracy: advanced.accuracy,
-          needNoiseReduction: advanced.noiseReduction,
-          needVolumeNormalization: advanced.volumeNormalization,
-        },
-      },
-    })
-    window.dispatchEvent(new CustomEvent('sailor:trainingQueueUpdated'))
-    job.status = 'queued'
-    queuedName.value = displayName
-    ytUrl.value = ''; ytStart.value = ''; ytEnd.value = ''; ytRights.value = false; name.value = ''
-  } catch (e: any) {
-    job.status = 'failed'
-    job.error = e?.data?.message || e?.message || 'Could not capture that YouTube segment.'
-  }
-}
-
 onBeforeUnmount(revokePreview)
 </script>
 
@@ -235,55 +169,6 @@ onBeforeUnmount(revokePreview)
       </p>
 
       <audio v-if="previewUrl && !fileError" :src="previewUrl" controls preload="metadata" class="w-full h-9 mt-3" />
-    </section>
-
-    <!-- Or: capture from a YouTube timestamp range -->
-    <section v-if="youtubeCapture" class="mb-8">
-      <div class="flex items-center gap-2 mb-2">
-        <span class="h-px flex-1 bg-white/10" />
-        <span class="text-[11px] uppercase tracking-wider text-white/35">or capture from YouTube</span>
-        <span class="h-px flex-1 bg-white/10" />
-      </div>
-      <input
-        v-model="ytUrl"
-        type="url"
-        placeholder="Paste a YouTube URL"
-        class="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white/90 placeholder-white/30 outline-none focus:bg-white/[0.06] focus:border-white/25 transition-colors"
-      />
-      <div class="flex items-center gap-2 mt-2">
-        <input
-          v-model="ytStart"
-          type="text"
-          inputmode="numeric"
-          placeholder="Start (0:15)"
-          class="w-1/2 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-[13px] text-white/90 placeholder-white/30 outline-none focus:bg-white/[0.06] focus:border-white/25 transition-colors tabular-nums"
-        />
-        <input
-          v-model="ytEnd"
-          type="text"
-          inputmode="numeric"
-          placeholder="End (0:35)"
-          class="w-1/2 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-[13px] text-white/90 placeholder-white/30 outline-none focus:bg-white/[0.06] focus:border-white/25 transition-colors tabular-nums"
-        />
-      </div>
-      <p class="text-[11px] text-white/40 mt-1.5">Pick 10–60s of clean speech of the voice — mm:ss or seconds.</p>
-      <label class="flex items-start gap-2 mt-3 cursor-pointer">
-        <input type="checkbox" v-model="ytRights" class="size-3.5 mt-0.5 rounded border-white/20 bg-white/[0.04] cursor-pointer accent-white" />
-        <span class="text-[12px] text-white/70">I have the rights to clone this voice (my own content, a voice I’ve licensed, or public-domain audio).</span>
-      </label>
-      <button
-        type="button"
-        class="h-9 px-4 mt-3 rounded-lg text-[13px] font-medium transition-colors flex items-center gap-2"
-        :class="ytCanSubmit
-          ? 'bg-emerald-500/90 text-black hover:bg-emerald-400 cursor-pointer'
-          : 'bg-white/[0.06] text-white/35 cursor-not-allowed'"
-        :disabled="!ytCanSubmit"
-        @click="startYoutubeClone"
-      >
-        <Loader2 v-if="busy" class="size-4 animate-spin" />
-        <Mic v-else class="size-4" />
-        {{ busy ? 'Capturing…' : 'Capture & add to queue' }}
-      </button>
     </section>
 
     <!-- Advanced -->

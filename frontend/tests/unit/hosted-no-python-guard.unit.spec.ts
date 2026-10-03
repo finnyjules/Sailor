@@ -1,25 +1,14 @@
 /**
- * Step 3, LC7: the hosted image has no Python (R10.10). No server code may
- * start a Python process in hosted. Statically: every server file whose CODE
- * (comments stripped) names the repo venv, a python executable or a .py
- * script is one of the known, hosted-guarded routes, and each child-process
- * call in those files sits right behind an `isHosted()` refusal. A new Python
- * call anywhere else fails here until it is ported or guarded the same way.
- *
- * LC10: Frame Animate's keyer is ported (server/frame/clipKey.ts), so the
- * Animate route is no longer a guarded Python route; YouTube voice capture
- * (yt-dlp) remains the only one.
+ * Step 3 / C3: Sailor's server starts no Python at all. The last Python
+ * caller (voice capture from YouTube) is retired, so no server file may name
+ * the repo venv, a python executable or a .py script. A new Python call fails
+ * here until it is ported to Node.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const SERVER = resolve(__dirname, '../../server')
-
-/** Routes allowed to run a venv script, locally only (they refuse in hosted). */
-const GUARDED = new Set([
-  'api/voice-clone/from-youtube.post.ts',
-])
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
@@ -41,10 +30,14 @@ const SCRIPT = /['"`](python3?|py)['"`]|\.py['"`]/
 const CHILD = /from ['"](node:)?child_process['"]|require\(['"](node:)?child_process['"]\)/
 const files = walk(SERVER).map(p => ({ rel: relative(SERVER, p).split('\\').join('/'), src: code(readFileSync(p, 'utf8')) }))
 
-describe('no Python in hosted', () => {
-  it('only the guarded routes name the venv, a python executable or a .py script', () => {
+describe('no Python in the server', () => {
+  it('no server file names the venv, a python executable or a .py script', () => {
     const naming = files.filter(f => INTERPRETER.test(f.src) || (CHILD.test(f.src) && SCRIPT.test(f.src))).map(f => f.rel).sort()
-    expect(naming).toEqual([...GUARDED].sort())
+    expect(naming).toEqual([])
+  })
+
+  it('the YouTube voice capture route is gone', () => {
+    expect(files.map(f => f.rel)).not.toContain('api/voice-clone/from-youtube.post.ts')
   })
 
   it('the fal LoRA weights step lifts the tar in Node, not Python', () => {
@@ -53,27 +46,11 @@ describe('no Python in hosted', () => {
     expect(lora.src).toMatch(/extractTarMember/)
   })
 
-  it('Frame Animate keys in Node: no child process, no Python, no hosted refusal', () => {
+  it('Frame Animate keys in Node: no child process, no Python', () => {
     for (const rel of ['api/frame/animate.post.ts', 'frame/clipKey.ts', 'frame/clipKeyRun.ts']) {
       const src = files.find(f => f.rel === rel)!.src
       expect(src, rel).not.toMatch(/child_process|execFile|spawn\(|\.venv|python|\.py['"`]/)
     }
-    const route = files.find(f => f.rel === 'api/frame/animate.post.ts')!.src
-    expect(route).toMatch(/keyClip\(/)
-    expect(route).not.toMatch(/if \(isHosted\(\)\) throw createError\(\{ statusCode: 501/)
+    expect(files.find(f => f.rel === 'api/frame/animate.post.ts')!.src).toMatch(/keyClip\(/)
   })
-
-  for (const rel of GUARDED) {
-    it(`${rel} refuses in hosted first and guards every child process`, () => {
-      const src = files.find(f => f.rel === rel)!.src
-      const handler = src.slice(src.indexOf('defineEventHandler('))
-      // The handler's first statement is the hosted refusal.
-      expect(handler).toMatch(/^defineEventHandler\(async \(event\) => \{\s*(\/\/[^\n]*\s*)*if \(isHosted\(\)\) throw createError\(/)
-      // Every execFile/spawn call has an isHosted() check within the three lines before it.
-      const lines = src.split('\n')
-      const calls = lines.flatMap((l, i) => /\b(execFile|spawn|execFileSync|spawnSync|exec)\(/.test(l) && !/import/.test(l) ? [i] : [])
-      expect(calls.length).toBeGreaterThan(0)
-      for (const i of calls) expect(lines.slice(Math.max(0, i - 3), i).join('\n')).toMatch(/isHosted\(\)/)
-    })
-  }
 })

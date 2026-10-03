@@ -9,8 +9,8 @@
  * fal — NOT Replicate Files — because minimax/voice-cloning is a PROXY that
  * fetches voice_file from MiniMax's own external servers; an auth-gated
  * Replicate Files URL 401s there and surfaces as the misleading "invalid
- * params, invalid file ext for voice clone". Same fix the /from-youtube route
- * and the lip-sync Kling path use. See server/utils/falStorage.ts.
+ * params, invalid file ext for voice clone". Same fix
+ * the lip-sync Kling path uses. See server/utils/falStorage.ts.
  */
 import { readUploadedFile } from '~~/server/utils/multipart'
 

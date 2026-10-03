@@ -6,8 +6,7 @@
  * external servers. Those servers can't read an auth-gated Replicate Files URL
  * (401 without a token), so the fetch fails — for voice-cloning it surfaces as
  * the misleading "invalid params, invalid file ext for voice clone". A
- * fal-hosted URL is publicly fetchable, so the proxy succeeds. Mirrors the
- * Python helper scripts/youtube_voice_clip.py `_upload_fal`.
+ * fal-hosted URL is publicly fetchable, so the proxy succeeds.
  *
  * The fal key is server-only: FAL_KEY (or NUXT_FAL_TOKEN) from the env or
  * frontend/.env (Nuxt loads .env into process.env).
