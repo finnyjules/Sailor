@@ -1254,14 +1254,16 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], valueInputs: { images: PICTURE_SAVER_KINDS }, outputsNotLinked: [0] },
   // ── cards (step 3, R1.6): Smart Layout (server/runner/cards/smartLayout.ts) ──
   // It renders, so it counts as work. Its pictures are a list (one per
-  // output), which only Save image and Preview image may read; its layout
-  // must be one the runner reads as Python does, within the pixel cap.
+  // output), which only Save image, Preview image and the Image card (LC9)
+  // may read; the Image card hands the list on, so its own readers are held
+  // to the same (LIST_PASSERS). Its layout must be one the runner reads as
+  // Python does, within the pixel cap.
   SmartLayout: {
     family: 'cards', local: 'render',
     valueInputs: { brand: ['text'], ...Object.fromEntries(TEXT_LAYERS.map(k => [k, ['text'] as const])) },
     imageInputs: IMAGE_LAYERS,
     widgets: { layout: { type: 'STRING', required: true }, aspects: { type: 'STRING', required: true }, brand_kit: { type: 'STRING' } },
-    listReaders: ['SaveImage', 'PreviewImage'],
+    listReaders: ['SaveImage', 'PreviewImage', 'Image'],
     inputCheck: 'smart-layout',
   },
   // ── shader-bake (step 3, R2.10): the Shader effect, replayed from the browser's bake ──
@@ -2324,6 +2326,27 @@ function hasJsonList(v: unknown, key: string): boolean {
  */
 const LINK_SOURCE_FAMILY: Readonly<Record<string, RunnerFamily>> = { ImageToMask: 'cards' }
 
+/**
+ * LC9: the list readers that hand the list on. Python runs the Image card
+ * once per item of a list (it doesn't declare INPUT_IS_LIST), so its outputs
+ * are lists too and whatever reads it would run once per item as well: its
+ * own readers are held to the same list readers.
+ */
+const LIST_PASSERS: ReadonlySet<string> = new Set(['Image'])
+
+/** Whether every node reading `id` (and, through a list passer, every node reading that) is one of `listReaders`. */
+function listReadOnlyBy(prompt: ApiPrompt, id: string, listReaders: readonly string[], depth = 0): boolean {
+  if (depth > 64) return false
+  for (const [rid, node] of Object.entries(prompt)) {
+    for (const l of linksOf(node)) {
+      if (l.from !== id) continue
+      if (!listReaders.includes(node.class_type)) return false
+      if (LIST_PASSERS.has(node.class_type) && !listReadOnlyBy(prompt, rid, listReaders, depth + 1)) return false
+    }
+  }
+  return true
+}
+
 /** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
 function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, families: ReadonlySet<RunnerFamily>, opts: RunnerEligibilityOptions = {}): boolean {
   const notLinked = rule.outputsNotLinked ?? []
@@ -2345,6 +2368,7 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
       }
     }
     if (rule.needsReader && !readers) return false
+    if (listReaders && !listReadOnlyBy(prompt, id, listReaders)) return false
   }
   const inputs = prompt[id]?.inputs ?? {}
   for (const name of rule.imageInputs ?? []) {

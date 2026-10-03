@@ -1424,10 +1424,15 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     case 'Image': {
       let files: OutputFile[]
+      // LC9: a list (Smart Layout's pictures): Python runs the card once per item, each a batch of one, so
+      // `batch_index` slices nothing, and the card hands the list on (its readers run once per item too).
+      let list = false
       if (isLink(inputs.images)) {
         files = linked('images')
+        const v = ctx.valueFrom?.(inputs.images)
+        list = v?.kind === 'files' && !!v.list
         const bi = typeof inputs.batch_index === 'number' ? inputs.batch_index : -1
-        if (bi >= 0 && files.length > 1) files = [files[Math.min(bi, files.length - 1)]!]
+        if (!list && bi >= 0 && files.length > 1) files = [files[Math.min(bi, files.length - 1)]!]
       }
       else {
         const f = parseInputFileRef(inputs.image)
@@ -1435,7 +1440,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       }
       // A picture the runner made (kept bytes) is never served by /view: the
       // card hands the kept file on and shows a copy in temp (R1.5).
-      if (files.some(f => f.type === 'kept')) return imageCardShowingKept(files)
+      if (files.some(f => f.type === 'kept')) return imageCardShowingKept(files, list)
       return { kind: 'pass', files, ui: { images: files } }
     }
 

@@ -193,7 +193,7 @@ describe('fix round 1 (a): Sailor classes that still need the local engine are n
   it('the list names each class with its plan; every Sailor class the runner doesn’t run is on it but the Timeline (editor-only, R9.1)', () => {
     expect(Object.keys(NEEDS_LOCAL_ENGINE).sort()).toEqual([
       'ClarityUpscaleRemoteNode', 'FilmShotNode', 'FluxKontextRemoteNode', 'FluxProRemoteNode', 'IdeogramV3TurboRemoteNode', 'KineticType',
-      'KlingVideoRemoteNode', 'PreviewVideo', 'RenderType', 'Seedance2RemoteNode', 'SmartLayout', 'Text', 'Veo3RemoteNode',
+      'KlingVideoRemoteNode', 'PreviewVideo', 'RenderType', 'Seedance2RemoteNode', 'Text', 'Veo3RemoteNode',
     ])
     for (const ct of SAILOR_NOT_TAKEN) if (ct !== 'Timeline') expect(NEEDS_LOCAL_ENGINE[ct], ct).toBeDefined()
     for (const [ct, e] of Object.entries(NEEDS_LOCAL_ENGINE)) {
@@ -211,12 +211,14 @@ describe('fix round 1 (a): Sailor classes that still need the local engine are n
     expect(route(renderType, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Poster type”: ${NEEDS_LOCAL_ENGINE_WORDS}` })
     expect(route(renderType, { engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['Poster type']) })
   })
-  it('a Smart Layout read by an Image card (28 saved graphs) goes there, named', () => {
-    const p: ApiPrompt = {
-      lay: { class_type: 'SmartLayout', inputs: { layout: '{}', aspects: '1x1' } },
-      i: { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true, batch_index: -1, images: ['lay', 0] } },
-    }
-    expect(route(p)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Layout']) } })
+  it('LC9: a Smart Layout read by an Image card (28 saved graphs) is off the list: the runner takes it', () => {
+    expect(NEEDS_LOCAL_ENGINE.SmartLayout).toBeUndefined()
+    const card = (from: Link) => ({ class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true, batch_index: -1, images: from } })
+    const p: ApiPrompt = { lay: { class_type: 'SmartLayout', inputs: { layout: '', aspects: '300x250,320x50', brand_kit: '' } }, i: card(['lay', 0]) }
+    expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
+    // The Image card hands the list on: what reads it is held to Save image, Preview image and another Image card.
+    expect(runnerTakesWorkflow({ ...p, j: card(['i', 0]), s: saveImage(['j', 0]) }, EVERY)).toBe(true)
+    expect(runnerTakesWorkflow({ ...p, b: blur(['i', 0]), s: saveImage(['b', 0]) }, EVERY)).toBe(false)
   })
   it('a node with a plainer reason is refused, not sent: a switched-off family stays refused', () => {
     const off = new Set<RunnerFamily>([...EVERY].filter(f => f !== 'effects-blur'))

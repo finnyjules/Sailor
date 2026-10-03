@@ -283,13 +283,15 @@ export type NeedsLocalEnginePlan = 'port' | 'retire' | 'keep local'
  * are the saved graphs holding each (2026-10-02: 1,251 graphs of 1,566
  * projects, user/sailor/projects and its migration backup).
  *
+ * Ported off the list: Smart Layout (LC9: the runner hands its pictures to
+ * an Image card too, eligibility.ts LIST_PASSERS).
+ *
  * Two Shader effect cases are the same by their setting, not their class
  * (NEEDS_LOCAL_ENGINE_SHADER_CASES, ./needsEngine.ts).
  */
 export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {
   PreviewVideo: { plan: 'port', savedGraphs: 0, why: 'Preview video: a temporary Save video, which the runner already does; no saved graph uses it.' },
   FilmShotNode: { plan: 'port', savedGraphs: 11, why: 'Film a shot: the runner takes it only for the models and settings it films (eligibility.ts filmShotTaken).' },
-  SmartLayout: { plan: 'port', savedGraphs: 28, why: 'Smart Layout read by an Image card (the runner hands its pictures only to Save image and Preview image).' },
   Text: { plan: 'port', savedGraphs: 2, why: 'A Text card showing a LoRA node’s log (the runner doesn’t hand that text on).' },
   RenderType: { plan: 'retire', savedGraphs: 0, why: 'Font Playground: no saved graph uses it and nothing in the app builds it; retire unless R11.10 finds a use.' },
   KineticType: { plan: 'retire', savedGraphs: 0, why: 'Kinetic Typography: migrated to Vector Type on open (app/lib/vectortype/migrateKinetic.ts).' },

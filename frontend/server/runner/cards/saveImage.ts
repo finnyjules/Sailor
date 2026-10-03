@@ -601,9 +601,11 @@ export function planPreviewImage(ctx: PlanContext): NodePlan {
  * An Image card fed a picture the runner made (kept bytes, which /view never
  * serves): it hands the files on as they are and shows a copy of each kept
  * one in temp, named by its bytes (`sailor_<sha256>.<ext>`), as Python's card
- * shows its picture from temp.
+ * shows its picture from temp. `list` (LC9): fed a list (Smart Layout's
+ * pictures), Python runs the card once per item and its outputs are lists:
+ * the values stay a list, so Save image saves each item as its own run.
  */
-export function imageCardShowingKept(files: OutputFile[]): NodePlan {
+export function imageCardShowingKept(files: OutputFile[], list = false): NodePlan {
   return {
     kind: 'derive',
     async derive(io) {
@@ -614,7 +616,8 @@ export function imageCardShowingKept(files: OutputFile[]): NodePlan {
       }
       const images = files.map(f => shown.get(keyOf(f)) ?? f)
       // Slot 1 reads the files too, as a pass-through card's outputs always did.
-      return { values: { 0: { kind: 'files', files }, 1: { kind: 'files', files } }, ui: { images } }
+      const value = list ? { kind: 'files' as const, files, list: true as const } : { kind: 'files' as const, files }
+      return { values: { 0: value, 1: value }, ui: { images } }
     },
   }
 }
