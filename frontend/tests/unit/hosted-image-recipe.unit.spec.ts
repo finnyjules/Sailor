@@ -176,7 +176,7 @@ describe('.dockerignore', () => {
       'frontend/server/utils/inputUploads.ts',
       'blueprints/Brightness and Contrast.json',
       'shader_effects/aurora.frag',
-      'custom_nodes/sailor_bridge/scene_defaults/a.json',
+      'scenes/scene_defaults/a.json',
       'models/loras/x.json',
     ]) {
       expect(ignored(p), p).toBe(false)

@@ -1,0 +1,62 @@
+{
+  "params": {
+    "text": "LET'S GO",
+    "font": "Work Sans",
+    "typeWeight": 900,
+    "typeX": 35,
+    "typeStroke": 0,
+    "tracking": 43,
+    "lineSpace": 20,
+    "fontHeight": 1,
+    "rowHeight": 1,
+    "rows": 14,
+    "mirror": "off",
+    "noStripes": "off",
+    "waveLength": 0.13,
+    "waveSpeed": 1,
+    "waveSlope": 1,
+    "scale": 1,
+    "rotateX": 0,
+    "rotateY": 0,
+    "rotateZ": 0,
+    "fills": "[{\"type\":\"qr\",\"a\":\"#FFB984\",\"b\":\"#FF99F7\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":8},{\"type\":\"solid\",\"a\":\"#0E6BFF\",\"b\":\"#040541\",\"textColor\":\"#040541\",\"angle\":45,\"density\":8},{\"type\":\"noise\",\"a\":\"#ffffff\",\"b\":\"#000000\",\"textColor\":\"#e2f75a\",\"angle\":45,\"density\":8}]",
+    "gradientMode": "off"
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#0e0e10",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

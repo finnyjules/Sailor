@@ -15,7 +15,7 @@ import { getRequestHeader } from 'h3'
 import { engineFolder } from './paths'
 import { catalogDir, shaderAssetRoute, shaderEffectsRoute } from './shaderCatalog'
 import {
-  sailorBridgeDir,
+  sailorScenesDir,
   spaceDefaultSaveRoute,
   spaceDefaultsRoute,
   spaceThumbnailGetRoute,
@@ -115,14 +115,14 @@ export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyR
     }
     case 'spaceDefaults':
     case 'spaceThumbnails': {
-      const bridge = sailorBridgeDir()
+      const bridge = sailorScenesDir()
       if (!bridge) return NO_DATA_FOLDER
       return h.name === 'spaceDefaults' ? spaceDefaultsRoute(bridge) : spaceThumbnailsRoute(bridge)
     }
     case 'spaceDefaultSave':
     case 'spaceThumbnailGet':
     case 'spaceThumbnailSave': {
-      const bridge = sailorBridgeDir()
+      const bridge = sailorScenesDir()
       if (!bridge) return NO_DATA_FOLDER
       if (h.name === 'spaceDefaultSave') return spaceDefaultSaveRoute(bridge, h.effectId, read.json)
       if (h.name === 'spaceThumbnailGet') return spaceThumbnailGetRoute(bridge, h.effectId)

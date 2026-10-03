@@ -1,0 +1,91 @@
+{
+  "params": {
+    "text": "LET'S\nMAKE\nDOPE\nTHINGS",
+    "font": "Work Sans",
+    "typeHeight": 100,
+    "tracking": 40,
+    "typeStroke": 0,
+    "textRepeat": 4,
+    "ribbonHeight": 44,
+    "ribbonStretch": 18,
+    "ribbonCount": 1,
+    "ribbonSpacing": 2,
+    "ribbonOffset": 0.2,
+    "alternate": "on",
+    "segmentCount": 120,
+    "snakeAmplitude": 2.4,
+    "snakeFrequency": 1.5,
+    "snakeAmplitudeZ": 0,
+    "snakeFrequencyZ": 1.5,
+    "speed": 43,
+    "scale": 1,
+    "rotateX": -1.07,
+    "rotateY": 0,
+    "rotateZ": -0.2,
+    "ribbonRotateX": 0,
+    "ribbonRotateY": 0,
+    "ribbonRotateZ": 0,
+    "fills": "[{\"type\":\"gradient\",\"a\":\"#1373ff\",\"b\":\"#878787\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":28},{\"type\":\"gradient\",\"a\":\"#d329ff\",\"b\":\"#000000\",\"textColor\":\"#ffffff\",\"angle\":45,\"density\":8},{\"type\":\"solid\",\"a\":\"#f55353\",\"b\":\"#000000\",\"textColor\":\"#ffffff\",\"angle\":45,\"density\":8},{\"type\":\"solid\",\"a\":\"#ebff51\",\"b\":\"#000000\",\"textColor\":\"#ffffff\",\"angle\":45,\"density\":8}]",
+    "bSideColor": "#101014",
+    "shadows": "on",
+    "shadowStrength": 0.5,
+    "shadowSoftness": 10,
+    "lightAngleX": 0.6,
+    "lightAngleY": 0.5,
+    "textGap": 6,
+    "straightLength": 530,
+    "lengthJitter": 0,
+    "lengthSeed": 1,
+    "arcRadius": 70,
+    "segmentSpace": 26,
+    "rows": 7,
+    "count": 1,
+    "frontMode": "gradient",
+    "textColor": "#111111",
+    "noStripes": "off",
+    "backMode": "grid",
+    "backColorA": "#111111",
+    "backColorB": "#ffffff",
+    "backDensity": 1,
+    "strokeWidth": 0,
+    "frontStrokeColor": "#000000",
+    "backStrokeColor": "#000000"
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#0e0e10",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

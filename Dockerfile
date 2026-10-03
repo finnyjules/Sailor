@@ -104,8 +104,8 @@ COPY --from=depth-model /opt/depth-model /opt/depth-model
 ENV NUXT_DEPTH_MODEL_DIR=/opt/depth-model
 
 # Sailor's data folders and files beside the server: LoRA sidecars and covers,
-# blueprints, shader_effects, custom_nodes/sailor_bridge's Timeline scene
-# defaults, and the frontend's own data the server reads by path
+# blueprints, shader_effects, scenes/ (the Timeline scene
+# defaults and thumbnails), and the frontend's own data the server reads by path
 # (server/runner/video/fonts/ for captions, server/runner/effects/asciiGlyphs.bin
 # for Ascii, the stored node list). .dockerignore keeps ComfyUI's Python source,
 # requirements and every *.py out of the image.

@@ -181,7 +181,7 @@ describe('shader_effects', () => {
 })
 
 describe('Space Type presets and thumbnails', () => {
-  const bridge = () => path.join(root, 'custom_nodes', 'sailor_bridge')
+  const bridge = () => path.join(root, 'scenes')
 
   it('save a preset, list it; the file is written the way json.dump(indent=2) writes it', async () => {
     expect(await post('/sailor/space_default/burst', { text: 'é', n: [1, 2] })).toMatchObject({ status: 200, body: { ok: true } })

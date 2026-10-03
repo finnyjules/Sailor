@@ -8,15 +8,16 @@
  *   POST /sailor/space_thumbnail/{effect_id} (:1963) save one thumbnail (raw PNG bytes)
  *   GET  /sailor/space_thumbnail/{effect_id} (:1949) one thumbnail
  *
- * Same folders as `_scene_defaults_dir()` / `_scene_thumbnails_dir()`:
- * `custom_nodes/sailor_bridge/scene_defaults` and `.../scene_thumbnails` under
- * the repo root, which is the engine root. They follow the engine root, so
- * unit tests (whose engine root is a temp folder) never touch the real ones.
+ * The folders are `scenes/scene_defaults` and `scenes/scene_thumbnails` under
+ * the data root (they lived under `custom_nodes/sailor_bridge/` until C2; a
+ * legacy folder is copied across, file by file, the first time it is seen).
+ * They follow the data root, so unit tests (whose root is a temp folder) never
+ * touch the real ones.
  * Presets are written as `json.dump(scene, f, indent=2)` writes them.
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveEngineRoot } from '../utils/inputUploads'
+import { resolveDataRoot } from '../utils/dataRoot'
 import { pyDumps } from './pyJson'
 import { isDir, isFile, listdir, writeFileAtomic } from './paths'
 
@@ -28,10 +29,30 @@ export interface PresetResult {
   headers?: Record<string, string>
 }
 
-/** `custom_nodes/sailor_bridge` under the engine root; null when the engine root is unknown. */
-export function sailorBridgeDir(): string | null {
-  const root = resolveEngineRoot()
-  return root ? path.join(root, 'custom_nodes', 'sailor_bridge') : null
+/** Copy files the new folder lacks from the old `custom_nodes/sailor_bridge` one (never overwrites). */
+function migrateLegacyScenes(root: string, scenes: string): void {
+  const legacy = path.join(root, 'custom_nodes', 'sailor_bridge')
+  for (const sub of ['scene_defaults', 'scene_thumbnails']) {
+    const from = path.join(legacy, sub)
+    if (!isDir(from)) continue
+    try {
+      fs.mkdirSync(path.join(scenes, sub), { recursive: true })
+      for (const fn of listdir(from)) {
+        const dest = path.join(scenes, sub, fn)
+        if (isFile(path.join(from, fn)) && !fs.existsSync(dest)) fs.copyFileSync(path.join(from, fn), dest)
+      }
+    }
+    catch {}
+  }
+}
+
+/** `scenes/` under the data root; null when the data root is unknown. */
+export function sailorScenesDir(): string | null {
+  const root = resolveDataRoot()
+  if (!root) return null
+  const scenes = path.join(root, 'scenes')
+  migrateLegacyScenes(root, scenes)
+  return scenes
 }
 
 /** `_scene_defaults_dir()` */

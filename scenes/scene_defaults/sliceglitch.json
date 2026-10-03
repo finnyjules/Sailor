@@ -1,0 +1,87 @@
+{
+  "params": {
+    "text": "LET'S\nMAKE\nDOPE\nTHINGS",
+    "font": "Work Sans",
+    "typeWeight": 900,
+    "tracking": -11,
+    "lineTight": 0.85,
+    "lineSpacing": 0.9,
+    "fitWidth": 0.62,
+    "baseSlant": -0.24,
+    "fontVaryUnit": "character",
+    "weightJitter": 0.74,
+    "slantJitter": 0.6,
+    "fontSeed": 808,
+    "textStroke": 8.5,
+    "strokeColor": "#000000",
+    "palette": "[{\"type\":\"qr\",\"a\":\"#FFB984\",\"b\":\"#FF99F7\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":8},{\"type\":\"solid\",\"a\":\"#0E6BFF\",\"b\":\"#040541\",\"textColor\":\"#040541\",\"angle\":45,\"density\":8},{\"type\":\"stripes\",\"a\":\"#FF99F7\",\"b\":\"#FF6259\",\"textColor\":\"#23123C\",\"angle\":45,\"density\":8},{\"type\":\"ombre\",\"a\":\"#54F4CF\",\"b\":\"#F2FF5A\",\"textColor\":\"#23123C\",\"angle\":45,\"density\":8},{\"type\":\"checkerboard\",\"a\":\"#F2FF5A\",\"b\":\"#FF99F7\",\"textColor\":\"#232323\",\"angle\":45,\"density\":8},{\"type\":\"grid\",\"a\":\"#FF6259\",\"b\":\"#FFB984\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":8}]",
+    "blockUnit": "character",
+    "blockDensity": 3,
+    "blockHeight": 1,
+    "blockSlant": -0.02,
+    "coverage": 1,
+    "blockOpacity": 1,
+    "typeColorMode": "mixed",
+    "bgColor": "#141414",
+    "glitchAmount": 1,
+    "seed": 0,
+    "bandShift": 70,
+    "tearAmount": 6,
+    "tearFrequency": 48,
+    "sliceH": 20,
+    "rgbSplit": 0.004,
+    "doodlesOn": "on",
+    "doodleCount": 19,
+    "doodleSize": 60,
+    "doodleSizeJitter": 0.4,
+    "doodleAreaW": 1,
+    "doodleAreaH": 0.8,
+    "doodleColorMode": "palette",
+    "doodleWidth": 3,
+    "doodleStroke": 0,
+    "doodleStrokeColor": "#000000",
+    "revealMode": "animate",
+    "speed": 0,
+    "sceneCount": 4,
+    "sceneTransition": 0.35,
+    "transitionTear": 2,
+    "ease": "in-out"
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "perspective",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#000000",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

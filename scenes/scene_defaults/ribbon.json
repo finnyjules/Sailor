@@ -1,0 +1,73 @@
+{
+  "params": {
+    "text": "LET'S GO",
+    "font": "Work Sans",
+    "typeHeight": 176,
+    "tracking": 58,
+    "typeStroke": 6.5,
+    "textRepeat": 8,
+    "ribbonHeight": 0.65,
+    "ribbonStretch": 22,
+    "ribbonCount": 4,
+    "ribbonSpacing": 2,
+    "ribbonOffset": 0.04,
+    "alternate": "on",
+    "segmentCount": 240,
+    "snakeAmplitude": 2.4,
+    "snakeFrequency": 1.5,
+    "snakeAmplitudeZ": 1.5,
+    "snakeFrequencyZ": 2.1,
+    "speed": 0.6,
+    "scale": 1,
+    "rotateX": 0,
+    "rotateY": 0,
+    "rotateZ": 0,
+    "ribbonRotateX": -1.02,
+    "ribbonRotateY": 0,
+    "ribbonRotateZ": 0,
+    "fills": "[{\"type\":\"stripes\",\"a\":\"#FF99F7\",\"b\":\"#FF6259\",\"textColor\":\"#23123C\",\"angle\":45,\"density\":8}]",
+    "bSideColor": "#101014",
+    "shadows": "on",
+    "shadowStrength": 0.55,
+    "shadowSoftness": 10,
+    "lightAngleX": 0.6,
+    "lightAngleY": 0.5
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#0e0e10",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

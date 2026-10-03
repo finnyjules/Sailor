@@ -1,0 +1,86 @@
+{
+  "params": {
+    "text": "DOPE THINGS",
+    "font": "Work Sans",
+    "typeHeight": 180,
+    "tracking": 0,
+    "typeStroke": 0,
+    "textRepeat": 4,
+    "ribbonHeight": 1.1,
+    "ribbonStretch": 18,
+    "ribbonCount": 1,
+    "ribbonSpacing": 2,
+    "ribbonOffset": 0.2,
+    "alternate": "on",
+    "segmentCount": 120,
+    "snakeAmplitude": 2.4,
+    "snakeFrequency": 1.5,
+    "snakeAmplitudeZ": 0,
+    "snakeFrequencyZ": 1.5,
+    "speed": 0.6,
+    "scale": 0.7,
+    "rotateX": 0.07,
+    "rotateY": 0,
+    "rotateZ": 0,
+    "ribbonRotateX": 0,
+    "ribbonRotateY": 0,
+    "ribbonRotateZ": 0,
+    "fills": "[{\"type\":\"ombre\",\"a\":\"#54F4CF\",\"b\":\"#F2FF5A\",\"textColor\":\"#23123C\",\"angle\":45,\"density\":8},{\"type\":\"solid\",\"a\":\"#0E6BFF\",\"b\":\"#040541\",\"textColor\":\"#040541\",\"angle\":45,\"density\":8},{\"type\":\"grid\",\"a\":\"#FF6259\",\"b\":\"#FFB984\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":8},{\"type\":\"checkerboard\",\"a\":\"#F2FF5A\",\"b\":\"#FF99F7\",\"textColor\":\"#232323\",\"angle\":45,\"density\":8}]",
+    "bSideColor": "#101014",
+    "shadows": "on",
+    "shadowStrength": 0.5,
+    "shadowSoftness": 10,
+    "lightAngleX": 0.6,
+    "lightAngleY": 0.5,
+    "typeWeight": 100,
+    "steps": 26,
+    "rotStepX": -0.06,
+    "rotStepY": 0,
+    "rotStepZ": 0,
+    "scaleStep": 1,
+    "spreadX": 0,
+    "spreadY": -0.07,
+    "style": "outline",
+    "strokeWidth": 1,
+    "blendMode": "additive",
+    "gradientMode": "on",
+    "spin": 0
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "perspective",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#0e0e10",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

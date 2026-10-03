@@ -1,0 +1,88 @@
+{
+  "params": {
+    "text": "LET'S MAKE \nDOPE THINGS \nTOGETHER",
+    "font": "Work Sans",
+    "typeHeight": 180,
+    "tracking": 40,
+    "typeStroke": 0,
+    "textRepeat": 4,
+    "ribbonHeight": 1.1,
+    "ribbonStretch": 18,
+    "ribbonCount": 1,
+    "ribbonSpacing": 2,
+    "ribbonOffset": 0.2,
+    "alternate": "on",
+    "segmentCount": 120,
+    "snakeAmplitude": 2.4,
+    "snakeFrequency": 1.5,
+    "snakeAmplitudeZ": 0,
+    "snakeFrequencyZ": 1.5,
+    "speed": 1,
+    "scale": 1,
+    "rotateX": 0,
+    "rotateY": 0,
+    "rotateZ": 0,
+    "ribbonRotateX": 0,
+    "ribbonRotateY": 0,
+    "ribbonRotateZ": 0,
+    "fills": "[{\"type\":\"stripes\",\"a\":\"#FF99F7\",\"b\":\"#FF6259\",\"textColor\":\"#23123C\",\"angle\":45,\"density\":8}]",
+    "bSideColor": "#101014",
+    "shadows": "on",
+    "shadowStrength": 0.5,
+    "shadowSoftness": 10,
+    "lightAngleX": 0.6,
+    "lightAngleY": 0.5,
+    "typeSize": 100,
+    "shape": "Rectangle",
+    "shapeAspect": 1,
+    "layers": 14,
+    "perspective": 35,
+    "depth": 0.5,
+    "innerWidth": 0,
+    "innerHeight": 0,
+    "rotate": 0,
+    "view": "Front",
+    "colors": "[{\"type\":\"solid\",\"a\":\"#000000\",\"b\":\"#040541\",\"textColor\":\"#ffffff\",\"angle\":45,\"density\":8}]",
+    "shadow": 0,
+    "strokeWidth": 0,
+    "strokeColor": "#000000",
+    "direction": "forward"
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#000000",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

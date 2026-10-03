@@ -1,0 +1,64 @@
+{
+  "params": {
+    "text": "DOPE\nTHINGS",
+    "font": "Work Sans",
+    "typeWeight": 900,
+    "tracking": 0.94,
+    "rowSpacing": 2,
+    "arc": 3.1,
+    "radius": 1.85,
+    "repeat": 8,
+    "hollow": "off",
+    "roll": -0.54,
+    "rollRandom": 0.1,
+    "spin": 1,
+    "scatter": 0,
+    "tumble": 0.05,
+    "tumbleMotion": "static",
+    "holdFraction": 0,
+    "posOffset": 0.2,
+    "sizeVary": 0.04,
+    "fills": "[{\"type\":\"grid\",\"a\":\"#FF6259\",\"b\":\"#FFB984\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":8},{\"type\":\"checkerboard\",\"a\":\"#F2FF5A\",\"b\":\"#FF99F7\",\"textColor\":\"#232323\",\"angle\":45,\"density\":8},{\"type\":\"solid\",\"a\":\"#0E6BFF\",\"b\":\"#040541\",\"textColor\":\"#040541\",\"angle\":45,\"density\":8},{\"type\":\"qr\",\"a\":\"#FFB984\",\"b\":\"#FF99F7\",\"textColor\":\"#DDE3EF\",\"angle\":45,\"density\":8},{\"type\":\"ombre\",\"a\":\"#54F4CF\",\"b\":\"#F2FF5A\",\"textColor\":\"#23123C\",\"angle\":45,\"density\":8}]",
+    "scale": 1.75,
+    "rotateX": 0.04,
+    "rotateY": 0.63,
+    "rotateZ": 0
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#0e0e10",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

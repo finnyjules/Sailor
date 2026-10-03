@@ -1,7 +1,7 @@
 /**
  * Where Sailor's data folders live (C1, ComfyUI code removal): the one folder
  * that holds `input/`, `output/`, `temp/`, `user/` and `models/` (and the
- * shipped `blueprints/`, `shader_effects/`, `custom_nodes/sailor_bridge/`).
+ * shipped `blueprints/`, `shader_effects/`, `scenes/`).
  * Every server path into those folders resolves through this module.
  *
  * - `SAILOR_DATA_ROOT` names it explicitly (the hosted image sets `/app`).

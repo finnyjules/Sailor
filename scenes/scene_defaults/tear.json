@@ -1,0 +1,62 @@
+{
+  "params": {
+    "text": "DOPE THINGS",
+    "textCase": "upper",
+    "font": "Work Sans",
+    "typeYScale": 320,
+    "typeWeight": 700,
+    "tracking": 0,
+    "tearStyle": "ripple",
+    "tearDir": "vertical",
+    "tearAmount": 0.03,
+    "tearFreq": 11,
+    "tearSlant": 0,
+    "tearEdge": 0.64,
+    "tearOverlap": 0.02,
+    "tearPhase": 0.69,
+    "speed": 2,
+    "scale": 2.5,
+    "rotateX": 0,
+    "rotateY": 0,
+    "rotateZ": 0,
+    "textColor": "#ffffff",
+    "bgColor": "#000000"
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#000000",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

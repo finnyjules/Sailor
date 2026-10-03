@@ -8,8 +8,8 @@
 
 # Python — the image carries no Python and no ComfyUI (step 3, R10.10).
 # ComfyUI's source, its requirements and every *.py stay out; Sailor's data
-# folders (blueprints, shader_effects, custom_nodes/sailor_bridge's scene
-# defaults, models/loras sidecars) still ship.
+# folders (blueprints, shader_effects, scenes' Timeline scene
+# defaults and thumbnails, models/loras sidecars) still ship.
 .venv
 **/__pycache__
 **/*.py

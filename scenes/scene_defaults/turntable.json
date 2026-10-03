@@ -1,0 +1,60 @@
+{
+  "params": {
+    "text": "DOPE THINGS",
+    "textCase": "asis",
+    "font": "Work Sans",
+    "typeYScale": 214,
+    "typeWeight": 900,
+    "tracking": 22,
+    "radius": 3.7,
+    "ttRings": 10,
+    "ttCols": 1,
+    "ttRows": 7,
+    "speed": 1,
+    "ttGradient": -4,
+    "ttTwist": 0,
+    "direction": "cw",
+    "scale": 1.85,
+    "rotateX": 0,
+    "rotateY": 0,
+    "rotateZ": 0,
+    "fills": "[{\"type\":\"gradient\",\"a\":\"#F2FF5A\",\"b\":\"#FF99F7\",\"textColor\":\"#232323\",\"angle\":45,\"density\":8}]"
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#000000",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "params": {
+    "text": "LET'SGO",
+    "font": "Work Sans",
+    "typeHeight": 130,
+    "tracking": 0,
+    "count": 21,
+    "offsetX": 0,
+    "offsetY": -0.5,
+    "offsetZ": 0,
+    "perspective": 1,
+    "spacingCurve": 0,
+    "layout": "bidirectional",
+    "showBox": "off",
+    "cardPadX": 0.4,
+    "cardPadY": 0.15,
+    "cardColor": "#000000",
+    "cardOpacity": 1,
+    "zOrder": "base",
+    "baseColor": "#ffffff",
+    "endColor": "#ffffff",
+    "baseOpacity": 1,
+    "endOpacity": 0.35,
+    "baseStroke": 0,
+    "endStroke": 0,
+    "baseScale": 1,
+    "endScale": 1,
+    "driftSpeed": 0,
+    "scale": 1,
+    "rotateX": 0,
+    "rotateY": 0,
+    "rotateZ": 0
+  },
+  "post": {
+    "bloom": false,
+    "bloomStrength": 0.6,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 0.8,
+    "color": false,
+    "exposure": 1,
+    "contrast": 1,
+    "saturation": 1,
+    "hue": 0,
+    "chroma": false,
+    "chromaAmount": 0.25,
+    "blur": false,
+    "blurAmount": 0.01
+  },
+  "projection": "isometric",
+  "panX": 0,
+  "panY": 0,
+  "bgColor": "#0e0e10",
+  "gradientStops": [
+    {
+      "color": "#3b5bff",
+      "on": true
+    },
+    {
+      "color": "#ff3b3b",
+      "on": true
+    },
+    {
+      "color": "#ffd23b",
+      "on": true
+    },
+    {
+      "color": "#ffffff",
+      "on": false
+    }
+  ]
+}
