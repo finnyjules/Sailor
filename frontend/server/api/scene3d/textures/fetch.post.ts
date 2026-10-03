@@ -18,8 +18,8 @@ const DOWNLOAD_TIMEOUT_MS = 60_000
 const inflight = new Map<string, Promise<TextureManifest>>()
 
 /**
- * The engine's `input/`, resolved per request by the shared walk-up
- * (`main.py` + `input/`, `SAILOR_ENGINE_ROOT` honoured) rather than the old
+ * The data root's `input/`, resolved per request by the shared resolver
+ * (`SAILOR_DATA_ROOT`, else the repo-root walk; server/utils/dataRoot.ts) rather than the old
  * `join(process.cwd(), '..')` guess. inputUploads.ts documents that exact
  * guess as a bug it already fixed: a Nitro process launched from anywhere but
  * `frontend/` wrote the maps into a phantom directory, returned 200, and then

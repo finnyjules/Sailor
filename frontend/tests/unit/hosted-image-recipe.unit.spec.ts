@@ -120,8 +120,9 @@ describe('the Dockerfile', () => {
     expect(runtime.body).toMatch(/^COPY --from=web \/build\/frontend\/\.output \/app\/frontend\/\.output$/m)
   })
 
-  it('names the data root, since there is no main.py for the walk to find', () => {
-    expect(runtime.body).toMatch(/^ENV SAILOR_ENGINE_ROOT=\/app$/m)
+  it('names the data root by its new name, at the same folder (C1)', () => {
+    expect(runtime.body).toMatch(/^ENV SAILOR_DATA_ROOT=\/app$/m)
+    expect(code(dockerfile)).not.toMatch(/SAILOR_ENGINE_ROOT=/)
   })
 
   it('exposes only the server port, never the engine port (review L2)', () => {

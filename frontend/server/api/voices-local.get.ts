@@ -9,10 +9,11 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { listOwned } from '../utils/ownedJsonStore'
 
 export default defineEventHandler(async (event) => {
-  const voicesDir = path.resolve(process.cwd(), '..', 'models', 'voices')
+  const voicesDir = dataPath('models', 'voices')
 
   let files: string[] = []
   try {

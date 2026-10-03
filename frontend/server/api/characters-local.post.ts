@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { slugifyCharacterName, type CharacterRecord } from '~~/server/utils/characterRegistry'
 import { claimNew } from '~~/server/utils/ownedJsonStore'
 import { emptyState } from '#shared/characters/types'
@@ -10,7 +11,7 @@ export default defineEventHandler(async (event) => {
   const slug = slugifyCharacterName(name)
   if (!name || !slug) throw createError({ statusCode: 400, message: 'A usable character name is required' })
 
-  const dir = path.resolve(process.cwd(), '..', 'models', 'characters')
+  const dir = dataPath('models', 'characters')
   await fs.mkdir(dir, { recursive: true })
   const file = path.join(dir, `${slug}.json`)
   try { await fs.access(file); throw createError({ statusCode: 409, message: `Character '${slug}' already exists` }) }

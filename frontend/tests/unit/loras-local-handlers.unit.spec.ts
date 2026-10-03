@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { __setDataRootForTests } from '../../server/utils/dataRoot'
 
 /**
  * Executes the /api/loras-local handlers for real against a temp models/loras
@@ -69,6 +70,7 @@ beforeEach(async () => {
   await fs.mkdir(lorasDir, { recursive: true })
   await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
   process.chdir(path.join(tmp, 'frontend'))
+  __setDataRootForTests(tmp) // C1: the data root, not the folder above cwd
 
   await fs.writeFile(path.join(lorasDir, 'Azure_Bloom.json'), JSON.stringify(SOURCE), 'utf8')
   await fs.writeFile(path.join(lorasDir, 'Azure_Bloom.safetensors'), 'weights')

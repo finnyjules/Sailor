@@ -1,116 +1,173 @@
 /**
- * S2 (pre-deploy fix wave) — the engine input directory resolution used to
- * fail OPEN: `engineDirForType` resolved via `path.resolve(process.cwd(),
- * '..', name)` with no verification, so a Nitro process launched from
- * anywhere but `frontend/` silently pointed at a directory that doesn't
- * exist. `existsSync` then misses every disk check, and an unclaimed
- * overwrite that should be refused (nothing on disk = "nobody's file" only
- * because we were looking in the wrong place) gets waved through instead.
+ * S2 (pre-deploy fix wave) — the data folder resolution used to fail OPEN:
+ * `engineDirForType` resolved via `path.resolve(process.cwd(), '..', name)`
+ * with no verification, so a Nitro process launched from anywhere but
+ * `frontend/` silently pointed at a directory that doesn't exist. `existsSync`
+ * then misses every disk check, and an unclaimed overwrite that should be
+ * refused gets waved through instead.
  *
- * `computeEngineRoot(cwd, envOverride)` is the pure resolver: env override
- * first (validated — an override that doesn't check out is a misconfigured
- * override, not a silent fallback), else walk up from `cwd` for the
- * ComfyUI checkout marker (`main.py` alongside `input/` — `input/` since
- * that's the directory whose presence the overwrite gate actually depends on). Real temp directories, no fs
- * mocking — this file verifies the walk itself, not a caller's use of it.
+ * C1 (ComfyUI code removal): `computeDataRoot(cwd, env)` is the pure resolver
+ * (server/utils/dataRoot.ts). `SAILOR_DATA_ROOT` first, the old
+ * `SAILOR_ENGINE_ROOT` as an alias (validated by `input/` — a setting that
+ * doesn't check out fails closed, never falls back), else walk up from `cwd`
+ * for the repo root: `frontend/` beside `user/` or `input/`. No `main.py` is
+ * involved anywhere. Real temp directories, no fs mocking.
  */
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { computeEngineRoot, checkEngineRootOnBootWith } from '../../server/utils/inputUploads'
+import { checkEngineRootOnBootWith, engineDirForType, resolveEngineRoot } from '../../server/utils/inputUploads'
+import { __setDataRootForTests, computeDataRoot, dataFolder, dataPath, resolveDataRoot } from '../../server/utils/dataRoot'
+import { engineFolder } from '../../server/native/paths'
 
 let root: string
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sailor-engine-root-'))
+  root = mkdtempSync(join(tmpdir(), 'sailor-data-root-'))
 })
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** Lay down the ComfyUI checkout marker (main.py + input/) under `dir`. */
-function makeEngineRoot(dir: string): void {
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'main.py'), '# comfyui entrypoint\n')
-  mkdirSync(join(dir, 'input'), { recursive: true })
+/** A Sailor checkout with no ComfyUI: frontend/ beside the data folders, no main.py. */
+function makeRepo(dir: string, folders: string[] = ['input', 'output', 'temp', 'user', 'models']): void {
+  mkdirSync(join(dir, 'frontend'), { recursive: true })
+  for (const f of folders) mkdirSync(join(dir, f), { recursive: true })
 }
 
-describe('computeEngineRoot — env override', () => {
-  it('uses the env override when it checks out (main.py + input/ present)', () => {
-    makeEngineRoot(root)
-    expect(computeEngineRoot('/nowhere/relevant', root)).toBe(root)
+describe('computeDataRoot — named by SAILOR_DATA_ROOT', () => {
+  it('uses the named folder when it holds input/ (no main.py anywhere)', () => {
+    mkdirSync(join(root, 'input'))
+    expect(computeDataRoot('/nowhere/relevant', { SAILOR_DATA_ROOT: root })).toBe(root)
   })
 
-  it('refuses an override that does not check out — no silent fallback to the cwd walk', () => {
-    // `root` exists but has neither main.py nor input/.
-    const cwdWithRealRoot = join(root, 'frontend')
-    makeEngineRoot(root) // a REAL root sits one level up from cwd...
-    // ...but the override points somewhere that isn't one.
-    const bogusOverride = join(root, 'not-the-engine')
-    mkdirSync(bogusOverride, { recursive: true })
-    expect(computeEngineRoot(cwdWithRealRoot, bogusOverride)).toBeNull()
+  it('refuses a named folder without input/ — no silent fallback to the cwd walk', () => {
+    makeRepo(root) // a REAL repo root sits one level up from cwd...
+    const bogus = join(root, 'not-the-data')
+    mkdirSync(bogus)
+    expect(computeDataRoot(join(root, 'frontend'), { SAILOR_DATA_ROOT: bogus })).toBeNull()
   })
 
-  it('an override missing only input/ is still refused (main.py alone is not the marker)', () => {
-    const half = join(root, 'half')
-    mkdirSync(half, { recursive: true })
-    writeFileSync(join(half, 'main.py'), '# entrypoint\n')
-    expect(computeEngineRoot('/irrelevant', half)).toBeNull()
+  it('the hosted image: /app-shaped folder with input/ and no Python checks out', () => {
+    const app = join(root, 'app')
+    makeRepo(app)
+    expect(computeDataRoot(join(app, 'frontend'), { SAILOR_DATA_ROOT: app })).toBe(app)
   })
 })
 
-describe('computeEngineRoot — an override without ComfyUI (R10.10, the hosted image)', () => {
-  it('an override with input/ and no main.py checks out', () => {
-    const noEngine = join(root, 'app')
-    mkdirSync(join(noEngine, 'input'), { recursive: true })
-    expect(computeEngineRoot('/irrelevant', noEngine)).toBe(noEngine)
+describe('computeDataRoot — SAILOR_ENGINE_ROOT, the old name', () => {
+  it('is still read when SAILOR_DATA_ROOT is unset', () => {
+    mkdirSync(join(root, 'input'))
+    expect(computeDataRoot('/irrelevant', { SAILOR_ENGINE_ROOT: root })).toBe(root)
   })
 
-  it('the walk still needs main.py: a bare input/ above cwd is not a root', () => {
-    const tree = join(root, 'tree')
-    mkdirSync(join(tree, 'input'), { recursive: true })
-    mkdirSync(join(tree, 'frontend'), { recursive: true })
-    expect(computeEngineRoot(join(tree, 'frontend'), undefined)).toBeNull()
+  it('SAILOR_DATA_ROOT wins when both are set', () => {
+    const data = join(root, 'data')
+    const engine = join(root, 'engine')
+    mkdirSync(join(data, 'input'), { recursive: true })
+    mkdirSync(join(engine, 'input'), { recursive: true })
+    expect(computeDataRoot('/irrelevant', { SAILOR_DATA_ROOT: data, SAILOR_ENGINE_ROOT: engine })).toBe(data)
+  })
+
+  it('a broken SAILOR_DATA_ROOT fails closed even when the old name points somewhere good', () => {
+    const engine = join(root, 'engine')
+    mkdirSync(join(engine, 'input'), { recursive: true })
+    expect(computeDataRoot('/irrelevant', { SAILOR_DATA_ROOT: join(root, 'missing'), SAILOR_ENGINE_ROOT: engine })).toBeNull()
+  })
+
+  it('empty strings are treated as unset', () => {
+    makeRepo(root)
+    expect(computeDataRoot(join(root, 'frontend'), { SAILOR_DATA_ROOT: '', SAILOR_ENGINE_ROOT: '' })).toBe(root)
   })
 })
 
-describe('computeEngineRoot — walking up from cwd (no override)', () => {
-  it('finds the marker at cwd itself', () => {
-    makeEngineRoot(root)
-    expect(computeEngineRoot(root, undefined)).toBe(root)
+describe('computeDataRoot — walking up from cwd (nothing named)', () => {
+  it('finds the repo root from frontend/ with no main.py present', () => {
+    makeRepo(root)
+    expect(computeDataRoot(join(root, 'frontend'), {})).toBe(root)
   })
 
-  it('finds the marker one level up — the frontend/ launch case', () => {
-    makeEngineRoot(root)
-    const frontendDir = join(root, 'frontend')
-    mkdirSync(frontendDir, { recursive: true })
-    expect(computeEngineRoot(frontendDir, undefined)).toBe(root)
-  })
-
-  it('finds the marker several levels up', () => {
-    makeEngineRoot(root)
-    const deep = join(root, 'frontend', '.claude', 'worktrees', 'xyz')
+  it('finds it at cwd itself and several levels down', () => {
+    makeRepo(root)
+    expect(computeDataRoot(root, {})).toBe(root)
+    const deep = join(root, 'frontend', 'server', 'native')
     mkdirSync(deep, { recursive: true })
-    expect(computeEngineRoot(deep, undefined)).toBe(root)
+    expect(computeDataRoot(deep, {})).toBe(root)
+  })
+
+  it('user/ alone beside frontend/ is enough (a checkout before any upload)', () => {
+    makeRepo(root, ['user'])
+    expect(computeDataRoot(join(root, 'frontend'), {})).toBe(root)
+  })
+
+  it('a stray input/ with no frontend/ beside it is not the root', () => {
+    mkdirSync(join(root, 'input'))
+    const cwd = join(root, 'elsewhere')
+    mkdirSync(cwd)
+    expect(computeDataRoot(cwd, {})).toBeNull()
+  })
+
+  it('frontend/ alone (no user/ or input/) is not the root', () => {
+    mkdirSync(join(root, 'frontend'))
+    expect(computeDataRoot(join(root, 'frontend'), {})).toBeNull()
+  })
+
+  it('main.py is not a marker: main.py + input/ without frontend/ is not the root', () => {
+    mkdirSync(join(root, 'input'))
+    writeFileSync(join(root, 'main.py'), '# old entrypoint\n')
+    const cwd = join(root, 'x')
+    mkdirSync(cwd)
+    expect(computeDataRoot(cwd, {})).toBeNull()
   })
 
   it('returns null when launched from an unrelated directory tree — FAILS CLOSED, not open', () => {
-    // A cwd with no main.py/input/ anywhere in its ancestry (an isolated
-    // temp dir has no such ancestor within the walk's bound).
     const stray = mkdtempSync(join(tmpdir(), 'sailor-stray-cwd-'))
     try {
-      expect(computeEngineRoot(stray, undefined)).toBeNull()
+      expect(computeDataRoot(stray, {})).toBeNull()
     } finally {
       rmSync(stray, { recursive: true, force: true })
     }
   })
+})
 
-  it('an empty-string env override is treated as unset, not as an override to "" ', () => {
-    makeEngineRoot(root)
-    const frontendDir = join(root, 'frontend')
-    mkdirSync(frontendDir, { recursive: true })
-    expect(computeEngineRoot(frontendDir, '')).toBe(root)
+describe('the folders every consumer reads (one helper)', () => {
+  const env = { ...process.env }
+  afterEach(() => {
+    process.env = { ...env }
+    __setDataRootForTests(undefined)
+  })
+
+  it('resolve under a repo with no main.py, from the real env + cwd', () => {
+    makeRepo(root)
+    __setDataRootForTests(undefined) // past the unit-test safety net: the real resolution
+    delete process.env.SAILOR_ENGINE_ROOT
+    process.env.SAILOR_DATA_ROOT = root
+    expect(resolveDataRoot()).toBe(root)
+    expect(resolveEngineRoot()).toBe(root)
+    for (const f of ['input', 'output', 'temp', 'user', 'models'] as const) {
+      expect(dataFolder(f)).toBe(join(root, f))
+      expect(engineFolder(f)).toBe(join(root, f))
+    }
+    expect(engineDirForType('input')).toBe(join(root, 'input'))
+    expect(engineDirForType('output')).toBe(join(root, 'output'))
+    expect(dataPath('models', 'loras')).toBe(join(root, 'models', 'loras'))
+  })
+
+  it('the old SAILOR_ENGINE_ROOT alone still resolves them', () => {
+    makeRepo(root)
+    __setDataRootForTests(undefined)
+    delete process.env.SAILOR_DATA_ROOT
+    process.env.SAILOR_ENGINE_ROOT = root
+    expect(resolveEngineRoot()).toBe(root)
+    expect(dataFolder('user')).toBe(join(root, 'user'))
+  })
+
+  it('an unknown root: guards get null, local-studio paths keep the folder above cwd', () => {
+    __setDataRootForTests(null)
+    expect(dataFolder('input')).toBeNull()
+    expect(engineDirForType('input')).toBeNull()
+    expect(dataPath('models', 'voices')).toBe(join(process.cwd(), '..', 'models', 'voices'))
   })
 })
 
@@ -136,6 +193,6 @@ describe('checkEngineRootOnBootWith — the boot-time loud-failure assert', () =
     const ok = checkEngineRootOnBootWith({ isHosted: () => true, resolveRoot: () => null, logError })
     expect(ok).toBe(false)
     expect(logError).toHaveBeenCalledTimes(1)
-    expect(logError.mock.calls[0][0]).toMatch(/engine root|SAILOR_ENGINE_ROOT/i)
+    expect(logError.mock.calls[0][0]).toMatch(/SAILOR_DATA_ROOT/)
   })
 })

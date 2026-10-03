@@ -81,7 +81,7 @@ primary_region = "sjc"   # San Jose — nearest to Neon (aws-us-west-2, Oregon).
 #
 # Deploy-day riders (see the Stage 5 verification doc + hosting decision):
 # production WS auth (the dev-hook auth doesn't exist in built Nitro),
-# SAILOR_ENGINE_ROOT env if processes don't launch from frontend/.
+# SAILOR_DATA_ROOT env (the Dockerfile sets /app; SAILOR_ENGINE_ROOT is the old name).
 ###############################################################################
 
 # VM size kept from the ComfyUI image until the Python-free image is measured

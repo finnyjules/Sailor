@@ -13,11 +13,12 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 
 const FOLDER_RE = /^lora_dataset_\d+$/
 const IMG_RE = /\.(png|jpe?g|webp)$/i
 
-function inputDir() { return path.resolve(process.cwd(), '..', 'input') }
+function inputDir() { return dataPath('input') }
 
 async function imageFiles(folder: string): Promise<string[]> {
   try {
@@ -67,7 +68,7 @@ export default defineEventHandler(async (event) => {
 
   let trainedOn: string | null = null
   try {
-    const meta = parseSidecar(await fs.readFile(path.resolve(process.cwd(), '..', 'models', 'loras', `${base}.json`), 'utf8'))
+    const meta = parseSidecar(await fs.readFile(dataPath('models', 'loras', `${base}.json`), 'utf8'))
     trainedOn = meta.trained_on ?? null
   }
   catch { /* no sidecar / unreadable — no basis to match */ }

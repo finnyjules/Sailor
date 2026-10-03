@@ -19,6 +19,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { parseSidecar } from '~~/server/utils/loraPrompt'
 import { isSafeLoraFilename } from '~~/server/utils/loraSidecars'
 import { guardMutation, releaseRecord } from '~~/server/utils/ownedJsonStore'
@@ -35,7 +36,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid filename' })
   }
 
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
   const base = filename.slice(0, -'.safetensors'.length)
 
   // Ownership gate (hosted only), composed with the two existing guards below.

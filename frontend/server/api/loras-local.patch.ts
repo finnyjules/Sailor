@@ -16,6 +16,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { parseSidecar, sidecarAesthetic } from '~~/server/utils/loraPrompt'
 import { isSafeLoraFilename } from '~~/server/utils/loraSidecars'
 import { guardMutation } from '~~/server/utils/ownedJsonStore'
@@ -35,7 +36,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid filename' })
   }
 
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
   const base = filename.slice(0, -'.safetensors'.length)
   const sidecarPath = path.join(lorasDir, `${base}.json`)
 

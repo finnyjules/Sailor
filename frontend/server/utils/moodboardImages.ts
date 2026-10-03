@@ -4,9 +4,9 @@
  * folder guard is its own `moodboard_<ms>` regex — these routes must never open
  * `lora_dataset_*` folders.
  */
-import path from 'node:path'
+import { dataPath } from './dataRoot'
 
-export function moodboardInputDir(): string { return path.resolve(process.cwd(), '..', 'input') }
+export function moodboardInputDir(): string { return dataPath('input') }
 
 export function safeImageFile(name: string): boolean {
   if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return false

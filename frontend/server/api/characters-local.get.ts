@@ -2,12 +2,13 @@
 // file vanished are dropped and the healed record is written back.
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { healRefImages, parseCharacterRecord } from '~~/server/utils/characterRegistry'
 import { listOwned } from '~~/server/utils/ownedJsonStore'
 
 export default defineEventHandler(async (event) => {
-  const dir = path.resolve(process.cwd(), '..', 'models', 'characters')
-  const inputDir = path.resolve(process.cwd(), '..', 'input')
+  const dir = dataPath('models', 'characters')
+  const inputDir = dataPath('input')
   let files: string[]
   try { files = await fs.readdir(dir) } catch { return { characters: [] } }
 

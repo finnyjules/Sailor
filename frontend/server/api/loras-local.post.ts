@@ -17,6 +17,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { parseSidecar } from '~~/server/utils/loraPrompt'
 import { isSafeLoraFilename, loraBaseName, buildDuplicateSidecar } from '~~/server/utils/loraSidecars'
 import { claimNew } from '~~/server/utils/ownedJsonStore'
@@ -40,7 +41,7 @@ export default defineEventHandler(async (event) => {
   const newBase = loraBaseName(newName)
   if (!newBase) throw createError({ statusCode: 400, statusMessage: 'name has no usable characters' })
 
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
   const sourceBase = filename.slice(0, -'.safetensors'.length)
 
   // Ownership gate (hosted only, security): without this, anyone who knows

@@ -11,11 +11,12 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { parseSidecar, sidecarAesthetic } from '../utils/loraPrompt'
 import { listOwned } from '../utils/ownedJsonStore'
 
 export default defineEventHandler(async (event) => {
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
 
   let files: string[] = []
   try {

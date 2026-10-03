@@ -130,7 +130,7 @@ function context(): ProjectsContext | null {
 
 const NO_DATA_FOLDER: NativeResult = {
   status: 503,
-  body: { error: 'Sailor can\'t find its data folder. Set SAILOR_ENGINE_ROOT to the folder that holds input/, output/ and user/.' },
+  body: { error: 'Sailor can\'t find its data folder. Set SAILOR_DATA_ROOT to the folder that holds input/, output/ and user/.' },
 }
 
 /** The request body's bytes (`request.read()`), within the 100 MB cap. */

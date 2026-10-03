@@ -8,6 +8,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { isHosted } from '../utils/deployMode'
 import { ownerOf } from '../utils/resourceOwners'
 
@@ -29,7 +30,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const voicesDir = path.resolve(process.cwd(), '..', 'models', 'voices')
+  const voicesDir = dataPath('models', 'voices')
   try {
     const buf = await fs.readFile(path.join(voicesDir, `${id}.mp3`))
     setHeader(event, 'Content-Type', 'audio/mpeg')

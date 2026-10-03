@@ -48,6 +48,7 @@ import { runFal } from '../../utils/falRun'
 import { MeterRefusalError } from '../../utils/requestMeter'
 import { downloadResult } from '../../runner/falQueue'
 import { SURFACES_APP } from '../../../shared/pricing/relightSurfaces'
+import { dataPath } from '../../utils/dataRoot'
 
 const CACHE_SUBDIR = 'sailor_depth'
 // Fix round 1 (review): the old `fetch(url).arrayBuffer()` had no size cap and no
@@ -109,7 +110,7 @@ let rootOverride: string | undefined
 export function __setSurfacesRootForTests(root: string | undefined): void { rootOverride = root }
 
 function engineRoot(): string {
-  return rootOverride ?? join(process.cwd(), '..')
+  return rootOverride ?? dataPath()
 }
 
 const exists = (p: string) => access(p).then(() => true, () => false)

@@ -96,7 +96,7 @@ export interface BodyReaders {
 
 const NO_DATA_FOLDER: SmallResult = {
   status: 503,
-  body: { error: 'Sailor can\'t find its data folder. Set SAILOR_ENGINE_ROOT to the folder that holds input/, output/ and user/.' },
+  body: { error: 'Sailor can\'t find its data folder. Set SAILOR_DATA_ROOT to the folder that holds input/, output/ and user/.' },
 }
 
 /**

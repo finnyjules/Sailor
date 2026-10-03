@@ -19,6 +19,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { mkdtempSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { __setDataRootForTests } from '../../server/utils/dataRoot'
 import { createApp, eventHandler, toWebHandler } from 'h3'
 import { __setInputUploadsDbForTests, canonicalUploadKey } from '../../server/utils/inputUploads'
 import { shortUserHash } from '../../server/utils/meterGraphRun'
@@ -73,6 +74,7 @@ beforeEach(async () => {
   await fs.mkdir(inputDir, { recursive: true })
   await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
   process.chdir(path.join(tmp, 'frontend'))
+  __setDataRootForTests(tmp) // C1: the data root, not the folder above cwd
   uploads.clear()
   query.mockClear()
   __setInputUploadsDbForTests({ query })

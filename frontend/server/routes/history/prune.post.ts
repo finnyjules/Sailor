@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, isAbsolute, normalize, sep } from 'node:path'
+import { dataFolder } from '../../utils/dataRoot'
 
 const CACHE_DIR = join(process.cwd(), '.cache')
 const CACHE_FILE = join(CACHE_DIR, 'history.json')
@@ -11,14 +12,15 @@ const CACHE_FILE = join(CACHE_DIR, 'history.json')
 // ghost cards in the AssetsPanel. This route walks the cache, drops any
 // entry whose every output file is missing, and rewrites the cache.
 
-// Resolved once: the ComfyUI output directory. The Nuxt dev server runs at
-// repo_root/frontend, so output lives one level up.
-const OUTPUT_DIR = join(process.cwd(), '..', 'output')
-
+// The data root's output folder (server/utils/dataRoot.ts), resolved per
+// request. When it can't be found nothing counts as missing: an unknown folder
+// must not prune every entry.
 function outputExists(filename: string, subfolder: string): boolean {
   if (!filename || isAbsolute(filename) || isAbsolute(subfolder || '')) return false
-  const candidate = normalize(join(OUTPUT_DIR, subfolder || '', filename))
-  if (!candidate.startsWith(normalize(OUTPUT_DIR) + sep)) return false
+  const outputDir = dataFolder('output')
+  if (!outputDir) return true
+  const candidate = normalize(join(outputDir, subfolder || '', filename))
+  if (!candidate.startsWith(normalize(outputDir) + sep)) return false
   return existsSync(candidate)
 }
 

@@ -13,6 +13,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../../utils/dataRoot'
 import { CLONE_MODEL } from './start.post'
 import { currentMeterContext, releaseRecordedHold, settleModel, settleRecordedHold } from '../../utils/requestMeter'
 import { deployMode } from '../../utils/deployMode'
@@ -101,7 +102,7 @@ export default defineEventHandler(async (event) => {
       persistError = `Replicate returned an unsafe voice_id: ${pred.output.voice_id}`
     } else {
       try {
-        const voicesDir = path.resolve(process.cwd(), '..', 'models', 'voices')
+        const voicesDir = dataPath('models', 'voices')
         await fs.mkdir(voicesDir, { recursive: true })
         const jsonPath = path.join(voicesDir, `${safe}.json`)
         const mp3Path = path.join(voicesDir, `${safe}.mp3`)

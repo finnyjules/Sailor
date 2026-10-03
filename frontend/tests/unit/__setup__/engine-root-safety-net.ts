@@ -2,9 +2,9 @@
  * A1 follow-up fix, item 3: before EVERY unit test, point the native engine
  * root (server/native/paths.ts's `engineFolder`, via
  * server/utils/inputUploads.ts's `resolveEngineRoot`) at a fresh, empty temp
- * folder — never the real checkout. `computeEngineRoot`'s cwd walk finds the
- * real engine root (this repo's `main.py` + `input/`, one level above
- * `frontend/`) from ANY unit test's cwd, so a spec that forgets to scope its
+ * folder — never the real checkout. The data root's cwd walk
+ * (server/utils/dataRoot.ts `computeDataRoot`) finds the real repo root
+ * (`frontend/` beside `user/` or `input/`) from ANY unit test's cwd, so a spec that forgets to scope its
  * own engine-root override would otherwise silently read and write the real
  * `user/`, `input/`, `output/` folders next to the actual ComfyUI checkout.
  *
@@ -16,7 +16,7 @@
  * sailor-*-gate specs already do. The one exception is a spec that
  * DELIBERATELY leaves the override unset to test `resolveEngineRoot`'s real
  * cwd/env fallback (`engine-root-resolve.unit.spec.ts`) — that file only
- * calls the pure `computeEngineRoot`/`checkEngineRootOnBootWith` functions
+ * calls the pure `computeDataRoot`/`checkEngineRootOnBootWith` functions
  * directly, never `resolveEngineRoot()` itself, so it is unaffected by this
  * override either way.
  *

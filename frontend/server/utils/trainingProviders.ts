@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs'
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import { dataPath } from './dataRoot'
 import os from 'node:os'
 import type { TrainingJob } from './trainingQueue'
 import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
@@ -158,7 +159,7 @@ async function pollLora(job: TrainingJob, token: string): Promise<ProviderResult
   }
 
   if (pred.status === 'succeeded' && outputUrl) {
-    const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+    const lorasDir = dataPath('models', 'loras')
     await fs.mkdir(lorasDir, { recursive: true })
     const filename = `${sanitize(job.outputName)}.safetensors`
     const localPath = path.join(lorasDir, filename)
@@ -264,7 +265,7 @@ async function pollVoice(job: TrainingJob, token: string): Promise<ProviderResul
   if (pred.status === 'succeeded' && pred.output?.voice_id) {
     const safe = safeVoiceId(pred.output.voice_id)
     if (!safe) return { status: 'failed', error: `Replicate returned an unsafe voice_id: ${pred.output.voice_id}`, logsTail }
-    const voicesDir = path.resolve(process.cwd(), '..', 'models', 'voices')
+    const voicesDir = dataPath('models', 'voices')
     await fs.mkdir(voicesDir, { recursive: true })
     const jsonPath = path.join(voicesDir, `${safe}.json`)
     const mp3Path = path.join(voicesDir, `${safe}.mp3`)

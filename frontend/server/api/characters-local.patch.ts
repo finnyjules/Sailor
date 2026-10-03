@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import {
   faceRefHygiene, parseCharacterRecord, photoHygiene, sanitizeBodyShape, stateHygiene, validRefFilename, voiceHygiene,
   type CharacterRecord, type CharacterState,
@@ -21,7 +22,7 @@ export default defineEventHandler(async (event) => {
   if (!slug || slug.includes('/') || slug.includes('\\') || slug.includes('..')) {
     throw createError({ statusCode: 400, message: 'Invalid slug' })
   }
-  const dir = path.resolve(process.cwd(), '..', 'models', 'characters')
+  const dir = dataPath('models', 'characters')
   const file = path.join(dir, `${slug}.json`)
   let record: CharacterRecord | null
   try { record = parseCharacterRecord(await fs.readFile(file, 'utf8'), slug) }

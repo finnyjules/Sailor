@@ -14,6 +14,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../../utils/dataRoot'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { preflightMeter } from '../../utils/requestMeter'
 import { canonicalUploadKey, recordUpload } from '../../utils/inputUploads'
@@ -72,7 +73,7 @@ export default defineEventHandler(async (event) => {
     const audioRes = await fetch(url)
     if (!audioRes.ok) throw createError({ statusCode: 502, message: `could not fetch generated audio: ${audioRes.status}` })
     const buf = Buffer.from(await audioRes.arrayBuffer())
-    const inputDir = path.resolve(process.cwd(), '..', 'input')
+    const inputDir = dataPath('input')
     await fs.mkdir(inputDir, { recursive: true })
     const filename = `lipsync-voice_${Date.now()}.mp3`
     await fs.writeFile(path.join(inputDir, filename), buf)

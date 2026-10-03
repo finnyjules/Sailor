@@ -26,13 +26,9 @@ import { join } from 'node:path'
 import { depthCacheKey, depthCacheName, assetType, safeAssetRelPath } from '~~/server/utils/depthCache'
 import { assertInputOwned } from '~~/server/utils/inputOwnership'
 import { depthPipeline } from '~~/server/utils/depthModel'
+import { dataPath } from '~~/server/utils/dataRoot'
 
-const COMFY_ROOT = join(process.cwd(), '..')
-const INPUT_DIR = join(COMFY_ROOT, 'input')
 const CACHE_SUBDIR = 'sailor_depth'
-// The cache always lives under input/, whatever root the SOURCE came from, so one
-// /view?type=input URL serves every depth map.
-const CACHE_DIR = join(INPUT_DIR, CACHE_SUBDIR)
 
 /** Depth drives a blur radius, not detail — full resolution buys nothing and costs
  *  cache size plus texture-upload time. Sources here run to 4k. */
@@ -52,7 +48,11 @@ export default defineEventHandler(async (event) => {
 
   await assertInputOwned(event, root, body?.subfolder ?? '', body?.filename ?? '')
 
-  const srcPath = join(COMFY_ROOT, root, rel)
+  // The data root (server/utils/dataRoot.ts). The cache always lives under input/,
+  // whatever root the SOURCE came from, so one /view?type=input URL serves every depth map.
+  const dataRoot = dataPath()
+  const cacheDir = join(dataRoot, 'input', CACHE_SUBDIR)
+  const srcPath = join(dataRoot, root, rel)
   let bytes: Uint8Array
   try {
     bytes = new Uint8Array(await readFile(srcPath))
@@ -61,7 +61,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const name = depthCacheName(depthCacheKey(bytes))
-  const outPath = join(CACHE_DIR, name)
+  const outPath = join(cacheDir, name)
   if (await exists(outPath)) {
     return { depthFilename: name, subfolder: CACHE_SUBDIR, cached: true }
   }
@@ -78,7 +78,7 @@ export default defineEventHandler(async (event) => {
         )
       : depth
 
-    await mkdir(CACHE_DIR, { recursive: true })
+    await mkdir(cacheDir, { recursive: true })
     await scaled.save(outPath)
   } catch (err) {
     throw createError({

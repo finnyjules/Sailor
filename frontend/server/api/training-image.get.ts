@@ -8,7 +8,7 @@
  * comfyui-proxy.ts.
  */
 import { promises as fs } from 'node:fs'
-import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 
 const FOLDER_RE = /^lora_dataset_\d+$/
 const IMG_RE = /\.(png|jpe?g|webp)$/i
@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'invalid file' })
   }
 
-  const abs = path.resolve(process.cwd(), '..', 'input', folder, file)
+  const abs = dataPath('input', folder, file)
   let buf: Buffer
   try { buf = await fs.readFile(abs) }
   catch { throw createError({ statusCode: 404, statusMessage: 'not found' }) }

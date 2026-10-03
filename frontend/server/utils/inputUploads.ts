@@ -13,6 +13,7 @@
  */
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { __setDataRootForTests, resolveDataRoot } from './dataRoot'
 import { connectLedgerDb, type LedgerDbHandle } from './ledgerDb'
 import { isHosted } from './deployMode'
 
@@ -117,52 +118,23 @@ export function canonicalUploadKey(type: string | null | undefined, subfolder: s
 }
 
 /**
- * The ComfyUI checkout marker: `main.py` alongside `input/` — the directory
- * this module's disk check actually depends on.
- */
-function isEngineRoot(dir: string): boolean {
-  return existsSync(path.join(dir, 'main.py')) && existsSync(path.join(dir, 'input'))
-}
-
-/**
- * Pure resolver (S2): `envOverride` wins when it checks out (validated, not
- * trusted blind — a broken override should fail closed, not silently defer
- * to the walk), else walk up from `cwd` for the marker. Returns null rather
- * than a best-effort guess when nothing is found — the old
+ * The data root (C1): `SAILOR_DATA_ROOT` (or the old `SAILOR_ENGINE_ROOT`),
+ * else the repo root found from the working directory — see dataRoot.ts. The
+ * engine-named exports stay so existing callers and specs keep their words.
+ *
+ * Null rather than a best-effort guess when nothing is found (S2): the old
  * `path.resolve(process.cwd(), '..', name)` guessed unconditionally, so a
  * Nitro process launched from anywhere but `frontend/` silently pointed at a
  * directory that doesn't exist and `existsSync` missed EVERY disk check,
  * treating every unclaimed name as free.
- *
- * Step 3, R10.10: the hosted image carries no ComfyUI, so no `main.py`. An
- * override is an operator's explicit choice (the Dockerfile sets
- * `SAILOR_ENGINE_ROOT=/app`), so it is checked by the folder Sailor actually
- * reads, `input/`, alone. The walk still needs `main.py` + `input/`: a guess
- * from the working directory must not stop at any stray `input/` folder.
  */
-export function computeEngineRoot(cwd: string, envOverride: string | null | undefined): string | null {
-  if (envOverride) return existsSync(path.join(envOverride, 'input')) ? envOverride : null
-  let dir = cwd
-  for (let i = 0; i < 12; i++) {
-    if (isEngineRoot(dir)) return dir
-    const parent = path.dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
+export function resolveEngineRoot(): string | null {
+  return resolveDataRoot()
 }
-
-let engineRootOverride: string | null | undefined // undefined = no override, use real resolution
 
 /** Test-only override — bypasses the real cwd/env walk entirely. */
 export function __setInputUploadsEngineRootForTests(root: string | null | undefined): void {
-  engineRootOverride = root
-}
-
-/** Production wiring: `SAILOR_ENGINE_ROOT` env override, else the cwd walk. */
-export function resolveEngineRoot(): string | null {
-  if (engineRootOverride !== undefined) return engineRootOverride
-  return computeEngineRoot(process.cwd(), process.env.SAILOR_ENGINE_ROOT)
+  __setDataRootForTests(root)
 }
 
 /**
@@ -192,10 +164,10 @@ export function checkEngineRootOnBootWith(deps: EngineRootBootDeps): boolean {
   if (!deps.isHosted()) return true
   if (deps.resolveRoot()) return true
   deps.logError(
-    '[inputUploads] hosted mode is active but the shared ComfyUI engine root could not be '
-    + 'resolved (checked SAILOR_ENGINE_ROOT, then walked up from cwd for main.py + input/). '
-    + 'Upload overwrite checks will fail CLOSED (refuse every ambiguous overwrite) until this '
-    + 'is fixed — set SAILOR_ENGINE_ROOT or fix the launch cwd.',
+    '[inputUploads] hosted mode is active but the data root could not be resolved '
+    + '(checked SAILOR_DATA_ROOT, then the old SAILOR_ENGINE_ROOT, then walked up from cwd for '
+    + 'frontend/ beside user/ or input/). Upload overwrite checks will fail CLOSED (refuse every '
+    + 'ambiguous overwrite) until this is fixed — set SAILOR_DATA_ROOT or fix the launch cwd.',
   )
   return false
 }

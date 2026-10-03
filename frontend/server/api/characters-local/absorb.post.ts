@@ -6,14 +6,15 @@
 // already there, never duplicates or overwrites.
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../../utils/dataRoot'
 import { parseSidecar } from '~~/server/utils/loraPrompt'
 import { parseCharacterRecord, slugifyCharacterName, type CharacterRecord } from '~~/server/utils/characterRegistry'
 import { claimNew } from '~~/server/utils/ownedJsonStore'
 import { emptyState } from '#shared/characters/types'
 
 export default defineEventHandler(async (event) => {
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
-  const charactersDir = path.resolve(process.cwd(), '..', 'models', 'characters')
+  const lorasDir = dataPath('models', 'loras')
+  const charactersDir = dataPath('models', 'characters')
 
   let loraFiles: string[] = []
   try { loraFiles = await fs.readdir(lorasDir) } catch { return { created: [], existing: [] } }

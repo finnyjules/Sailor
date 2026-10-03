@@ -8,6 +8,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { isHosted } from '../utils/deployMode'
 import { ownerOf } from '../utils/resourceOwners'
 
@@ -30,7 +31,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
   for (const ext of ['webp', 'png', 'jpg'] as const) {
     const p = path.join(lorasDir, `${base}.cover.${ext}`)
     try {

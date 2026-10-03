@@ -3,21 +3,20 @@
  * guard every request-supplied file name goes through.
  *
  * The folders are the ones ComfyUI used — `<engine root>/{input,output,temp,
- * user,models}` — resolved through the same `resolveEngineRoot()` the upload
- * checks use, so the native routes and the Python routes they replace always
+ * user,models}` — resolved through the same data root (server/utils/dataRoot.ts)
+ * the upload checks use, so the native routes and the Python routes they replace always
  * address the same files. Null means the engine root could not be found;
  * callers must say so rather than guess a folder.
  */
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveEngineRoot } from '../utils/inputUploads'
+import { dataFolder, type DataFolder } from '../utils/dataRoot'
 
-export type EngineFolder = 'input' | 'output' | 'temp' | 'user' | 'models'
+export type EngineFolder = DataFolder
 
 export function engineFolder(name: EngineFolder): string | null {
-  const root = resolveEngineRoot()
-  return root ? path.join(root, name) : null
+  return dataFolder(name)
 }
 
 /** ComfyUI's `folder_paths.get_user_directory()`. */

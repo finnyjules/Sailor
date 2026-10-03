@@ -18,6 +18,7 @@ import { promises as fs } from 'node:fs'
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import { dataPath } from '../../utils/dataRoot'
 import os from 'node:os'
 import { linkTrainedCharacter } from '~~/server/utils/characterLink'
 import { deployMode } from '../../utils/deployMode'
@@ -145,7 +146,7 @@ export default defineEventHandler(async (event) => {
       : null
 
   if (pred.status === 'succeeded' && outputUrl) {
-    const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+    const lorasDir = dataPath('models', 'loras')
     await fs.mkdir(lorasDir, { recursive: true })
     const filename = `${outputName}.safetensors`
     const localPath = path.join(lorasDir, filename)

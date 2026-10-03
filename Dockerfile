@@ -114,11 +114,11 @@ COPY . .
 # Overlay the built Nuxt output from stage 1.
 COPY --from=web /build/frontend/.output /app/frontend/.output
 
-# The data root Sailor reads input/, output/, temp/ and user/ under. Named
-# explicitly because there is no main.py for the cwd walk to find
-# (server/utils/inputUploads.ts computeEngineRoot); start.sh links these
-# folders to the Fly volume.
-ENV SAILOR_ENGINE_ROOT=/app
+# The data root Sailor reads input/, output/, temp/, user/ and models/ under,
+# named explicitly rather than left to the cwd walk
+# (frontend/server/utils/dataRoot.ts); start.sh links these folders to the Fly
+# volume. SAILOR_ENGINE_ROOT is the old name, still read.
+ENV SAILOR_DATA_ROOT=/app
 
 RUN chmod +x /app/start.sh
 EXPOSE 3000

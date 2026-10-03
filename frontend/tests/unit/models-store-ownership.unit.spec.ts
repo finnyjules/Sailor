@@ -14,6 +14,7 @@ import { promises as fs } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { __setDataRootForTests } from '../../server/utils/dataRoot'
 import { __setResourceOwnersDbForTests } from '../../server/utils/resourceOwners'
 import {
   __resetVoiceCloneOwnersForTests,
@@ -110,6 +111,7 @@ beforeEach(async () => {
   await fs.mkdir(path.join(tmp, 'models', 'input'), { recursive: true })
   await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
   process.chdir(path.join(tmp, 'frontend'))
+  __setDataRootForTests(tmp) // C1: the data root, not the folder above cwd
   owners.clear()
   query.mockClear()
   __setResourceOwnersDbForTests({ query })

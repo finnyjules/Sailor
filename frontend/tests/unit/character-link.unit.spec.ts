@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { mkdtempSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { __setDataRootForTests } from '../../server/utils/dataRoot'
 import { linkDecision, linkTrainedCharacter, type LinkDecisionInput } from '~~/server/utils/characterLink'
 import { __setResourceOwnersDbForTests } from '~~/server/utils/resourceOwners'
 
@@ -51,6 +52,7 @@ describe('linkTrainedCharacter — records character ownership (hosted)', () => 
     await fs.mkdir(path.join(tmp, 'models', 'characters'), { recursive: true })
     await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
     process.chdir(path.join(tmp, 'frontend'))
+    __setDataRootForTests(tmp) // C1: the data root, not the folder above cwd
     owners = new Map<string, string>()
     queryMock = vi.fn(async (sql: string, params: any[] = []) => {
       if (/INSERT INTO resource_owners/i.test(sql)) {
@@ -125,6 +127,7 @@ describe('linkTrainedCharacter — cross-tenant hijack guard', () => {
     await fs.mkdir(charsDir, { recursive: true })
     await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
     process.chdir(path.join(tmp, 'frontend'))
+    __setDataRootForTests(tmp) // C1: the data root, not the folder above cwd
     owners = new Map<string, string>()
     queryMock = vi.fn(async (sql: string, params: any[] = []) => {
       if (/INSERT INTO resource_owners/i.test(sql)) {

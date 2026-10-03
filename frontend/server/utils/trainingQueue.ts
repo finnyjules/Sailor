@@ -11,6 +11,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from './dataRoot'
 import { randomUUID } from 'node:crypto'
 
 export type TrainingKind = 'lora' | 'voice'
@@ -85,7 +86,7 @@ export interface JobStore {
 
 /** Default registry path: alongside the model outputs (../models from the Nuxt cwd). */
 export function defaultJobsPath(): string {
-  return path.resolve(process.cwd(), '..', 'models', '.training-jobs.json')
+  return dataPath('models', '.training-jobs.json')
 }
 
 /**

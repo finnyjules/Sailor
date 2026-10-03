@@ -13,6 +13,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../utils/dataRoot'
 import { assertRateLimit } from '../lib/rateLimit'
 import { preflightMeter } from '../utils/requestMeter'
 import { guardMutation } from '../utils/ownedJsonStore'
@@ -31,7 +32,7 @@ export default defineEventHandler(async (event) => {
   const base = safeBase(name)
   if (!base) throw createError({ statusCode: 400, message: 'Invalid LoRA name' })
 
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
 
   // Read the sidecar for the trained model ref + style.
   let meta: any = {}

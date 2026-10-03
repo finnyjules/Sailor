@@ -20,6 +20,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from '../../utils/dataRoot'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { ensureFalLoraWeights, type LoraSidecar } from '../../utils/loraFalWeights'
 import { buildFalLoraGenInput } from '../../utils/loraGenInput'
@@ -49,7 +50,7 @@ export default defineEventHandler(async (event) => {
   const userPrompt = (body?.prompt ?? '').trim()
   if (!userPrompt) throw createError({ statusCode: 400, message: 'prompt is required' })
 
-  const lorasDir = path.resolve(process.cwd(), '..', 'models', 'loras')
+  const lorasDir = dataPath('models', 'loras')
   const sidecarPath = path.join(lorasDir, `${base}.json`)
   let meta: LoraSidecar = {}
   try {

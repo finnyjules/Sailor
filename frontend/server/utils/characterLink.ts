@@ -9,6 +9,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { dataPath } from './dataRoot'
 import { parseCharacterRecord, slugifyCharacterName, type CharacterRecord } from '~~/server/utils/characterRegistry'
 import { emptyState } from '#shared/characters/types'
 import { deployMode } from '~~/server/utils/deployMode'
@@ -94,7 +95,7 @@ export async function linkTrainedCharacter(opts: { displayName: string, weightsF
   const { displayName, weightsFilename, trigger, ownerUserId } = opts
   const slug = slugifyCharacterName(displayName)
   if (!slug) return
-  const dir = path.resolve(process.cwd(), '..', 'models', 'characters')
+  const dir = dataPath('models', 'characters')
   await fs.mkdir(dir, { recursive: true })
 
   let files: string[] = []
