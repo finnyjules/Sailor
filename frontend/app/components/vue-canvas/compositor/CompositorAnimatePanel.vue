@@ -8,7 +8,9 @@ import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceLabel } from '~/data/c
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, clipFrameUrl, takeIndexOf, type ImageClip } from '~/lib/compositor/clip'
 import type { ImageLayer } from '~/composables/useCompositorLayers'
 
-const props = defineProps<{ layer: ImageLayer; busy: boolean; error: string }>()
+// `canGenerate` false (hosted, LC7: no Python to key a clip with) hides the prompt,
+// model, length and Generate; an existing clip keeps its takes, Speed and Remove.
+const props = withDefaults(defineProps<{ layer: ImageLayer; busy: boolean; error: string; canGenerate?: boolean }>(), { canGenerate: true })
 const emit = defineEmits<{
   generate: [payload: { prompt: string; model: string; seconds: number }]
   speed: [value: number]
@@ -50,9 +52,10 @@ const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2
 </script>
 
 <template>
-  <div class="mt-3">
+  <div v-if="canGenerate || hasClip || takes.length" class="mt-3">
     <div class="panel-label">Animate</div>
     <div class="mt-2 flex flex-col gap-2">
+      <template v-if="canGenerate">
       <div>
         <div class="panel-label mb-1.5">Prompt</div>
         <textarea v-model="prompt" rows="2" :class="fieldCls" placeholder="What should move, and how" />
@@ -75,6 +78,7 @@ const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2
         @click="emit('generate', { prompt: prompt.trim(), model, seconds })">
         {{ busy ? 'Generating…' : `Generate${price ? ' · ' + price : ''}` }}
       </button>
+      </template>
       <div v-if="error" class="text-[11px] text-red-300/90">{{ error }}</div>
       <div v-if="showTakes" data-role="takes">
         <div class="panel-label mb-1.5">Takes</div>

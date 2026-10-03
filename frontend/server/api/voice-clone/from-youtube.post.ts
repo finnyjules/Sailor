@@ -12,17 +12,27 @@
  * The caller must have the rights to clone the voice (their own content, a hired
  * voice actor, or licensed/public-domain audio). Enforced in the UI, not here.
  *
+ * Hosted has no Python or yt-dlp (step 3, R10.10), and yt-dlp has no small Node
+ * stand-in, so there the route refuses first, before the rate limit or any
+ * upload (LC7); the YouTube capture is hidden in hosted. Uploading a file
+ * (/api/voice-clone/upload) is the hosted way in.
+ *
  * Allowlisted via the '/api/voice-clone' prefix in server/middleware/comfyui-proxy.ts.
  */
 import { execFile } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { assertRateLimit } from '../../lib/rateLimit'
+import { isHosted } from '../../utils/deployMode'
+
+/** The hosted refusal, exported so its spec says the same words. */
+export const YOUTUBE_VOICE_HOSTED_REFUSAL = 'Capturing a voice from YouTube only works when Sailor runs on your own computer. Upload an audio file instead.'
 
 const CLIP_CAP_SEC = 60
 const CLIP_MIN_SEC = 10  // MiniMax voice cloning rejects clips shorter than this ("too short")
 
 export default defineEventHandler(async (event) => {
+  if (isHosted()) throw createError({ statusCode: 501, message: YOUTUBE_VOICE_HOSTED_REFUSAL })
   assertRateLimit(event, 'voice-clone-youtube', 3, 600_000)
   const body = await readBody(event) as { url?: string, startSec?: number, endSec?: number }
   const url = (body?.url || '').trim()
@@ -52,6 +62,7 @@ export default defineEventHandler(async (event) => {
   // MiniMax voice-cloning proxies the fetch externally and can't read an
   // auth-gated Replicate Files URL), and prints "FALURL:<url>". Errors → stderr.
   const stdout = await new Promise<string>((resolve, reject) => {
+    if (isHosted()) return reject(new Error(YOUTUBE_VOICE_HOSTED_REFUSAL))
     execFile(
       python,
       [script, url, String(startSec), String(endSec), outPath],

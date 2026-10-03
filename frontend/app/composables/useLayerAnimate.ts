@@ -49,10 +49,14 @@ export function useLayerAnimate() {
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
   const busy = ref(false)
   const error = ref('')
+  // Hosted has no Python to key the clip with (LC7): the route refuses, and the
+  // panel hides its Generate controls on this flag.
+  const available = !hosted
 
   async function animate(layer: ImageLayer, opts: { prompt: string; model: string; seconds: number }): Promise<ImageClip> {
     busy.value = true; error.value = ''
     try {
+      if (!available) throw new Error('Animate only works when Sailor runs on your own computer for now.')
       if (!(await confirmAnimateCost(opts.model, opts.seconds, hosted))) throw new AnimateCancelled()
       const image = await stillAsDataUrl(layer)
       const res = await $fetch<{ dir: string; frames: number; fps: number; model: string; prompt: string }>('/api/frame/animate', {
@@ -67,5 +71,5 @@ export function useLayerAnimate() {
     }
   }
 
-  return { busy, error, animate }
+  return { busy, error, available, animate }
 }

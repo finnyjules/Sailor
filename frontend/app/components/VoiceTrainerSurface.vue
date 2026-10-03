@@ -131,6 +131,10 @@ async function startClone() {
 // ── Capture from a YouTube timestamp range (additive; independent of the file
 // upload path). Grabs a [start,end] segment as the voice sample instead of an
 // uploaded file, then feeds the same training queue. ────────────────────────
+// Hosted has no Python or yt-dlp (LC7): the YouTube capture route refuses there, so
+// the capture section is not offered. Uploading a sample works everywhere.
+import { hostedModeEnabled } from '~/lib/hostedMode'
+const youtubeCapture = !hostedModeEnabled(useRuntimeConfig().public)
 const ytUrl = ref('')
 const ytStart = ref('')   // mm:ss or plain seconds
 const ytEnd = ref('')
@@ -234,7 +238,7 @@ onBeforeUnmount(revokePreview)
     </section>
 
     <!-- Or: capture from a YouTube timestamp range -->
-    <section class="mb-8">
+    <section v-if="youtubeCapture" class="mb-8">
       <div class="flex items-center gap-2 mb-2">
         <span class="h-px flex-1 bg-white/10" />
         <span class="text-[11px] uppercase tracking-wider text-white/35">or capture from YouTube</span>

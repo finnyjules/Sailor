@@ -9,12 +9,18 @@
  * The model call goes through runFal so the ledger hold, prompt
  * moderation, polling and release-on-failure are the shared ones. The Python steps
  * are execFile'd from the repo venv, like voice-clone/from-youtube.
+ *
+ * Hosted has no Python (step 3, R10.10), so there the route refuses first, before
+ * the body is read, the rate limit counts or any hold is taken (LC7). The keyer
+ * (scripts/clip_key.py: Lab keying, guard matte, erode/soften over every frame)
+ * is too large for a cheap Node port; the Animate controls are hidden in hosted.
  */
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { assertRateLimit } from '../../lib/rateLimit'
+import { isHosted } from '../../utils/deployMode'
 import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
 import { dataUrlBytes } from '../../utils/frameAnimate'
@@ -37,10 +43,14 @@ function clipsDir(): string | null {
   const input = engineDirForType('input')
   return input ? path.join(input, 'sailor_clips') : null
 }
+/** The hosted refusal, exported so its spec and the client say the same words. */
+export const ANIMATE_HOSTED_REFUSAL = 'Animate only works when Sailor runs on your own computer for now. Nothing was charged.'
+
 const PROMPT_SUFFIX = (key: 'green' | 'blue') =>
   `, on a solid ${key} screen background (uniform flat ${key === 'green' ? '#00FF00' : '#0000FF'} chroma key), evenly lit, no shadows, no gradient, camera locked, gentle motion`
 
 function py(args: string[], timeoutMs: number): Promise<string> {
+  if (isHosted()) return Promise.reject(new Error(ANIMATE_HOSTED_REFUSAL))
   return new Promise((resolve, reject) => {
     execFile(PYTHON, [SCRIPT, ...args], { timeout: timeoutMs, maxBuffer: 1 << 22 }, (err, out, stderr) => {
       if (err) return reject(new Error((stderr || '').trim().split('\n').pop() || err.message))
@@ -50,6 +60,10 @@ function py(args: string[], timeoutMs: number): Promise<string> {
 }
 
 export default defineEventHandler(async (event) => {
+  // Hosted: no Python to flatten or key with. Refuse before anything else, so no
+  // hold is taken and nothing is charged for a clip that could never be keyed.
+  if (isHosted()) throw createError({ statusCode: 501, message: ANIMATE_HOSTED_REFUSAL })
+
   // Validate BEFORE rate-limiting (review fix): assertRateLimit used to run
   // first, so six malformed requests (bad image, unknown model, junk PNG)
   // burned the whole 6-per-10-min budget and locked the user out for real

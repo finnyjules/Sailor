@@ -9,18 +9,19 @@
  * fal storage, and records the resulting CDN URL on the sidecar as
  * `fal_weights_url`. Every later generation reads that field and costs nothing.
  *
- * The tar is never held in memory: it streams to a temp file, the venv's Python
- * (`scripts/lora_extract_safetensors.py`, stdlib `tarfile`) streams the member
- * out of it, and only the extracted safetensors is read into a Buffer — once,
- * to hand to `uploadToFalStorage`. Both temp files are removed in `finally`.
+ * The tar is never held in memory: it streams to a temp file, `tarMembers.ts`
+ * streams the member out of it (step 3, LC7: Node, not the venv's Python, so
+ * this works in the hosted image too), and only the extracted safetensors is
+ * read into a Buffer — once, to hand to `uploadToFalStorage`. Both temp files
+ * are removed in `finally`.
  */
-import { execFile } from 'node:child_process'
 import { createWriteStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { uploadToFalStorage } from './falStorage'
+import { extractTarMember } from './tarMembers'
 
 export interface LoraSidecar {
   name?: string
@@ -36,9 +37,8 @@ const EXTRACT_TIMEOUT_MS = 600_000
 
 /**
  * First `.safetensors` name, `lora.safetensors` winning over anything else.
- * The TypeScript twin of `pick_member` in scripts/lora_extract_safetensors.py —
- * the Python is what actually runs; this exists so the preference rule is
- * testable without a tar, and so both sides can be read side by side.
+ * The rule `scripts/lora_extract_safetensors.py`'s `pick_member` had; since
+ * LC7 this is the one that runs.
  */
 export function pickSafetensorsMember(names: string[]): string | null {
   const candidates = (names ?? []).filter(n => typeof n === 'string' && n.toLowerCase().endsWith('.safetensors'))
@@ -87,24 +87,17 @@ async function migrate(sidecarPath: string, meta: LoraSidecar): Promise<string> 
 
   try {
     // 1. Stream the tar to disk — buffering 330 MB would be pointless here.
-    // Bounded like the Python step: a stalled replicate.delivery connection must not
+    // Bounded: a stalled replicate.delivery connection must not
     // hang this request forever — the in-flight memo would then pin every later
     // generation of this LoRA to a promise that never settles.
     const res = await fetch(tarUrl, { signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS) })
     if (!res.ok || !res.body) throw new Error(`Could not download the trained weights (${res.status})`)
     await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(tarPath))
 
-    // 2. Lift the safetensors out with the venv's Python (repo root is one
-    //    level up from the Nitro cwd, as in voice-clone/from-youtube).
-    const root = path.resolve(process.cwd(), '..')
-    const python = path.join(root, '.venv', 'bin', 'python')
-    const script = path.join(root, 'scripts', 'lora_extract_safetensors.py')
-    await new Promise<string>((resolve, reject) => {
-      execFile(python, [script, tarPath, outPath], { timeout: EXTRACT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, out, stderr) => {
-        if (err) return reject(new Error((stderr || '').trim().split('\n').pop() || err.message))
-        resolve(out || '')
-      })
-    })
+    // 2. Lift the safetensors out of the tar (Node, no Python: LC7).
+    const lifted = await extractTarMember(tarPath, pickSafetensorsMember, outPath)
+      .catch((e: Error) => { throw new Error(`Could not read the trained-model tar: ${e.message}`) })
+    if (!lifted) throw new Error('The trained-model tar holds no .safetensors weights.')
 
     // 3. Upload the weights to fal storage (a public CDN URL flux-lora can read).
     const bytes = await fs.readFile(outPath)
