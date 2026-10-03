@@ -70,6 +70,7 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectStartProblems, nearLimit, waveformStartProblems } from './video/start'
 import { clipAtCaps, frameShapes, videoSourceShapeOf } from './video/shapes'
+import { paidVideoSaveProblem } from './video/paidVideoSave'
 import { SAVE_FRAMES_TOO_MUCH, saveFramesKeptBytes, saveSize } from './cards/saveImage'
 import { loaderBatchStartProblems } from './cards/loaderBatch'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
@@ -2729,6 +2730,13 @@ export function createEngine(deps: EngineDeps) {
         first ??= saved.first
       }
       if (first && total > room) throw stopGap({ message: SAVE_FRAMES_TOO_MUCH, ...first })
+    }
+    // LC8 round 2 (F2 money): a paid maker's video into Save video, in hosted, bounded from its settings (Enhance a
+    // video: its measured clip × its upscale and rate) before the hold: past the caps Save video re-encodes within,
+    // or not sizable, refused plainly (a stream copy, format and codec on auto, is never re-encoded).
+    for (const [index, p] of prompts.entries()) {
+      const bad = paidVideoSaveProblem(p, families, { hosted: deps.hosted(), measured: measured[index]! })
+      if (bad) throw refuse(named(bad.nodeId, bad.message), 400, { nodeId: bad.nodeId, classType: bad.classType })
     }
     // R11.8 fix round 1 (I2): Create video reading a paid maker's sound past R5's sound caps: the engine, as before.
     for (const p of prompts) {

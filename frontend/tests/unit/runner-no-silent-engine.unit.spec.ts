@@ -267,9 +267,10 @@ describe('fix round 3: the review’s minors', () => {
     expect(engineRunPrompt(p, CATALOG)).toBe(p)
   })
   it('M-2: a pruned run names what it left out', () => {
-    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), d: { class_type: 'VAEDecode', inputs: {} }, pa: { class_type: 'PreviewAny', inputs: { source: ['d', 0] } } }
+    // LC8 round 2: a local-only node (VAE decode) is never left out, so the example is a Sailor result with nothing wired in.
+    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), b2: { class_type: 'Blur', inputs: { type: 'gaussian', radius: 2, angle: 0, length: 0, strength: 1 } }, s2: saveImage(['b2', 0]) }
     const pruned = engineRunPrompt(p, CATALOG)
-    const t = (id: string) => ({ d: 'Decode', pa: 'Show any' } as Record<string, string>)[id] ?? id
+    const t = (id: string) => ({ b2: 'Decode', s2: 'Show any' } as Record<string, string>)[id] ?? id
     expect(leftOutNotice([{ prompt: p, pruned, titleOf: t }])).toEqual({ title: 'Some nodes were left out', description: '“Decode” and “Show any” won’t run: something they need isn’t wired in.' })
     expect(leftOutNotice([{ prompt: p, pruned: p, titleOf: t }])).toBeNull()
   })
@@ -312,17 +313,30 @@ describe('fix round 2: a Shader effect whose picture is made in the same run goe
 
 describe('fix round 1: what ComfyUI would drop doesn’t decide the route', () => {
   it('an output ComfyUI drops no longer keeps a runner graph off the runner', () => {
-    // A Preview any reading a VAE decode with nothing wired in: ComfyUI drops both and runs the rest.
-    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), d: { class_type: 'VAEDecode', inputs: {} }, pa: { class_type: 'PreviewAny', inputs: { source: ['d', 0] } } }
-    expect(runnerTakesWorkflow(p, EVERY)).toBe(false)
+    // A Save image reading a Blur with nothing wired in: ComfyUI drops both and runs the rest.
+    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), b2: { class_type: 'Blur', inputs: { type: 'gaussian', radius: 2, angle: 0, length: 0, strength: 1 } }, s2: saveImage(['b2', 0]) }
+    // (Every class here is the runner's, so it prunes this itself too.)
+    expect(runnerTakesWorkflow(p, EVERY)).toBe(true)
     const pruned = engineRunPrompt(p, CATALOG)!
     expect(Object.keys(pruned).sort()).toEqual(['b', 'l', 's'])
     expect(runnerTakesWorkflow(pruned, EVERY)).toBe(true)
   })
-  it('a KSampler graph with nothing to show refuses as ComfyUI does; one whose every result fails, too', () => {
+  it('LC8 round 2 (ruling): a local-only node is never left out: its presence routes the whole run the R10.2 way', () => {
+    // A Preview any reading a VAE decode with nothing wired in, beside a runnable chain: no runner hand-off.
+    const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]), d: { class_type: 'VAEDecode', inputs: {} }, pa: { class_type: 'PreviewAny', inputs: { source: ['d', 0] } } }
+    expect(engineRunPrompt(p, CATALOG)).toBeNull()
+    expect(route(p).to).toBe('engine')
+    expect(route(p, { engineUp: false })).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
+    expect(route(p, { hosted: true })).toMatchObject({ to: 'refused', title: 'This workflow can’t run here' })
+  })
+  it('a KSampler graph with nothing to show, or whose every result fails: LC8 round 2, its local-only nodes route it (the engine judges it)', () => {
     const { s: _s, ...noOutput } = kSampler()
-    expect(route(noOutput)).toEqual({ to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE })
-    expect(route(kSampler({ s: { class_type: 'SaveImage', inputs: { ...SAVE_DEFAULTS } } }))).toEqual({ to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` })
+    expect(route(noOutput)).toEqual({ to: 'engine' })
+    expect(route(kSampler({ s: { class_type: 'SaveImage', inputs: { ...SAVE_DEFAULTS } } }))).toEqual({ to: 'engine' })
+    expect(route(noOutput, { engineUp: false })).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
+    // With no local-only node, the plain refusals stand.
+    expect(route({ s: { class_type: 'SaveImage', inputs: { ...SAVE_DEFAULTS } } })).toEqual({ to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` })
+    expect(route({ l: loadImage() })).toEqual({ to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE })
   })
 })
 

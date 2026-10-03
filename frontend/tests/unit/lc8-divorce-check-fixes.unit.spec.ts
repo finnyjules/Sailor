@@ -67,8 +67,78 @@ describe('B2: a stock checkpoint graph with the engine off is judged as local-on
     const r = route(p)
     expect(r).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
     expect((r as { description: string }).description).toContain('“KSampler”')
-    // With the engine up it would refuse it too: the old words stand there.
-    expect(route(p, { engineUp: true })).toMatchObject({ to: 'refused', title: 'This workflow can’t run' })
+    // Round 2 (R10.2): their presence routes the run: with the engine up it goes there, named by the engine's own errors.
+    expect(route(p, { engineUp: true }).to).toBe('engine')
+  })
+})
+
+// ── Round 2: project 34249b7f's shape ────────────────────────────────────────
+
+describe('round 2: local-only nodes beside runnable chains are never left out (project 34249b7f)', () => {
+  // Two copies of: stock nodes (unwired, as saved) and Load image + Image scale, with the auto Image cards
+  // Run adds on VAE decode, Load image and Image scale. The Load image → Image chains alone would run.
+  const shape = (): ApiPrompt => {
+    const p: ApiPrompt = {}
+    for (const k of ['a', 'b']) {
+      p[`${k}ks`] = { class_type: 'KSampler', inputs: { seed: 0, steps: 20, cfg: 8, sampler_name: 'euler', scheduler: 'simple', denoise: 1 } }
+      p[`${k}clip`] = { class_type: 'CLIPTextEncode', inputs: { text: null } }
+      p[`${k}vae`] = { class_type: 'VAEDecode', inputs: {} }
+      p[`${k}ckpt`] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: null } }
+      p[`${k}lat`] = { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512, batch_size: 1 } }
+      p[`${k}save`] = { class_type: 'SaveImage', inputs: { filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true } }
+      p[`${k}load`] = { class_type: 'LoadImage', inputs: { image: 'pasted.png' } }
+      p[`${k}scale`] = { class_type: 'ImageScale', inputs: { upscale_method: 'nearest-exact', width: 512, height: 512, crop: 'disabled' } }
+      p[`${k}s1`] = { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', batch_index: -1, images: [`${k}vae`, 0] } }
+      p[`${k}s2`] = { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', batch_index: -1, images: [`${k}load`, 0] } }
+      p[`${k}s3`] = { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', batch_index: -1, images: [`${k}scale`, 0] } }
+    }
+    return p
+  }
+  Object.assign(titles, { aks: 'KSampler', ackpt: 'Load Checkpoint', avae: 'VAE Decode', ascale: 'Upscale Image' })
+
+  it('no runner hand-off: the pruning never leaves a local-only node out', () => {
+    expect(runnerTakesWorkflow(shape(), ALL)).toBe(false)
+    expect(engineRunPrompt(shape(), CATALOG)).toBeNull()
+  })
+
+  it('engine off, locally: refused, "needs the local engine", naming the stock nodes', () => {
+    const r = route(shape())
+    expect(r).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
+    expect((r as { description: string }).description).toContain('“KSampler”')
+  })
+
+  it('hosted: refused, they run only on the local engine', () => {
+    const r = route(shape(), { hosted: true })
+    expect(r).toMatchObject({ to: 'refused', title: 'This workflow can’t run here' })
+    expect((r as { description: string }).description).toMatch(/run only on the local engine/)
+  })
+
+  it('engine up, locally: the whole graph goes to the engine', () => {
+    expect(route(shape(), { engineUp: true }).to).toBe('engine')
+  })
+
+  it('a needs-local-engine Sailor node or a custom node beside a runnable chain is never left out either', () => {
+    const chain = (): ApiPrompt => ({ l: { class_type: 'LoadImage', inputs: { image: 'pasted.png' } }, c: { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', batch_index: -1, images: ['l', 0] } } })
+    const custom: ApiPrompt = { ...chain(), x: { class_type: 'LayerUtility: If ', inputs: {} } }
+    titles.x = 'If'
+    // A custom class counts as an output (the safe side): it is kept, so the run is no runner hand-off.
+    const kept = engineRunPrompt(custom, CATALOG)
+    expect(kept === null || 'x' in kept).toBe(true)
+    expect(runnerTakesWorkflow(kept ?? custom, ALL)).toBe(false)
+    expect(route(custom)).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
+    expect(route(custom, { engineUp: true }).to).toBe('engine')
+    const kinetic: ApiPrompt = { ...chain(), k: { class_type: 'KineticType', inputs: {} } }
+    expect(engineRunPrompt(kinetic, CATALOG)).toBeNull()
+    expect(route(kinetic)).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
+  })
+
+  it('a wrong-type wire is still dropped (r119c): no local-engine node there', () => {
+    const p: ApiPrompt = {
+      3: { class_type: 'LoadVideoFrames', inputs: { file: 'clip.mp4', max_seconds: 10, max_frames: 1, max_size: 720, start_frame: 0, stride: 1 } },
+      2: { class_type: 'SaveImage', inputs: { filename_prefix: 'x', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true, images: ['3', 0] } },
+      10: { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', batch_index: -1, images: ['3', 1] } },
+    }
+    expect(Object.keys(engineRunPrompt(p, CATALOG)!).sort()).toEqual(['2', '3'])
   })
 })
 

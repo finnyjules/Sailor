@@ -973,6 +973,8 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
         // without one they simply all finish. The project is the run's own
         // tab (captured before the awaits above), not whichever tab is active now.
         const runTab = tabs.value.find(t => t.id === runTabId)
+        // LC8 round 2 (B5′): the nodes this run sends; only the auto-sinks among them stay if it is accepted.
+        sinks.ran = new Set(runnerPrompts.flatMap(p => Object.keys(p ?? {})))
         try {
           await sendRunnerPost(
             () => startRunnerRun({
@@ -1036,6 +1038,8 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
       // Fix round 1: Sailor nodes that still need the local engine (NEEDS_LOCAL_ENGINE, your own shader
       // effects) go there named, never silently.
       if (route?.to === 'engine' && route.notice) toast.info(route.notice.title, { description: route.notice.description })
+      // LC8 round 2 (B5′): on the local engine, the takes as built are what is sent.
+      if (!sentToRunner) sinks.ran = new Set([firstTake, ...extraTakes].flatMap(tk => Object.keys(tk.directPrompt ?? {})))
       if (sentToRunner) {
         // Registered as the POST returned (sendRunnerPost), before its early events were replayed.
       } else if (takeCount > 1) {
@@ -2090,8 +2094,10 @@ function onCanvasDirty() {
 interface RunSinks {
   /** The auto-sinks added for this run (node ids). */
   ids: string[]
-  /** The run was accepted (registered): the sinks stay. */
+  /** The run was accepted (registered): the sinks it sent stay. */
   accepted: boolean
+  /** LC8 round 2 (B5′): the node ids the accepted run sent (an auto-sink on an output left out isn't among them). */
+  ran: Set<string>
   /** The tab, and whether it had unsaved edits, when the run began. */
   tabId: string | undefined
   dirtyBefore: boolean
@@ -2108,6 +2114,7 @@ function beginRunSinks(ids: string[] = []): RunSinks {
   const r: RunSinks = {
     ids: [...ids],
     accepted: false,
+    ran: new Set(),
     tabId,
     dirtyBefore: autosaveDebounceTimer !== null || autosaveDeferredForRun,
     editedAtBefore: tabId ? docEditedAt[tabId] : undefined,
@@ -2124,16 +2131,20 @@ function materializeRunSinks(ids: string[]): { expanded: string[]; added: string
   return { expanded, added }
 }
 /**
- * The run is settled. Accepted: its sinks stay and a save that waited goes now. Refused: its sinks are taken
- * back, and when they were the only change since the last save, nothing is saved (the project is as it was).
+ * The run is settled. Accepted: the sinks it sent stay (the others are taken back) and a save that waited goes
+ * now. Refused: its sinks are taken back, and when they were the only change since the last save, nothing is
+ * saved (the project is as it was).
  */
 async function settleRunSinks(r: RunSinks): Promise<void> {
-  if (r.ids.length && !r.accepted) {
-    vueCanvasRef.value?.removeAutoSinks?.(r.ids)
+  // LC8 round 2 (B5′): an accepted run keeps only the auto-sinks it sent (on outputs that run); the others go,
+  // before the waiting save, so they are never saved. A refused run takes them all back.
+  const drop = r.accepted ? r.ids.filter(id => !r.ran.has(id)) : r.ids
+  if (drop.length) {
+    vueCanvasRef.value?.removeAutoSinks?.(drop)
     // The removal dirties the canvas on the next tick (the graph watch): let it, then drop that save.
     await nextTick()
     await nextTick()
-    if (!r.dirtyBefore && activeTab.value?.id === r.tabId) {
+    if (drop.length === r.ids.length && !r.dirtyBefore && activeTab.value?.id === r.tabId) {
       if (autosaveDebounceTimer) { clearTimeout(autosaveDebounceTimer); autosaveDebounceTimer = null }
       autosaveDeferredForRun = false
       if (r.tabId) {

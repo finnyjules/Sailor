@@ -262,7 +262,17 @@ function localOnlyOutputsPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): 
  */
 export function engineRunPrompt(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
   const part = engineRunPart(prompt, catalog, { wireTypes: true })
-  return typeof part === 'string' ? null : part
+  if (typeof part === 'string') return null
+  // LC8 round 2 (R10.2): a node only the local engine runs is never left out: such a run is no runner hand-off
+  // (engineRoute takes it to the engine, named, or refuses it in the local-engine words).
+  if (Object.entries(prompt).some(([id, n]) => !(id in part) && needsTheLocalEngine(n.class_type))) return null
+  return part
+}
+
+/** LC8 round 2: a class only the local engine runs: local-only, a Sailor node still on NEEDS_LOCAL_ENGINE, or a custom node. */
+export function needsTheLocalEngine(classType: string): boolean {
+  return isLocalOnlyClass(classType) || isCustomClass(classType)
+    || (classType !== 'ShaderEffect' && Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, classType))
 }
 
 /**
@@ -334,8 +344,6 @@ export function engineRoute(
   const listed = new Map<string, string>()
   let allFailed = false
   let noOutputs = false
-  /** LC8 (B2): local-only nodes in a take nothing would run (no output reads them, or none is valid), by title. */
-  const localOnlyAside = new Set<string>()
   /** LC8 (F1): a take of nodes the runner takes one by one, with nothing to do (no work, no output reading anything). */
   let nothingToRun = false
   for (const take of takes) {
@@ -344,16 +352,20 @@ export function engineRoute(
     // LC8 (B2): local-only classes are judged before setting validation: an output reading one is the
     // local engine's to judge (it knows its own nodes' settings), and goes there named, or is refused
     // where the engine can't be reached, in its words.
-    if (part === 'failed' || part === 'no-outputs') {
-      const sub = part === 'failed' ? localOnlyOutputsPart(take.prompt, opts.catalog) : null
-      if (!sub) {
-        for (const [id, node] of Object.entries(take.prompt)) if (isLocalOnlyClass(node.class_type)) localOnlyAside.add(take.titleOf(id))
-        if (part === 'failed') allFailed = true
-        else noOutputs = true
-        continue
-      }
-      part = sub
+    if (part === 'failed') part = localOnlyOutputsPart(take.prompt, opts.catalog) ?? 'failed'
+    // LC8 round 2 (R10.2): a node only the local engine runs (local-only, NEEDS_LOCAL_ENGINE, custom) is
+    // never left out: one the pruning dropped still takes the whole run the R10.2 way, named.
+    const judged = typeof part === 'string' ? null : part
+    for (const [id, node] of Object.entries(take.prompt)) {
+      if (judged && id in judged) continue
+      const ct = node.class_type
+      const title = take.titleOf(id)
+      if (isLocalOnlyClass(ct)) localOnly.add(title)
+      else if (isCustomClass(ct)) { if (!listed.has(title)) listed.set(title, CUSTOM_NODE_WORDS) }
+      else if (ct !== 'ShaderEffect' && Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, ct)) { if (!listed.has(title)) listed.set(title, NEEDS_LOCAL_ENGINE_WORDS) }
     }
+    if (part === 'failed') { allFailed = true; continue }
+    if (part === 'no-outputs') { noOutputs = true; continue }
     const { run, ids } = blockedNodes(part, families)
     if (!ids.length) continue
     // LC8 (F1): every node taken on its own, the whole still not: there is nothing to do.
@@ -383,13 +395,6 @@ export function engineRoute(
     return { to: 'refused', title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`, description: namedWords(refused) }
   }
   if (!localOnly.size && !listed.size) {
-    // LC8 (B2): local-only nodes nothing would run, where the engine can't be reached: they are why.
-    if (localOnlyAside.size && (opts.hosted || !opts.engineUp)) {
-      const aside = [...localOnlyAside]
-      return opts.hosted
-        ? { to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(aside) }
-        : { to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(aside) }
-    }
     if (allFailed) return { to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` }
     if (noOutputs) return { to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE }
     const declined = opts.declined?.trim()

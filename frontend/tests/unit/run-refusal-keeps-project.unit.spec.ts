@@ -37,9 +37,18 @@ describe('a refused Run leaves the project as it was', () => {
 
   it('a refused run takes its sinks back and, when they were the only change, drops the save', () => {
     const fn = body('async function settleRunSinks(')
-    expect(fn).toContain('if (r.ids.length && !r.accepted)')
-    expect(fn).toContain('vueCanvasRef.value?.removeAutoSinks?.(r.ids)')
-    expect(fn).toMatch(/if \(!r\.dirtyBefore && activeTab\.value\?\.id === r\.tabId\) \{\s*if \(autosaveDebounceTimer\) \{ clearTimeout\(autosaveDebounceTimer\)/)
+    expect(fn).toContain('const drop = r.accepted ? r.ids.filter(id => !r.ran.has(id)) : r.ids')
+    expect(fn).toContain('vueCanvasRef.value?.removeAutoSinks?.(drop)')
+    expect(fn).toMatch(/if \(drop\.length === r\.ids\.length && !r\.dirtyBefore && activeTab\.value\?\.id === r\.tabId\) \{\s*if \(autosaveDebounceTimer\) \{ clearTimeout\(autosaveDebounceTimer\)/)
+    // The removal comes before the waiting save is let go.
+    expect(fn.indexOf('removeAutoSinks')).toBeLessThan(fn.indexOf('armAutosave()'))
+  })
+
+  it('LC8 round 2 (B5′): an accepted run keeps only the auto-sinks it sent (outputs that run)', () => {
+    const fn = body('async function runVueWorkflowBody(')
+    // The runner: the takes it is sent (pruned or as built); the local engine: the takes as built.
+    expect(fn).toMatch(/sinks\.ran = new Set\(runnerPrompts\.flatMap\(p => Object\.keys\(p \?\? \{\}\)\)\)\s*try \{\s*await sendRunnerPost\(/)
+    expect(fn).toMatch(/if \(!sentToRunner\) sinks\.ran = new Set\(\[firstTake, \.\.\.extraTakes\]\.flatMap\(tk => Object\.keys\(tk\.directPrompt \?\? \{\}\)\)\)/)
   })
 
   it('the autosave waits while a run that added sinks is judged, and saves once it is settled', () => {
