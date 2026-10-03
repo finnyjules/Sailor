@@ -76,15 +76,20 @@ const computed = (fn: unknown) => fn
 // ── 1. letters (and bands) count as motion ──────────────────────────────────
 
 describe('hasMotion', () => {
-  const evaluate = (over: Record<string, unknown> = {}) =>
-    runStatement(MODAL, 'hasMotion', {
+  // `hasMotion` = the frame's own motion (`hasOwnMotion`: layers, bands, letters) or an
+  // animated wired slot. Lift both, and hand the first to the second as the ref it reads.
+  const evaluate = (over: Record<string, unknown> = {}) => {
+    const scope = {
       computed,
       localLayers: ref<any[]>([{ id: 'L1', kind: 'text' }]),
       hasAnimatedSlot: ref(false),
       motionxTracks: ref<any[]>([]),
       motionBehaviours: ref<any[]>([]),
       ...over,
-    })()
+    }
+    const own = runStatement(MODAL, 'hasOwnMotion', scope)
+    return runStatement(MODAL, 'hasMotion', { ...scope, hasOwnMotion: { get value() { return own() } } })()
+  }
 
   it('false for a still frame', () => {
     expect(evaluate()).toBe(false)

@@ -31,6 +31,6 @@ export default defineConfig({
   test: {
     include: ['tests/unit/**/*.unit.spec.ts'],
     environment: 'node',
-    setupFiles: ['tests/unit/__setup__/vue-reactivity.ts', 'tests/unit/__setup__/engine-root-safety-net.ts'],
+    setupFiles: ['tests/unit/__setup__/vue-reactivity.ts', 'tests/unit/__setup__/engine-root-safety-net.ts', 'tests/unit/__setup__/web-storage.ts'],
   },
 })

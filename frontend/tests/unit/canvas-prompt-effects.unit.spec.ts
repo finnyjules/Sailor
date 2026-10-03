@@ -79,7 +79,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
   it('a Remix chip runs the effect session against the node, without the router', async () => {
     const { api, effects, route, replies } = setup()
     setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
-    expect(api.modeNote.value).toBe('48–88 credits')
+    expect(api.modeNote.value).toBe('30–84 credits')
     await api.submit('rain on a window')
     expect(route).not.toHaveBeenCalled() // the chip decides the kind (spec §4)
     expect(effects.start).toHaveBeenCalledWith('rain on a window', expect.objectContaining({ key: 's1', label: 'Water ripple' }))
@@ -121,7 +121,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
   it('a New effect chip starts from nothing', async () => {
     const { api, effects } = setup()
     setMode({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
-    expect(api.modeNote.value).toBe('48–88 credits')
+    expect(api.modeNote.value).toBe('30–84 credits')
     await api.submit('rain on a window')
     expect(effects.start.mock.calls[0]![1].base).toBeNull()
     expect(effects.start.mock.calls[0]![1].remix).toBe(false)
@@ -151,7 +151,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     effects.request.value = 'rain on a window'
     effects.running.value = true
     expect(api.working.value).toBe(true)
-    expect(api.workingLabel.value).toBe('Working on “rain on a window” · 48–88 credits')
+    expect(api.workingLabel.value).toBe('Working on “rain on a window” · 30–84 credits')
     await api.submit('something else')
     expect(route).not.toHaveBeenCalled()
     api.stop()
@@ -239,7 +239,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(api.takesMoreNote.value).toBeNull()
     setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
     await api.submit('rain')
-    expect(api.takesMoreNote.value).toBe('48–88 credits')
+    expect(api.takesMoreNote.value).toBe('30–84 credits')
   })
 
   it('Make one / Remix mid-job says why nothing happens (the studios’ busy toast)', async () => {
@@ -259,7 +259,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
       expect(api.acceptsReference.value).toBe(true)
       api.attachReference(REF)
       expect(api.mode.value).toMatchObject({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
-      expect(api.modeNote.value).toBe('51–88 credits')
+      expect(api.modeNote.value).toBe('30–88 credits')
       await api.submit('')
       expect(route).not.toHaveBeenCalled()
       expect(effects.start).toHaveBeenCalledWith(REFERENCE_ONLY_REQUEST, expect.objectContaining({ key: 's1', base: null }), { reference: REF })
