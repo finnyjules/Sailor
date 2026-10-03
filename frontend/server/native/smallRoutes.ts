@@ -6,9 +6,8 @@
  * `/sailor/models` stays claimed with no route in it (step 3, R10.5): Sailor
  * no longer downloads or reports model bundles, and a request there answers
  * 404 here rather than reaching the engine's downloader.
- * `/sailor/font_subset` is checked here and, locally, still subset by the
- * engine while it runs; without it, and always in hosted (R10.9), the font
- * comes back whole (fontSubset.ts says why).
+ * `/sailor/font_subset` is checked and cut here, in Node, hosted and local
+ * alike (fontSubset.ts).
  */
 import type { H3Event } from 'h3'
 import { getRequestHeader } from 'h3'
@@ -127,12 +126,10 @@ export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyR
       return spaceThumbnailSaveRoute(bridge, h.effectId, read.bytes)
     }
     case 'fontSubset': {
-      // Checked natively (the Python's own 400s). A font that passes comes back
-      // whole: the engine's fontTools subsetting is gone (step 3, R10.9 for
-      // hosted; step 4, C5 everywhere; see fontSubset.ts).
+      // Checked (the Python's own 400s) and cut natively; see fontSubset.ts.
       const parsed = await read.json()
       if (!parsed.ok) return parsed.result
-      return fontSubsetRoute(parsed.value)
+      return await fontSubsetRoute(parsed.value)
     }
     case 'saveCaptions':
     case 'clearDataset':

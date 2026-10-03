@@ -193,11 +193,12 @@ const TTF = path.resolve(__dirname, '..', '..', '..', 'Assets', 'Fonts', 'Free F
 
 for (const mode of ['hosted', 'local'] as const) describe(`${mode} font subset: checked and answered natively`, () => {
   useMode(mode)
-  it.skipIf(!fs.existsSync(TTF))('the font comes back whole, with no request to the engine', async () => {
+  it.skipIf(!fs.existsSync(TTF))('the font is cut to the text and basic Latin, with no request to the engine', async () => {
     const b64 = fs.readFileSync(TTF).toString('base64')
     const r = await call('POST', '/sailor/font_subset', JSON.stringify({ font: b64, text: 'a' }), { 'content-type': 'application/json' })
     expect(r.status).toBe(200)
-    expect(r.body).toMatchObject({ font: b64, before: fs.statSync(TTF).size, after: fs.statSync(TTF).size })
+    expect(r.body.before).toBe(fs.statSync(TTF).size)
+    expect(r.body.after).toBeLessThan(r.body.before)
     expect(requested()).toEqual([])
     expect(proxyRequest).not.toHaveBeenCalled()
   })

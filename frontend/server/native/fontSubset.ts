@@ -6,29 +6,22 @@
  * `{ font: "<base64>", before: <bytes in>, after: <bytes out> }`, with the
  * Python's own 400s for a missing, oversized, undecodable or unreadable font.
  *
- * The answer's font is the ORIGINAL font, unsubsetted, for every font kind.
- * The Python subsets with fontTools, which keeps cmap, name, OS/2, post and
- * every GSUB/GPOS feature. fontkit's `createSubset()` cannot stand in for it:
+ * The font is cut to `text`'s characters UNION basic Latin (U+0020..U+007E),
+ * every GSUB/GPOS feature kept (the Python's `layout_features = ["*"]`),
+ * hinting kept, same container as the input (ttf/otf/woff/woff2 in, the same
+ * out). The cutter is `subset-font` (harfbuzz's hb-subset in WebAssembly), the
+ * maintained equivalent of fontTools' subsetter: it keeps cmap, name, OS/2 and
+ * post, so the result is a font a browser accepts, not fontkit's PDF-embedding
+ * subset. fontkit still parses the input first, so bytes that are not a font
+ * (or a collection, which fontTools also refuses) get a 400.
  *
- *   - TrueType outlines (TTFSubset) come back as a PDF-embedding font with
- *     only head/hhea/loca/maxp/cvt/prep/glyf/hmtx/fpgm — no cmap (so no
- *     character maps to any glyph), no name/OS/2/post (browsers reject the
- *     font), and no GSUB/GPOS/kern (kerning and ligatures gone);
- *   - CFF outlines (CFFSubset) come back as a bare CFF table, not a font
- *     file at all.
- *
- * Neither contains the requested characters in a form a browser can use, and
- * the export inlines this font into a web page. The route is a size
- * optimisation, not a correctness requirement (the export falls back to the
- * full font on any failure), so the safe answer is the full font: `before`
- * equals `after`. fontkit still parses the font, so bytes that are not a font
- * get the same 400 the Python gives.
- *
- * So the route (smallRoutes.ts) runs these checks and answers with this whole
- * font (step 4, C5: there is no engine to subset it).
+ * Subsetting is a size optimisation: if harfbuzz cannot cut a font that parses
+ * (an exotic table), the route answers the whole font rather than an error,
+ * and the export (which falls back to the full font anyway) is unaffected.
  */
 /// <reference path="../../app/lib/vectortype/fontkit.d.ts" />
 import * as fontkit from 'fontkit'
+import subsetFont from 'subset-font'
 
 export interface SubsetResult {
   status: number
@@ -37,6 +30,9 @@ export interface SubsetResult {
 
 /** `MAX_FONT_SUBSET_BYTES` */
 export const MAX_FONT_SUBSET_BYTES = 20 * 1024 * 1024
+
+/** `_BASIC_LATIN_CODEPOINTS`: space .. tilde, always kept. */
+const BASIC_LATIN = Array.from({ length: 0x7F - 0x20 }, (_, i) => String.fromCodePoint(0x20 + i)).join('')
 
 /** `base64.b64decode(s, validate=True)` — strict: base64 alphabet only, exact padding. */
 export function strictB64Decode(s: string): Buffer {
@@ -57,12 +53,8 @@ export function strictB64Decode(s: string): Buffer {
   return Buffer.from(s, 'base64')
 }
 
-/**
- * `subset_font_bytes`'s checks (empty, oversized, not a font), then the font
- * itself — see the header for why nothing is cut. `text` is accepted and
- * unused: every character of it is in the answer because the whole font is.
- */
-export function subsetFontBytes(fontBytes: Buffer, _text: string): Buffer {
+/** `subset_font_bytes`: the checks (empty, oversized, not a font), then the cut. */
+export async function subsetFontBytes(fontBytes: Buffer, text: string): Promise<Buffer> {
   if (!fontBytes.length) throw new Error('subset_font_bytes: no font bytes given')
   if (fontBytes.length > MAX_FONT_SUBSET_BYTES) {
     throw new Error(`subset_font_bytes: font is ${fontBytes.length} bytes, over the ${MAX_FONT_SUBSET_BYTES}-byte cap`)
@@ -70,11 +62,17 @@ export function subsetFontBytes(fontBytes: Buffer, _text: string): Buffer {
   const font = fontkit.create(fontBytes) as any
   // fontTools' TTFont refuses a collection without a font number.
   if (Array.isArray(font?.fonts)) throw new Error('specify a font number between 0 and ' + (font.fonts.length - 1) + ' (inclusive)')
-  return fontBytes
+  try {
+    return Buffer.from(await subsetFont(fontBytes, BASIC_LATIN + text))
+  }
+  catch (e) {
+    console.warn('[font_subset] could not cut this font, answering it whole:', e instanceof Error ? e.message : e)
+    return fontBytes
+  }
 }
 
 /** `_font_subset_route`, given the parsed JSON body. A non-object body is aiohttp's 500 (the caller's guard). */
-export function fontSubsetRoute(data: unknown): SubsetResult {
+export async function fontSubsetRoute(data: unknown): Promise<SubsetResult> {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new TypeError('\'data\' has no attribute \'get\'')
   const body = data as Record<string, unknown>
   const fontB64 = body.font
@@ -88,7 +86,7 @@ export function fontSubsetRoute(data: unknown): SubsetResult {
   catch (e) { return { status: 400, body: { error: `undecodable font: ${(e as Error).message}` } } }
 
   let out: Buffer
-  try { out = subsetFontBytes(fontBytes, text) }
+  try { out = await subsetFontBytes(fontBytes, text) }
   catch (e) { return { status: 400, body: { error: e instanceof Error ? e.message : String(e) } } }
 
   return { status: 200, body: { font: out.toString('base64'), before: fontBytes.length, after: out.length } }

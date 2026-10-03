@@ -228,11 +228,32 @@ describe('font_subset', () => {
     }
   })
 
-  it.skipIf(!hasFonts)('the whole font comes back, and nothing is asked (step 4, C5: no engine subset)', async () => {
-    const b64 = fs.readFileSync(TTF).toString('base64')
-    engineFetch.mockResolvedValue(new Response(JSON.stringify({ font: 'c3Vi', before: 55484, after: 3 }), { headers: { 'content-type': 'application/json; charset=utf-8' } }))
-    const r = await post('/sailor/font_subset', { font: b64, text: 'a' })
-    expect(r.body).toMatchObject({ font: b64, before: fs.statSync(TTF).size, after: fs.statSync(TTF).size })
+  it.skipIf(!hasFonts)('the font is cut to the text plus basic Latin: smaller, nothing else kept, same container, features kept, nothing asked of the engine', async () => {
+    const text = 'Wave «ç» — 42é'
+    const wanted = new Set([...text].map(c => c.codePointAt(0)!))
+    for (let cp = 0x20; cp < 0x7F; cp++) wanted.add(cp)
+    for (const file of [TTF, OTF]) {
+      const source = fs.readFileSync(file)
+      const original = fontkit.create(source) as any
+      const r = await post('/sailor/font_subset', { font: source.toString('base64'), text })
+      const out = Buffer.from(r.body.font, 'base64')
+      expect(r.body.after).toBeLessThan(r.body.before)
+      expect(out.subarray(0, 4).toString('hex'), 'same container').toBe(source.subarray(0, 4).toString('hex'))
+      const font = fontkit.create(out) as any
+      expect(font.numGlyphs).toBeLessThan(original.numGlyphs)
+      // Exactly the wanted characters (those the font has) map to a glyph.
+      const kept = new Set<number>((font.characterSet as number[]).filter(cp => cp !== 0xFFFF)) // 0xFFFF is cmap format 4's terminator
+      const expected = new Set([...wanted].filter(cp => original.hasGlyphForCodePoint(cp)))
+      expect(kept, path.basename(file)).toEqual(expected)
+      expect(font.familyName).toBe(original.familyName)
+      expect(font.availableFeatures.length, 'layout features kept').toBeGreaterThan(0)
+      for (const f of font.availableFeatures) expect(original.availableFeatures).toContain(f)
+    }
+    // Text adds only its own characters: an empty text keeps just basic Latin.
+    const bare = await post('/sailor/font_subset', { font: fs.readFileSync(TTF).toString('base64') })
+    const bareFont = fontkit.create(Buffer.from(bare.body.font, 'base64')) as any
+    expect(bareFont.hasGlyphForCodePoint(0xE9)).toBe(false)
+    expect(bareFont.hasGlyphForCodePoint(0x41)).toBe(true)
     expect(engineFetch).not.toHaveBeenCalled()
 
     expect((await post('/sailor/font_subset', { font: 'abc' })).status).toBe(400)

@@ -227,19 +227,18 @@ describe.skipIf(!hasPython)('font_subset', () => {
   const otf = path.join(FONTS, 'Absans', 'Absans-Regular.otf')
   const hasFonts = fs.existsSync(ttf) && fs.existsSync(otf)
 
-  it.skipIf(!hasFonts)('same shape; the native font is the whole font and holds every requested character (TTF and CFF/OTF)', () => {
+  it.skipIf(!hasFonts)('same shape; both are cut and hold every requested character (TTF and CFF/OTF)', async () => {
     const text = 'Wave «ç» 42 — é'
     for (const file of [ttf, otf]) {
       const b64 = fs.readFileSync(file).toString('base64')
       const [py] = python([{ handler: '_font_subset_route', body: JSON.stringify({ font: b64, text }) }])
-      const native = fontSubsetRoute({ font: b64, text }) as { status: number, body: any }
+      const native = await fontSubsetRoute({ font: b64, text }) as { status: number, body: any }
       expect(py!.status).toBe(200)
       expect(native.status).toBe(200)
       expect(Object.keys(native.body)).toEqual(Object.keys(py!.body))
       expect(native.body.before).toBe(py!.body.before)
       expect(py!.body.after).toBeLessThan(py!.body.before)
-      expect(native.body.after, 'the native answer is the full, unsubsetted font').toBe(native.body.before)
-      expect(native.body.font).toBe(b64)
+      expect(native.body.after, 'the native answer is cut').toBeLessThan(native.body.before)
       for (const out of [native.body.font, py!.body.font]) {
         const font = fontkit.create(Buffer.from(out, 'base64')) as any
         for (const ch of new Set([...text, ...Array.from({ length: 0x7F - 0x20 }, (_, i) => String.fromCodePoint(0x20 + i))])) {
@@ -251,7 +250,7 @@ describe.skipIf(!hasPython)('font_subset', () => {
     }
   })
 
-  it('the same refusals, word for word where the Python\'s words are its own', () => {
+  it('the same refusals, word for word where the Python\'s words are its own', async () => {
     const bodies: unknown[] = [
       {}, { font: '' }, { font: 5 }, { font: null, text: 'x' },
       { font: 'abc' }, { font: 'ab!c' }, { font: 'YW Jj' }, { font: 'YWJj=' }, { font: 'YWJj====' }, { font: 'é' },
@@ -261,17 +260,17 @@ describe.skipIf(!hasPython)('font_subset', () => {
     const py = python(bodies.map(b => ({ handler: '_font_subset_route', body: JSON.stringify(b) })))
     for (const [i, b] of bodies.entries()) {
       let native: { status: number, body: unknown }
-      try { native = fontSubsetRoute(b) }
+      try { native = await fontSubsetRoute(b) }
       catch { native = { status: 500, body: 'raised' } }
       expect(native.status, JSON.stringify(b)).toBe(py[i]!.status)
       if (native.status === 400) expect(native.body, JSON.stringify(b)).toEqual(py[i]!.body)
     }
   })
 
-  it('bytes that are not a font: 400 on both sides (the parser\'s message differs)', () => {
+  it('bytes that are not a font: 400 on both sides (the parser\'s message differs)', async () => {
     const b64 = Buffer.from('not a font at all, just text').toString('base64')
     const [py] = python([{ handler: '_font_subset_route', body: JSON.stringify({ font: b64 }) }])
-    const native = fontSubsetRoute({ font: b64 })
+    const native = await fontSubsetRoute({ font: b64 })
     expect(py!.status).toBe(400)
     expect(native.status).toBe(400)
   })
