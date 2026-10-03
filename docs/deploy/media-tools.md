@@ -9,12 +9,11 @@ folder in and sets `NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin`.
   dav1d 1.5.1 and zlib 1.3.2, all linked statically. The versions, URLs and sha256 values are
   in `scripts/media-tools/versions.env`. dav1d's build tools (meson, ninja) come from a
   pinned, hash-checked venv the script makes itself (`scripts/media-tools/buildtools.txt`).
-- **Base (the runtime base is now pinned):** the Dockerfile has one line,
-  `ARG PYTHON_BASE=python:3.12-slim@sha256:…`, and both the `media-tools` stage and the
-  `runtime` stage are `FROM ${PYTHON_BASE}`. Before R5.1a the runtime was unpinned
-  `python:3.12-slim` and moved whenever Docker Hub moved the tag; now it only moves when
-  that line changes. Keeping them on one ARG means the tools are always compiled against
-  the glibc they run on.
+- **Bases (both pinned):** the tools stage is `FROM ${PYTHON_BASE}` (Python only for
+  the build's meson and ninja) and the runtime is `FROM ${NODE_BASE}` (Node 22, no Python,
+  step 3 R10.10). Both are pinned by multi-arch digest and must sit on the **same Debian
+  release** (trixie today), so the tools run on the glibc they were compiled against. The
+  runtime stage runs `ffmpeg -version` and `ffprobe -version`, so a mismatch fails the build.
 - **Build time:** about 10 minutes on a cold cache. The stage only reruns when
   `scripts/media-tools/` or the base changes.
 - **Size added to the image:** not measured yet. The controller measures it at the first
@@ -25,14 +24,15 @@ folder in and sets `NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin`.
 1. Read the new digest of the multi-arch tag (not a single-architecture image):
    `docker buildx imagetools inspect python:3.12-slim` (the top `Digest:` line), or Docker
    Hub's `https://hub.docker.com/v2/repositories/library/python/tags/3.12-slim` (`digest`).
-2. Change the one `ARG PYTHON_BASE=` line in the Dockerfile. Don't give either stage its
-   own base.
+2. Change the `ARG PYTHON_BASE=` line in the Dockerfile, and `ARG NODE_BASE=` with it when
+   the Debian release changes (read `node:22-<release>-slim`'s digest the same way). The two
+   must name the same release.
 3. Build and deploy. The tools are rebuilt on the new base (about 10 minutes), and the new
    `manifest.json` records the compiler. A one-off test can use
    `docker build --build-arg PYTHON_BASE=python:3.12-slim@sha256:<digest> …`, which moves
    both stages together.
-4. A new Debian release under the tag (bookworm to trixie, say) also changes the runtime's
-   system libraries: check ComfyUI starts and the Nuxt server runs before deploying.
+4. A new Debian release under the tag also changes the runtime's system libraries: check
+   the Nuxt server runs (and a video effect and a caption render) before deploying.
 
 ## Checking a running machine
 
@@ -103,5 +103,5 @@ sha256 doesn't match its pin.
 - OpenH264 built from source is covered by its BSD licence. Cisco's patent grant covers only
   Cisco's own binaries downloaded by an end user. H.264 encoding in hosted is on by the
   user's own decision (2026-09-28); the patent question is recorded there (ruling b).
-- The image still contains PyAV, which bundles GPL x264 and x265, until ComfyUI leaves it
-  (ruling o). "No GPL" holds for Sailor's own tools, not yet for the whole image.
+- Since R10.10 the image carries no ComfyUI and no PyAV, so it no longer contains PyAV's
+  GPL x264 and x265 (ruling o).

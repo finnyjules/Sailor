@@ -6,11 +6,35 @@
 *.log
 **/.DS_Store
 
-# Python
+# Python — the image carries no Python and no ComfyUI (step 3, R10.10).
+# ComfyUI's source, its requirements and every *.py stay out; Sailor's data
+# folders (blueprints, shader_effects, custom_nodes/sailor_bridge's scene
+# defaults, models/loras sidecars) still ship.
 .venv
 **/__pycache__
+**/*.py
 **/*.py[cod]
 .pytest_cache
+comfy
+comfy_api
+comfy_api_nodes
+comfy_config
+comfy_execution
+comfy_extras
+api_server
+app
+middleware
+utils
+alembic_db
+alembic.ini
+requirements.txt
+manager_requirements.txt
+pyproject.toml
+pytest.ini
+tests
+tests-unit
+script_examples
+extra_model_paths.yaml.example
 
 # Node / Nuxt (frontend is rebuilt inside the image)
 **/node_modules

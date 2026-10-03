@@ -133,9 +133,15 @@ function isEngineRoot(dir: string): boolean {
  * Nitro process launched from anywhere but `frontend/` silently pointed at a
  * directory that doesn't exist and `existsSync` missed EVERY disk check,
  * treating every unclaimed name as free.
+ *
+ * Step 3, R10.10: the hosted image carries no ComfyUI, so no `main.py`. An
+ * override is an operator's explicit choice (the Dockerfile sets
+ * `SAILOR_ENGINE_ROOT=/app`), so it is checked by the folder Sailor actually
+ * reads, `input/`, alone. The walk still needs `main.py` + `input/`: a guess
+ * from the working directory must not stop at any stray `input/` folder.
  */
 export function computeEngineRoot(cwd: string, envOverride: string | null | undefined): string | null {
-  if (envOverride) return isEngineRoot(envOverride) ? envOverride : null
+  if (envOverride) return existsSync(path.join(envOverride, 'input')) ? envOverride : null
   let dir = cwd
   for (let i = 0; i < 12; i++) {
     if (isEngineRoot(dir)) return dir

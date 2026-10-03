@@ -1,5 +1,6 @@
-# Fly.io config for Sailor — Nuxt frontend + CPU-only ComfyUI in one machine.
-# Generation runs on Replicate/fal, so no GPU is required.
+# Fly.io config for Sailor — the Nuxt (Nitro) server alone in one machine. The
+# image carries no ComfyUI and no Python (step 3, R10.10): nodes run in Sailor's
+# runner or on Replicate/fal, so no GPU is required.
 #
 # HOSTING DECISION 2026-08-17 (docs/superpowers/specs/2026-08-17-hosting-decision-fly.md):
 # Fly.io, region sjc, auto-stop-by-default. The app name below is a
@@ -44,7 +45,7 @@ primary_region = "sjc"   # San Jose — nearest to Neon (aws-us-west-2, Oregon).
 # Service — Nuxt frontend (the ONLY public service).
 #
 # auto_stop_machines: the machine stops when traffic goes quiet and boots on
-# the next request (~15-30s for ComfyUI). An idle month costs volume storage
+# the next request (boot time without ComfyUI not measured yet). An idle month costs volume storage
 # only (~$1-2), not ~$30 of always-on compute — deliberate choice 2026-08-17
 # after exactly that bill. Flip min_machines_running to 1 (and auto_stop to
 # "off") only for the beta window, as an explicit decision.
@@ -83,6 +84,8 @@ primary_region = "sjc"   # San Jose — nearest to Neon (aws-us-west-2, Oregon).
 # SAILOR_ENGINE_ROOT env if processes don't launch from frontend/.
 ###############################################################################
 
+# VM size kept from the ComfyUI image until the Python-free image is measured
+# on Fly (step 3, ruling (l)); shrink it only from those measurements.
 [[vm]]
   size = "shared-cpu-4x"
   memory = "8gb"

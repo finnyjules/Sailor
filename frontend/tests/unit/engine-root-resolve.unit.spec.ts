@@ -60,6 +60,21 @@ describe('computeEngineRoot — env override', () => {
   })
 })
 
+describe('computeEngineRoot — an override without ComfyUI (R10.10, the hosted image)', () => {
+  it('an override with input/ and no main.py checks out', () => {
+    const noEngine = join(root, 'app')
+    mkdirSync(join(noEngine, 'input'), { recursive: true })
+    expect(computeEngineRoot('/irrelevant', noEngine)).toBe(noEngine)
+  })
+
+  it('the walk still needs main.py: a bare input/ above cwd is not a root', () => {
+    const tree = join(root, 'tree')
+    mkdirSync(join(tree, 'input'), { recursive: true })
+    mkdirSync(join(tree, 'frontend'), { recursive: true })
+    expect(computeEngineRoot(join(tree, 'frontend'), undefined)).toBeNull()
+  })
+})
+
 describe('computeEngineRoot — walking up from cwd (no override)', () => {
   it('finds the marker at cwd itself', () => {
     makeEngineRoot(root)

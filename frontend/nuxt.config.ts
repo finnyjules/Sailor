@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
+import { isHosted } from './server/utils/deployMode'
 
 // img-fx bundles an optional React component alongside its framework-agnostic
 // core. We only use the core, so `react` + `react/jsx-runtime` are aliased to a
@@ -45,8 +46,9 @@ export default defineNuxtConfig({
       // falls back to http://127.0.0.1:8188. In production set via
       // NUXT_PUBLIC_COMFY_ORIGIN (e.g. https://sailor.fly.dev:8188).
       comfyOrigin: '',
-      // Mirrors server deployMode at build/dev start: hosted iff Clerk keys present.
-      hostedMode: !!process.env.NUXT_CLERK_SECRET_KEY,
+      // Mirrors server deployMode at build/dev start: hosted iff Clerk keys present
+      // (the shared check, so the two can never disagree — R10.10 review L4).
+      hostedMode: isHosted(),
       // Sailor runner routing (docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md).
       // Off by default; NUXT_PUBLIC_RUNNER_ENABLED=true turns it on at runtime.
       runnerEnabled: false,
@@ -163,11 +165,10 @@ export default defineNuxtConfig({
           }
 
           // Step 3, R10.9: hosted never reaches the engine — a hosted dev
-          // server (a Clerk key set, deployMode()'s own test) answers the
+          // server (the shared deployMode check, R10.10 review L4) answers the
           // upgrade with a plain 404 and opens no socket to ComfyUI. Local
           // mode proceeds exactly as before.
-          const key = process.env.NUXT_CLERK_SECRET_KEY
-          if (typeof key === 'string' && key.trim().length > 0) {
+          if (isHosted()) {
             socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
             socket.destroy()
             return

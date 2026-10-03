@@ -1,15 +1,26 @@
 # syntax=docker/dockerfile:1
 
-# ONE base for the runtime and the video-tools build stage, pinned by digest so
-# the tools are compiled against the same glibc they run on (Task R5.1a). Both
-# stages read only this ARG: bumping it bumps both (docs/deploy/media-tools.md).
-# python:3.12-slim's multi-arch index digest, read from Docker Hub on 2026-09-28.
+# The video tools are compiled against the glibc they run on (Task R5.1a), so the
+# tools stage and the runtime stage must sit on the SAME Debian release. Both
+# bases are pinned by their multi-arch index digest; bump them together
+# (docs/deploy/media-tools.md). The runtime's own `ffmpeg -version` step below
+# fails the build if they ever drift apart.
+#
+# PYTHON_BASE builds the tools only (meson and ninja come from a pinned venv);
+# no Python reaches the runtime image (step 3, R10.10).
+# python:3.12-slim's multi-arch index digest, read from Docker Hub on 2026-09-28
+# (Debian trixie, snapshot @1789689600).
 ARG PYTHON_BASE=python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
+# node:22-trixie-slim's multi-arch index digest, read from Docker Hub on
+# 2026-10-02 (Node 22.23.3, Debian trixie, the same snapshot @1789689600).
+# Used by both the build stage and the runtime, so native modules are
+# installed on the system they run on.
+ARG NODE_BASE=node:22-trixie-slim@sha256:b26b04c123d9ff8ab646ceb18b9d75a1173acf64b9a401094b906d27b29338d4
 
 ###############################################################################
 # Stage 1 — build the Nuxt frontend
 ###############################################################################
-FROM node:22-slim AS web
+FROM ${NODE_BASE} AS web
 WORKDIR /build/frontend
 
 # Pin pnpm to match the lockfile. We install it directly with npm instead of via
@@ -69,53 +80,46 @@ RUN set -eu; \
       | sha256sum -c -
 
 ###############################################################################
-# Stage 3 — runtime: ComfyUI (Python, CPU-only) + Nuxt server (Node)
+# Stage 3 — runtime: the Nuxt (Nitro) server on Node 22, Sailor's video tools and
+# the depth model. No Python, no ComfyUI, no torch, opencv or PyAV (step 3,
+# R10.10): every node runs in Sailor's runner or on a paid service.
 ###############################################################################
-FROM ${PYTHON_BASE} AS runtime
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    NODE_ENV=production \
+FROM ${NODE_BASE} AS runtime
+ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000
 
-# System deps: Node 22 (to run the Nuxt server) + libs ComfyUI/torch need
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      curl ca-certificates git build-essential \
-      libgl1 libglib2.0-0 libgomp1 \
- && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
- && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-
-# Python deps — CPU-only torch wheels first, then the rest of requirements.
-# Installing torch from the CPU index avoids pulling ~2GB of unused CUDA libs.
-COPY requirements.txt ./
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio \
- && pip install -r requirements.txt
-
-# opencv (cv2) is imported by comfy_extras nodes (subject_track, frame_interp, …) but isn't
-# declared in requirements.txt. The headless
-# build avoids GUI deps. Separate layer so the heavy torch layer stays cached.
-RUN pip install opencv-python-headless
 
 # The video tools, with their licences and sources (licenses/SOURCES.md) beside them.
 COPY --from=media-tools /opt/media-tools /opt/media-tools
 ENV NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin
+# Proves the tools run on this base (a glibc mismatch fails the build here, not
+# the first video job).
+RUN /opt/media-tools/bin/ffmpeg -hide_banner -version \
+ && /opt/media-tools/bin/ffprobe -hide_banner -version
 
 # Lens · Depth of field's depth model (R7.9), read only from here (never downloaded at run time).
 COPY --from=depth-model /opt/depth-model /opt/depth-model
 ENV NUXT_DEPTH_MODEL_DIR=/opt/depth-model
 
-# ComfyUI source + the sailor bridge custom node + LoRA sidecars/covers.
-# .dockerignore keeps models/loras/*.json + *.cover.* but drops the heavy
-# .safetensors weights (inference runs on Replicate, not locally).
+# Sailor's data folders and files beside the server: LoRA sidecars and covers,
+# blueprints, shader_effects, custom_nodes/sailor_bridge's Timeline scene
+# defaults, and the frontend's own data the server reads by path
+# (server/runner/video/fonts/ for captions, server/runner/effects/asciiGlyphs.bin
+# for Ascii, the stored node list). .dockerignore keeps ComfyUI's Python source,
+# requirements and every *.py out of the image.
 COPY . .
 
 # Overlay the built Nuxt output from stage 1.
 COPY --from=web /build/frontend/.output /app/frontend/.output
 
+# The data root Sailor reads input/, output/, temp/ and user/ under. Named
+# explicitly because there is no main.py for the cwd walk to find
+# (server/utils/inputUploads.ts computeEngineRoot); start.sh links these
+# folders to the Fly volume.
+ENV SAILOR_ENGINE_ROOT=/app
+
 RUN chmod +x /app/start.sh
-EXPOSE 3000 8188
+EXPOSE 3000
 CMD ["/app/start.sh"]

@@ -123,6 +123,40 @@ describe('hosted proxy: every engine path is a plain 404', () => {
     }
   })
 
+  // R10.10 (review L1): odd spellings and the remaining verbs. A spelling the
+  // engine would read as one of its routes is refused like the plain one; a
+  // spelling aiohttp would not route (it is case-sensitive, and an encoded
+  // slash is one literal segment) may instead fall through to Nitro. Either
+  // way nothing is proxied and no request leaves for ComfyUI.
+  const ODD_PATHS: Array<[string, string]> = [
+    ['POST', '//prompt'], ['POST', '/comfyui//prompt'], ['POST', '/PROMPT'], ['POST', '/%2Fprompt'],
+    ['HEAD', '/prompt'], ['OPTIONS', '/prompt'], ['HEAD', '/api/prompt'], ['OPTIONS', '/comfyui/api/prompt'],
+    ['HEAD', '/queue'], ['OPTIONS', '/interrupt'], ['HEAD', '/system_stats'], ['OPTIONS', '/api/ws'],
+  ]
+
+  it('odd spellings and HEAD / OPTIONS never reach ComfyUI', async () => {
+    for (const [m, p] of ODD_PATHS) {
+      const body = m === 'POST' ? JSON.stringify({ prompt: { 1: { class_type: 'SaveImage', inputs: {} } } }) : undefined
+      const r = await call(m, p, body, { 'content-type': 'application/json' })
+      const fellThrough = JSON.stringify(r.body) === JSON.stringify({ fallthrough: true })
+      expect(r.status === 404 || fellThrough, `${m} ${p}: ${r.status} ${JSON.stringify(r.body)}`).toBe(true)
+      if (!fellThrough && m !== 'HEAD') expect(JSON.stringify(r.body), `${m} ${p}`).not.toMatch(/ComfyUI|engine/i)
+    }
+    expect(requested(), 'no request at all').toEqual([])
+    expect(proxyRequest, 'nothing raw-proxied').not.toHaveBeenCalled()
+  })
+
+  it('the plain engine routes under HEAD and OPTIONS are a 404 from the proxy itself', async () => {
+    for (const m of ['HEAD', 'OPTIONS']) {
+      for (const p of ['/prompt', '/api/prompt', '/comfyui/prompt', '/queue', '/interrupt']) {
+        const r = await call(m, p)
+        expect(r.status, `${m} ${p}`).toBe(404)
+      }
+    }
+    expect(requested()).toEqual([])
+    expect(proxyRequest).not.toHaveBeenCalled()
+  })
+
   it('the node list is served from the stored catalog, scrubbed — never from the engine', async () => {
     for (const p of ['/object_info', '/api/object_info', '/comfyui/object_info/LoadImage']) {
       const r = await call('GET', p)
@@ -232,7 +266,9 @@ describe('hosted /ws upgrade: refused before any socket to the engine', () => {
   it('the dev upgrade handler answers 404 when a Clerk key is set, before proceed() opens the socket', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '..', '..', 'nuxt.config.ts'), 'utf8')
     const refuse = src.indexOf("socket.write('HTTP/1.1 404 Not Found")
-    const gate = src.lastIndexOf('process.env.NUXT_CLERK_SECRET_KEY', refuse)
+    // The gate is the shared hosted check (isHosted(), R10.10 review L4) or,
+    // before that patch lands, the same test spelled out by hand.
+    const gate = Math.max(src.lastIndexOf('isHosted()', refuse), src.lastIndexOf('process.env.NUXT_CLERK_SECRET_KEY', refuse))
     const proceedCall = src.indexOf('proceed()\n', refuse)
     expect(gate).toBeGreaterThan(0)
     expect(refuse).toBeGreaterThan(gate)

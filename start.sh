@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Runtime dirs live on the Fly volume mounted at /data so generated outputs,
-# uploads, and user settings/workflows persist across deploys.
+# uploads, and user settings/workflows persist across deploys. (A local smoke
+# run of the image has no volume: this then makes /data on the container's disk.)
 mkdir -p /data/output /data/input /data/temp /data/user
 
 # Persist the model stores (per-user characters, LoRAs, voices + the training-
@@ -11,7 +12,7 @@ mkdir -p /data/output /data/input /data/temp /data/user
 # voice, and cast character written under /app/models/ would vanish on deploy.
 # Only runs when the volume is mounted (/data present); local/dev boxes have no
 # /data and keep the repo's models/ dir exactly as-is (byte-identical). Must run
-# BEFORE ComfyUI starts, since it also reads models/ (loras, etc.).
+# BEFORE the server starts, since it reads models/ (loras, etc.).
 if [ -d /data ]; then
   mkdir -p /data/models/characters /data/models/loras /data/models/voices
   for d in characters loras voices; do
@@ -52,24 +53,14 @@ if [ -d /data ]; then
     ln -sfn /data/models/.training-jobs.json /app/models/.training-jobs.json
   fi
 
-  # I2 — the engine's input/ and output/ dirs live on the volume too. ComfyUI is
-  # launched below with --input-directory /data/input / --output-directory
-  # /data/output, but the Nitro writers resolve them at <repo-root>/{input,output}
-  # (path.resolve(cwd,'..',<name>) === /app/{input,output}). Without this symlink
-  # the two sides point at DIFFERENT dirs: moodboard/lipsync uploads written by
-  # Nitro land in /app/input where the engine never looks (and .dockerignore
-  # drops /input, so they're ephemeral), the character heal path can wipe
-  # refImages once /app/input appears, and the input-upload disk check can never
-  # resolve its engine root. Same seed-then-symlink, copy-gated discipline as
-  # models/ above (defensive: .dockerignore keeps these out of the image, so on a
-  # fresh container there's nothing to seed and we just create the symlink; the
-  # gated seed covers the case where a real dir already exists).
-  # user/ joins them for engine-free Phase A: Sailor now reads and writes
-  # user/sailor/projects and user/sailor/spend.jsonl itself (server/native), so
-  # <repo-root>/user must be the same /data/user the engine is launched with.
-  # temp/ likewise: the engine runs with --temp-directory /data/temp and Sailor's
-  # native /view?type=temp reads <repo-root>/temp, so the two must be one dir.
-  # (.dockerignore drops /temp, so normally this just creates the symlink.)
+  # I2 — input/, output/, user/ and temp/ live on the volume too. Sailor reads
+  # and writes them under its data root, SAILOR_ENGINE_ROOT=/app (Dockerfile):
+  # uploads, run results, projects, the spend log and /view?type=temp. Without
+  # these links they would sit on the container's ephemeral disk and vanish on
+  # redeploy. Same seed-then-symlink, copy-gated discipline as models/ above
+  # (defensive: .dockerignore keeps these out of the image, so on a fresh
+  # container there's nothing to seed and we just create the symlink; the gated
+  # seed covers the case where a real dir already exists).
   for d in input output user temp; do
     if [ -d "/app/$d" ] && [ ! -L "/app/$d" ]; then
       if cp -an "/app/$d/." "/data/$d/"; then
@@ -90,46 +81,9 @@ if [ -d /data ]; then
   mkdir -p /data/sailor
 fi
 
-# Stage 6 Task 8 — per-user settings + userdata. When SAILOR_ENGINE_MULTI_USER
-# is set truthy, run ComfyUI with --multi-user so UserManager files each
-# tenant's settings/userdata under user/<id>/, keyed off the `comfy-user`
-# header the authenticated Nuxt proxy injects (server/middleware/comfyui-proxy.ts,
-# handleHostedUserScoped). The SAME env gates the proxy's userScoped
-# route-opening (deployMode.ts engineMultiUser()), so the flag and the header
-# injection can never disagree. Local dev launches main.py directly (never this
-# script) and always stays single-user.
-#
-# DANGER — leave this UNSET until an engine-user registration layer lands.
-# Under --multi-user, get_request_user_id raises KeyError (→ 401) for any
-# `comfy-user` id absent from user/users.json, INCLUDING `default`; Clerk ids
-# are never registered there. See the Task 8 report for the open blockers.
-MULTI_USER_ARG=""
-case "$(printf '%s' "${SAILOR_ENGINE_MULTI_USER:-}" | tr '[:upper:]' '[:lower:]')" in
-  ''|0|false) : ;;
-  *) MULTI_USER_ARG="--multi-user" ;;
-esac
-
-# 1) ComfyUI backend (CPU-only) on :8188.
-cd /app
-python main.py \
-  --listen 0.0.0.0 --port 8188 \
-  --cpu --disable-auto-launch \
-  ${MULTI_USER_ARG:+$MULTI_USER_ARG} \
-  --output-directory /data/output \
-  --input-directory /data/input \
-  --temp-directory /data/temp \
-  --user-directory /data/user \
-  --database-url "sqlite:////data/comfyui.db" &
-COMFY_PID=$!
-
-# 2) Nuxt (Nitro) server on :3000. cwd MUST be /app/frontend so the
-#    /api/loras-local route resolves ../models/loras correctly.
+# The Nuxt (Nitro) server on :3000, the only process (step 3, R10.10: the image
+# carries no ComfyUI and no Python). cwd MUST be /app/frontend so the
+# /api/loras-local route resolves ../models/loras correctly. exec hands it PID 1's
+# signals; if it exits, the container stops and Fly restarts it.
 cd /app/frontend
-node .output/server/index.mjs &
-NUXT_PID=$!
-
-# If either process dies, bring the whole container down so Fly restarts it.
-wait -n "$COMFY_PID" "$NUXT_PID"
-echo "[start.sh] a process exited; shutting down container." >&2
-kill "$COMFY_PID" "$NUXT_PID" 2>/dev/null || true
-exit 1
+exec node .output/server/index.mjs
