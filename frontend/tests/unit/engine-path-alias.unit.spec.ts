@@ -461,7 +461,6 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
       ['/sailor/space_thumbnails', 'GET'],
       ['/sailor/space_thumbnail/burst', 'GET'],
       ['/sailor/font_subset', 'POST'],
-      ['/sailor/models/status', 'GET'],
       ['/comfyui/sailor/shader_effects', 'GET'],
     ] as const) {
       proxyRequest.mockClear()
@@ -481,6 +480,8 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
       ['/sailor/motion/cleanup_frames', 'POST'],
       ['/sailor/lora/save_captions', 'POST'],
       ['/sailor/lora/clear_dataset', 'POST'],
+      // R10.5: the model-bundle routes are gone, refused by default.
+      ['/sailor/models/status', 'GET'],
       ['/sailor/models/download', 'GET'],
       ['/sailor/space_default/burst', 'POST'],
       ['/sailor/space_thumbnail/burst', 'POST'],
@@ -702,7 +703,7 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
       ['/sailor/shader_effects', 'GET'], ['/comfyui/sailor/shader_effects/assets/a.png', 'GET'], ['/api/sailor/space_defaults', 'GET'],
       ['/sailor/space_default/burst', 'POST'], ['/sailor/space_thumbnails', 'GET'], ['/sailor/space_thumbnail/burst', 'GET'],
       ['/sailor/space_thumbnail/burst', 'POST'], ['/sailor/font_subset', 'POST'], ['/sailor/lora/save_captions', 'POST'],
-      ['/sailor/lora/clear_dataset', 'POST'], ['/sailor/motion/cleanup_frames', 'POST'], ['/sailor/models/status', 'GET'],
+      ['/sailor/lora/clear_dataset', 'POST'], ['/sailor/motion/cleanup_frames', 'POST'],
     ] as const) {
       proxyRequest.mockClear()
       const res = await middleware({ ...ev(p, m), node: { req: {}, res: { setHeader() {} } } })
@@ -733,15 +734,13 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
     expect(handleHostedObjectInfo, 'local mode must never enter the hosted scrubber').not.toHaveBeenCalled()
   })
 
-  it('models/download: raw-proxied while the engine answers, 503 when it does not', async () => {
-    proxyRequest.mockClear()
-    expect(await middleware({ ...ev('/sailor/models/download?key=upscale', 'GET'), node: { req: {}, res: { setHeader() {} } } }))
-      .toEqual({ error: 'This needs the local engine' })
-    expect(proxyRequest).not.toHaveBeenCalled()
+  it('the model-bundle routes are gone (R10.5): 404 from Sailor, never the engine\'s downloader, even with the engine up', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')))
-    await middleware(ev('/sailor/models/download?key=upscale', 'GET'))
-    expect(proxyRequest).toHaveBeenCalledTimes(1)
-    expect(proxyRequest.mock.calls[0]?.[1]).toBe('http://127.0.0.1:8188/sailor/models/download?key=upscale')
+    for (const p of ['/sailor/models/download?key=upscale', '/sailor/models/status?key=upscale', '/comfyui/api/sailor/models/download?key=x']) {
+      proxyRequest.mockClear()
+      expect(await middleware({ ...ev(p, 'GET'), node: { req: {}, res: { setHeader() {} } } }), p).toBe('404: Not Found')
+      expect(proxyRequest, p).not.toHaveBeenCalled()
+    }
   })
 })
 

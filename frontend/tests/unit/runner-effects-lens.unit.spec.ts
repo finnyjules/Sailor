@@ -478,13 +478,16 @@ describe('the depth model\'s files (hosted: shipped, never fetched)', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true })
   })
 
-  it('`lens-blur` answers as off while the files are missing, on once they are there at their sizes', () => {
+  it('hosted, `lens-blur` answers as off while the files are missing, on once they are there at their sizes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'depth-model-'))
     dirs.push(dir)
     process.env.NUXT_DEPTH_MODEL_DIR = dir
     process.env.NUXT_RUNNER_ENABLED = 'true'
     process.env.NUXT_RUNNER_FAMILIES = 'cards,lens-blur'
     expect(depthModelReady()).toBe(false)
+    // Locally the model fills its own folder at first use (R10.5): the family stays on.
+    expect([...runnerFamilies()].sort()).toEqual(['cards', 'lens-blur'])
+    process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_hosted'
     expect([...runnerFamilies()]).toEqual(['cards'])
     for (const f of DEPTH_MODEL_FILES) {
       const p = join(dir, DEPTH_MODEL, f.path)

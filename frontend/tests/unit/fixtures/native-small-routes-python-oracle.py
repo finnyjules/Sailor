@@ -13,9 +13,6 @@ temp engine root, with the real aiohttp `web` and a stub `folder_paths`:
                            <root>/custom_nodes/sailor_bridge) and _font_subset_route
   _lora_training.py        _save_captions / _clear_dataset (+ _safe_folder)
   nodes_compositor.py      _cleanup_motion_frames (+ _SLATE_FRAME_RE)
-  _model_downloads.py      _status_route, with every module's real
-                           register_bundle(...) call replayed, and the real
-                           folder_names_and_paths table from folder_paths.py
 
 stdin:  {"root": "<engine root>", "calls": [{"handler": "_x", "path": "/sailor/x?a=b",
          "match_info": {...}, "body": "<raw body text>" | null, "body_b64": "<raw bytes>"}
@@ -138,46 +135,12 @@ def build_compositor(root: str) -> dict:
     return {'_cleanup_motion_frames': ns['_cleanup_motion_frames']}
 
 
-def build_models(root: str) -> dict:
-    """The real registry: every module's register_bundle(...) call replayed."""
-    import comfy_extras._model_downloads as md
-    folder_paths = stub_folder_paths(root)
-    md._REGISTRY.clear()
-    for fname in sorted(os.listdir(EXTRAS)):
-        if not fname.endswith('.py'):
-            continue
-        if fname == '_model_downloads.py' or 'register_bundle(' not in open(os.path.join(EXTRAS, fname)).read():
-            continue
-        tree = parse(fname)
-        ns = {'os': os, 'folder_paths': folder_paths, 'ModelBundle': md.ModelBundle, 'ModelFile': md.ModelFile,
-              'register_bundle': md.register_bundle, 'loader_cache': md.loader_cache}
-        top = []
-        for node in tree.body:  # _lora_training.py registers inside a top-level try block
-            top.extend(node.body if isinstance(node, ast.Try) else [node])
-        defs = [n for n in top if isinstance(n, (ast.FunctionDef, ast.Assign, ast.AnnAssign))]
-        regs = [n for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
-                and getattr(n.value.func, 'id', None) == 'register_bundle']
-        # Definitions and path constants first, each on its own (a constant that
-        # needs torch/numpy simply stays undefined), then the registrations.
-        for node in defs:
-            try:
-                run_module([node], ns, fname)
-            except Exception:
-                pass
-        for node in regs:
-            run_module([node], ns, fname)
-    ns = {'web': web, 'bundle_status': md.bundle_status}
-    run_module(lift_defs(parse('_model_downloads.py'), {'_status_route'}, '_model_downloads.py'), ns, '_model_downloads.py')
-    return {'_status_route': ns['_status_route'], '__registry__': sorted(md._REGISTRY.keys())}
-
-
 GROUPS = {
     '_get_shader_effects': build_shader,
     '_space_defaults_list': build_timeline, '_space_default_save': build_timeline, '_space_thumbnails_list': build_timeline,
     '_space_thumbnail_save': build_timeline, '_space_thumbnail_get': build_timeline, '_font_subset_route': build_timeline,
     '_save_captions': build_lora, '_clear_dataset': build_lora,
     '_cleanup_motion_frames': build_compositor,
-    '_status_route': build_models, '__registry__': build_models,
 }
 
 

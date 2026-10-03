@@ -3,10 +3,9 @@
  * (server/native/router.ts → smallRoutes.ts), driven through a real h3 app
  * against a temp engine root: aiohttp's route table (paths, verbs, 404/405,
  * the /api and /comfyui spellings), each route's shape and guards, the shader
- * asset's headers and conditional GET, a font subset that holds every
- * requested character, and models/download's hand-off — proxied when the
- * engine answers, 503 when it does not. `fetch` is stubbed in every test, so
- * nothing here can reach a real engine.
+ * asset's headers and conditional GET, and a font subset that holds every
+ * requested character. The model-bundle routes are gone (R10.5): 404.
+ * `fetch` is stubbed in every test, so nothing here can reach a real engine.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -87,8 +86,8 @@ function catalog(manifest: unknown = { version: 2, effects: [{ id: 'wave', name:
 
 describe('the route table', () => {
   it('every route is native under every engine spelling', () => {
-    for (const p of ['/sailor/shader_effects', '/api/sailor/space_defaults', '/comfyui/sailor/font_subset', '/comfyui/api/sailor/models/status',
-      '/sailor/lora/save_captions', '/sailor/motion/cleanup_frames', '/sailor/space_thumbnail/ball', '/sailor/models/download?key=x']) {
+    for (const p of ['/sailor/shader_effects', '/api/sailor/space_defaults', '/comfyui/sailor/font_subset',
+      '/sailor/lora/save_captions', '/sailor/motion/cleanup_frames', '/sailor/space_thumbnail/ball']) {
       expect(nativeEnginePath(p), p).not.toBeNull()
     }
     expect(nativeEnginePath('/sailor/render_timeline')).toBeNull()
@@ -98,13 +97,15 @@ describe('the route table', () => {
   it('aiohttp\'s 404 and 405 inside the owned namespaces; HEAD is GET', async () => {
     catalog()
     for (const p of ['/sailor/lora/other', '/sailor/shader_effects/', '/sailor/shader_effects/other/x', '/sailor/space_default',
-      '/sailor/space_thumbnail/', '/sailor/models', '/sailor/motion/x', '/sailor/space_thumbnail/a/b']) {
+      '/sailor/space_thumbnail/', '/sailor/models', '/sailor/motion/x', '/sailor/space_thumbnail/a/b',
+      // R10.5: the model-bundle routes are gone; the namespace stays Sailor's, so nothing reaches the engine's downloader.
+      '/sailor/models/status?key=upscale', '/sailor/models/download?key=upscale', '/comfyui/api/sailor/models/status']) {
       const r = await call('GET', p)
       expect(r.status, p).toBe(404)
       expect(r.body, p).toBe('404: Not Found')
     }
     for (const [m, p] of [['GET', '/sailor/font_subset'], ['POST', '/sailor/shader_effects'], ['DELETE', '/sailor/space_thumbnail/ball'],
-      ['POST', '/sailor/models/status'], ['GET', '/sailor/lora/clear_dataset'], ['GET', '/sailor/space_default/ball'], ['PUT', '/sailor/space_defaults']]) {
+      ['GET', '/sailor/lora/clear_dataset'], ['GET', '/sailor/space_default/ball'], ['PUT', '/sailor/space_defaults']]) {
       const r = await call(m!, p!)
       expect(r.status, `${m} ${p}`).toBe(405)
       expect(r.body, `${m} ${p}`).toBe('405: Method Not Allowed')
@@ -337,41 +338,5 @@ describe('LoRA dataset and bake-frame housekeeping', () => {
     expect(await post('/sailor/motion/cleanup_frames', { delete: 'x' })).toMatchObject({ status: 400, body: { error: 'bad payload' } })
     expect(SLATE_FRAME_RE.test('slate_12_0001.png')).toBe(true)
     expect(SLATE_FRAME_RE.test('slate_12_001.png')).toBe(false)
-  })
-})
-
-describe('models', () => {
-  it('status reads the disk: a file at its declared size is present', async () => {
-    expect((await call('GET', '/sailor/models/status?key=upscale')).body)
-      .toEqual({ ready: false, missing: [{ name: 'RealESRGAN_x2plus.pth', size: 67_061_725 }], total_size: 67_061_725, label: 'Upscale' })
-    const file = path.join(root, 'models', 'upscale_models', 'RealESRGAN_x2plus.pth')
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, '')
-    fs.truncateSync(file, 67_061_725)
-    expect((await call('GET', '/sailor/models/status?key=upscale')).body).toEqual({ ready: true, missing: [], total_size: 67_061_725, label: 'Upscale' })
-    expect((await call('GET', '/sailor/models/status?key=nope')).body).toEqual({ ready: false, missing: [], total_size: 0, error: 'unknown bundle \'nope\'' })
-    expect((await call('GET', '/sailor/models/status')).body).toEqual({ ready: false, missing: [], total_size: 0, error: 'unknown bundle \'\'' })
-    expect(engineFetch).not.toHaveBeenCalled()
-  })
-
-  it('download: 503 "needs the local engine" when the engine does not answer', async () => {
-    const r = await call('GET', '/sailor/models/download?key=upscale')
-    expect(r).toMatchObject({ status: 503, body: { error: 'This needs the local engine' } })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8188/system_stats')
-  })
-
-  it('download: handed to the proxy untouched when the engine answers', async () => {
-    engineFetch.mockResolvedValue(new Response('{}', { status: 200 }))
-    const r = await call('GET', '/sailor/models/download?key=upscale')
-    expect(r.body).toEqual({ fallthrough: true })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8188/system_stats')
-  })
-
-  it('download: the engine already known down (cached health) is 503 with no probe of its own', async () => {
-    engineHealthState.value = 'down'
-    engineFetch.mockResolvedValue(new Response('{}', { status: 200 }))
-    const r = await call('GET', '/sailor/models/download?key=upscale')
-    expect(r).toMatchObject({ status: 503, body: { error: 'This needs the local engine' } })
-    expect(engineFetch).not.toHaveBeenCalled()
   })
 })

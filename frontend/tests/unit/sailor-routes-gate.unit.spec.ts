@@ -259,17 +259,18 @@ describe('classifySailor — the audited bucket table', () => {
       ['/sailor/space_thumbnails', 'GET', 'proxy'],
       ['/sailor/space_thumbnail/burst', 'GET', 'proxy'],
       ['/sailor/font_subset', 'POST', 'proxy'],
-      ['/sailor/models/status', 'GET', 'proxy'],
       // The engine's Timeline renders (Task R9.3): unlisted, so refused by default.
       ['/sailor/render_timeline', 'POST', 'unknown'],
       ['/sailor/render_timeline_stream', 'POST', 'unknown'],
       ['/sailor/timeline/render_frame', 'POST', 'unknown'],
       // The engine's video encode (Task R10.4): unlisted, so refused by default.
       ['/sailor/spacetype_encode', 'POST', 'unknown'],
+      // The model-bundle routes (Task R10.5): unlisted, so refused by default.
+      ['/sailor/models/status', 'GET', 'unknown'],
+      ['/sailor/models/download', 'GET', 'unknown'],
       ['/sailor/motion/cleanup_frames', 'POST', 'refuse'],
       ['/sailor/lora/save_captions', 'POST', 'refuse'],
       ['/sailor/lora/clear_dataset', 'POST', 'refuse'],
-      ['/sailor/models/download', 'GET', 'refuse'],
       ['/sailor/space_default/burst', 'POST', 'refuse'],
       ['/sailor/space_thumbnail/burst', 'POST', 'refuse'],
     ]
@@ -657,7 +658,6 @@ const EXPECTED: Record<string, string> = {
   'GET /sailor/space_thumbnails': 'proxy',
   'GET /sailor/space_thumbnail/{effect_id}': 'proxy',
   'POST /sailor/font_subset': 'proxy',
-  'GET /sailor/models/status': 'proxy',
   // per-user data
   'GET /sailor/input_listing': 'data',
   'GET /sailor/output_listing': 'data',
@@ -674,7 +674,6 @@ const EXPECTED: Record<string, string> = {
   'POST /sailor/space_thumbnail/{effect_id}': 'refuse',
   'POST /sailor/lora/save_captions': 'refuse',
   'POST /sailor/lora/clear_dataset': 'refuse',
-  'GET /sailor/models/download': 'refuse',
   'POST /sailor/motion/cleanup_frames': 'refuse',
   // Task R9.3: the engine's Timeline renders, which Sailor no longer calls,
   // are deliberately unlisted: hosted refuses them by default (RETIRED_ROUTES).
@@ -683,6 +682,9 @@ const EXPECTED: Record<string, string> = {
   'POST /sailor/timeline/render_frame': 'unknown',
   // Task R10.4: the engine's video encode, likewise unlisted.
   'POST /sailor/spacetype_encode': 'unknown',
+  // Task R10.5: the model-bundle routes, likewise unlisted.
+  'GET /sailor/models/status': 'unknown',
+  'GET /sailor/models/download': 'unknown',
 }
 
 /** Engine routes nothing in Sailor calls any more, left unclassified on purpose (deny by default). */
@@ -691,6 +693,8 @@ const RETIRED_ROUTES = new Set([
   'POST /sailor/render_timeline',
   'POST /sailor/timeline/render_frame',
   'POST /sailor/spacetype_encode',
+  'GET /sailor/models/status',
+  'GET /sailor/models/download',
 ])
 
 /** Turn a `{param}` template into a concrete path classifySailor can match. */

@@ -11,8 +11,9 @@
  * Runs Depth Anything V2 locally via transformers.js — no API call, no per-preview
  * bill. The pipeline is server/utils/depthModel.ts's singleton (shared with the runner's
  * Lens · Depth of field, R7.9), so weights load once (~3.5s) and stay warm; inference is
- * ~1s. Hosted, the model's files ship in the image and are never downloaded. A cache hit
- * never touches the model at all.
+ * ~1s. Hosted, the model's files ship in the image and are never downloaded; locally the
+ * first call fills NUXT_DEPTH_MODEL_DIR (or transformers.js's cache) with the pinned, checked
+ * files (depthModel.ts fillDepthModel, R10.5). A cache hit never touches the model at all.
  *
  * Output convention: BRIGHT = NEAR (it's inverse depth / disparity, not distance).
  *

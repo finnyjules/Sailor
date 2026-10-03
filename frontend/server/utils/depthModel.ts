@@ -12,14 +12,21 @@
  *     against these sha256s at build time) under NUXT_DEPTH_MODEL_DIR, and
  *     are NEVER fetched at run time (`allowRemoteModels` off).
  *   - Locally: read from NUXT_DEPTH_MODEL_DIR when set, else from
- *     transformers.js's own cache (node_modules/@huggingface/transformers/.cache),
- *     where the depth route's first use has always downloaded them.
+ *     transformers.js's own cache (node_modules/@huggingface/transformers/.cache).
+ *     A missing or short file is fetched into that folder by Sailor itself
+ *     (`fillDepthModel`, step 3 R10.5) at the pinned revision and checked
+ *     against its sha256 before it is used, the first time the depth model
+ *     is asked for (the depth route, POST /api/depth/estimate). It is the only
+ *     model Sailor still keeps on disk: the Toolbox and Settings no longer
+ *     download any (R10.5).
  *
  * `depthModelReady()` says whether the files are on disk where the loader
  * reads them (the runner takes Lens · Depth of field only then:
  * server/runner/config.ts).
  */
-import { existsSync, statSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { createWriteStream, existsSync, statSync } from 'node:fs'
+import { mkdir, rename, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { isHosted } from './deployMode'
@@ -75,21 +82,102 @@ export function depthModelReady(): boolean {
   return ok
 }
 
+/** Where one model file is fetched from: the pinned revision, never `main`. */
+export function depthModelFileUrl(path: string): string {
+  return `https://huggingface.co/${DEPTH_MODEL}/resolve/${DEPTH_MODEL_REVISION}/${path}`
+}
+
+export interface DepthModelFill {
+  fetch: (url: string) => Promise<Response>
+  files: readonly { path: string; bytes: number; sha256: string }[]
+}
+
+const DEFAULT_FILL: DepthModelFill = { fetch: url => globalThis.fetch(url), files: DEPTH_MODEL_FILES }
+let fillDeps: DepthModelFill = DEFAULT_FILL
+
+/** Tests only: fetch and file list `depthPipeline` fills with (undefined = the real ones). */
+export function setDepthModelFillForTests(deps?: Partial<DepthModelFill>): void {
+  fillDeps = { ...DEFAULT_FILL, ...deps }
+  pipePromise = null
+  filling = null
+  readyAt = null
+}
+
+async function fetchOne(dir: string, f: DepthModelFill['files'][number], doFetch: DepthModelFill['fetch']): Promise<void> {
+  const dest = join(dir, DEPTH_MODEL, f.path)
+  await mkdir(dirname(dest), { recursive: true })
+  const res = await doFetch(depthModelFileUrl(f.path))
+  if (!res.ok || !res.body) throw new Error(`Sailor couldn’t download the depth model (${f.path}, ${res.status}). Check the connection and try again.`)
+  // Written beside the file and renamed in only once whole and checked: a cut
+  // download never leaves a file the loader would read.
+  const part = `${dest}.${randomUUID()}.part`
+  const hash = createHash('sha256')
+  let bytes = 0
+  try {
+    const out = createWriteStream(part)
+    const done = new Promise<void>((resolve, reject) => { out.on('finish', () => resolve()); out.on('error', reject) })
+    const reader = res.body.getReader()
+    for (;;) {
+      const { done: end, value } = await reader.read()
+      if (end) break
+      bytes += value.byteLength
+      if (bytes > f.bytes) { await reader.cancel().catch(() => {}); throw new Error(`The depth model Sailor downloaded was damaged (${f.path} too large). Try again.`) }
+      hash.update(value)
+      if (!out.write(value)) await new Promise<void>(r => out.once('drain', () => r()))
+    }
+    out.end()
+    await done
+    if (bytes !== f.bytes || hash.digest('hex') !== f.sha256) throw new Error(`The depth model Sailor downloaded was damaged (${f.path} didn’t match its checksum). Try again.`)
+    await rename(part, dest)
+  }
+  catch (err) {
+    await rm(part, { force: true })
+    throw err
+  }
+}
+
+let filling: Promise<void> | null = null
+
+/**
+ * Locally, put every depth model file that is missing or the wrong size into
+ * `depthModelDir()`, from the pinned revision, each checked against its
+ * sha256 (step 3, R10.5). One fill at a time; a failure lets the next call
+ * retry. Hosted never downloads: the image ships the files.
+ */
+export function fillDepthModel(deps: DepthModelFill = fillDeps): Promise<void> {
+  if (isHosted()) return Promise.reject(new Error('The depth model isn\'t installed on this server.'))
+  const dir = depthModelDir()
+  if (!dir) return Promise.reject(new Error('Sailor can\'t find a folder for the depth model. Set NUXT_DEPTH_MODEL_DIR.'))
+  if (!filling) {
+    filling = (async () => {
+      for (const f of deps.files) {
+        const p = join(dir, DEPTH_MODEL, f.path)
+        let have = false
+        try { have = existsSync(p) && statSync(p).size === f.bytes }
+        catch {}
+        if (!have) await fetchOne(dir, f, deps.fetch)
+      }
+    })().finally(() => { filling = null })
+  }
+  return filling
+}
+
 let pipePromise: Promise<any> | null = null
 
 /**
- * The depth-estimation pipeline, loaded once. Hosted, only from the files on
- * disk (never a download); locally a missing file is fetched into
- * transformers.js's cache, as the depth route always did.
+ * The depth-estimation pipeline, loaded once, always from the files on disk
+ * (transformers.js never downloads: `allowRemoteModels` off). Locally the
+ * files are first filled by `fillDepthModel`; hosted they ship in the image.
  */
 export function depthPipeline(): Promise<any> {
   if (!pipePromise) {
-    pipePromise = import('@huggingface/transformers')
+    pipePromise = (isHosted() ? Promise.resolve() : fillDepthModel())
+      .then(() => import('@huggingface/transformers'))
       .then(({ env, pipeline }) => {
         const dir = depthModelDir()
         if (dir) env.localModelPath = dir
         env.allowLocalModels = true
-        env.allowRemoteModels = !isHosted()
+        env.allowRemoteModels = false
         return pipeline('depth-estimation', DEPTH_MODEL)
       })
       .catch((err) => { pipePromise = null; throw err }) // let the next request retry

@@ -23,7 +23,6 @@ import {
 } from '../../server/native/spacePresets'
 import { fontSubsetRoute } from '../../server/native/fontSubset'
 import { cleanupFramesRoute, clearDatasetRoute, saveCaptionsRoute } from '../../server/native/inputHousekeeping'
-import { bundleStatus, modelBundles, type BundleEnv } from '../../server/native/modelBundles'
 
 const REPO = path.resolve(__dirname, '..', '..', '..')
 const PYTHON = path.join(REPO, '.venv', 'bin', 'python')
@@ -387,45 +386,5 @@ describe.skipIf(!hasPython)('motion/cleanup_frames', () => {
     const bodies: unknown[] = [{}, { delete: 'x' }, { delete: [], keep: 'x' }, { delete: [], keep: null }, { delete: ['slate_1_0001.png'], keep: [] }]
     const py = python(bodies.map(b => ({ handler: '_cleanup_motion_frames', body: JSON.stringify(b) })))
     for (const [i, b] of bodies.entries()) expect(cleanupFramesRoute(input, b), JSON.stringify(b)).toEqual({ status: py[i]!.status, body: py[i]!.body })
-  })
-})
-
-describe.skipIf(!hasPython)('models/status', () => {
-  function sized(file: string, size: number) {
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, '')
-    fs.truncateSync(file, size) // sparse: no real disk used
-  }
-
-  it('the registry has the same bundles as every Python module registers', () => {
-    const [keys] = python([{ handler: '__registry__' }])
-    const e: BundleEnv = { modelsDir: path.join(root, 'models'), home, env: {} }
-    expect(modelBundles(e).map(b => b.key).sort()).toEqual(keys!.body)
-  })
-
-  it('every bundle, on an empty disk and on a partly filled one, reports the same', () => {
-    const e: BundleEnv = { modelsDir: path.join(root, 'models'), home, env: {} }
-    const keys = [...modelBundles(e).map(b => b.key), 'nope', '']
-    const compare = (label: string) => {
-      const py = python(keys.map(k => ({ handler: '_status_route', path: `/sailor/models/status?key=${encodeURIComponent(k)}` })))
-      for (const [i, k] of keys.entries()) expect(bundleStatus(e, k), `${label}: ${k}`).toEqual(py[i]!.body)
-    }
-    compare('empty')
-
-    const m = (...p: string[]) => path.join(root, 'models', ...p)
-    sized(m('rife', 'rife_v4.6.onnx'), 0) // unknown size, empty: missing
-    sized(m('sam', 'mobile_sam.encoder.onnx'), 5)
-    fs.mkdirSync(m('upscale_models', 'RealESRGAN_x2plus.pth'), { recursive: true }) // a folder, not a file
-    sized(m('unet', 'flux1-schnell.safetensors'), 23_782_506_688)
-    sized(m('text_encoders', 'clip_l.safetensors'), 246_144_152)
-    sized(path.join(home, '.u2net', 'isnet-general-use.onnx'), 178_648_008)
-    sized(m('whisper', 'models--Systran--faster-whisper-base', 'snapshots', 'rev1', 'model.bin'), 1)
-    sized(path.join(home, '.cache', 'torch', 'hub', 'checkpoints', 'htdemucs.th'), 1)
-    sized(path.join(home, '.cache', 'huggingface', 'hub', 'models--depth-anything--Depth-Anything-V2-Small-hf', 'snapshots', 'r', 'model.safetensors'), 1)
-    compare('filled')
-
-    // A stray file among the depth snapshots makes the Python's probe raise: not ready.
-    sized(path.join(home, '.cache', 'huggingface', 'hub', 'models--depth-anything--Depth-Anything-V2-Small-hf', 'snapshots', 'a-file'), 1)
-    compare('depth probe raises')
   })
 })

@@ -220,7 +220,6 @@ export const SAILOR_DATA_PREFIXES = [
  *   /sailor/shader_effects (+ /assets/{name})  reads the bundled shader dir; no writes, no per-user data.
  *   /sailor/space_defaults / space_thumbnails   read the operator-seeded shared preset dir (read-only listing).
  *   /sailor/font_subset                          pure fn: base64 font in → subsetted base64 out, touches no disk.
- *   /sailor/models/status                        read-only bundle-presence check.
  * NOTE space_thumbnail/{id} is handled by VERB in classifySailor: GET reads a
  * shared thumb (proxy), POST writes one (refuse) — so it is NOT a flat prefix
  * here.
@@ -230,7 +229,6 @@ export const HOSTED_SAILOR_PROXY = [
   '/sailor/space_defaults',
   '/sailor/space_thumbnails',
   '/sailor/font_subset',
-  '/sailor/models/status',
 ]
 
 const SPACE_THUMB_WRITE_MSG = 'Space preset thumbnails are operator content in hosted mode'
@@ -242,13 +240,13 @@ const SPACE_THUMB_WRITE_MSG = 'Space preset thumbnails are operator content in h
  * refusal is method-specific (space_default/{id} POST; space_thumbnail/{id}
  * POST is refused in classifySailor's verb branch above the proxy list).
  * The engine's Timeline render routes (Task R9.3) and its video encode route
- * (Task R10.4) are no longer listed: nothing in Sailor calls them, so in
- * hosted they fall to `unknown` and are refused by default.
+ * (Task R10.4) and the model-bundle routes (Task R10.5) are no longer
+ * listed: nothing in Sailor calls them, so in hosted they fall to `unknown`
+ * and are refused by default.
  */
 const SAILOR_REFUSE: { prefix: string, verb?: string, message: string }[] = [
   { prefix: '/sailor/motion', message: 'Frame cleanup is not available in hosted mode — it deletes from the shared input directory' },
   { prefix: '/sailor/lora', message: 'Dataset writes are not available in hosted mode — they mutate the shared training directory' },
-  { prefix: '/sailor/models/download', message: 'Model download is not available in hosted mode — it writes to the operator model disk' },
   { prefix: '/sailor/space_default', verb: 'POST', message: 'Space presets are operator content in hosted mode' },
 ]
 

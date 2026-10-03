@@ -1,19 +1,17 @@
 /**
  * The small /sailor routes Sailor now serves itself — the route table for
- * shaderCatalog.ts, spacePresets.ts, fontSubset.ts, inputHousekeeping.ts and
- * modelBundles.ts, in aiohttp's shape (paths, verbs, `{param}` segments).
+ * shaderCatalog.ts, spacePresets.ts, fontSubset.ts and inputHousekeeping.ts,
+ * in aiohttp's shape (paths, verbs, `{param}` segments).
  *
- * `/sailor/models/download` is the one route here that stays with ComfyUI
- * (it needs the engine's downloader): when the engine answers it is handed
- * back to the proxy untouched (`'proxy'`, so the event stream flows), and
- * when it does not the answer is 503 `This needs the local engine`.
+ * `/sailor/models` stays claimed with no route in it (step 3, R10.5): Sailor
+ * no longer downloads or reports model bundles, and a request there answers
+ * 404 here rather than reaching the engine's downloader.
  * `/sailor/font_subset` is checked here and still subset by the engine while
  * it runs; without it the font comes back whole (fontSubset.ts says why).
  */
 import type { H3Event } from 'h3'
 import { getRequestHeader } from 'h3'
 import { engineFolder } from './paths'
-import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
 import { catalogDir, shaderAssetRoute, shaderEffectsRoute } from './shaderCatalog'
 import {
   sailorBridgeDir,
@@ -25,7 +23,6 @@ import {
 } from './spacePresets'
 import { fontSubsetRoute } from './fontSubset'
 import { cleanupFramesRoute, clearDatasetRoute, saveCaptionsRoute } from './inputHousekeeping'
-import { bundleStatus, defaultBundleEnv } from './modelBundles'
 import { ENGINE_FORWARD_TIMEOUT_MS, forwardToEngine } from './media'
 
 export interface SmallResult {
@@ -48,7 +45,7 @@ export const SMALL_PREFIXES = [
 ]
 
 export type SmallHandler =
-  | { name: 'shaderEffects' | 'spaceDefaults' | 'spaceThumbnails' | 'fontSubset' | 'saveCaptions' | 'clearDataset' | 'cleanupFrames' | 'modelStatus' | 'modelDownload' }
+  | { name: 'shaderEffects' | 'spaceDefaults' | 'spaceThumbnails' | 'fontSubset' | 'saveCaptions' | 'clearDataset' | 'cleanupFrames' }
   | { name: 'shaderAsset', assetName: string }
   | { name: 'spaceDefaultSave' | 'spaceThumbnailGet' | 'spaceThumbnailSave', effectId: string }
 
@@ -69,8 +66,6 @@ export function matchSmallRoute(p: string, method: string, decodeSegment: (s: st
     case '/sailor/lora/save_captions': return byVerb({ POST: { name: 'saveCaptions' } })
     case '/sailor/lora/clear_dataset': return byVerb({ POST: { name: 'clearDataset' } })
     case '/sailor/motion/cleanup_frames': return byVerb({ POST: { name: 'cleanupFrames' } })
-    case '/sailor/models/status': return byVerb({ GET: { name: 'modelStatus' } })
-    case '/sailor/models/download': return byVerb({ GET: { name: 'modelDownload' } })
   }
   // `{param}` = aiohttp's `[^{}/]+`, matched on the decoded path (an encoded `/` stays `%2F`).
   const param = (prefix: string): string | null => {
@@ -102,38 +97,11 @@ const NO_DATA_FOLDER: SmallResult = {
   body: { error: 'Sailor can\'t find its data folder. Set SAILOR_ENGINE_ROOT to the folder that holds input/, output/ and user/.' },
 }
 
-export const NEEDS_ENGINE: SmallResult = { status: 503, body: { error: 'This needs the local engine' } }
-
-/** How long to wait for the local engine to answer the reachability check. */
-export const ENGINE_PROBE_TIMEOUT_MS = 2_000
-
-/** Whether the local engine answers at all. */
-export async function engineIsUp(_event: H3Event): Promise<boolean> {
-  // The engine already known down (cached health check): no second probe.
-  if (await engineHealth() === 'down') return false
-  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
-  try {
-    const res = await fetch(`${target}/system_stats`, { headers: { origin: target }, signal: AbortSignal.timeout(ENGINE_PROBE_TIMEOUT_MS) })
-    try { await res.body?.cancel() }
-    catch {}
-    return true
-  }
-  catch {
-    return false
-  }
-}
-
-function query(event: H3Event): URLSearchParams {
-  const q = event.path.indexOf('?')
-  return new URLSearchParams(q === -1 ? '' : event.path.slice(q + 1))
-}
-
 /**
- * Serve one matched route. `'proxy'` = hand the request to the engine proxy
- * unchanged (models/download while the engine is up). Throws where the Python
- * raised an unhandled exception; the router turns that into aiohttp's 500.
+ * Serve one matched route. Throws where the Python raised an unhandled
+ * exception; the router turns that into aiohttp's 500.
  */
-export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyReaders): Promise<SmallResult | 'proxy'> {
+export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyReaders): Promise<SmallResult> {
   switch (h.name) {
     case 'shaderEffects': {
       const dir = catalogDir()
@@ -181,12 +149,5 @@ export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyR
       if (h.name === 'clearDataset') return clearDatasetRoute(input, parsed.value)
       return cleanupFramesRoute(input, parsed.value)
     }
-    case 'modelStatus': {
-      const models = engineFolder('models')
-      if (!models) return NO_DATA_FOLDER
-      return { status: 200, body: bundleStatus(defaultBundleEnv(models), query(event).get('key') ?? '') }
-    }
-    case 'modelDownload':
-      return (await engineIsUp(event)) ? 'proxy' : NEEDS_ENGINE
   }
 }

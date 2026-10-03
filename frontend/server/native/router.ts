@@ -208,17 +208,15 @@ async function dispatchMedia(event: H3Event, p: string): Promise<NativeResult> {
 
 /**
  * The small routes (server/native/smallRoutes.ts): shader catalog, Space Type
- * presets, font subset, LoRA dataset and bake-frame housekeeping, model
- * status. Undefined = hand the request to the engine proxy unchanged
- * (`models/download` while the engine is up).
+ * presets, font subset, LoRA dataset and bake-frame housekeeping. The old
+ * model-bundle routes are gone (R10.5): `/sailor/models/*` answers 404 here.
  */
-async function dispatchSmall(event: H3Event, p: string): Promise<NativeResult | undefined> {
+async function dispatchSmall(event: H3Event, p: string): Promise<NativeResult> {
   const match = matchSmallRoute(p, (event.method || 'GET').toUpperCase(), decodeSegment)
   if (match.kind === 'notFound') return text(404, '404: Not Found')
   if (match.kind === 'badMethod') return text(405, '405: Method Not Allowed')
   try {
-    const r = await runSmallRoute(match.handler, event, { json: () => readJsonBody(event), bytes: () => readBodyBytes(event) })
-    return r === 'proxy' ? undefined : r
+    return await runSmallRoute(match.handler, event, { json: () => readJsonBody(event), bytes: () => readBodyBytes(event) })
   }
   catch (e) {
     if ((e as { statusCode?: number })?.statusCode === 413) throw e

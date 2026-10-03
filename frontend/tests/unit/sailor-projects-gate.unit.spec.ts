@@ -642,14 +642,13 @@ describe('the rest of the /sailor extension is audited (Task 2b)', () => {
     // routes are refused — those are covered end to end in
     // sailor-routes-gate.unit.spec.ts. Since A3 the capability routes are
     // served natively from the same folders instead of proxied.
-    for (const p of ['/sailor/shader_effects', '/sailor/space_defaults', '/sailor/models/status']) {
+    for (const p of ['/sailor/shader_effects', '/sailor/space_defaults']) {
       proxyRequest.mockClear()
       const r = await via(p, 'GET')
       expect(r.status, p).not.toBe('proxied')
       expect(proxyRequest, p).not.toHaveBeenCalled()
     }
     expect((await via('/sailor/space_defaults', 'GET')).body).toEqual({})
-    expect((await via('/sailor/models/status?key=nope', 'GET')).body).toMatchObject({ error: 'unknown bundle \'nope\'' })
     // font_subset is a hosted 'proxy' POST: answered natively too (the body is read, checked, never raw-proxied).
     proxyRequest.mockClear()
     body('{"font":"abc","text":"x"}')

@@ -3,13 +3,11 @@ import {
   X, Toolbox,
   // Chrome & UI
   Search as SearchIcon, ChevronDown,
-  // Download chip states
-  Loader2, CloudDownload,
 } from 'lucide-vue-next'
 import { useNodeSearch } from '~/composables/useNodeSearch'
 import {
   TOOLBOX_SECTIONS, TOOLBOX_DOMAINS, DEFAULT_COLLAPSED,
-  type Domain, type ModelBundleKey, type ToolboxItem, type ToolboxSection,
+  type Domain, type ToolboxItem, type ToolboxSection,
 } from '~/data/toolbox-items'
 
 defineEmits<{ close: [] }>()
@@ -93,43 +91,9 @@ function toggleSection(s: { domain: Domain; title: string }) {
 
 const { addNode } = useNodeSearch()
 
-// -- Model pre-download orchestration ---------------------------------------
-// Some nodes (FaceSwap) need hundreds of MB of weights. We pre-fetch when the
-// card is first clicked so the first prompt isn't a "why is this hanging" moment.
-// State + the progress stream live in a module-level composable so an in-flight
-// download survives this panel being closed (v-if-unmounted).
-const { download, inflight, modelsReady, probeModelStatus, ensureModels, dismissDownload, ALL_MODEL_BUNDLES } = useModelDownloads()
-
-onMounted(() => { for (const k of ALL_MODEL_BUNDLES) probeModelStatus(k) })
-
-// A card may require one bundle or several — normalize to a list.
-function requiredKeys(item: ToolboxItem): ModelBundleKey[] {
-  if (!item.requiresModels) return []
-  return Array.isArray(item.requiresModels) ? item.requiresModels : [item.requiresModels]
-}
-
-// Card-level helpers used by the template.
-function isModelMissing(item: ToolboxItem): boolean {
-  return requiredKeys(item).some((k) => !modelsReady.has(k))
-}
-function isCardDownloading(item: ToolboxItem): boolean {
-  return download.active && requiredKeys(item).some((k) => inflight.has(k))
-}
-function cardProgress(): number {
-  if (!download.total) return 0
-  return download.downloaded / download.total
-}
-
-function fmtMB(bytes: number): string {
-  return (bytes / 1024 / 1024).toFixed(0)
-}
-
-async function handleAdd(item: ToolboxItem) {
-  // Fetch every required bundle in sequence (the download UI is single-active).
-  for (const key of requiredKeys(item)) {
-    const ok = await ensureModels(key)
-    if (!ok) return  // toast already shows the error; user can retry by clicking again
-  }
+// Adding a node never downloads anything (step 3, R10.5): the Toolbox's
+// model nodes run as hosted calls, and the depth model fills itself.
+function handleAdd(item: ToolboxItem) {
   addNode(item.nodeType)
 }
 
@@ -150,10 +114,6 @@ function onCardDragStart(event: DragEvent, item: ToolboxItem) {
   if (!event.dataTransfer) return
   event.dataTransfer.setData('text/plain', item.nodeType)
   event.dataTransfer.effectAllowed = 'copy'
-  // Model-backed nodes are still draggable — the node instantiates on drop and
-  // its weights download on first run. Kick the downloads off now (background,
-  // in sequence) so they're likely ready by the time they run.
-  void (async () => { for (const key of requiredKeys(item)) await ensureModels(key) })()
   // Hide the hover-preview tooltip while a drag is in flight.
   if (enterTimer) clearTimeout(enterTimer)
   hoveredItem.value = null
@@ -275,38 +235,13 @@ function onCardLeave() {
             :key="item.nodeType"
             draggable="true"
             class="relative group flex flex-col items-center justify-center gap-2.5 aspect-square rounded bg-white/[0.025] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/10 transition-colors cursor-grab active:cursor-grabbing p-2"
-            :title="isModelMissing(item) ? 'Click to download model weights, then add' : 'Click to add, or drag onto the canvas'"
+            title="Click to add, or drag onto the canvas"
             @click="handleAdd(item)"
             @dragstart="(e) => onCardDragStart(e, item)"
             @mouseenter="(e) => onCardEnter(e, item)"
             @mouseleave="onCardLeave"
           >
-            <!-- Cloud badge: weights not yet on disk. Hidden once downloaded
-                 (or while a download is in progress — the ring around the icon
-                 carries the state at that point). -->
-            <CloudDownload
-              v-if="isModelMissing(item) && !isCardDownloading(item)"
-              class="absolute top-1 right-1 size-3 text-white/40 group-hover:text-white/70 transition-colors"
-              :stroke-width="1.75"
-            />
-
-            <!-- Icon + optional progress ring -->
             <div class="relative size-6 flex items-center justify-center">
-              <!-- SVG ring: stroke-dashoffset gives us the partial arc. -->
-              <svg
-                v-if="isCardDownloading(item)"
-                class="absolute inset-0 size-full -rotate-90"
-                viewBox="0 0 36 36"
-              >
-                <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2.5" />
-                <circle
-                  cx="18" cy="18" r="16" fill="none"
-                  stroke="var(--action)" stroke-width="2.5" stroke-linecap="round"
-                  :stroke-dasharray="2 * Math.PI * 16"
-                  :stroke-dashoffset="2 * Math.PI * 16 * (1 - cardProgress())"
-                  class="transition-[stroke-dashoffset] duration-200 ease-linear"
-                />
-              </svg>
               <component
                 :is="item.icon"
                 class="size-6 text-white/65 group-hover:text-white/95 transition-colors"
@@ -341,53 +276,6 @@ function onCardLeave() {
           <span class="text-sm font-semibold text-white/90">{{ hoveredItem.label }}</span>
         </div>
         <p class="text-xs text-white/60 leading-relaxed">{{ hoveredItem.description }}</p>
-      </div>
-    </Transition>
-  </Teleport>
-
-  <!-- Model download toast: sticky bottom-right, shows progress for nodes that
-       need weights (FaceSwap, etc.) before they can be added. -->
-  <Teleport to="body">
-    <Transition
-      enter-active-class="transition-all duration-200 ease-out"
-      enter-from-class="opacity-0 translate-y-2"
-      enter-to-class="opacity-100 translate-y-0"
-      leave-active-class="transition-opacity duration-150 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="download.active"
-        class="fixed bottom-6 right-6 z-[70] w-80 rounded-lg border border-white/10 bg-[#1a1a1a]/95 backdrop-blur-md shadow-2xl p-4"
-      >
-        <div class="flex items-center gap-2 mb-2">
-          <Loader2 v-if="download.phase !== 'error'" class="size-4 text-white/70 animate-spin" />
-          <X v-else class="size-4 text-rose-400" @click="dismissDownload" />
-          <span class="text-sm font-medium text-white/90">
-            Installing {{ download.label }}
-          </span>
-        </div>
-        <p v-if="download.phase === 'checking'" class="text-xs text-white/55">
-          Checking what's already downloaded…
-        </p>
-        <p v-else-if="download.phase === 'preparing'" class="text-xs text-white/55">
-          Loading {{ download.file }}…
-        </p>
-        <p v-else-if="download.phase === 'error'" class="text-xs text-rose-400/90">
-          {{ download.message }}
-        </p>
-        <template v-else>
-          <div class="flex items-center justify-between text-[11px] text-white/55 mb-1.5 tabular-nums">
-            <span class="truncate">{{ download.file }}</span>
-            <span>{{ fmtMB(download.downloaded) }} / {{ fmtMB(download.total) }} MB</span>
-          </div>
-          <div class="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-            <div
-              class="h-full bg-action transition-[width] duration-200 ease-linear"
-              :style="{ width: download.total ? `${(download.downloaded / download.total * 100).toFixed(1)}%` : '5%' }"
-            />
-          </div>
-        </template>
       </div>
     </Transition>
   </Teleport>

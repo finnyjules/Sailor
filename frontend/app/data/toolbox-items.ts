@@ -66,25 +66,11 @@ import { PhSelectionForeground } from '@phosphor-icons/vue'
 
 export type Domain = 'image' | 'text' | 'audio' | 'video' | '3d'
 
-// Toolbox-visible id for a model bundle (declared server-side via
-// _model_downloads.register_bundle). Add new keys here as we ship new ML nodes.
-export type ModelBundleKey =
-  | 'bgremove' | 'upscale'
-  | 'frameinterp' | 'subjecttrack'
-  | 'objectremove'
-  | 'whisper' | 'demucs'
-  | 'depth'
-
 export interface ToolboxItem {
   nodeType: string
   label: string
   description: string
   icon: Component
-  // When set, clicking the card kicks off a background download with a
-  // progress toast BEFORE the node is added to the canvas. Drag is blocked
-  // until the download is done. An array fetches several bundles in sequence
-  // (e.g. 3D Reframe needs depth + the LaMa inpainter).
-  requiresModels?: ModelBundleKey | ModelBundleKey[]
 }
 
 export interface ToolboxSection {
@@ -213,7 +199,7 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
   {
     title: 'Lens',
     items: [
-      { nodeType: 'LensBlur', label: 'Lens / DoF', description: 'Lens blur with depth — tap to focus, set aperture, bokeh and vignette. Downloads ~100 MB on first use.', icon: Focus, requiresModels: 'depth' },
+      { nodeType: 'LensBlur', label: 'Lens / DoF', description: 'Lens blur with depth — tap to focus, set aperture, bokeh and vignette. Fetches its depth model (~100 MB) the first time.', icon: Focus },
       { nodeType: 'LensReframe', label: '3D Reframe', description: 'Re-shoot on a different lens — pick what it was shot on and the lens to re-shoot as, and AI regenerates the scene at that lens’s perspective, field of view and compression. Runs on demand (cloud).', icon: Aperture },
       { nodeType: 'ChromaticAberration', label: 'Aberration', description: 'Offset color channels radially, simulating lens fringing.', icon: CircleDashed },
       { nodeType: 'Halftone', label: 'Halftone', description: 'Newspaper-print dot pattern.', icon: Hash },
@@ -281,10 +267,10 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
   {
     title: 'Local AI',
     items: [
-      { nodeType: 'BackgroundRemove', label: 'Remove BG', description: 'Knock out the background and emit a clean alpha mask. Downloads ~179 MB on first use.', icon: PhSelectionForeground, requiresModels: 'bgremove' },
-      { nodeType: 'SubjectMask', label: 'Subject Mask', description: 'Click a point on the subject — MobileSAM segments it into a mask. Works on every frame of a video. Downloads ~55 MB on first use.', icon: MousePointerClick, requiresModels: 'subjecttrack' },
-      { nodeType: 'ObjectRemove', label: 'Object Removal', description: 'LaMa inpainting — clean removal of distractions, watermarks, or whole subjects. Downloads ~196 MB on first use.', icon: WandSparkles, requiresModels: 'objectremove' },
-      { nodeType: 'UpscaleImage', label: 'Upscale 2×', description: 'Real-ESRGAN 2× upscale. Doubles each dimension while sharpening detail. Downloads ~64 MB on first use.', icon: Maximize, requiresModels: 'upscale' },
+      { nodeType: 'BackgroundRemove', label: 'Remove BG', description: 'Knock out the background and emit a clean alpha mask.', icon: PhSelectionForeground },
+      { nodeType: 'SubjectMask', label: 'Subject Mask', description: 'Click a point on the subject and it becomes a mask. Works on every frame of a video.', icon: MousePointerClick },
+      { nodeType: 'ObjectRemove', label: 'Object Removal', description: 'Clean removal of distractions, watermarks, or whole subjects.', icon: WandSparkles },
+      { nodeType: 'UpscaleImage', label: 'Upscale 2×', description: 'Real-ESRGAN 2× upscale. Doubles each dimension while sharpening detail.', icon: Maximize },
     ],
   },
   {
@@ -381,8 +367,8 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
     domain: 'audio',
     title: 'Local AI',
     items: [
-      { nodeType: 'WhisperTranscribe', label: 'Transcribe',    description: 'Speech-to-text via Whisper. Outputs Caption Track text + SRT. Downloads ~145 MB (base model) on first use.', icon: MessageSquare, requiresModels: 'whisper' },
-      { nodeType: 'VocalSeparator',    label: 'Vocal Separator', description: 'Split a song into vocals + instrumental stems (Demucs). Downloads ~80 MB on first use.', icon: Mic, requiresModels: 'demucs' },
+      { nodeType: 'WhisperTranscribe', label: 'Transcribe',    description: 'Speech-to-text via Whisper. Outputs Caption Track text + SRT.', icon: MessageSquare },
+      { nodeType: 'VocalSeparator',    label: 'Vocal Separator', description: 'Split a song into vocals + instrumental stems (Demucs).', icon: Mic },
       { nodeType: 'AudioDenoise',      label: 'Denoise',         description: 'Remove background noise (hiss, hum, room tone, fans) from a clip. No download required.', icon: VolumeX },
     ],
   },
@@ -429,7 +415,7 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
     domain: 'video',
     title: 'Local AI',
     items: [
-      { nodeType: 'FrameInterpolateAI',   label: 'Slow Motion AI',     description: 'RIFE 4.6 frame interpolation — handles fast action and complex scenes far better than classical optical flow. Downloads ~32 MB on first use.', icon: Hourglass, requiresModels: 'frameinterp' },
+      { nodeType: 'FrameInterpolateAI',   label: 'Slow Motion AI',     description: 'RIFE frame interpolation — handles fast action and complex scenes far better than classical optical flow.', icon: Hourglass },
     ],
   },
   {
