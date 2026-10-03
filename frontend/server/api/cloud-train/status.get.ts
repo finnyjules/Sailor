@@ -3,7 +3,7 @@
  *
  * Polls Replicate for the prediction status. When it transitions to
  * `succeeded`, downloads the output (either a direct .safetensors or a .tar
- * containing one), saves to ../models/loras/<outputName>.safetensors, and
+ * containing one), saves to the LoRA library (library/loras/<outputName>.safetensors), and
  * writes a sidecar .json with provenance.
  *
  * Safe to call repeatedly — the download step is a no-op once the file is
@@ -18,7 +18,7 @@ import { promises as fs } from 'node:fs'
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import { dataPath } from '../../utils/dataRoot'
+import { findInLibrary, libraryDir } from '../../utils/library'
 import os from 'node:os'
 import { linkTrainedCharacter } from '~~/server/utils/characterLink'
 import { deployMode } from '../../utils/deployMode'
@@ -28,10 +28,6 @@ const exec = promisify(execCb)
 
 function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'my_lora'
-}
-
-async function fileExists(p: string): Promise<boolean> {
-  try { await fs.access(p); return true } catch { return false }
 }
 
 /**
@@ -146,12 +142,12 @@ export default defineEventHandler(async (event) => {
       : null
 
   if (pred.status === 'succeeded' && outputUrl) {
-    const lorasDir = dataPath('models', 'loras')
+    const lorasDir = libraryDir('loras')
     await fs.mkdir(lorasDir, { recursive: true })
     const filename = `${outputName}.safetensors`
     const localPath = path.join(lorasDir, filename)
 
-    if (await fileExists(localPath)) {
+    if (await findInLibrary('loras', filename)) {
       localFilename = filename // already downloaded; idempotent poll
     } else {
       const dl = await downloadAndPlace(outputUrl, localPath)

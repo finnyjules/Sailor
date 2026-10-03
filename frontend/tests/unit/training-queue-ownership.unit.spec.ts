@@ -64,9 +64,9 @@ function ev(id: string | null, userId: string | null): any {
 beforeEach(async () => {
   cwd = process.cwd()
   tmp = mkdtempSync(path.join(os.tmpdir(), 'training-queue-owner-'))
-  // trainingQueue.ts's defaultJobsPath() resolves ../models/.training-jobs.json
+  // trainingQueue.ts's defaultJobsPath() resolves ../library/.training-jobs.json
   // from cwd, so mirror that shape (loras-local-handlers.unit.spec.ts pattern).
-  await fs.mkdir(path.join(tmp, 'models'), { recursive: true })
+  await fs.mkdir(path.join(tmp, 'library'), { recursive: true })
   await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
   process.chdir(path.join(tmp, 'frontend'))
 })

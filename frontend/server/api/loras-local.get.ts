@@ -1,7 +1,7 @@
 /**
  * GET /api/loras-local
  *
- * Lists the LoRAs in ../models/loras (where cloud training drops the trained
+ * Lists the LoRAs in the library (library/loras, where cloud training drops the trained
  * .safetensors + a .json provenance sidecar). Returns name, base model,
  * provider, the public CDN url (if any), size and date so the LoRA panel can
  * show a "Your LoRAs" section alongside the curated library.
@@ -11,19 +11,17 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { libraryDir, listLibrary } from '../utils/library'
 import { parseSidecar, sidecarAesthetic } from '../utils/loraPrompt'
 import { listOwned } from '../utils/ownedJsonStore'
 
 export default defineEventHandler(async (event) => {
-  const lorasDir = dataPath('models', 'loras')
-
-  let files: string[] = []
-  try {
-    files = await fs.readdir(lorasDir)
-  } catch {
-    return { loras: [] }
-  }
+  const lorasDir = libraryDir('loras')
+  // Each file name with the folder it is in (the library first; library.ts).
+  const where = await listLibrary('loras')
+  if (!where.size) return { loras: [] }
+  const files = [...where.keys()]
+  const at = (name: string) => path.join(where.get(name) ?? lorasDir, name)
 
   const out: Array<{
     filename: string
@@ -57,13 +55,13 @@ export default defineEventHandler(async (event) => {
 
     let meta: Record<string, any> = {}
     try {
-      meta = parseSidecar(await fs.readFile(path.join(lorasDir, `${base}.json`), 'utf8'))
+      meta = parseSidecar(await fs.readFile(at(`${base}.json`), 'utf8'))
     } catch { /* no sidecar */ }
 
     let trainedOn: string | null = meta.trained_on ?? null
     let sizeBytes: number | null = null
     try {
-      const st = await fs.stat(path.join(lorasDir, f))
+      const st = await fs.stat(at(f))
       sizeBytes = st.size
       if (!trainedOn) trainedOn = st.mtime.toISOString()
     } catch { /* weights absent (e.g. on the deployed server) — sidecar only */ }
@@ -73,7 +71,7 @@ export default defineEventHandler(async (event) => {
     let coverUrl: string | null = null
     for (const ext of ['webp', 'png', 'jpg']) {
       try {
-        const st = await fs.stat(path.join(lorasDir, `${base}.cover.${ext}`))
+        const st = await fs.stat(at(`${base}.cover.${ext}`))
         coverUrl = `/api/lora-cover?name=${encodeURIComponent(f)}&v=${Math.floor(st.mtimeMs)}`
         break
       } catch { /* no cover of this ext */ }

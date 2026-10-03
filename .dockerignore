@@ -9,7 +9,7 @@
 # Python — the image carries no Python and no ComfyUI (step 3, R10.10).
 # ComfyUI's source, its requirements and every *.py stay out; Sailor's data
 # folders (blueprints, shader_effects, scenes' Timeline scene
-# defaults and thumbnails, models/loras sidecars) still ship.
+# defaults and thumbnails, library/loras sidecars) still ship.
 .venv
 **/__pycache__
 **/*.py
@@ -50,11 +50,16 @@ frontend/dist
 /temp
 /user
 
-# Model weights — keep only the LoRA sidecars + cover thumbnails,
-# drop the multi-GB .safetensors and model bundles.
-models/**
-!models/loras/**
-models/loras/**/*.safetensors
+# ComfyUI's old model folder: nothing in it ships (step 4, C6b — the user's
+# LoRAs, characters and voices moved to library/).
+models
+
+# The user's library: ship only the LoRA sidecars + cover thumbnails (the
+# curated styles), never the multi-GB .safetensors, the training ledger, or
+# the local characters and voices.
+library/**
+!library/loras/**
+library/loras/**/*.safetensors
 
 # Misc large/unneeded at runtime
 Assets

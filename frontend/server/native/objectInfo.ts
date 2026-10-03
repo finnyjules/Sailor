@@ -18,18 +18,18 @@
  *
  *   - the input-derived combos (`UPLOAD_INPUT_LISTS`): each node's own listing
  *     of `input/`;
- *   - the LoRA pickers (`MODEL_INPUT_LISTS`): `models/loras` plus
- *     `extra_model_paths.yaml`, with the same extensions, the recursive walk
- *     and the sort as `folder_paths.get_filename_list`.
+ *   - the LoRA pickers (`MODEL_INPUT_LISTS`): the LoRA library
+ *     (`library/loras`, server/utils/library.ts), with the same extensions,
+ *     the recursive walk and the sort as ComfyUI's picker had.
  *
  * Every other byte of the served catalogue is left as it is in the file,
  * except Sailor's model menus, laid over every body served (`withModelOverlay`).
  */
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { resolveEngineRoot } from '../utils/inputUploads'
+import { libraryDirs } from '../utils/library'
 import { PY_ENCODING_SUFFIXES, PY_MIME_TOP, PY_SUFFIX_MAP } from './pyMimeTypes'
 import { isDir, isFile } from './paths'
 import { applyModelOverlay } from '../../shared/runner/modelMenus'
@@ -153,190 +153,10 @@ function direntIsFile(dir: string, e: fs.Dirent): boolean {
   return e.isSymbolicLink() && isFile(path.join(dir, e.name))
 }
 
-// ------------------------------------------------------ folder_paths port
+// ------------------------------------------------------ the LoRA library
 
-const SUPPORTED_PT_EXTENSIONS = ['.ckpt', '.pt', '.pt2', '.bin', '.pth', '.safetensors', '.pkl', '.sft']
-
-/** `folder_paths.folder_names_and_paths`: folder name → [search paths, extensions]. */
-export type FolderTable = Map<string, { paths: string[], extensions: string[] }>
-
-/** `folder_paths.map_legacy`. */
-function mapLegacy(name: string): string {
-  return name === 'unet' ? 'diffusion_models' : name === 'clip' ? 'text_encoders' : name
-}
-
-/** The default table folder_paths.py builds for `base_path` (custom_nodes left out). */
-function defaultFolderTable(root: string): FolderTable {
-  const m = (...p: string[]) => p.map(x => path.join(root, 'models', x))
-  const t: FolderTable = new Map()
-  const pt = SUPPORTED_PT_EXTENSIONS
-  t.set('checkpoints', { paths: m('checkpoints'), extensions: pt })
-  t.set('configs', { paths: m('configs'), extensions: ['.yaml'] })
-  t.set('loras', { paths: m('loras'), extensions: pt })
-  t.set('vae', { paths: m('vae'), extensions: pt })
-  t.set('text_encoders', { paths: m('text_encoders', 'clip'), extensions: pt })
-  t.set('diffusion_models', { paths: m('unet', 'diffusion_models'), extensions: pt })
-  t.set('clip_vision', { paths: m('clip_vision'), extensions: pt })
-  t.set('style_models', { paths: m('style_models'), extensions: pt })
-  t.set('embeddings', { paths: m('embeddings'), extensions: pt })
-  t.set('diffusers', { paths: m('diffusers'), extensions: ['folder'] })
-  t.set('vae_approx', { paths: m('vae_approx'), extensions: pt })
-  t.set('controlnet', { paths: m('controlnet', 't2i_adapter'), extensions: pt })
-  t.set('gligen', { paths: m('gligen'), extensions: pt })
-  t.set('upscale_models', { paths: m('upscale_models'), extensions: pt })
-  t.set('latent_upscale_models', { paths: m('latent_upscale_models'), extensions: pt })
-  t.set('hypernetworks', { paths: m('hypernetworks'), extensions: pt })
-  t.set('photomaker', { paths: m('photomaker'), extensions: pt })
-  t.set('classifiers', { paths: m('classifiers'), extensions: [''] })
-  t.set('model_patches', { paths: m('model_patches'), extensions: pt })
-  t.set('audio_encoders', { paths: m('audio_encoders'), extensions: pt })
-  return t
-}
-
-/** `folder_paths.add_model_folder_path`. */
-function addModelFolderPath(t: FolderTable, folderName: string, fullPath: string, isDefault: boolean): void {
-  const name = mapLegacy(folderName)
-  const entry = t.get(name)
-  if (!entry) {
-    t.set(name, { paths: [fullPath], extensions: [] })
-    return
-  }
-  const i = entry.paths.indexOf(fullPath)
-  if (i >= 0) {
-    if (isDefault && i !== 0) {
-      entry.paths.splice(i, 1)
-      entry.paths.unshift(fullPath)
-    }
-  }
-  else if (isDefault) entry.paths.unshift(fullPath)
-  else entry.paths.push(fullPath)
-}
-
-/** `os.path.expanduser` + `os.path.expandvars` (unknown variables stay as written). */
-function expandUserAndVars(p: string): string {
-  let out = p
-  if (out === '~' || out.startsWith('~/')) out = os.homedir() + out.slice(1)
-  return out.replace(/\$(\w+|\{[^}]*\})/g, (whole, name: string) => {
-    const key = name.startsWith('{') ? name.slice(1, -1) : name
-    const v = process.env[key]
-    return v === undefined ? whole : v
-  })
-}
-
-type YamlValue = string | boolean | null
-
-/** A plain YAML 1.1 scalar the way `yaml.safe_load` reads the ones this file uses. */
-function yamlScalar(raw: string): YamlValue {
-  const s = raw.trim()
-  if (s === '' || s === '~' || /^(null|Null|NULL)$/.test(s)) return null
-  if (/^(true|True|TRUE|yes|Yes|YES|on|On|ON|y|Y)$/.test(s)) return true
-  if (/^(false|False|FALSE|no|No|NO|off|Off|OFF|n|N)$/.test(s)) return false
-  if (s.length >= 2 && s.startsWith('\'') && s.endsWith('\'')) return s.slice(1, -1).replace(/''/g, '\'')
-  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) return JSON.parse(s)
-  return s
-}
-
-function stripComment(line: string): string {
-  const m = /(^|\s)#/.exec(line)
-  return m ? line.slice(0, m.index) : line
-}
-
-/**
- * The subset of YAML `extra_model_paths.yaml` is written in: top-level
- * sections, each a mapping of `key: value` or `key: |` block scalars (whose
- * lines, `#` included, are literal — as in PyYAML). Returns null for anything
- * outside that subset rather than guessing.
- */
-export function parseExtraModelPathsYaml(text: string): Record<string, Record<string, YamlValue> | null> | null {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  const out: Record<string, Record<string, YamlValue> | null> = {}
-  let section: string | null = null
-  let i = 0
-  const indentOf = (l: string) => l.length - l.trimStart().length
-  while (i < lines.length) {
-    const line = stripComment(lines[i]!)
-    if (line.trim() === '') { i++; continue }
-    const indent = indentOf(line)
-    const kv = /^(\s*)([^\s:#][^:]*?)\s*:(?:\s+(.*))?\s*$/.exec(line)
-    if (!kv) return null
-    const key = kv[2]!
-    const value = (kv[3] ?? '').trim()
-    if (indent === 0) {
-      if (value !== '') out[key] = yamlScalar(value) as null
-      else out[key] = null
-      section = key
-      i++
-      continue
-    }
-    if (section === null) return null
-    const conf = (out[section] ??= {})
-    if (conf === null || typeof conf !== 'object') return null
-    const block = /^([|>])([+-]?)$/.exec(value)
-    if (!block) {
-      conf[key] = yamlScalar(value)
-      i++
-      continue
-    }
-    // Block scalar: every following line indented deeper than the key (or blank).
-    const body: string[] = []
-    i++
-    while (i < lines.length && (lines[i]!.trim() === '' || indentOf(lines[i]!) > indent)) body.push(lines[i++]!)
-    while (body.length && body[body.length - 1]!.trim() === '') body.pop()
-    const first = body.find(l => l.trim() !== '')
-    const blockIndent = first ? indentOf(first) : 0
-    const content = body.map(l => l.slice(Math.min(blockIndent, indentOf(l))))
-    let joined = block[1] === '>' ? content.join(' ') : content.join('\n')
-    if (block[2] !== '-' && content.length) joined += '\n'
-    conf[key] = joined
-  }
-  return out
-}
-
-/** `utils/extra_config.load_extra_path_config` applied to `t`. */
-function loadExtraPathConfig(t: FolderTable, yamlPath: string): void {
-  let config: ReturnType<typeof parseExtraModelPathsYaml>
-  try { config = parseExtraModelPathsYaml(fs.readFileSync(yamlPath, 'utf8')) }
-  catch { return }
-  if (!config) {
-    console.warn(`[native] object_info: could not read ${yamlPath}; extra model folders are not listed`)
-    return
-  }
-  const yamlDir = path.dirname(path.resolve(yamlPath))
-  for (const conf of Object.values(config)) {
-    if (!conf || typeof conf !== 'object') continue
-    const c = { ...conf }
-    let basePath: string | null = null
-    if ('base_path' in c) {
-      basePath = expandUserAndVars(String(c.base_path ?? ''))
-      delete c.base_path
-      if (basePath && !path.isAbsolute(basePath)) basePath = path.resolve(yamlDir, basePath)
-    }
-    let isDefault = false
-    if ('is_default' in c) {
-      isDefault = Boolean(c.is_default)
-      delete c.is_default
-    }
-    for (const [folder, value] of Object.entries(c)) {
-      if (typeof value !== 'string') continue
-      for (const y of value.split('\n')) {
-        if (y.length === 0) continue
-        let full = y
-        // os.path.join: an absolute second part replaces the first.
-        if (basePath) full = path.isAbsolute(y) ? y : path.join(basePath, y)
-        else if (!path.isAbsolute(full)) full = path.resolve(yamlDir, y)
-        addModelFolderPath(t, folder, path.normalize(full), isDefault)
-      }
-    }
-  }
-}
-
-/** folder_paths' table for the engine at `root`, with `<root>/extra_model_paths.yaml` applied. */
-export function modelFolderTable(root: string): FolderTable {
-  const t = defaultFolderTable(root)
-  const yamlPath = path.join(root, 'extra_model_paths.yaml')
-  if (isFile(yamlPath)) loadExtraPathConfig(t, yamlPath)
-  return t
-}
+/** The extensions the LoRA pickers list (ComfyUI's `supported_pt_extensions`). */
+export const LORA_EXTENSIONS = ['.ckpt', '.pt', '.pt2', '.bin', '.pth', '.safetensors', '.pkl', '.sft']
 
 /**
  * `folder_paths.recursive_search(directory, excluded_dir_names)`'s file list:
@@ -370,14 +190,18 @@ function recursiveSearch(directory: string, excluded: string[]): string[] {
   return result
 }
 
-/** `folder_paths.get_filename_list(folder_name)`. */
-export function getFilenameList(t: FolderTable, folderName: string): string[] {
-  const entry = t.get(mapLegacy(folderName))
-  if (!entry) return []
+/**
+ * The LoRA pickers' file list (step 4, C6b): every LoRA file in the library
+ * (`<root>/library/loras`, server/utils/library.ts, plus the old folder while
+ * it still exists beside it), walked recursively and sorted as ComfyUI's
+ * `get_filename_list("loras")` did. None when the root is unknown.
+ */
+export function listLoraFiles(root: string | null): string[] {
+  if (!root) return []
   const out = new Set<string>()
-  for (const dir of entry.paths) {
+  for (const dir of libraryDirs('loras', root)) {
     for (const f of recursiveSearch(dir, ['.git'])) {
-      if (entry.extensions.length === 0 || entry.extensions.includes(pySplitext(f)[1].toLowerCase())) out.add(f)
+      if (LORA_EXTENSIONS.includes(pySplitext(f)[1].toLowerCase())) out.add(f)
     }
   }
   return pySorted(out)
@@ -386,13 +210,13 @@ export function getFilenameList(t: FolderTable, folderName: string): string[] {
 // ------------------------------------------------------- the combo tables
 
 /**
- * LoRA pickers: `Class.input` → the `get_filename_list` folder behind it (plus
+ * LoRA pickers: `Class.input` → the library kind behind it (only `loras`; plus
  * the literal entries the node appends). Each row was read off the node's own
  * source (comfy_api_nodes/nodes_replicate.py); `native-object-info.unit.spec.ts`
  * checks every row against the catalogue so a renamed node or input shows up
  * as a failure.
  */
-export const MODEL_INPUT_LISTS: Record<string, { folder: string, append?: string[] }> = {
+export const MODEL_INPUT_LISTS: Record<string, { folder: 'loras', append?: string[] }> = {
   'FluxLoRARemoteNode.lora_name': { folder: 'loras', append: ['[None]'] },
   'FluxMultiLoRARemoteNode.lora_a': { folder: 'loras', append: ['[None]'] },
   'FluxMultiLoRARemoteNode.lora_b': { folder: 'loras', append: ['[None]'] },
@@ -476,7 +300,7 @@ export function findSpec(catalog: Catalog, key: string): unknown {
 /**
  * Rebuild, in place, every file-list combo in `catalog` that ComfyUI lists
  * from disk and that this module knows how to list: the input-derived ones
- * from `<root>/input`, the LoRA pickers from `<root>/models` (+ extra paths).
+ * from `<root>/input`, the LoRA pickers from the library (`listLoraFiles`).
  * A null root lists nothing — exactly what ComfyUI shows for empty folders.
  */
 export function refreshFileLists(catalog: Catalog, root: string | null): Catalog {
@@ -487,18 +311,12 @@ export function refreshFileLists(catalog: Catalog, root: string | null): Catalog
     input ??= root ? listInput(path.join(root, 'input')) : EMPTY_INPUT
     setComboOptions(spec, list(input), Boolean(seedsDefault))
   }
-  let table: FolderTable | undefined
-  const lists = new Map<string, string[]>()
+  let loras: string[] | undefined
   for (const [key, rule] of Object.entries(MODEL_INPUT_LISTS)) {
     const spec = findSpec(catalog, key)
     if (spec === undefined) continue
-    table ??= root ? modelFolderTable(root) : new Map()
-    let files = lists.get(rule.folder)
-    if (!files) {
-      files = getFilenameList(table, rule.folder)
-      lists.set(rule.folder, files)
-    }
-    setComboOptions(spec, [...files, ...(rule.append ?? [])], false)
+    loras ??= listLoraFiles(root)
+    setComboOptions(spec, [...loras, ...(rule.append ?? [])], false)
   }
   return catalog
 }

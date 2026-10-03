@@ -3,7 +3,7 @@
  *
  * Generates a preview thumbnail for a trained LoRA by running it once on
  * Replicate (the trained model, with its aesthetic + trigger as the prompt),
- * and caches the result to models/loras/<base>.cover.webp. One-time per LoRA
+ * and caches the result to library/loras/<base>.cover.webp. One-time per LoRA
  * (subsequent calls overwrite). Returns { coverUrl }.
  *
  * This costs one generation (~$0.04) — it's only ever triggered by an explicit
@@ -13,7 +13,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { libraryDir, libraryFile } from '../utils/library'
 import { assertRateLimit } from '../lib/rateLimit'
 import { preflightMeter } from '../utils/requestMeter'
 import { guardMutation } from '../utils/ownedJsonStore'
@@ -32,12 +32,12 @@ export default defineEventHandler(async (event) => {
   const base = safeBase(name)
   if (!base) throw createError({ statusCode: 400, message: 'Invalid LoRA name' })
 
-  const lorasDir = dataPath('models', 'loras')
+  const lorasDir = libraryDir('loras')
 
   // Read the sidecar for the trained model ref + style.
   let meta: any = {}
   try {
-    meta = JSON.parse(await fs.readFile(path.join(lorasDir, `${base}.json`), 'utf8'))
+    meta = JSON.parse(await fs.readFile(await libraryFile('loras', `${base}.json`), 'utf8'))
   } catch {
     throw createError({ statusCode: 404, message: 'No sidecar for that LoRA.' })
   }
@@ -121,6 +121,7 @@ export default defineEventHandler(async (event) => {
 
     const dl = await fetch(imgUrl)
     if (!dl.ok) throw createError({ statusCode: 502, message: `Could not download cover (${dl.status})` })
+    await fs.mkdir(lorasDir, { recursive: true })
     await fs.writeFile(path.join(lorasDir, `${base}.cover.webp`), Buffer.from(await dl.arrayBuffer()))
 
     return { ok: true, coverUrl: `/api/lora-cover?name=${encodeURIComponent(name)}&v=${Date.now()}` }

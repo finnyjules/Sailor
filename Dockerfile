@@ -114,7 +114,7 @@ COPY . .
 # Overlay the built Nuxt output from stage 1.
 COPY --from=web /build/frontend/.output /app/frontend/.output
 
-# The data root Sailor reads input/, output/, temp/, user/ and models/ under,
+# The data root Sailor reads input/, output/, temp/, user/ and library/ under,
 # named explicitly rather than left to the cwd walk
 # (frontend/server/utils/dataRoot.ts); start.sh links these folders to the Fly
 # volume. SAILOR_ENGINE_ROOT is the old name, still read.

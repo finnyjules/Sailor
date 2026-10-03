@@ -25,7 +25,7 @@
  *    the calls made are charged. Its last answer's first URL is the picture,
  *    alpha dropped, shown under `flux_multilora`.
  *
- * A LoRA picked by name is read from models/loras/ (../loraFiles.ts): only
+ * A LoRA picked by name is read from the LoRA library, library/loras/ (../loraFiles.ts): only
  * its sidecar, never its weights, which the provider fetches from the
  * sidecar's address (as Python). Hosted never gets here with one (ruling (i)).
  */

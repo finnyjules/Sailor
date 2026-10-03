@@ -3,7 +3,7 @@
  *
  * The browser no longer holds training jobs in memory and polls them — that's
  * what made closing the window abort a training. Instead every job is persisted
- * here as a small JSON file under the models dir, and a server-side runner
+ * here as a small JSON file in the library folder, and a server-side runner
  * (server/plugins/trainingQueueRunner.ts) starts/polls/finalizes them. The
  * browser becomes a pure viewer via /api/training-queue.
  *
@@ -11,7 +11,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from './dataRoot'
+import { trainingJobsFile } from './library'
 import { randomUUID } from 'node:crypto'
 
 export type TrainingKind = 'lora' | 'voice'
@@ -84,9 +84,9 @@ export interface JobStore {
   remove(id: string): Promise<boolean>
 }
 
-/** Default registry path: alongside the model outputs (../models from the Nuxt cwd). */
+/** Default registry path: beside the trained LoRAs and voices, `library/.training-jobs.json` (library.ts moves the old one). */
 export function defaultJobsPath(): string {
-  return dataPath('models', '.training-jobs.json')
+  return trainingJobsFile()
 }
 
 /**

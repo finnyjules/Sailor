@@ -23,10 +23,8 @@ import {
   nodeCatalogFile,
   UPLOAD_INPUT_LISTS,
   __setNodeCatalogFileForTests,
-  modelFolderTable,
-  getFilenameList,
+  listLoraFiles,
   objectInfoDisplayName,
-  parseExtraModelPathsYaml,
   pyFilterFilesContentTypes,
   pyGuessTopType,
 } from '../../server/native/objectInfo'
@@ -133,6 +131,8 @@ describe('the catalogue, refreshed from disk (C5: no engine; C6: the only source
     const r = await call('GET', '/object_info')
     expect(r.status).toBe(200)
     const b = r.body
+    // C6b: the first listing moved the old models/loras into the library.
+    expect(fs.existsSync(path.join(root, 'library', 'loras', 'z.safetensors'))).toBe(true)
     expect(b.LoadImage.input.required.image).toEqual([['a.jpg', 'b.png'], { image_upload: true }])
     expect(b.Image.input.required.image).toEqual([['', 'a.jpg', 'b.png'], { image_upload: true, default: '' }])
     expect(b.LoadAudio.input.required.audio[1].options).toEqual(['clip.mp4', 'song.mp3'])
@@ -277,36 +277,25 @@ describe('Python ports', () => {
     expect(pyFilterFilesContentTypes(['webp'], ['image'])).toEqual(['webp'])
   })
 
-  it('extra_model_paths.yaml: sections, block lists, base_path, is_default, legacy names', () => {
-    const cfg = parseExtraModelPathsYaml([
-      '# a comment',
-      'mine:',
-      '    base_path: shared/',
-      '    is_default: true',
-      '    loras: |',
-      '         extra_loras',
-      '         more_loras',
-      '    unet: unet_dir  # trailing comment',
-      'off:',
-    ].join('\n'))
-    expect(cfg).toEqual({
-      mine: { base_path: 'shared/', is_default: true, loras: 'extra_loras\nmore_loras\n', unet: 'unet_dir' },
-      off: null,
-    })
-    fs.writeFileSync(path.join(root, 'extra_model_paths.yaml'), [
-      'mine:',
-      '    base_path: shared/',
-      '    loras: |',
-      '         extra_loras',
-      '    unet: unet_dir',
-    ].join('\n'))
+  it('LoRA pickers list the library (C6b): the old models/loras moves there once; extra_model_paths.yaml is not read', () => {
+    fs.writeFileSync(path.join(root, 'extra_model_paths.yaml'), ['mine:', '    base_path: shared/', '    loras: extra_loras'].join('\n'))
     write('shared/extra_loras/e.safetensors')
-    write('shared/unet_dir/w.safetensors')
     write('models/loras/z.safetensors')
-    const t = modelFolderTable(root)
-    expect(t.get('loras')!.paths).toEqual([path.join(root, 'models', 'loras'), path.join(root, 'shared', 'extra_loras')])
-    expect(getFilenameList(t, 'loras')).toEqual(['e.safetensors', 'z.safetensors'])
-    expect(getFilenameList(t, 'diffusion_models')).toEqual(['w.safetensors'])
+    write('models/checkpoints/m.ckpt')
+    expect(listLoraFiles(root)).toEqual(['z.safetensors'])
+    expect(fs.existsSync(path.join(root, 'library', 'loras', 'z.safetensors'))).toBe(true)
+    expect(fs.existsSync(path.join(root, 'models', 'loras'))).toBe(false)
+    // Other model kinds stay where they were, untouched and unlisted.
+    expect(fs.existsSync(path.join(root, 'models', 'checkpoints', 'm.ckpt'))).toBe(true)
+    expect(listLoraFiles(null)).toEqual([])
+  })
+
+  it('LoRA pickers read both folders, the library first, when both exist', () => {
+    write('library/loras/a.safetensors')
+    write('models/loras/b.safetensors'); write('models/loras/a.safetensors')
+    expect(listLoraFiles(root)).toEqual(['a.safetensors', 'b.safetensors'])
+    // Nothing was moved over an existing library folder.
+    expect(fs.existsSync(path.join(root, 'models', 'loras', 'b.safetensors'))).toBe(true)
   })
 })
 

@@ -3,7 +3,7 @@
  * VoiceTrainerSurface — the "Train a voice" body, rendered inside the Train tab
  * (LoraTrainerSurface) when the kind is 'voice'. Unlike LoRA training this is a
  * single Replicate prediction: upload one sample → minimax/voice-cloning →
- * persist the cloned voice into models/voices so it shows in the Generate-speech
+ * persist the cloned voice into library/voices so it shows in the Generate-speech
  * voice gallery under "Your voices".
  *
  * Renders sibling <section>s only (no outer container) — the Train tab provides

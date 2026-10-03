@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the character registry (models/characters/<slug>.json).
+ * Pure helpers for the character registry (library/characters/<slug>.json).
  * Reference images live in the ComfyUI INPUT dir and records store filenames —
  * a cast ref is exactly `/view?filename=<name>&type=input`, which the Shot
  * Director ref chain already resolves. Pure (fs-free) so it unit-tests like

@@ -66,7 +66,7 @@ export const FLUX_LORA_GUIDANCE_TOO_HIGH = 'Flux Dev + LoRA takes a guidance up 
 /** The marker the multi-LoRA model prints once per LoRA it loads (:952). */
 export const LORA_LOADED_MARKER = 'Downloading LoRA weights'
 
-/** Every LoRA picker and link widget, by class: the names ComfyUI validates against models/loras/, the links sent. */
+/** Every LoRA picker and link widget, by class: the names the picker lists from library/loras/, the links sent. */
 export const LORA_NAME_INPUTS: Readonly<Record<LoraClass, readonly string[]>> = {
   FluxLoRARemoteNode: ['lora_name'],
   FluxMultiLoRARemoteNode: MULTI_LORA_SLOTS.map(s => s.name),
@@ -284,7 +284,7 @@ export function isHttpsSafetensors(value: string): boolean {
 
 /**
  * Hosted (ruling (i), both paths): LoRAs picked by name and trained-model
- * addresses are refused until LoRAs are stored per user (models/loras/ is
+ * addresses are refused until LoRAs are stored per user (library/loras/ is
  * one shared folder with no owner; a trained model runs under Sailor's own
  * Replicate account); public links are allowed. A wired picker or link
  * can't be judged before the run: refused too, as a wired voice is.

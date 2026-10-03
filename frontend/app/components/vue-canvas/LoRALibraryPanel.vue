@@ -181,7 +181,7 @@ onMounted(() => {
   for (const p of toFetch) fetchPreview(p)
 })
 
-// ── Your trained LoRAs (local models/loras + sidecars) ────────────────────
+// ── Your trained LoRAs (local library/loras + sidecars) ────────────────────
 // Shared cached client with loading/error state, so the tab can show a
 // spinner or a retry line instead of a false "No trained styles yet."
 const { loras: localLoras, loading: lorasLoading, error: lorasError, refresh: refreshLocalLoras } = useLocalLoras()

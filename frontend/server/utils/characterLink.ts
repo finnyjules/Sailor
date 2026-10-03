@@ -1,6 +1,6 @@
 /**
  * Shared server-side helper: link a just-succeeded character-kind LoRA
- * training to the character registry (models/characters/<slug>.json).
+ * training to the character registry (library/characters/<slug>.json).
  *
  * Extracted so both finalize paths — the legacy /api/cloud-train/status
  * poll endpoint and the training-queue's pollLora() in trainingProviders.ts
@@ -9,7 +9,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from './dataRoot'
+import { findInLibrary, libraryDir, listLibrary } from './library'
 import { parseCharacterRecord, slugifyCharacterName, type CharacterRecord } from '~~/server/utils/characterRegistry'
 import { emptyState } from '#shared/characters/types'
 import { deployMode } from '~~/server/utils/deployMode'
@@ -65,15 +65,11 @@ function matchesTrainedCharacter(record: CharacterRecord, displayNameSlug: strin
  * Find the first available de-collided slug by appending -2, -3, etc.
  * (assumes caller has already tried the base slug).
  */
-async function findAvailableSlug(baseSlug: string, dir: string, maxAttempts: number = 100): Promise<string> {
+async function findAvailableSlug(baseSlug: string, maxAttempts: number = 100): Promise<string> {
   for (let i = 2; i <= maxAttempts; i++) {
     const candidate = `${baseSlug}-${i}`
-    try {
-      await fs.access(path.join(dir, `${candidate}.json`))
-    } catch {
-      // File does not exist — this slug is available
-      return candidate
-    }
+    // No library folder holds it — this slug is available
+    if (!(await findInLibrary('characters', `${candidate}.json`))) return candidate
   }
   // Fallback to timestamp-based if we somehow hit maxAttempts (very unlikely)
   return `${baseSlug}-${Date.now()}`
@@ -95,17 +91,19 @@ export async function linkTrainedCharacter(opts: { displayName: string, weightsF
   const { displayName, weightsFilename, trigger, ownerUserId } = opts
   const slug = slugifyCharacterName(displayName)
   if (!slug) return
-  const dir = dataPath('models', 'characters')
+  const dir = libraryDir('characters')
   await fs.mkdir(dir, { recursive: true })
 
-  let files: string[] = []
-  try { files = await fs.readdir(dir) } catch { /* none yet */ }
+  // Each record with the folder it is in (the library first; library.ts).
+  const where = await listLibrary('characters')
+  const files = [...where.keys()]
+  const at = (name: string) => path.join(where.get(name) ?? dir, name)
 
   let match: CharacterRecord | null = null
   for (const f of files.filter(f => f.endsWith('.json'))) {
     const s = f.slice(0, -5)
     let parsed: CharacterRecord | null = null
-    try { parsed = parseCharacterRecord(await fs.readFile(path.join(dir, f), 'utf8'), s) } catch { continue }
+    try { parsed = parseCharacterRecord(await fs.readFile(at(f), 'utf8'), s) } catch { continue }
     if (parsed && matchesTrainedCharacter(parsed, slug)) { match = parsed; break }
   }
 
@@ -135,7 +133,7 @@ export async function linkTrainedCharacter(opts: { displayName: string, weightsF
     match!.loraName = weightsFilename
     match!.trigger = trigger
     match!.updatedAt = now
-    await fs.writeFile(path.join(dir, `${match!.slug}.json`), JSON.stringify(match, null, 2))
+    await fs.writeFile(at(`${match!.slug}.json`), JSON.stringify(match, null, 2))
     await claimCharacter(match!.slug, ownerUserId)
     return
   }
@@ -143,7 +141,7 @@ export async function linkTrainedCharacter(opts: { displayName: string, weightsF
   if (decision === 'collide-new') {
     // Ready character with a different loraName: create a new record with de-collided slug
     console.warn(`[characterLink] Slug collision: "${slug}" already ready with loraName="${match!.loraName}", creating new record with de-collided slug`)
-    const newSlug = await findAvailableSlug(slug, dir)
+    const newSlug = await findAvailableSlug(slug)
     const record: CharacterRecord = {
       name: displayName,
       slug: newSlug,

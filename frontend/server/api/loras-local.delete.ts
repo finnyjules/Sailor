@@ -19,14 +19,10 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { findInLibrary, libraryDir, libraryDirs } from '../utils/library'
 import { parseSidecar } from '~~/server/utils/loraPrompt'
 import { isSafeLoraFilename } from '~~/server/utils/loraSidecars'
 import { guardMutation, releaseRecord } from '~~/server/utils/ownedJsonStore'
-
-async function exists(p: string): Promise<boolean> {
-  try { await fs.access(p); return true } catch { return false }
-}
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ filename?: string }>(event)
@@ -36,7 +32,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid filename' })
   }
 
-  const lorasDir = dataPath('models', 'loras')
+  const lorasDir = libraryDir('loras')
+  const exists = async (name: string) => Boolean(await findInLibrary('loras', name))
   const base = filename.slice(0, -'.safetensors'.length)
 
   // Ownership gate (hosted only), composed with the two existing guards below.
@@ -44,17 +41,18 @@ export default defineEventHandler(async (event) => {
   // before the weights-on-disk / duplicate_of checks can leak a 409. A LoRA the
   // caller owns passes here and is still subject to those rules (own real-weights
   // LoRAs stay unreachable; only own duplicated styles delete).
-  const present = (await exists(path.join(lorasDir, filename))) || (await exists(path.join(lorasDir, `${base}.json`)))
+  const present = (await exists(filename)) || (await exists(`${base}.json`))
   await guardMutation({ kind: 'lora', dir: lorasDir }, event.context?.userId ?? null, base, present)
 
-  if (await exists(path.join(lorasDir, filename))) {
+  if (await exists(filename)) {
     throw createError({
       statusCode: 409,
       statusMessage: 'This LoRA has trained weights on disk — only duplicated styles can be deleted here.',
     })
   }
 
-  const sidecarPath = path.join(lorasDir, `${base}.json`)
+  const sidecarPath = await findInLibrary('loras', `${base}.json`)
+  if (!sidecarPath) throw createError({ statusCode: 404, statusMessage: 'LoRA not found' })
   let meta: Record<string, any>
   try {
     meta = parseSidecar(await fs.readFile(sidecarPath, 'utf8'))
@@ -73,8 +71,10 @@ export default defineEventHandler(async (event) => {
   await releaseRecord({ kind: 'lora', dir: lorasDir }, base)
 
   // Covers are optional and named by extension — clear whichever exists.
-  for (const ext of ['webp', 'png', 'jpg']) {
-    try { await fs.unlink(path.join(lorasDir, `${base}.cover.${ext}`)) } catch { /* none of this ext */ }
+  for (const dir of libraryDirs('loras')) {
+    for (const ext of ['webp', 'png', 'jpg']) {
+      try { await fs.unlink(path.join(dir, `${base}.cover.${ext}`)) } catch { /* none of this ext */ }
+    }
   }
 
   return { ok: true, filename }

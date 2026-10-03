@@ -1,7 +1,8 @@
 /**
  * Where Sailor's data folders live (C1, ComfyUI code removal): the one folder
- * that holds `input/`, `output/`, `temp/`, `user/` and `models/` (and the
- * shipped `blueprints/`, `shader_effects/`, `scenes/`).
+ * that holds `input/`, `output/`, `temp/`, `user/` and `library/` (the user's
+ * LoRAs, characters and voices — see library.ts; and the shipped
+ * `blueprints/`, `shader_effects/`, `scenes/`).
  * Every server path into those folders resolves through this module.
  *
  * - `SAILOR_DATA_ROOT` names it explicitly (the hosted image sets `/app`).
@@ -21,7 +22,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 
-export type DataFolder = 'input' | 'output' | 'temp' | 'user' | 'models'
+export type DataFolder = 'input' | 'output' | 'temp' | 'user' | 'library'
 
 /** The env name to set, for messages. */
 export const DATA_ROOT_ENV = 'SAILOR_DATA_ROOT'

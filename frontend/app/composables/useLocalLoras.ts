@@ -1,6 +1,6 @@
 /**
  * Cached client for the user's trained LoRAs (/api/loras-local — local
- * models/loras + sidecars). Module-level shared state: one fetch feeds every
+ * library/loras + sidecars). Module-level shared state: one fetch feeds every
  * consumer (LoRA library panel, pickers). Tracks loading/error so views can
  * show a spinner or a retry line instead of a false "no styles" empty state.
  */

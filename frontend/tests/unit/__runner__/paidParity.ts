@@ -140,7 +140,7 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
     }
     throw new Error(`${c.name}: GET ${url} is not served by the case`)
   }
-  // `root` (R3.13): the engine folder the kit works in, set up by the caller (a models/loras/ of its own).
+  // `root` (R3.13): the engine folder the kit works in, set up by the caller (a library/loras/ of its own).
   const k = makeKit({ hosted: o.hosted, root: o.root, fal, replicate, deps: { download, families: () => o.families } })
 
   const prompt: ApiPrompt = { [NODE]: { class_type: c.class_type, inputs: { ...c.widgets } }, ...readerFor(c.class_type) }

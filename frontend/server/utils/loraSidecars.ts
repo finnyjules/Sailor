@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the LoRA .json sidecars in ../models/loras — the provenance
+ * Pure helpers for the LoRA .json sidecars in the LoRA library (library/loras) — the provenance
  * files GET /api/loras-local lists and PATCH/POST/DELETE mutate. Kept free of fs
  * so the filename guard and the duplication rules are unit-testable.
  */

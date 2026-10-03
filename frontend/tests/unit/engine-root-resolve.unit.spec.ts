@@ -31,7 +31,7 @@ afterEach(() => {
 })
 
 /** A Sailor checkout with no ComfyUI: frontend/ beside the data folders, no main.py. */
-function makeRepo(dir: string, folders: string[] = ['input', 'output', 'temp', 'user', 'models']): void {
+function makeRepo(dir: string, folders: string[] = ['input', 'output', 'temp', 'user', 'library']): void {
   mkdirSync(join(dir, 'frontend'), { recursive: true })
   for (const f of folders) mkdirSync(join(dir, f), { recursive: true })
 }
@@ -145,13 +145,13 @@ describe('the folders every consumer reads (one helper)', () => {
     process.env.SAILOR_DATA_ROOT = root
     expect(resolveDataRoot()).toBe(root)
     expect(resolveEngineRoot()).toBe(root)
-    for (const f of ['input', 'output', 'temp', 'user', 'models'] as const) {
+    for (const f of ['input', 'output', 'temp', 'user', 'library'] as const) {
       expect(dataFolder(f)).toBe(join(root, f))
       expect(engineFolder(f)).toBe(join(root, f))
     }
     expect(engineDirForType('input')).toBe(join(root, 'input'))
     expect(engineDirForType('output')).toBe(join(root, 'output'))
-    expect(dataPath('models', 'loras')).toBe(join(root, 'models', 'loras'))
+    expect(dataPath('library', 'loras')).toBe(join(root, 'library', 'loras'))
   })
 
   it('the old SAILOR_ENGINE_ROOT alone still resolves them', () => {
@@ -167,7 +167,7 @@ describe('the folders every consumer reads (one helper)', () => {
     __setDataRootForTests(null)
     expect(dataFolder('input')).toBeNull()
     expect(engineDirForType('input')).toBeNull()
-    expect(dataPath('models', 'voices')).toBe(join(process.cwd(), '..', 'models', 'voices'))
+    expect(dataPath('library', 'voices')).toBe(join(process.cwd(), '..', 'library', 'voices'))
   })
 })
 

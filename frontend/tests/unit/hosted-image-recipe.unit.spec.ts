@@ -142,10 +142,15 @@ describe('start.sh', () => {
     expect(body.match(/\bnode\s/g)).toHaveLength(1)
   })
 
-  it('keeps the volume links for models, data folders and the stores', () => {
+  it('keeps the volume links for the library, data folders and the stores', () => {
     expect(body).toMatch(/mkdir -p \/data\/output \/data\/input \/data\/temp \/data\/user/)
     expect(body).toMatch(/for d in characters loras voices; do/)
-    expect(body).toMatch(/ln -sfn "\/data\/models\/\$d" "\/app\/models\/\$d"/)
+    expect(body).toMatch(/ln -sfn "\/data\/library\/\$d" "\/app\/library\/\$d"/)
+    expect(body).not.toMatch(/\/app\/models/)
+    // C6b: the volume's old /data/models/<kind> moves once by rename (mv on one volume), never copied.
+    expect(body).toMatch(/for d in characters loras voices \.training-jobs\.json \.training-jobs\.json\.bak; do/)
+    expect(body).toMatch(/if \[ -e "\/data\/models\/\$d" \] && \[ ! -e "\/data\/library\/\$d" \]; then\n\s+mv "\/data\/models\/\$d" "\/data\/library\/\$d"/)
+    expect(body).not.toMatch(/(cp|rm)\s[^\n]*\/data\/models/)
     expect(body).toMatch(/\.training-jobs\.json/)
     expect(body).toMatch(/for d in input output user temp; do/)
     expect(body).toMatch(/ln -sfn "\/data\/\$d" "\/app\/\$d"/)
@@ -177,12 +182,17 @@ describe('.dockerignore', () => {
       'blueprints/Brightness and Contrast.json',
       'shader_effects/aurora.frag',
       'scenes/scene_defaults/a.json',
-      'models/loras/x.json',
+      'library/loras/x.json',
+      'library/loras/x.cover.webp',
     ]) {
       expect(ignored(p), p).toBe(false)
     }
     // A LoRA's weights stay out; the frontend is rebuilt inside the image.
-    expect(ignored('models/loras/x.safetensors')).toBe(true)
+    expect(ignored('library/loras/x.safetensors')).toBe(true)
+    // C6b: ComfyUI's old model folder ships nothing; the library ships no ledger, characters or voices.
+    for (const p of ['models/loras/x.json', 'models/lama/big_lama.pt', 'library/.training-jobs.json', 'library/characters/a.json', 'library/voices/v.mp3']) {
+      expect(ignored(p), p).toBe(true)
+    }
     expect(ignored('frontend/.output/server/index.mjs')).toBe(true)
     expect(ignored('frontend/.media-tools/darwin-arm64/bin/ffmpeg')).toBe(true)
   })

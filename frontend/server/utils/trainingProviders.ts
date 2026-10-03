@@ -11,7 +11,7 @@ import { promises as fs } from 'node:fs'
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import { dataPath } from './dataRoot'
+import { findInLibrary, libraryDir } from './library'
 import os from 'node:os'
 import type { TrainingJob } from './trainingQueue'
 import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
@@ -26,10 +26,6 @@ const exec = promisify(execCb)
 
 function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'my_lora'
-}
-
-async function fileExists(p: string): Promise<boolean> {
-  try { await fs.access(p); return true } catch { return false }
 }
 
 const REPLICATE = 'https://api.replicate.com/v1'
@@ -159,12 +155,12 @@ async function pollLora(job: TrainingJob, token: string): Promise<ProviderResult
   }
 
   if (pred.status === 'succeeded' && outputUrl) {
-    const lorasDir = dataPath('models', 'loras')
+    const lorasDir = libraryDir('loras')
     await fs.mkdir(lorasDir, { recursive: true })
     const filename = `${sanitize(job.outputName)}.safetensors`
     const localPath = path.join(lorasDir, filename)
 
-    if (!(await fileExists(localPath))) {
+    if (!(await findInLibrary('loras', filename))) {
       const dl = await downloadWeights(outputUrl, localPath)
       if (!dl.ok) return { status: 'failed', error: dl.error, logsTail }
       const modelRef = out && typeof out === 'object' && !Array.isArray(out) && typeof out.version === 'string' ? out.version : null
@@ -265,11 +261,11 @@ async function pollVoice(job: TrainingJob, token: string): Promise<ProviderResul
   if (pred.status === 'succeeded' && pred.output?.voice_id) {
     const safe = safeVoiceId(pred.output.voice_id)
     if (!safe) return { status: 'failed', error: `Replicate returned an unsafe voice_id: ${pred.output.voice_id}`, logsTail }
-    const voicesDir = dataPath('models', 'voices')
+    const voicesDir = libraryDir('voices')
     await fs.mkdir(voicesDir, { recursive: true })
     const jsonPath = path.join(voicesDir, `${safe}.json`)
     const mp3Path = path.join(voicesDir, `${safe}.mp3`)
-    if (pred.output.preview && !(await fileExists(mp3Path))) {
+    if (pred.output.preview && !(await findInLibrary('voices', `${safe}.mp3`))) {
       const dl = await fetch(pred.output.preview)
       if (dl.ok) await fs.writeFile(mp3Path, Buffer.from(await dl.arrayBuffer()))
     }

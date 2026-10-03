@@ -1,6 +1,6 @@
 /**
  * House style library — Sailor-trained style LoRAs published for all users.
- * Entries are SELF-CONTAINED: no dependency on the local models/loras sidecars
+ * Entries are SELF-CONTAINED: no dependency on the local library/loras sidecars
  * (those exist only on the dev machine). Published via /dev/style-publisher,
  * which upserts house-styles.json and writes thumbnails to
  * public/house-styles/<id>/. Publishing = reviewing the git diff + committing.

@@ -1,23 +1,24 @@
 // POST /api/characters-local/absorb (no body)
 //
-// Migration bridge: scan models/loras/*.json for kind === 'character' sidecars
-// and create a registry record (models/characters/<slug>.json) for each one
+// Migration bridge: scan the LoRA library's *.json for kind === 'character' sidecars
+// and create a registry record (library/characters/<slug>.json) for each one
 // that doesn't already have one. Idempotent — re-running only reports what's
 // already there, never duplicates or overwrites.
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../../utils/dataRoot'
+import { libraryDir, listLibrary } from '../../utils/library'
 import { parseSidecar } from '~~/server/utils/loraPrompt'
 import { parseCharacterRecord, slugifyCharacterName, type CharacterRecord } from '~~/server/utils/characterRegistry'
 import { claimNew } from '~~/server/utils/ownedJsonStore'
 import { emptyState } from '#shared/characters/types'
 
 export default defineEventHandler(async (event) => {
-  const lorasDir = dataPath('models', 'loras')
-  const charactersDir = dataPath('models', 'characters')
+  const charactersDir = libraryDir('characters')
 
-  let loraFiles: string[] = []
-  try { loraFiles = await fs.readdir(lorasDir) } catch { return { created: [], existing: [] } }
+  // Each file name with the folder it is in (the library first; library.ts).
+  const loraWhere = await listLibrary('loras')
+  if (!loraWhere.size) return { created: [], existing: [] }
+  const loraFiles = [...loraWhere.keys()]
 
   // Mirror loras-local.get.ts's filename derivation: a LoRA is identified by
   // its weights file (<base>.safetensors); a sidecar without one is skipped.
@@ -32,7 +33,7 @@ export default defineEventHandler(async (event) => {
     const base = f.slice(0, -'.json'.length)
     if (!weightsBases.has(base)) continue // no weights file — skip
     let meta: Record<string, any> = {}
-    try { meta = parseSidecar(await fs.readFile(path.join(lorasDir, f), 'utf8')) } catch { continue }
+    try { meta = parseSidecar(await fs.readFile(path.join(loraWhere.get(f)!, f), 'utf8')) } catch { continue }
     if (meta.kind !== 'character') continue
     candidates.push({
       base,
@@ -43,14 +44,14 @@ export default defineEventHandler(async (event) => {
   }
 
   await fs.mkdir(charactersDir, { recursive: true })
-  let registryFiles: string[] = []
-  try { registryFiles = await fs.readdir(charactersDir) } catch { /* none yet */ }
+  const registryWhere = await listLibrary('characters')
+  const registryFiles = [...registryWhere.keys()]
 
   const existingRecords: CharacterRecord[] = []
   for (const f of registryFiles.filter(f => f.endsWith('.json'))) {
     const slug = f.slice(0, -5)
     let parsed: CharacterRecord | null = null
-    try { parsed = parseCharacterRecord(await fs.readFile(path.join(charactersDir, f), 'utf8'), slug) }
+    try { parsed = parseCharacterRecord(await fs.readFile(path.join(registryWhere.get(f)!, f), 'utf8'), slug) }
     catch { continue }
     if (parsed) existingRecords.push(parsed)
   }

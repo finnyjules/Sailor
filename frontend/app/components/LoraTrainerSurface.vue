@@ -1700,7 +1700,7 @@ onBeforeUnmount(() => {
             <span v-else>{{ outputFilename }}_*.safetensors</span>
           </div>
           <div v-if="cloudJob?.localFilename" class="text-[11px] text-white/45">
-            Saved to <code class="text-white/65 bg-white/[0.04] px-1 py-0.5 rounded">models/loras/</code> — ready to use in workflows.
+            Saved to your LoRA library — ready to use in workflows.
           </div>
           <a
             v-if="cloudJob?.replicateUrl"

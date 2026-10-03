@@ -1,14 +1,13 @@
 /**
  * GET /api/voice-preview-file?id=<voice_id>
  *
- * Streams the preview clip for a cloned voice (../models/voices/<id>.mp3),
+ * Streams the preview clip for a cloned voice (library/voices/<id>.mp3),
  * downloaded by /api/voice-clone/status. 404 if none exists.
  *
  * Must be allowlisted in server/middleware/comfyui-proxy.ts (NITRO_API_PATHS).
  */
 import { promises as fs } from 'node:fs'
-import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { libraryFile } from '../utils/library'
 import { isHosted } from '../utils/deployMode'
 import { ownerOf } from '../utils/resourceOwners'
 
@@ -30,9 +29,8 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const voicesDir = dataPath('models', 'voices')
   try {
-    const buf = await fs.readFile(path.join(voicesDir, `${id}.mp3`))
+    const buf = await fs.readFile(await libraryFile('voices', `${id}.mp3`))
     setHeader(event, 'Content-Type', 'audio/mpeg')
     setHeader(event, 'Cache-Control', 'private, max-age=60')
     return buf

@@ -3,14 +3,18 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { dataPath } from '../utils/dataRoot'
+import { libraryDir, listLibrary } from '../utils/library'
 import { healRefImages, parseCharacterRecord } from '~~/server/utils/characterRegistry'
 import { listOwned } from '~~/server/utils/ownedJsonStore'
 
 export default defineEventHandler(async (event) => {
-  const dir = dataPath('models', 'characters')
+  const dir = libraryDir('characters')
   const inputDir = dataPath('input')
-  let files: string[]
-  try { files = await fs.readdir(dir) } catch { return { characters: [] } }
+  // Each record with the folder it is in (the library first; library.ts).
+  const where = await listLibrary('characters')
+  if (!where.size) return { characters: [] }
+  const files = [...where.keys()]
+  const at = (name: string) => path.join(where.get(name) ?? dir, name)
 
   // Capture readdir success explicitly. If the input dir listing fails (missing,
   // transient FS error, etc.), `existing` stays null and we must NOT heal: healing
@@ -24,7 +28,7 @@ export default defineEventHandler(async (event) => {
   for (const f of files.filter(f => f.endsWith('.json'))) {
     const slug = f.slice(0, -5)
     let parsed
-    try { parsed = parseCharacterRecord(await fs.readFile(path.join(dir, f), 'utf8'), slug) }
+    try { parsed = parseCharacterRecord(await fs.readFile(at(f), 'utf8'), slug) }
     catch { continue }
     if (!parsed) continue
     if (existing === null) {
@@ -34,7 +38,7 @@ export default defineEventHandler(async (event) => {
     const { record, dropped } = healRefImages(parsed, name => existing!.has(name))
     if (dropped) {
       record.updatedAt = new Date().toISOString()
-      await fs.writeFile(path.join(dir, f), JSON.stringify(record, null, 2)).catch(() => {})
+      await fs.writeFile(at(f), JSON.stringify(record, null, 2)).catch(() => {})
     }
     characters.push(record)
   }

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 
 // Mock node:fs so pollLora's "does the weights file already exist / write it
-// out" bookkeeping never touches the real models/loras directory (which
-// path.resolve(process.cwd(), '..', 'models', 'loras') would otherwise
+// out" bookkeeping never touches the real library/loras directory (which
+// path.resolve(process.cwd(), '..', 'library', 'loras') would otherwise
 // resolve to when vitest's cwd is frontend/). fs.access rejecting means
 // "file does not exist yet" (fileExists() -> false), which is what we want
 // so downloadWeights() runs and the succeeded branch proceeds to the

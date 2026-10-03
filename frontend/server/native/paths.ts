@@ -3,7 +3,7 @@
  * guard every request-supplied file name goes through.
  *
  * The folders are the ones ComfyUI used — `<engine root>/{input,output,temp,
- * user,models}` — resolved through the same data root (server/utils/dataRoot.ts)
+ * user}` (plus Sailor's `library/`, library.ts) — resolved through the same data root (server/utils/dataRoot.ts)
  * the upload checks use, so the native routes and the Python routes they replace always
  * address the same files. Null means the engine root could not be found;
  * callers must say so rather than guess a folder.

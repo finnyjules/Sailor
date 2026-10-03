@@ -2,7 +2,7 @@
  * PATCH /api/loras-local
  *
  * Edit a trained LoRA's metadata after training by updating its .json sidecar
- * in ../models/loras (the same file GET /api/loras-local reads). Supports
+ * in the LoRA library (the same file GET /api/loras-local reads). Supports
  * editing `name`, `trigger`, `aesthetic` and `kind`. The weights file and its
  * filename are never touched — only the provenance sidecar.
  *
@@ -16,7 +16,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { findInLibrary, libraryDir, libraryFile } from '../utils/library'
 import { parseSidecar, sidecarAesthetic } from '~~/server/utils/loraPrompt'
 import { isSafeLoraFilename } from '~~/server/utils/loraSidecars'
 import { guardMutation } from '~~/server/utils/ownedJsonStore'
@@ -36,18 +36,17 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid filename' })
   }
 
-  const lorasDir = dataPath('models', 'loras')
+  const lorasDir = libraryDir('loras')
   const base = filename.slice(0, -'.safetensors'.length)
-  const sidecarPath = path.join(lorasDir, `${base}.json`)
+  // Edited in place, in whichever library folder holds it (library.ts).
+  const sidecarPath = await libraryFile('loras', `${base}.json`)
 
   // Weights OR sidecar must exist — don't write sidecars for phantom LoRAs, but
   // sidecar-only entries are legitimate: duplicated styles never have weights of
   // their own, and on the deployed server no LoRA does (inference runs on
   // Replicate via meta.replicate_model). Requiring weights locked both out.
   const present = await Promise.all(
-    [path.join(lorasDir, filename), sidecarPath].map(async (p) => {
-      try { await fs.access(p); return true } catch { return false }
-    }),
+    [filename, `${base}.json`].map(async name => Boolean(await findInLibrary('loras', name))),
   )
   if (!present.some(Boolean)) {
     throw createError({ statusCode: 404, statusMessage: 'LoRA not found' })
@@ -87,6 +86,7 @@ export default defineEventHandler(async (event) => {
     meta.kind = body.kind === 'character' || body.kind === 'style' ? body.kind : null
   }
 
+  await fs.mkdir(path.dirname(sidecarPath), { recursive: true })
   await fs.writeFile(sidecarPath, JSON.stringify(meta, null, 2), 'utf8')
 
   return {

@@ -205,7 +205,7 @@ export type RunnerFamily =
    * Flux Dev + LoRA and Flux Dev + LoRAs on Replicate (step 3, R3.13; R3.14
    * adds Restyle with a style LoRA): the user's trained model or
    * flux-dev-lora, and flux-dev-multi-lora with its reload retry. A LoRA
-   * picked by name is read from models/loras/ (its sidecar only); hosted
+   * picked by name is read from library/loras/ (its sidecar only); hosted
    * takes public LoRA links only (ruling (i)). Needs `cards`: their pictures
    * come from Image cards and LoadImage, their prompts take text wires. Off:
    * they go to ComfyUI, as before.

@@ -311,7 +311,7 @@ function kit(o: KitOpts): Kit {
       },
     },
   })
-  mkdirSync(join(k.root, 'models', 'loras'), { recursive: true })
+  mkdirSync(join(k.root, 'library', 'loras'), { recursive: true })
   __setInputUploadsEngineRootForTests(k.root)
   __setEngineForTests(k.engine)
   return Object.assign(k, { keptBytes: w.bytes, downloads, sent: fakes.sent })

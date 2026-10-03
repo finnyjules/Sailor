@@ -1,6 +1,5 @@
 import { promises as fs } from 'node:fs'
-import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { libraryDir, libraryFile } from '../utils/library'
 import {
   faceRefHygiene, parseCharacterRecord, photoHygiene, sanitizeBodyShape, stateHygiene, validRefFilename, voiceHygiene,
   type CharacterRecord, type CharacterState,
@@ -22,8 +21,9 @@ export default defineEventHandler(async (event) => {
   if (!slug || slug.includes('/') || slug.includes('\\') || slug.includes('..')) {
     throw createError({ statusCode: 400, message: 'Invalid slug' })
   }
-  const dir = dataPath('models', 'characters')
-  const file = path.join(dir, `${slug}.json`)
+  const dir = libraryDir('characters')
+  // Read and written in place, in whichever library folder holds it (library.ts).
+  const file = await libraryFile('characters', `${slug}.json`)
   let record: CharacterRecord | null
   try { record = parseCharacterRecord(await fs.readFile(file, 'utf8'), slug) }
   catch { throw createError({ statusCode: 404, message: `No character '${slug}'` }) }

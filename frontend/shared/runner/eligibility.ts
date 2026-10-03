@@ -1611,7 +1611,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // the prompt takes a text wire, and Flux Dev + LoRAs' `prompt_in` and
   // `style_in` sockets take text (R1.2's pattern; R0: the value arrives as
   // typed); every other setting is a widget as ComfyUI validates it. A LoRA
-  // picker is a COMBO of the models/loras/ listing, which only the server
+  // picker is a COMBO of the library/loras/ listing, which only the server
   // knows: the row checks its type, the start of the run its name
   // (server/runner/loraFiles.ts loraStartProblem). A wired widget leaves the
   // node to the engine.

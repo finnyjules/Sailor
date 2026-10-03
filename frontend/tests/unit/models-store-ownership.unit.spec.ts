@@ -1,7 +1,7 @@
 /**
- * Stage 6 Task 5: the models/ stores (characters, LoRAs, voices) are per-user.
+ * Stage 6 Task 5: the library stores (characters, LoRAs, voices) are per-user.
  * Drives the ACTUAL route handlers against a faked resource_owners table and a
- * temp models/ tree (the handlers resolve `../models/<store>` from cwd, so we
+ * temp library/ tree (the handlers resolve `<data root>/library/<store>`, so we
  * chdir into a scratch `frontend`-shaped dir — the loras-local-handlers pattern).
  *
  * The point of interest is the curated/global rule: a record with no owner row
@@ -102,9 +102,9 @@ afterAll(() => { process.chdir(cwd) })
 beforeEach(async () => {
   cwd = process.cwd()
   tmp = mkdtempSync(path.join(os.tmpdir(), 'models-store-'))
-  charsDir = path.join(tmp, 'models', 'characters')
-  lorasDir = path.join(tmp, 'models', 'loras')
-  voicesDir = path.join(tmp, 'models', 'voices')
+  charsDir = path.join(tmp, 'library', 'characters')
+  lorasDir = path.join(tmp, 'library', 'loras')
+  voicesDir = path.join(tmp, 'library', 'voices')
   await fs.mkdir(charsDir, { recursive: true })
   await fs.mkdir(lorasDir, { recursive: true })
   await fs.mkdir(voicesDir, { recursive: true })

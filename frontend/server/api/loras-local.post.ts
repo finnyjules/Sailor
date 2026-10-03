@@ -2,7 +2,7 @@
  * POST /api/loras-local
  *
  * Duplicate a trained LoRA's identity so one training run can carry several
- * taste profiles. Writes a NEW .json sidecar in ../models/loras pointing at the
+ * taste profiles. Writes a NEW .json sidecar in the LoRA library pointing at the
  * SAME hosted weights — no .safetensors is copied (they're ~350 MB and would be
  * byte-identical). GET /api/loras-local already derives one entry per base name
  * from either the weights or the sidecar, so the copy shows up in the LoRA
@@ -17,16 +17,12 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { findInLibrary, libraryDir, libraryFile } from '../utils/library'
 import { parseSidecar } from '~~/server/utils/loraPrompt'
 import { isSafeLoraFilename, loraBaseName, buildDuplicateSidecar } from '~~/server/utils/loraSidecars'
 import { claimNew } from '~~/server/utils/ownedJsonStore'
 import { deployMode } from '~~/server/utils/deployMode'
 import { ownerOf } from '~~/server/utils/resourceOwners'
-
-async function exists(p: string): Promise<boolean> {
-  try { await fs.access(p); return true } catch { return false }
-}
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ filename?: string, name?: string }>(event)
@@ -41,7 +37,7 @@ export default defineEventHandler(async (event) => {
   const newBase = loraBaseName(newName)
   if (!newBase) throw createError({ statusCode: 400, statusMessage: 'name has no usable characters' })
 
-  const lorasDir = dataPath('models', 'loras')
+  const lorasDir = libraryDir('loras')
   const sourceBase = filename.slice(0, -'.safetensors'.length)
 
   // Ownership gate (hosted only, security): without this, anyone who knows
@@ -61,7 +57,7 @@ export default defineEventHandler(async (event) => {
 
   let source: Record<string, any>
   try {
-    source = parseSidecar(await fs.readFile(path.join(lorasDir, `${sourceBase}.json`), 'utf8'))
+    source = parseSidecar(await fs.readFile(await libraryFile('loras', `${sourceBase}.json`), 'utf8'))
   } catch {
     throw createError({ statusCode: 404, statusMessage: 'LoRA sidecar not found' })
   }
@@ -78,13 +74,14 @@ export default defineEventHandler(async (event) => {
   // Refuse if anything already occupies the target base — a sidecar (another
   // style) or weights (a real trained LoRA we must never overwrite).
   const taken = await Promise.all(
-    ['json', 'safetensors'].map(ext => exists(path.join(lorasDir, `${newBase}.${ext}`))),
+    ['json', 'safetensors'].map(async ext => Boolean(await findInLibrary('loras', `${newBase}.${ext}`))),
   )
   if (taken.some(Boolean)) {
     throw createError({ statusCode: 409, statusMessage: `"${newName}" already exists` })
   }
 
   const dup = buildDuplicateSidecar(source, newName)
+  await fs.mkdir(lorasDir, { recursive: true })
   await fs.writeFile(path.join(lorasDir, `${newBase}.json`), JSON.stringify(dup, null, 2), 'utf8')
   // The duplicate is a brand-new record — claim it (hosted only) for its creator.
   await claimNew({ kind: 'lora', dir: lorasDir }, event.context?.userId ?? null, newBase)

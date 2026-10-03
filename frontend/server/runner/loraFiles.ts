@@ -1,16 +1,16 @@
 /**
  * The LoRA files Flux Dev + LoRA and Flux Dev + LoRAs read by name (step 3,
- * R3.13): each LoRA in models/loras/ (the folders folder_paths lists for
- * "loras", extra_model_paths.yaml included) may have a sidecar JSON beside it,
+ * R3.13): each LoRA in the LoRA library (`library/loras`, server/utils/
+ * library.ts; step 4, C6b) may have a sidecar JSON beside it,
  * written by the cloud trainer (server/api/cloud-train/status.get.ts), naming
  * its Replicate model and its weights file. The node reads only the sidecar;
  * the LoRA's weights file itself is never read or uploaded (Python's
  * `_read_lora_sidecar`, replicate_refs.py:95-111, does the same: the provider
  * fetches the weights from the address in the sidecar).
  *
- *  - The name must be one ComfyUI lists for the picker (`get_filename_list
- *    ("loras")` + "[None]"): any other fails ComfyUI's validation, and a
- *    name that would reach outside the folder is refused.
+ *  - The name must be one the picker lists (the library's LoRA files +
+ *    "[None]"): any other is refused, and a name that would reach outside
+ *    the folder is refused.
  *  - The sidecar is read with a cap (LORA_SIDECAR_MAX_BYTES), checked before
  *    the hold (`loraStartProblem`) and again when read. Flux Dev + LoRA's
  *    guidance over flux-dev-lora's maximum is refused there too when the
@@ -30,7 +30,8 @@ import { FLUX_LORA_CLASS, LORA_BY_NAME_HOSTED, LORA_NAME_INPUTS, LORA_NONE, REST
 import { pyStrip } from '#shared/runner/pyText'
 import { parsePyJson, type PyJson } from '#shared/runner/pyJson'
 import { resolveEngineRoot } from '../utils/inputUploads'
-import { getFilenameList, modelFolderTable, pySplitext } from '../native/objectInfo'
+import { listLoraFiles, pySplitext } from '../native/objectInfo'
+import { libraryDirs } from '../utils/library'
 import { resolveInside } from '../native/paths'
 
 /** The most bytes one LoRA sidecar may be (the trainer writes a few hundred). */
@@ -43,16 +44,15 @@ export const LORA_SIDECAR_UNREADABLE = 'This LoRA’s settings file can’t be r
 /** A sidecar as Python's dict: each key's last value. */
 export type LoraSidecar = ReadonlyMap<string, PyJson>
 
-/** The folders folder_paths lists for "loras", or none when the engine root can't be found. */
+/** The LoRA library's folders (library first), or none when the data root can't be found. */
 export function loraFolders(): string[] {
   const root = resolveEngineRoot()
-  return root ? [...(modelFolderTable(root).get('loras')?.paths ?? [])] : []
+  return root ? libraryDirs('loras', root) : []
 }
 
-/** The LoRA picker's options: `get_filename_list("loras") + ["[None]"]`. */
+/** The LoRA picker's options: the library's LoRA files + `[None]`. */
 export function loraOptions(): string[] {
-  const root = resolveEngineRoot()
-  return [...(root ? getFilenameList(modelFolderTable(root), 'loras') : []), LORA_NONE]
+  return [...listLoraFiles(resolveEngineRoot()), LORA_NONE]
 }
 
 /** Python's bool() of a JSON value as json.loads reads it. */

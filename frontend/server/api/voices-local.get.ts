@@ -1,7 +1,7 @@
 /**
  * GET /api/voices-local
  *
- * Lists the user's cloned voices in ../models/voices (where the voice-clone
+ * Lists the user's cloned voices in the library (library/voices, where the voice-clone
  * flow drops a <voice_id>.json sidecar + a <voice_id>.mp3 preview clip).
  * Powers the "Your voices" section of the Generate-speech voice gallery.
  *
@@ -9,18 +9,16 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { libraryDir, listLibrary } from '../utils/library'
 import { listOwned } from '../utils/ownedJsonStore'
 
 export default defineEventHandler(async (event) => {
-  const voicesDir = dataPath('models', 'voices')
-
-  let files: string[] = []
-  try {
-    files = await fs.readdir(voicesDir)
-  } catch {
-    return { voices: [] }
-  }
+  const voicesDir = libraryDir('voices')
+  // Each file name with the folder it is in (the library first; library.ts).
+  const where = await listLibrary('voices')
+  if (!where.size) return { voices: [] }
+  const files = [...where.keys()]
+  const at = (name: string) => path.join(where.get(name) ?? voicesDir, name)
 
   const out: Array<{
     id: string
@@ -36,14 +34,14 @@ export default defineEventHandler(async (event) => {
 
     let meta: any = {}
     try {
-      meta = JSON.parse(await fs.readFile(path.join(voicesDir, f), 'utf8'))
+      meta = JSON.parse(await fs.readFile(at(f), 'utf8'))
     } catch { continue }
 
     const voiceId = String(meta.voice_id || id)
 
     let previewUrl: string | null = null
     try {
-      const st = await fs.stat(path.join(voicesDir, `${voiceId}.mp3`))
+      const st = await fs.stat(at(`${voiceId}.mp3`))
       previewUrl = `/api/voice-preview-file?id=${encodeURIComponent(voiceId)}&v=${Math.floor(st.mtimeMs)}`
     } catch { /* no preview clip */ }
 

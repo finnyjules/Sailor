@@ -1,14 +1,13 @@
 /**
  * GET /api/lora-cover?name=<lora filename>
  *
- * Streams the cached cover image for a LoRA (models/loras/<base>.cover.webp),
+ * Streams the cached cover image for a LoRA (library/loras/<base>.cover.webp),
  * generated on demand by POST /api/lora-cover. 404 if none exists yet.
  *
  * Must be allowlisted in server/middleware/comfyui-proxy.ts (NITRO_API_PATHS).
  */
 import { promises as fs } from 'node:fs'
-import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { findInLibrary } from '../utils/library'
 import { isHosted } from '../utils/deployMode'
 import { ownerOf } from '../utils/resourceOwners'
 
@@ -31,9 +30,9 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const lorasDir = dataPath('models', 'loras')
   for (const ext of ['webp', 'png', 'jpg'] as const) {
-    const p = path.join(lorasDir, `${base}.cover.${ext}`)
+    const p = await findInLibrary('loras', `${base}.cover.${ext}`)
+    if (!p) continue
     try {
       const buf = await fs.readFile(p)
       setHeader(event, 'Content-Type', ext === 'jpg' ? 'image/jpeg' : `image/${ext}`)

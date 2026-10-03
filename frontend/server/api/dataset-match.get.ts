@@ -8,12 +8,13 @@
  *   ?folder=<lora_dataset_...>    → the image files in that folder (manual override)
  *   ?list=1                       → all dataset folders (name, start, image count)
  *
- * Reads the repo's ../input and ../models/loras trees, so it only works on a dev
+ * Reads the repo's ../input and the LoRA library, so it only works on a dev
  * machine where training was run. Must be allowlisted in comfyui-proxy.ts.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { dataPath } from '../utils/dataRoot'
+import { libraryFile } from '../utils/library'
 
 const FOLDER_RE = /^lora_dataset_\d+$/
 const IMG_RE = /\.(png|jpe?g|webp)$/i
@@ -68,7 +69,7 @@ export default defineEventHandler(async (event) => {
 
   let trainedOn: string | null = null
   try {
-    const meta = parseSidecar(await fs.readFile(dataPath('models', 'loras', `${base}.json`), 'utf8'))
+    const meta = parseSidecar(await fs.readFile(await libraryFile('loras', `${base}.json`), 'utf8'))
     trainedOn = meta.trained_on ?? null
   }
   catch { /* no sidecar / unreadable — no basis to match */ }

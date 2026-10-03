@@ -4,7 +4,7 @@
  * lucataco/flux-dev-multi-lora with its reload retry — against what their
  * real Python sends and returns (fixtures/runner-paid-lora.json,
  * scripts/runner_paid_fixtures.py --group lora, run with a temporary
- * models/loras/ and the HuggingFace look-up served found / not found /
+ * library/loras/ and the HuggingFace look-up served found / not found /
  * offline), priced per call on both paths.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -123,13 +123,13 @@ const caseNamed = (name: string): LoraCase => {
 }
 const isMulti = (c: PaidCase) => c.class_type === 'FluxMultiLoRARemoteNode'
 
-// ── A models/loras/ with the fixture's files, and the engine root pointing at it ──
+// ── A library/loras/ (C6b) with the fixture's files, and the engine root pointing at it ──
 
 function loraRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'runner-lora-root-'))
   for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
   for (const [name, sidecar] of Object.entries(FIXTURE.loras)) {
-    const file = join(root, 'models', 'loras', name)
+    const file = join(root, 'library', 'loras', name)
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, '')
     if (sidecar !== null) writeFileSync(file.replace(/\.safetensors$/, '.json'), sidecar)
@@ -781,8 +781,8 @@ describe('refusals before the hold, in plain words', () => {
     await refusedAtStart(single({ lora_name: 'gone.safetensors' }), LORA_NOT_LISTED, false)
     await refusedAtStart(multi({ lora_a_url: 'hf.co/a/b', lora_d: '../../escape.safetensors' }), LORA_NOT_LISTED, false)
     const root = loraRoot()
-    writeFileSync(join(root, 'models', 'loras', 'huge.safetensors'), '')
-    writeFileSync(join(root, 'models', 'loras', 'huge.json'), `{"replicate_url": "${'x'.repeat(LORA_SIDECAR_MAX_BYTES)}"}`)
+    writeFileSync(join(root, 'library', 'loras', 'huge.safetensors'), '')
+    writeFileSync(join(root, 'library', 'loras', 'huge.json'), `{"replicate_url": "${'x'.repeat(LORA_SIDECAR_MAX_BYTES)}"}`)
     __setInputUploadsEngineRootForTests(root)
     expect((await loraStartProblem(single({ lora_name: 'huge.safetensors' })))?.message).toBe(LORA_SIDECAR_TOO_LARGE)
     // A name that isn't read (a link wins) must still be one ComfyUI lists, but its sidecar isn't measured.
@@ -801,8 +801,8 @@ describe('refusals before the hold, in plain words', () => {
 
   it('the read is bounded by the cap (never the whole file)', async () => {
     const root = loraRoot()
-    const big = join(root, 'models', 'loras', 'big.json')
-    writeFileSync(join(root, 'models', 'loras', 'big.safetensors'), '')
+    const big = join(root, 'library', 'loras', 'big.json')
+    writeFileSync(join(root, 'library', 'loras', 'big.safetensors'), '')
     writeFileSync(big, `{"replicate_url": "x"}${' '.repeat(LORA_SIDECAR_MAX_BYTES)}`)
     __setInputUploadsEngineRootForTests(root)
     await expect(readLoraSidecar('big.safetensors')).rejects.toThrow(LORA_SIDECAR_TOO_LARGE)

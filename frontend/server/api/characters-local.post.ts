@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../utils/dataRoot'
+import { findInLibrary, libraryDir } from '../utils/library'
 import { slugifyCharacterName, type CharacterRecord } from '~~/server/utils/characterRegistry'
 import { claimNew } from '~~/server/utils/ownedJsonStore'
 import { emptyState } from '#shared/characters/types'
@@ -11,15 +11,14 @@ export default defineEventHandler(async (event) => {
   const slug = slugifyCharacterName(name)
   if (!name || !slug) throw createError({ statusCode: 400, message: 'A usable character name is required' })
 
-  const dir = dataPath('models', 'characters')
+  const dir = libraryDir('characters')
   await fs.mkdir(dir, { recursive: true })
   const file = path.join(dir, `${slug}.json`)
-  try { await fs.access(file); throw createError({ statusCode: 409, message: `Character '${slug}' already exists` }) }
-  catch (e: any) { if (e?.statusCode === 409) throw e }
+  if (await findInLibrary('characters', `${slug}.json`)) throw createError({ statusCode: 409, message: `Character '${slug}' already exists` })
 
   // linkedFrom is kept only if it names an existing character's slug.
   const linkedFrom = typeof body?.linkedFrom === 'string' && slugifyCharacterName(body.linkedFrom) === body.linkedFrom
-    && await fs.access(path.join(dir, `${body.linkedFrom}.json`)).then(() => true, () => false) ? body.linkedFrom : null
+    && Boolean(await findInLibrary('characters', `${body.linkedFrom}.json`)) ? body.linkedFrom : null
 
   const now = new Date().toISOString()
   const record: CharacterRecord = {

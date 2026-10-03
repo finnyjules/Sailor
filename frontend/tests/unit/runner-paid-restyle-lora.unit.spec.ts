@@ -4,7 +4,7 @@
  * up to three Nano Banana 2 passes on fal — against what its real Python sends
  * and returns (fixtures/runner-paid-restyle-lora.json, scripts/
  * runner_paid_fixtures.py --group restyle-lora, run with a temporary
- * models/loras/), priced call by call on both paths and charged for the calls
+ * library/loras/), priced call by call on both paths and charged for the calls
  * that finished.
  *
  * The runner hands on its own kept copy of the LoRA's picture and of each
@@ -77,13 +77,13 @@ const caseNamed = (name: string): PaidCase => {
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'))
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 
-// ── A models/loras/ with the fixture's files, and the engine root pointing at it ──
+// ── A library/loras/ (C6b) with the fixture's files, and the engine root pointing at it ──
 
 function loraRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'runner-restyle-lora-root-'))
   for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
   for (const [name, sidecar] of Object.entries(FIXTURE.loras)) {
-    const file = join(root, 'models', 'loras', name)
+    const file = join(root, 'library', 'loras', name)
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, '')
     if (sidecar !== null) writeFileSync(file.replace(/\.safetensors$/, '.json'), sidecar)
@@ -806,8 +806,8 @@ describe('refusals before the hold, in plain words', () => {
   it('a LoRA name ComfyUI doesn\'t list, and a sidecar over its cap (read even beside a link)', async () => {
     await refusedAtStart(with_({ lora_name: 'gone.safetensors' }), LORA_NOT_LISTED, false)
     const root = loraRoot()
-    writeFileSync(join(root, 'models', 'loras', 'huge.safetensors'), '')
-    writeFileSync(join(root, 'models', 'loras', 'huge.json'), `{"trigger": "${'x'.repeat(LORA_SIDECAR_MAX_BYTES)}"}`)
+    writeFileSync(join(root, 'library', 'loras', 'huge.safetensors'), '')
+    writeFileSync(join(root, 'library', 'loras', 'huge.json'), `{"trigger": "${'x'.repeat(LORA_SIDECAR_MAX_BYTES)}"}`)
     __setInputUploadsEngineRootForTests(root)
     expect((await loraStartProblem(with_({ lora_name: 'huge.safetensors' })))?.message).toBe(LORA_SIDECAR_TOO_LARGE)
     expect(loraNamesUsed(RESTYLE_LORA_CLASS, { lora_name: 'x.safetensors', lora_url: 'hf.co/a/b' })).toEqual([{ input: 'lora_name', name: 'x.safetensors' }])

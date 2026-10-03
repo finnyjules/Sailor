@@ -6,7 +6,7 @@ import path from 'node:path'
 import { __setDataRootForTests } from '../../server/utils/dataRoot'
 
 /**
- * Executes the /api/loras-local handlers for real against a temp models/loras
+ * Executes the /api/loras-local handlers for real against a temp library/loras
  * tree. The fs branching here — "weights present so refuse to delete", "target
  * name taken", "no hosted model ref" — is the whole substance of these routes,
  * and none of it is reachable from the pure helpers.
@@ -65,8 +65,8 @@ const sidecar = async (base: string) => JSON.parse(await fs.readFile(path.join(l
 beforeEach(async () => {
   cwd = process.cwd()
   tmp = mkdtempSync(path.join(os.tmpdir(), 'loras-test-'))
-  // Handlers resolve ../models/loras from cwd, so mirror that shape.
-  lorasDir = path.join(tmp, 'models', 'loras')
+  // Handlers resolve <data root>/library/loras (C6b).
+  lorasDir = path.join(tmp, 'library', 'loras')
   await fs.mkdir(lorasDir, { recursive: true })
   await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
   process.chdir(path.join(tmp, 'frontend'))

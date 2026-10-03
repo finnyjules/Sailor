@@ -2,7 +2,7 @@
  * POST /api/inpaint/lora-gen   Body: { name, prompt, aspectRatio?, loraScale?, guidanceScale?, seed? }
  *
  * Generate from a trained LoRA, used by the frame modal's "Generate Object"
- * Style mode when a style is picked. Reads models/loras/<base>.json for the
+ * Style mode when a style is picked. Reads library/loras/<base>.json for the
  * trigger + aesthetic, composes the prompt, runs fal's `fal-ai/flux-lora` with
  * the trained weights, and returns the image as a base64 data URL (CORS-safe) —
  * same response shape as /api/inpaint/text2img.
@@ -19,8 +19,7 @@
  * from server/utils; the two new helpers are imported explicitly.
  */
 import { promises as fs } from 'node:fs'
-import path from 'node:path'
-import { dataPath } from '../../utils/dataRoot'
+import { libraryFile } from '../../utils/library'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { ensureFalLoraWeights, type LoraSidecar } from '../../utils/loraFalWeights'
 import { buildFalLoraGenInput } from '../../utils/loraGenInput'
@@ -50,8 +49,7 @@ export default defineEventHandler(async (event) => {
   const userPrompt = (body?.prompt ?? '').trim()
   if (!userPrompt) throw createError({ statusCode: 400, message: 'prompt is required' })
 
-  const lorasDir = dataPath('models', 'loras')
-  const sidecarPath = path.join(lorasDir, `${base}.json`)
+  const sidecarPath = await libraryFile('loras', `${base}.json`)
   let meta: LoraSidecar = {}
   try {
     meta = JSON.parse(await fs.readFile(sidecarPath, 'utf8'))

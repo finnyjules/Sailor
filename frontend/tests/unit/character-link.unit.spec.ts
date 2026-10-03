@@ -49,7 +49,7 @@ describe('linkTrainedCharacter — records character ownership (hosted)', () => 
 
   beforeEach(async () => {
     tmp = mkdtempSync(path.join(os.tmpdir(), 'charlink-'))
-    await fs.mkdir(path.join(tmp, 'models', 'characters'), { recursive: true })
+    await fs.mkdir(path.join(tmp, 'library', 'characters'), { recursive: true })
     await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
     process.chdir(path.join(tmp, 'frontend'))
     __setDataRootForTests(tmp) // C1: the data root, not the folder above cwd
@@ -81,7 +81,7 @@ describe('linkTrainedCharacter — records character ownership (hosted)', () => 
   it('hosted: creating a fresh record claims it for ownerUserId', async () => {
     process.env[CLERK_KEY] = 'sk_test_hosted'
     await linkTrainedCharacter({ displayName: 'Millie', weightsFilename: 'millie.safetensors', trigger: 'MIL', ownerUserId: 'u_owner' })
-    const charsDir = path.join(tmp, 'models', 'characters')
+    const charsDir = path.join(tmp, 'library', 'characters')
     await fs.access(path.join(charsDir, 'millie.json'))
     expect(owners.get('character:millie')).toBe('u_owner')
   })
@@ -95,7 +95,7 @@ describe('linkTrainedCharacter — records character ownership (hosted)', () => 
   it('hosted with unknown owner: creates the record but records nothing', async () => {
     process.env[CLERK_KEY] = 'sk_test_hosted'
     await linkTrainedCharacter({ displayName: 'Orphan', weightsFilename: 'orphan.safetensors', trigger: null, ownerUserId: null })
-    const charsDir = path.join(tmp, 'models', 'characters')
+    const charsDir = path.join(tmp, 'library', 'characters')
     await fs.access(path.join(charsDir, 'orphan.json'))
     expect(owners.size).toBe(0)
   })
@@ -103,7 +103,7 @@ describe('linkTrainedCharacter — records character ownership (hosted)', () => 
 
 // Cross-tenant character-record hijack guard (independent security review,
 // Stage 6). linkTrainedCharacter matches by slugified displayName against the
-// SHARED models/characters dir. A claim-draft/update-same decision on a record
+// SHARED library/characters dir. A claim-draft/update-same decision on a record
 // OWNED BY A DIFFERENT USER must NOT overwrite the victim's on-disk record
 // (which is what characters-local.get renders and the LoRA dispatch reads) —
 // otherwise attacker A repoints victim V's character at A's LoRA and drains V's
@@ -123,7 +123,7 @@ describe('linkTrainedCharacter — cross-tenant hijack guard', () => {
 
   beforeEach(async () => {
     tmp = mkdtempSync(path.join(os.tmpdir(), 'charlink-hijack-'))
-    charsDir = path.join(tmp, 'models', 'characters')
+    charsDir = path.join(tmp, 'library', 'characters')
     await fs.mkdir(charsDir, { recursive: true })
     await fs.mkdir(path.join(tmp, 'frontend'), { recursive: true })
     process.chdir(path.join(tmp, 'frontend'))

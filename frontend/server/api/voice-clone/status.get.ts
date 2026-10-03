@@ -3,7 +3,7 @@
  *
  * Polls Replicate for the voice-cloning prediction. When it transitions to
  * `succeeded`, downloads the preview clip and writes the voice into the local
- * voices store (../models/voices/<voice_id>.{json,mp3}) so it appears in the
+ * voices store (library/voices/<voice_id>.{json,mp3}) so it appears in the
  * Generate-speech voice gallery and validates as a voice_id combo value.
  *
  * Safe to call repeatedly — persistence is a no-op once the files are on disk.
@@ -13,7 +13,7 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dataPath } from '../../utils/dataRoot'
+import { findInLibrary, libraryDir } from '../../utils/library'
 import { CLONE_MODEL } from './start.post'
 import { currentMeterContext, releaseRecordedHold, settleModel, settleRecordedHold } from '../../utils/requestMeter'
 import { deployMode } from '../../utils/deployMode'
@@ -24,10 +24,6 @@ import { recordOwner } from '../../utils/resourceOwners'
 function safeId(id: string): string | null {
   const s = (id || '').trim()
   return /^[a-zA-Z0-9_-]+$/.test(s) ? s : null
-}
-
-async function fileExists(p: string): Promise<boolean> {
-  try { await fs.access(p); return true } catch { return false }
 }
 
 export default defineEventHandler(async (event) => {
@@ -102,13 +98,13 @@ export default defineEventHandler(async (event) => {
       persistError = `Replicate returned an unsafe voice_id: ${pred.output.voice_id}`
     } else {
       try {
-        const voicesDir = dataPath('models', 'voices')
+        const voicesDir = libraryDir('voices')
         await fs.mkdir(voicesDir, { recursive: true })
         const jsonPath = path.join(voicesDir, `${safe}.json`)
         const mp3Path = path.join(voicesDir, `${safe}.mp3`)
 
         // Download the preview clip (idempotent — skip if already present).
-        if (pred.output.preview && !(await fileExists(mp3Path))) {
+        if (pred.output.preview && !(await findInLibrary('voices', `${safe}.mp3`))) {
           const dl = await fetch(pred.output.preview)
           if (dl.ok) {
             await fs.writeFile(mp3Path, Buffer.from(await dl.arrayBuffer()))
