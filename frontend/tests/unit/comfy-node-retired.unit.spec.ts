@@ -5,7 +5,9 @@
  * retired, with the plain message reachable by keyboard, touch and screen
  * readers (a focusable badge with a tooltip and a description); its Run row
  * shows no price, no scope menu and "Retired", and its Run button says why it
- * can't run.
+ * can't run. Step 4, C4: Sailor's own retired nodes (Font Playground, Kinetic
+ * Typography, the hidden per-model Replicate nodes) open the same way, each
+ * naming its replacement.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -101,6 +103,41 @@ describe('a saved retired node', () => {
       if (row.exists()) { expect(row.props('canRun')).toBe(false); expect(row.props('blockedReason')).toBe(message) }
       w.unmount()
     }
+  })
+
+  it('step 4, C4: Sailor\'s own retired nodes open from their saved widgets, show Retired, can\'t run, and name their replacement', () => {
+    for (const [type, widgets, message] of [
+      ['RenderType', ['{"text":"Hi"}'], 'This node was retired. Use Vector Type instead.'],
+      ['FluxProRemoteNode', ['a fox', '1:1', 1024, 1024, 2, false, 'webp', 0], 'This node was retired. Use Generate an image instead.'],
+      ['IdeogramV3TurboRemoteNode', ['a fox', '1:1', 'Auto', 'Auto', 0], 'This node was retired. Use Generate an image instead.'],
+      ['FluxKontextRemoteNode', ['make it blue', 'match_input_image', 2, false, 'png', 0], 'This node was retired. Use Edit an image instead.'],
+      ['ClarityUpscaleRemoteNode', ['masterpiece', 2, 0.35, 0.6, '', 18, 0], 'This node was retired. Use Upscale an image instead.'],
+      ['Seedance2RemoteNode', ['a fox runs', '16:9', '1080p', 5, false, 0], 'This node was retired. Use Generate a video instead.'],
+      ['Veo3RemoteNode', ['a fox runs', '16:9', '', 0], 'This node was retired. Use Generate a video instead.'],
+      ['KlingVideoRemoteNode', ['a fox runs', '16:9', 5, '', 0.5], 'This node was retired. Use Generate a video instead.'],
+    ] as const) {
+      const [node] = open({ nodes: [{ ...klingNode(), type, widgets_values: widgets }] })
+      expect(node.data.nodeType, type).toBe(type)
+      const w = card(node)
+      expect(w.find('[data-retired]').text(), type).toBe('Retired')
+      expect(w.find('[data-part="TooltipContent"]').text(), type).toBe(message)
+      // The Font Playground and Kinetic Typography cards draw no Run row (their own editor ran them); any row drawn can't run.
+      const row = w.findComponent(NodeRunRow)
+      if (type.endsWith('RemoteNode')) expect(row.exists(), type).toBe(true)
+      if (row.exists()) { expect(row.props('canRun'), type).toBe(false); expect(row.props('blockedReason'), type).toBe(message) }
+      w.unmount()
+    }
+  })
+
+  it('C4: a saved Kinetic Typography node opens as Vector Type; one its migration left as it was shows Retired, naming Vector Type', () => {
+    const [migrated] = open({ nodes: [{ ...klingNode(), type: 'KineticType', widgets_values: ['{"text":"Hi"}'] }] })
+    expect(migrated.data.nodeType).toBe('VectorType')
+    // migrateKinetic.ts keeps a node it can't migrate as a KineticType: its card is the retired card.
+    const [base] = open({ nodes: [{ ...klingNode(), type: 'RenderType', widgets_values: ['{}'] }] })
+    const w = card({ ...base, data: { ...base.data, nodeType: 'KineticType' } })
+    expect(w.find('[data-retired]').text()).toBe('Retired')
+    expect(w.find('[data-part="TooltipContent"]').text()).toBe('This node was retired. Use Vector Type instead.')
+    w.unmount()
   })
 
   it('any other node is untouched: no badge, its price and scope menu stay', () => {

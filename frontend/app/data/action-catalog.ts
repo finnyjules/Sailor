@@ -94,17 +94,13 @@ export const ACTION_CATALOG: Record<string, ActionEntry> = {
 
 // Per-model classes still registered server-side for saved-workflow
 // back-compat, but hidden from the panel — use-case nodes are the front door.
+// Step 4 (C4): the seven the runner never ran (Flux 1.1 Pro, Ideogram V3
+// Turbo, Flux Kontext, Clarity Upscale, Seedance 2.0, Veo 3, Kling 2.1 Video)
+// are retired instead (shared/runner/retired.ts), hidden by isRetiredClass.
 export const DEPRECATED_NODES = new Set<string>([
-  'FluxProRemoteNode',
-  'IdeogramV3TurboRemoteNode',
-  'FluxKontextRemoteNode',
-  'ClarityUpscaleRemoteNode',
   'RemoveBackgroundRemoteNode',
   'RestorePhotoRemoteNode',
   'DescribeImageRemoteNode',
-  'Seedance2RemoteNode',
-  'Veo3RemoteNode',
-  'KlingVideoRemoteNode',
   'LipsyncRemoteNode',
   'WhisperRemoteNode',
   'MusicGenRemoteNode',

@@ -12,12 +12,15 @@
  *     local proxy); the browser says so before sending anything.
  *   - A saved workflow holding one still opens; its card shows it retired and
  *     can't be run.
+ * Step 4, C4: Sailor's own nine nodes no saved graph ran (Font Playground,
+ * Kinetic Typography and the seven hidden per-model Replicate nodes) are
+ * retired the same way, each naming its replacement.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { RETIRED_ADVICE_OF, RETIRED_CLASSES, RETIRED_NODE_MESSAGE, RETIRED_OUTPUT_CLASSES, isRetiredClass, retiredNodeIds, retiredNodesResponse } from '#shared/runner/retired'
+import { C4_RETIRED_CLASSES, RETIRED_ADVICE_OF, RETIRED_CLASSES, RETIRED_NODE_MESSAGE, RETIRED_OUTPUT_CLASSES, isRetiredClass, retiredMessageOf, retiredNodeIds, retiredNodesResponse } from '#shared/runner/retired'
 import { PROVIDER_TYPES, RUNNER_NODE_RULES, RUNNER_NODE_TYPES } from '#shared/runner/eligibility'
 import { modelMenus } from '#shared/runner/modelMenus'
 import { blockedRunRefusal, workflowNodeTitles } from '#shared/runner/needsEngine'
@@ -67,13 +70,43 @@ const retiredGraph = (): ApiPrompt => ({
 })
 
 describe('the retired list (guard)', () => {
-  it('is exactly every api.comfy.org-billed class in the committed catalogue (182) plus the two deleted local nodes', () => {
+  it('is exactly every api.comfy.org-billed class in the committed catalogue (182), the two deleted local nodes and C4\'s nine', () => {
     const billed = Object.keys(CATALOG).filter(comfyBilled).sort()
     expect(billed.length).toBe(182)
-    expect([...RETIRED_CLASSES].sort()).toEqual([...billed, 'FaceRestore', 'LipSync'].sort())
+    expect([...RETIRED_CLASSES].sort()).toEqual([...billed, 'FaceRestore', 'LipSync', ...C4_RETIRED_CLASSES].sort())
     for (const name of billed) expect(isRetiredClass(name), name).toBe(true)
-    expect(Object.keys(RETIRED_ADVICE_OF).sort()).toEqual(['FaceRestore', 'LipSync'])
+    expect(Object.keys(RETIRED_ADVICE_OF).sort()).toEqual(['FaceRestore', 'LipSync', ...C4_RETIRED_CLASSES].sort())
     for (const name of ['FaceRestore', 'LipSync']) expect(name in CATALOG, name).toBe(false)
+    // C4's stay in the catalogue, so a saved project holding one still draws its card.
+    for (const name of C4_RETIRED_CLASSES) expect(name in CATALOG, name).toBe(true)
+  })
+
+  it('step 4, C4: Sailor\'s own retired nodes name their replacement, and are refused before the hold on both paths', () => {
+    const cases: [string, string, string][] = [
+      ['RenderType', 'Use Vector Type instead.', 'IMAGE'],
+      ['KineticType', 'Use Vector Type instead.', 'IMAGE'],
+      ['FluxProRemoteNode', 'Use Generate an image instead.', 'IMAGE'],
+      ['IdeogramV3TurboRemoteNode', 'Use Generate an image instead.', 'IMAGE'],
+      ['FluxKontextRemoteNode', 'Use Edit an image instead.', 'IMAGE'],
+      ['ClarityUpscaleRemoteNode', 'Use Upscale an image instead.', 'IMAGE'],
+      ['Seedance2RemoteNode', 'Use Generate a video instead.', 'VIDEO'],
+      ['Veo3RemoteNode', 'Use Generate a video instead.', 'VIDEO'],
+      ['KlingVideoRemoteNode', 'Use Generate a video instead.', 'VIDEO'],
+    ]
+    expect(cases.map(c => c[0]).sort()).toEqual([...C4_RETIRED_CLASSES].sort())
+    for (const [cls, advice, out] of cases) {
+      const message = `This node was retired. ${advice}`
+      expect(retiredMessageOf(cls), cls).toBe(message)
+      expect(CATALOG[cls].output[0], cls).toBe(out)
+      const saver = out === 'VIDEO'
+        ? { class_type: 'SaveVideo', inputs: { video: ['2', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } }
+        : { class_type: 'SaveImage', inputs: { images: ['2', 0], filename_prefix: 'x' } }
+      const g: ApiPrompt = { 2: { class_type: cls, inputs: { prompt: 'a fox' } }, 3: saver }
+      expect(retiredNodesResponse(g, IS_OUTPUT)!.error.message, cls).toBe(message)
+      expect(blockedPromptRefusal(g, { isOutputClass: IS_OUTPUT })!.error.message, cls).toBe(message)
+      expect(blockedRunRefusal([{ prompt: g, titleOf: () => 'Old node' }], { runnerOn: true, isOutputClass: IS_OUTPUT }), cls)
+        .toEqual({ title: '“Old node” was retired', description: advice })
+    }
   })
 
   it('FaceRestore and LipSync are refused before the hold, each with its own advice, on both paths', () => {
@@ -102,9 +135,9 @@ describe('the retired list (guard)', () => {
     expect([...RETIRED_OUTPUT_CLASSES].sort()).toEqual(outputs)
   })
 
-  it('retires no Replicate or fal class, nothing the runner or the line-up takes', () => {
+  it('retires no Replicate or fal class but C4\'s hidden per-model nodes, nothing the runner or the line-up takes', () => {
     for (const name of RETIRED_CLASSES) {
-      expect(moduleOf(name), name).not.toBe('comfy_api_nodes.nodes_replicate')
+      if (!C4_RETIRED_CLASSES.includes(name)) expect(moduleOf(name), name).not.toBe('comfy_api_nodes.nodes_replicate')
       expect(RUNNER_NODE_TYPES.has(name), name).toBe(false)
       expect(name in RUNNER_NODE_RULES, name).toBe(false)
       expect(PROVIDER_TYPES.has(name), name).toBe(false)
@@ -126,7 +159,7 @@ describe('no surface offers a retired node', () => {
     // A Comfy-billed provider the live engine may list is never offered either.
     expect(offeredInActionsPanel('SomeNewPartnerNode', 'api node/image/Kling')).toBe(false)
     expect(offeredInActionsPanel('GenerateImageNode', 'api node/image/Replicate')).toBe(true)
-    expect(offeredInActionsPanel('FluxProRemoteNode', 'api node/image/Replicate')).toBe(false) // DEPRECATED_NODES, as before
+    expect(offeredInActionsPanel('FluxProRemoteNode', 'api node/image/Replicate')).toBe(false) // retired (C4), hidden before by DEPRECATED_NODES
   })
 
   it('the Actions catalogue, heroes, chips, deprecated list, agent capabilities, toolbox and start modal name none', () => {

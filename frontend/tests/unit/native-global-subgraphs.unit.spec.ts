@@ -332,16 +332,18 @@ describe('R10.6: hosted offers no local-only class or blueprint', () => {
       expect(isRetiredClass(c), c).toBe(false)
       expect(isCustomClass(c), c).toBe(false)
     }
-    for (const c of ['GenerateImageNode', 'GenerateVideoNode', 'Image', 'Video', 'SaveImage', 'FilmShotNode', 'SmartLayout', 'Text', 'Timeline']) {
+    // Step 4, C4: Preview video is the runner's now; Font Playground, Kinetic Typography and the per-model nodes are retired.
+    for (const c of ['GenerateImageNode', 'GenerateVideoNode', 'Image', 'Video', 'SaveImage', 'FilmShotNode', 'SmartLayout', 'Text', 'Timeline', 'PreviewVideo']) {
       expect(hostedOffersClass(c), c).toBe(true)
     }
-    for (const c of ['KSampler', 'CheckpointLoaderSimple', 'GLSLShader', 'PreviewVideo', 'RenderType', 'KineticType', 'FluxProRemoteNode', 'MyCustomPackNode', 'GeminiNode']) {
+    for (const c of ['KSampler', 'CheckpointLoaderSimple', 'GLSLShader', 'RenderType', 'KineticType', 'FluxProRemoteNode', 'MyCustomPackNode', 'GeminiNode']) {
       expect(hostedOffersClass(c), c).toBe(false)
     }
-    // Every catalogue class is offered, or is one hosted refuses.
+    // Every catalogue class is offered, or is one hosted refuses (C4: no Sailor class still needs the local engine).
+    expect(NEEDS_LOCAL_ENGINE).toEqual({})
     for (const c of Object.keys(CATALOG)) {
       if (hostedOffersClass(c)) continue
-      expect(isLocalOnlyClass(c) || isRetiredClass(c) || Object.hasOwn(NEEDS_LOCAL_ENGINE, c), c).toBe(true)
+      expect(isLocalOnlyClass(c) || isRetiredClass(c), c).toBe(true)
     }
   })
 

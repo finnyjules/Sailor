@@ -120,7 +120,8 @@ const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
  * local-engine toast), never silently; elsewhere it gets its words. Fix round 2: so does one whose picture is
  * made in the same run (NEEDS_LOCAL_ENGINE_SHADER_CASES; runner-no-silent-engine.unit.spec.ts). LC13: one of
  * your own effects runs in Sailor once the browser has drawn it; one not drawn (its run bound for the engine,
- * which can't run it) is refused plainly everywhere, never sent to the engine.
+ * which can't run it) is refused plainly everywhere, never sent to the engine. Step 4, C4: the picture made in
+ * the same run is refused plainly everywhere too; NEEDS_LOCAL_ENGINE_SHADER_CASES is empty.
  */
 const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {}
 const SHADER_CLOSED_CASES: Readonly<Record<string, string>> = {
@@ -163,6 +164,13 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
         .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
     }
     expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_CLOSED_CASES['a wired setting'])
+    // Step 4, C4: its picture made in the run is refused the same way, never sent to the local engine.
+    const SHB: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake', 'effects-blur'])
+    const made: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), ...shader({}, ['b', 0]) }
+    for (const hosted of [false, true]) {
+      expect(engineRoute([{ prompt: made, titleOf }], { runnerOn: true, families: SHB, hosted, engineUp: true }))
+        .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES['its picture made in the run']}` })
+    }
   })
 })
 

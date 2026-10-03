@@ -137,8 +137,8 @@ const refusal = async (k: ReturnType<typeof kit>, p: ApiPrompt, userId: string |
   k.engine.startRun({ userId, takes: [p], ...START }).then(() => null, e => e as Error & { statusCode?: number; data?: Record<string, unknown> })
 
 describe('LC13: a My effect\'s bake is checked against the person\'s own My effects store, then replayed', () => {
-  it('is no longer on the local-engine list', () => {
-    expect(Object.keys(NEEDS_LOCAL_ENGINE_SHADER_CASES)).toEqual(['pictureMadeInRun'])
+  it('is no longer on the local-engine list (empty since step 4, C4)', () => {
+    expect(NEEDS_LOCAL_ENGINE_SHADER_CASES).toEqual({})
     expect(myEffectRefOf(`${ID}~v3`)).toEqual({ id: ID, codeIndex: 2 })
     expect(myEffectRefOf(ID)).toEqual({ id: ID, codeIndex: 0 })
     for (const bad of ['mine_abc~v1', `${ID}~v0`, `${ID}~v1x`, 'halftone', 3]) expect(myEffectRefOf(bad), String(bad)).toBeNull()

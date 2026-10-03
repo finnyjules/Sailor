@@ -85,6 +85,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R5.4: Save video is an output node (is_output_node=True; Load video, Get video
   // components and Create video are not). The Video card is listed above.
   'SaveVideo',
+  // Step 4, C4: Preview video is one too (is_output_node=True).
+  'PreviewVideo',
   // R5.5: Save video frames is an output node (is_output_node=True); Load video frames is not.
   'SaveVideoFrames',
   // R6: every ported video effect that is one (all but Slow motion, Silence cut and Text clip, as

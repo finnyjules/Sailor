@@ -1,5 +1,7 @@
 /**
- * The retired partner nodes (engine-free step 3, decision 3, Task R4.1).
+ * The retired partner nodes (engine-free step 3, decision 3, Task R4.1), the
+ * two deleted local nodes (R7.10) and Sailor's own nodes retired in step 4
+ * (C4_RETIRED_CLASSES).
  *
  * Every class in `comfy_api_nodes/nodes_*.py` except `nodes_replicate.py`:
  * the partner nodes ComfyUI bills through Comfy's own account
@@ -25,6 +27,28 @@
  */
 import type { ApiPrompt } from './graph'
 import { readByOutputs } from './validate'
+
+/**
+ * Step 4, C4: Sailor's own classes retired when ComfyUI's code goes, each with
+ * the words naming its replacement by its visible name. Each was on
+ * NEEDS_LOCAL_ENGINE (./localOnly.ts) with no saved graph running it
+ * (2026-10-03 scan of 1,370 saved graphs). They stay in the committed node
+ * catalogue so a saved project holding one still draws its card.
+ */
+const C4_RETIRED_ADVICE: Readonly<Record<string, string>> = {
+  RenderType: 'Use Vector Type instead.',
+  KineticType: 'Use Vector Type instead.',
+  FluxProRemoteNode: 'Use Generate an image instead.',
+  IdeogramV3TurboRemoteNode: 'Use Generate an image instead.',
+  FluxKontextRemoteNode: 'Use Edit an image instead.',
+  ClarityUpscaleRemoteNode: 'Use Upscale an image instead.',
+  Seedance2RemoteNode: 'Use Generate a video instead.',
+  Veo3RemoteNode: 'Use Generate a video instead.',
+  KlingVideoRemoteNode: 'Use Generate a video instead.',
+}
+
+/** The classes C4 retired (C4_RETIRED_ADVICE's). */
+export const C4_RETIRED_CLASSES: readonly string[] = Object.keys(C4_RETIRED_ADVICE)
 
 /** What to do instead, the second sentence of RETIRED_NODE_MESSAGE. */
 export const RETIRED_NODE_ADVICE = 'Pick another way to make this.'
@@ -132,6 +156,11 @@ export const RETIRED_CLASSES: ReadonlySet<string> = new Set([
   'WavespeedFlashVSRNode', 'WavespeedImageUpscaleNode',
   // Local nodes deleted 2026-09-27 (6b682b578; non-commercial licences), Task R7.10 (2)
   'FaceRestore', 'LipSync',
+  // Step 4, C4: Sailor's own nodes no saved graph runs, retired rather than ported (9). Font Playground and
+  // Kinetic Typography (comfy_extras/nodes_type.py, nodes_kinetic_type.py; Kinetic Typography is migrated to
+  // Vector Type on open, app/lib/vectortype/migrateKinetic.ts), and the hidden per-model Replicate nodes
+  // (app/data/action-catalog.ts used to hide them): the use-case nodes run these models.
+  ...C4_RETIRED_CLASSES,
 ])
 
 /**
@@ -142,6 +171,7 @@ export const RETIRED_CLASSES: ReadonlySet<string> = new Set([
 export const RETIRED_ADVICE_OF: Readonly<Record<string, string>> = {
   FaceRestore: 'Use Fix faces instead.',
   LipSync: 'Use Lip-sync a character instead.',
+  ...C4_RETIRED_ADVICE,
 }
 
 /**

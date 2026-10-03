@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { makeKit } from './__runner__/kit'
+import { makeKit, ofType } from './__runner__/kit'
 import { clipPath, requireMediaTools, sha256Hex, unz, unzF32, type PySound, type PyRational } from './__runner__/mediaParity'
 import { videoCardCaseKey, videoCardCases, videoCardPrompt } from './__runner__/videoCardCases'
 import { GATE_CLASS, type ApiPrompt } from '#shared/runner/graph'
@@ -736,7 +736,6 @@ describe('the family', () => {
       'an Image card into CreateVideo': { i: { class_type: 'Image', inputs: { image: 'a.png', export: false, batch_index: -1 } }, v: createVideo(['i', 0], 24), s: saveVideo('v') },
       'a card with a made video read by a Gate': { l: loadVideo('a.mp4'), g: getComp('l'), v: createVideo(['g', 0], 24), c: videoCard({ source: ['v', 0] }), gt: { class_type: GATE_CLASS, inputs: { data_in: ['c', 0], bypass: true } }, c2: videoCard({ source: ['gt', 0] }) },
       'a wired file name': { t: { class_type: 'PrimitiveString', inputs: { value: 'x' } }, l: { class_type: 'LoadVideo', inputs: { file: ['t', 0] } }, s: saveVideo('l') },
-      'Preview video, not ported': { l: loadVideo('a.mp4'), p: { class_type: 'PreviewVideo', inputs: { video: ['l', 0] } } },
     }
     const every = new Set<RunnerFamily>([...ALL_RUNNER_FAMILIES])
     for (const [name, p] of Object.entries(left)) {
@@ -990,6 +989,41 @@ describe('the engine', () => {
     expect(existsSync(join(k.root, 'output', out.subfolder, out.filename))).toBe(true)
     const recorded = k.graphRuns.appendOutput.mock.calls.map(c => String(c[1]))
     expect(recorded.some(r => r.includes(out.filename))).toBe(true)
+  })
+
+  it('step 4, C4: Preview video is a temporary Save video: a file stream-copied into temp, a made video encoded there', LONG, async () => {
+    await requireMediaTools()
+    expect(RUNNER_NODE_RULES.PreviewVideo).toMatchObject({ family: 'media-video', local: 'render', valueInputs: { video: ['files', 'video'] } })
+    expect(SWITCHED_CLASSES.PreviewVideo).toBe('media-video')
+    expect(RUNNER_OUTPUT_CLASSES.has('PreviewVideo')).toBe(true)
+    const preview = (from: string) => ({ class_type: 'PreviewVideo', inputs: { video: [from, 0] as Link } })
+    const k = videoKit()
+    const file: ApiPrompt = { l: loadVideo('v_stereo_aac.mp4'), p: preview('l') }
+    const made: ApiPrompt = { l: loadVideo('v_stereo_aac.mp4'), g: getComp('l'), v: createVideo(['g', 0], ['g', 2], ['g', 1]), p: preview('v'), s: saveVideo('v') }
+    for (const p of [file, made]) expect(runnerTakesWorkflow(p, ON)).toBe(true)
+    // Its video read on: refused (as Preview image's picture is), never sent anywhere.
+    expect(runnerTakesWorkflow({ ...file, s: saveVideo('p') }, ON)).toBe(false)
+    // media-video off: switched off, never the engine.
+    expect(runnerTakesWorkflow(file, new Set<RunnerFamily>(['cards']))).toBe(false)
+    const one = await k.engine.startRun({ userId: null, takes: [file], ...START })
+    await k.engine.settled(one.runId)
+    const t1 = (await k.store.get(one.runId))!.takes[0]!
+    expect(t1.nodes.p!.status, t1.nodes.p!.error ?? '').toBe('done')
+    // Shown from temp (the executed event), never listed as made.
+    const shownEvent = ofType(k.seen, 'executed').find(m => (m.data as { node: string }).node === 'p')!.data as { output: { images: OutputFile[] } }
+    expect(shownEvent.output.images).toEqual([{ filename: 'preview_video_00001_.mp4', subfolder: '', type: 'temp' }])
+    expect(t1.nodes.p!.outputs).toEqual([])
+    const shown = join(k.root, 'temp', 'preview_video_00001_.mp4')
+    expect((await probeMedia(shown, { userId: null, roots: rootsOf(shown) })).video[0]).toMatchObject({ w: 32, h: 24 })
+    // A made video: encoded into temp for the preview; Save video beside it saves the same video.
+    const two = await k.engine.startRun({ userId: null, takes: [made], ...START })
+    await k.engine.settled(two.runId)
+    const t2 = (await k.store.get(two.runId))!.takes[0]!
+    for (const id of ['p', 's']) expect(t2.nodes[id]!.status, `${id}: ${t2.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(t2.nodes.s!.outputs).toEqual([{ filename: 'ComfyUI_00001_.mp4', subfolder: 'video', type: 'output' }])
+    const saved = join(k.root, 'output', 'video', 'ComfyUI_00001_.mp4')
+    expect((await probeMedia(saved, { userId: null, roots: rootsOf(saved) })).video[0]).toMatchObject({ codec: 'h264', w: 32, h: 24, frames: 24 })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 
   it('the card exporting a file saves a stream copy and lists it once; the file it hands on is not listed as made', LONG, async () => {

@@ -117,7 +117,7 @@ describe('round 2: local-only nodes beside runnable chains are never left out (p
     expect(route(shape(), { engineUp: true }).to).toBe('engine')
   })
 
-  it('a needs-local-engine Sailor node or a custom node beside a runnable chain is never left out either', () => {
+  it('a custom node beside a runnable chain is never left out either; C4: a retired node nothing reads is, as ComfyUI leaves it out', () => {
     const chain = (): ApiPrompt => ({ l: { class_type: 'LoadImage', inputs: { image: 'pasted.png' } }, c: { class_type: 'Image', inputs: { image: '', export: true, filename_prefix: 'ComfyUI', batch_index: -1, images: ['l', 0] } } })
     const custom: ApiPrompt = { ...chain(), x: { class_type: 'LayerUtility: If ', inputs: {} } }
     titles.x = 'If'
@@ -127,9 +127,16 @@ describe('round 2: local-only nodes beside runnable chains are never left out (p
     expect(runnerTakesWorkflow(kept ?? custom, ALL)).toBe(false)
     expect(route(custom)).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
     expect(route(custom, { engineUp: true }).to).toBe('engine')
+    // Step 4, C4: Kinetic Typography is retired (it was on NEEDS_LOCAL_ENGINE): one nothing reads is left out
+    // (retired.ts retiredNodeIds), the chain handed to the runner; one an output reads is refused as retired.
     const kinetic: ApiPrompt = { ...chain(), k: { class_type: 'KineticType', inputs: {} } }
-    expect(engineRunPrompt(kinetic, CATALOG)).toBeNull()
-    expect(route(kinetic)).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
+    const pruned = engineRunPrompt(kinetic, CATALOG)!
+    expect(Object.keys(pruned).sort()).toEqual(['c', 'l'])
+    expect(runnerTakesWorkflow(pruned, ALL)).toBe(true)
+    expect(blockedRunRefusal([{ prompt: kinetic, titleOf: id => titles[id] ?? id }], { runnerOn: true, families: ALL, isOutputClass: outputClassesOf(CATALOG) })).toBeNull()
+    const read: ApiPrompt = { ...kinetic, s: { class_type: 'SaveImage', inputs: { images: ['k', 0], filename_prefix: 'x' } } }
+    expect(blockedRunRefusal([{ prompt: read, titleOf: () => 'Kinetic' }], { runnerOn: true, families: ALL, isOutputClass: outputClassesOf(CATALOG) }))
+      .toEqual({ title: '“Kinetic” was retired', description: 'Use Vector Type instead.' })
   })
 
   it('a wrong-type wire is still dropped (r119c): no local-engine node there', () => {

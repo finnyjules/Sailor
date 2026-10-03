@@ -147,7 +147,7 @@ import { planAudioGen } from './generators/audioGen'
 import { planSoundIn } from './generators/soundIn'
 import type { PythonWav } from './soundWav'
 import { planAudioCard, planLoadAudio, planPreviewAudio, planSaveAudio } from './media/soundNodes'
-import { planCreateVideo, planGetVideoComponents, planLoadVideo, planSaveVideo, planVideoCard } from './media/videoNodes'
+import { planCreateVideo, planGetVideoComponents, planLoadVideo, planPreviewVideo, planSaveVideo, planVideoCard } from './media/videoNodes'
 import { planLoadVideoFrames, planSaveVideoFrames } from './media/frameNodes'
 import { planVideoEffect } from './video/plan'
 import { videoEffectSpec } from './video/table'
@@ -1290,6 +1290,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return planCreateVideo(ctx)
     case 'SaveVideo':
       return planSaveVideo(ctx)
+    // Step 4, C4: Preview video, a temporary Save video.
+    case 'PreviewVideo':
+      return planPreviewVideo(ctx)
     // R5.5: frame batches from and to files (media/frameNodes.ts).
     case 'LoadVideoFrames':
       return planLoadVideoFrames(ctx)

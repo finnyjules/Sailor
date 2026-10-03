@@ -3,7 +3,8 @@
  * whole — a workflow is never split between the two.
  */
 import { isLink, linksOf, type ApiPrompt } from './graph'
-import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
+import { EVERY_KNOWN_FAMILY, NO_FAMILIES, familyOn, type RunnerFamily } from './families'
+import { oddSettingWords, wiredSettingWords } from './messages'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE } from './lipSync'
 import { lipSyncEngineMediaTaken, lipSyncRunEngine } from './lipSyncEngines'
@@ -57,6 +58,9 @@ import {
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
 ])
+
+/** Runner classes with no family row of their own, taken only for some settings (runnerTakesNode: Film a shot, filmShotTaken). */
+export const RUNNER_SPECIAL_CLASSES: ReadonlySet<string> = new Set(['FilmShotNode'])
 
 /** One model's switch: its family, and any inputs that model alone needs linked. */
 export interface RunnerModelRule {
@@ -624,7 +628,7 @@ export const PAID_VIDEO_OUTPUTS: readonly (readonly [string, number])[] = [
  * these only: anything else would be handed a video it can't read, so the
  * workflow is left to the engine ('video-card-made-video').
  */
-export const MADE_VIDEO_READERS: readonly string[] = ['SaveVideo', 'GetVideoComponents', 'Video']
+export const MADE_VIDEO_READERS: readonly string[] = ['SaveVideo', 'PreviewVideo', 'GetVideoComponents', 'Video']
 
 /** Create video's `fps` as ComfyUI validates a typed one (io.Float.Input: 1…120); a wired rate is Python's float as it comes. */
 const CREATE_VIDEO_FPS: RunnerWidgetSpec = { type: 'FLOAT', required: true, min: 1, max: 120 }
@@ -1126,6 +1130,15 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       format: { type: 'COMBO', required: true, options: ['auto', 'mp4'] },
       codec: { type: 'COMBO', required: true, options: ['auto', 'h264'] },
     },
+  },
+  // Step 4, C4: Preview video, a temporary Save video (nodes_video.py PreviewVideo: save_to into temp as
+  // `preview_video_<nnnnn>_.mp4`). No settings; what it reads, as Save video. Python hands the video on too;
+  // a node reading that is refused (as Preview image's picture is), never sent anywhere.
+  PreviewVideo: {
+    family: 'media-video', local: 'render', mustLink: ['video'], required: ['video'],
+    valueInputs: { video: ['files', 'video'] },
+    linkSources: { video: [...VIDEO_OUTPUTS, ...PAID_VIDEO_OUTPUTS] },
+    outputsNotLinked: [0],
   },
   // ── media-video (step 3, R5.5): frame batches from and to files
   // (server/runner/media/frameNodes.ts). Load video frames decodes a file
@@ -1820,6 +1833,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   GetVideoComponents: 'media-video',
   CreateVideo: 'media-video',
   SaveVideo: 'media-video',
+  // C4: Preview video, a temporary Save video.
+  PreviewVideo: 'media-video',
   // R5.5: frame batches from and to files.
   LoadVideoFrames: 'media-video',
   SaveVideoFrames: 'media-video',
@@ -2657,13 +2672,50 @@ function presetShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<
  * Whether the runner takes this Film a shot: shot-directed (no sound or words
  * wired in, on one of its models), or on the preset path (presetShotTaken).
  */
-function filmShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
+export function filmShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
   if (!isShotDirected(inputs)) return presetShotTaken(inputs, families)
   if (isLink(inputs.audio) || isLink(inputs.prompt)) return false
   const model = resolveVideoModelId(inputs.model)
   if (!Object.prototype.hasOwnProperty.call(FILM_SHOT_RUNNER_MODELS, model)) return false
   const family = FILM_SHOT_RUNNER_MODELS[model]
   return !family || familyOn(family, families)
+}
+
+/** C4: a Shot Director shot on a model Shot Director doesn't offer (it offers FILM_SHOT_RUNNER_MODELS's, by their names on the node). */
+export const FILM_SHOT_DIRECTED_MODEL_WORDS = 'Shot Director films only with Seedance 2.0, Veo 3.1, Veo 3.1 Fast or Kling Video 3.0. Pick one of those for this shot.'
+
+/** C4: a Film a shot model Python no longer lists (ComfyUI's own validation refuses it too). */
+export const FILM_SHOT_MODEL_WORDS = 'This model isn’t offered any more. Pick another model on the node.'
+
+/** C4: a sound wired into Film a shot (Python's node has no sound input). */
+export const FILM_SHOT_SOUND_WORDS = 'Film a shot doesn’t take a sound. Remove the sound wired into it.'
+
+/** A Film a shot setting's label as the node shows it (the widget's name in sentence case). */
+const filmShotLabel = (name: string) => {
+  const words = name.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * Step 4, C4: why the runner doesn't take this Film a shot even with every
+ * family on, in plain words naming what to change, or null (it takes it with
+ * every family on: a family that is off is named as switched off instead).
+ * Before C4 such a shot went to the local engine (NEEDS_LOCAL_ENGINE); no
+ * saved graph holds one (2026-10-03 scan: the runner takes every one).
+ */
+export function filmShotRefusalWords(inputs: Record<string, unknown>): string | null {
+  if (filmShotTaken(inputs, EVERY_KNOWN_FAMILY)) return null
+  if (isLink(inputs.audio)) return FILM_SHOT_SOUND_WORDS
+  for (const name of ['prompt', 'model', 'model_options']) {
+    if (isLink(inputs[name])) return wiredSettingWords(filmShotLabel(name))
+  }
+  if (isShotDirected(inputs)) return FILM_SHOT_DIRECTED_MODEL_WORDS
+  if (shotDirectedOtherwise(inputs)) return oddSettingWords(filmShotLabel('model_options'))
+  if (!widgetValid(inputs, 'preset', { type: 'COMBO', required: true, options: SHOT_PRESET_IDS })) return oddSettingWords(filmShotLabel('preset'))
+  for (const o of SHOT_OVERRIDE_WIDGETS) {
+    if (!widgetValid(inputs, o.widget, { type: 'COMBO', options: o.options })) return oddSettingWords(filmShotLabel(o.widget))
+  }
+  return FILM_SHOT_MODEL_WORDS
 }
 
 /**

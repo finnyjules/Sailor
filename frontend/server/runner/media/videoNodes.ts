@@ -31,6 +31,9 @@
  *                        encoded as a made video. A made video: H.264 at
  *                        Fraction(round(fps · 1000), 1000), PYAV_H264_DEFAULT,
  *                        its sound cut to the frames as AAC (madeVideoSoundCut).
+ *   PreviewVideo       — execute (:277-292, step 4 C4): Save video with no
+ *                        format or codec into temp as `preview_video_<nnnnn>_.mp4`,
+ *                        no tags added (what it hands on, nothing may read).
  *   Video (card)       — execute (:345-385), VIDEO_CARD_MEDIA_RULE: `source`
  *                        wins, then `file`, else ui `{ images: [] }`. A file
  *                        video is shown as the file itself, as the runner did
@@ -336,11 +339,11 @@ export async function loadVideoStartProblems(
     const v = verdictOf ? await verdictOf(file, { card: true }) : null
     if (v) return { message: v.message, nodeId, classType: n.class_type, file: file.filename, engine: true }
   }
-  // A Video card's file read by Get video components or Save video (a Load video's is judged above):
+  // A Video card's file read by Get video components, Save video or Preview video (a Load video's is judged above):
   // one the build can't read leaves the workflow to the engine, as Load video's does.
   for (const [nodeId, n] of Object.entries(prompt)) {
     const link = n.inputs?.video
-    if ((n.class_type !== 'GetVideoComponents' && n.class_type !== 'SaveVideo') || !isLink(link) || prompt[link[0]]?.class_type !== 'Video') continue
+    if ((n.class_type !== 'GetVideoComponents' && n.class_type !== 'SaveVideo' && n.class_type !== 'PreviewVideo') || !isLink(link) || prompt[link[0]]?.class_type !== 'Video') continue
     const card = prompt[link[0]]!
     if (runnerRuleFor('Video', card.inputs ?? {}, families) !== VIDEO_CARD_MEDIA_RULE) continue
     const file = cardFile(prompt, link[0])
@@ -446,6 +449,26 @@ export function planSaveVideo(ctx: PlanContext): NodePlan {
     kind: 'derive',
     async derive(io) {
       const f = await saveVideoFile(io, wired(ctx, link), { prefix, folder: 'output', format, codec, tags: true })
+      return { values: {}, ui: { images: [entry(f)], animated: [true] } }
+    },
+  }
+}
+
+/**
+ * Step 4, C4: PreviewVideo (nodes_video.py :259-292), a temporary Save video:
+ * save_to with no format or codec (a file's stream copy, a made video's
+ * H.264) into temp as `preview_video_<nnnnn>_.mp4`, no tags of its own.
+ * Python hands the video on too; here nothing may read it (the rule's
+ * outputsNotLinked), so nothing is handed on.
+ */
+export function planPreviewVideo(ctx: PlanContext): NodePlan {
+  const link = ctx.prompt[ctx.nodeId]!.inputs?.video
+  if (!isLink(link)) throw new Error(NO_VIDEO_WIRED)
+  return {
+    kind: 'derive',
+    async derive(io) {
+      const f = await saveVideoFile(io, wired(ctx, link), { prefix: 'preview_video', folder: 'temp', format: 'auto', codec: 'auto', tags: false })
+      // Nothing reads it on (its rule's outputsNotLinked), as Preview audio hands nothing on.
       return { values: {}, ui: { images: [entry(f)], animated: [true] } }
     },
   }

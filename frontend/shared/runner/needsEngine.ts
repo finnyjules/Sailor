@@ -8,7 +8,7 @@
  * (server/utils/blockedModels.ts) share them, so there is one rule.
  */
 import { isLink, type ApiNode, type ApiPrompt } from './graph'
-import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, isRunnerEligible, nodeValidationErrors, runnerTakesNode, svgReaderProblems } from './eligibility'
+import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, RUNNER_SPECIAL_CLASSES, filmShotRefusalWords, filmShotTaken, isRunnerEligible, nodeValidationErrors, runnerTakesNode, svgReaderProblems } from './eligibility'
 import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_SHADER_CASES, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from './localOnly'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, prunedAny, pruneInvalidOutputs, readByOutputs, showsMadeResult } from './validate'
 import { EVERY_KNOWN_FAMILY, NO_FAMILIES, type RunnerFamily } from './families'
@@ -158,6 +158,25 @@ export function wireTypeMismatch(prompt: ApiPrompt, id: string, catalog: NodeCat
 }
 
 /**
+ * Step 4, C4: a wire from an output its source class doesn't have (the
+ * catalogue lists fewer outputs): ComfyUI's validate_inputs reads
+ * `RETURN_TYPES[slot]`, which raises, so validate_prompt drops the output
+ * reading it and runs the rest. A Text card wired to a LoRA node's old second
+ * output (its log, which the LoRA nodes no longer have) is one: dropped, it
+ * keeps its saved text. Judged only where the catalogue lists the source class.
+ */
+export function wireFromMissingOutput(prompt: ApiPrompt, id: string, catalog: NodeCatalog | null | undefined): boolean {
+  if (!catalog) return false
+  for (const v of Object.values(prompt[id]?.inputs ?? {})) {
+    if (!isLink(v)) continue
+    const from = prompt[v[0]]
+    const outputs = from ? catalogEntry(catalog, from.class_type)?.output : undefined
+    if (Array.isArray(outputs) && v[1] >= outputs.length) return true
+  }
+  return false
+}
+
+/**
  * The run with node `id`'s wires from a `refused` node reading a stand-in
  * source of its type instead (STAND_IN_SOURCES): the node is then judged on
  * its own (what reads it is left as it is).
@@ -185,8 +204,8 @@ export type EngineRoute =
   | { to: 'engine'; notice?: { title: string; description: string } }
   | { to: 'refused'; title: string; description: string }
 
-/** A class the runner knows (a runner type or a rule row), whatever its families. */
-const runnerKnowsClass = (ct: string) => RUNNER_NODE_TYPES.has(ct) || Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, ct)
+/** A class the runner knows (a runner type, a rule row, or Film a shot), whatever its families. */
+const runnerKnowsClass = (ct: string) => RUNNER_NODE_TYPES.has(ct) || Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, ct) || RUNNER_SPECIAL_CLASSES.has(ct)
 
 /**
  * Fix round 1: what ComfyUI would run of a prompt (validate_prompt): an output
@@ -214,7 +233,8 @@ function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null, o: { wir
       && requiredWires(catalog, node.class_type).every(name => node.inputs?.[name] !== undefined)
       // LC8 (B3): a wire of the wrong type, as ComfyUI's validate_inputs refuses it (the output is dropped, the
       // rest runs). Only for the runner's hand-off (engineRunPrompt): engineRoute still names such a node.
-      && !(o.wireTypes && wireTypeMismatch(prompt, id, catalog))
+      // C4: so is a wire from an output its source doesn't have (wireFromMissingOutput).
+      && !(o.wireTypes && (wireTypeMismatch(prompt, id, catalog) || wireFromMissingOutput(prompt, id, catalog)))
     for (const v of Object.values(node.inputs ?? {})) if (isLink(v) && !check(v[0], seen)) ok = false
     valid.set(id, ok)
     return ok
@@ -387,7 +407,7 @@ export function engineRoute(
       if (!shaderWhy && isUnbakedShader(run[id]!)) continue
       const needs = needsLocalEngineWords(run[id]!, shaderWhy, off.has(id))
       if (needs) { listed.set(title, needs); continue }
-      refused.set(title, shaderWhy ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS))
+      refused.set(title, shaderWhy ?? filmShotWhy(run[id]!, families, title) ?? missingOutputWhy(run, id, opts.catalog) ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS))
     }
   }
   if (refused.size) {
@@ -430,6 +450,25 @@ export function isCustomClass(classType: string): boolean {
 
 /** Where a custom node can't go (hosted, or the engine off). */
 export const CUSTOM_NODE_WORDS = 'This node isn’t part of Sailor. It runs only on the local engine, on your own computer.'
+
+/**
+ * Step 4, C4: why a Film a shot isn't taken, by name: its family (or its
+ * model's) off, as switched off; else what to change (filmShotRefusalWords).
+ * Null for any other node, or one taken.
+ */
+function filmShotWhy(node: ApiNode, families: ReadonlySet<RunnerFamily>, title: string): string | null {
+  if (node.class_type !== 'FilmShotNode') return null
+  const inputs = node.inputs ?? {}
+  if (filmShotTaken(inputs, families)) return null
+  return filmShotRefusalWords(inputs) ?? switchedOffWords(title)
+}
+
+/** C4: a node reading an output its source no longer has (wireFromMissingOutput), when the rest can't run without it. */
+export const MISSING_OUTPUT_WORDS = 'This reads a result the node it’s wired to no longer makes. Remove that wire.'
+
+function missingOutputWhy(run: ApiPrompt, id: string, catalog: NodeCatalog | null | undefined): string | null {
+  return wireFromMissingOutput(run, id, catalog) ? MISSING_OUTPUT_WORDS : null
+}
 
 /** A Shader effect with no bake on it yet (fix round 3, M-3). */
 function isUnbakedShader(node: ApiNode): boolean {

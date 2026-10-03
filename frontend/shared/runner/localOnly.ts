@@ -17,8 +17,6 @@
  *
  * Pure; relative imports only.
  */
-import { SHADER_NEEDS_PICTURE_FIRST } from './shaderBakeKey'
-
 /** Every local-only class, by its ComfyUI class name, grouped by its Python file. */
 export const LOCAL_ONLY_CLASSES: ReadonlySet<string> = new Set([
   // nodes_ace.py (5)
@@ -274,54 +272,45 @@ export function isLocalOnlyClass(classType: unknown): boolean {
 export type NeedsLocalEnginePlan = 'port' | 'retire' | 'keep local'
 
 /**
- * Fix round 1 (a): Sailor's own classes the runner doesn't run yet that ran
- * on the local engine before R10.2. "Switching a family on never makes a
- * working graph fail": until each is ported or retired, it is on this
- * explicit, named list. Locally with the engine up, a run holding one goes
- * there with the local-engine toast naming it; in hosted, or with the engine
- * off, it is refused in plain words (NEEDS_LOCAL_ENGINE_WORDS). The counts
- * are the saved graphs holding each (2026-10-02: 1,251 graphs of 1,566
- * projects, user/sailor/projects and its migration backup).
+ * Fix round 1 (a): Sailor's own classes the runner didn't run yet that ran on
+ * the local engine before R10.2, on an explicit, named list until each was
+ * ported or retired ("switching a family on never makes a working graph
+ * fail"). Locally with the engine up, a run holding one went there with the
+ * local-engine toast naming it; in hosted, or with the engine off, it was
+ * refused in plain words (NEEDS_LOCAL_ENGINE_WORDS).
  *
- * Ported off the list: Smart Layout (LC9: the runner hands its pictures to
- * an Image card too, eligibility.ts LIST_PASSERS).
- *
- * One Shader effect case is the same by its setting, not its class
- * (NEEDS_LOCAL_ENGINE_SHADER_CASES, ./needsEngine.ts).
+ * EMPTY since step 4, C4 (2026-10-03): every entry is ported or retired.
+ *   - Ported: Smart Layout (LC9: the runner hands its pictures to an Image
+ *     card too, eligibility.ts LIST_PASSERS); Preview video (C4: a temporary
+ *     Save video, media/videoNodes.ts planPreviewVideo); Film a shot (C4: the
+ *     runner films every model and setting Python does but a Shot Director
+ *     shot on a model Shot Director doesn't offer, a wired setting, or a model
+ *     Python no longer lists, each refused by name, eligibility.ts
+ *     filmShotRefusalWords); the Text card showing a LoRA node's log (C4: the
+ *     LoRA nodes no longer have that output, so ComfyUI drops the card as it
+ *     validates and runs the rest; the canvas hands the runner the same, the
+ *     card keeping its saved text, ./needsEngine.ts wireFromMissingOutput).
+ *   - Retired (./retired.ts C4_RETIRED_CLASSES, each naming its replacement):
+ *     Font Playground and Kinetic Typography (Vector Type), and the seven
+ *     hidden per-model Replicate nodes (Generate an image, Edit an image,
+ *     Upscale an image, Generate a video).
  */
-export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {
-  PreviewVideo: { plan: 'port', savedGraphs: 0, why: 'Preview video: a temporary Save video, which the runner already does; no saved graph uses it.' },
-  FilmShotNode: { plan: 'port', savedGraphs: 11, why: 'Film a shot: the runner takes it only for the models and settings it films (eligibility.ts filmShotTaken).' },
-  Text: { plan: 'port', savedGraphs: 2, why: 'A Text card showing a LoRA node’s log (the runner doesn’t hand that text on).' },
-  RenderType: { plan: 'retire', savedGraphs: 0, why: 'Font Playground: no saved graph uses it and nothing in the app builds it; retire unless R11.10 finds a use.' },
-  KineticType: { plan: 'retire', savedGraphs: 0, why: 'Kinetic Typography: migrated to Vector Type on open (app/lib/vectortype/migrateKinetic.ts).' },
-  FluxProRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate image runs these models.' },
-  IdeogramV3TurboRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate image runs these models.' },
-  FluxKontextRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Edit image runs these models.' },
-  ClarityUpscaleRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Upscale runs Clarity.' },
-  Seedance2RemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate a video runs these models.' },
-  Veo3RemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate a video runs these models.' },
-  KlingVideoRemoteNode: { plan: 'retire', savedGraphs: 0, why: 'Hidden per-model node (DEPRECATED_NODES): Generate a video runs these models.' },
-}
+export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {}
 
 /** Where a node on NEEDS_LOCAL_ENGINE can't go (hosted, or the engine off). */
 export const NEEDS_LOCAL_ENGINE_WORDS = 'Sailor can’t run this node yet. It runs only on the local engine, on your own computer.'
 
 /**
- * Fix round 1 (c), fix round 2: the Shader effect cases that still need the
- * local engine, by cause, each with its words for where it can't go (hosted,
- * the engine off) and its plan. Counts are Shader effect nodes in the saved
- * graphs (2026-10-02 scan).
+ * Fix round 1 (c), fix round 2: the Shader effect cases that still needed the
+ * local engine, by cause, each with its words for where it couldn't go.
  *
- * Ported off the list: one of your own effects (LC13: the browser draws a My
- * effect as the canvas does, and the server checks the bake against the
- * person's own My effects store; the local engine never could run one).
+ * EMPTY since step 4, C4 (2026-10-03):
+ *   - one of your own effects was ported (LC13: the browser draws a My effect
+ *     as the canvas does, and the server checks the bake against the person's
+ *     own My effects store);
+ *   - a picture made in the same run is refused plainly everywhere, never
+ *     sent (SHADER_NEEDS_PICTURE_FIRST, ./shaderBakeKey.ts): the browser bakes
+ *     before the run, and a mid-run bake would mean pausing the run for the
+ *     browser. 2 saved graphs (one project and its backup copy) hold one.
  */
-export const NEEDS_LOCAL_ENGINE_SHADER_CASES: Readonly<Record<'pictureMadeInRun', { words: string; plan: NeedsLocalEnginePlan; savedNodes: number; why: string }>> = {
-  pictureMadeInRun: {
-    words: SHADER_NEEDS_PICTURE_FIRST,
-    plan: 'port',
-    savedNodes: 4,
-    why: 'Its picture is made in the same run (one saved graph chains bloom → vignette → outline): the browser bakes before the run. Port by baking after the upstream run, or by the runner baking server-side.',
-  },
-}
+export const NEEDS_LOCAL_ENGINE_SHADER_CASES: Readonly<Record<string, { words: string; plan: NeedsLocalEnginePlan; savedNodes: number; why: string }>> = {}

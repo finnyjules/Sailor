@@ -64,7 +64,7 @@ function readersOf(prompt: ApiPrompt, id: string, slot: number): { id: string; c
 function madeVideoOnlyEncoded(prompt: ApiPrompt, id: string, depth: number): boolean {
   if (depth > 64) return false
   for (const r of readersOf(prompt, id, 0)) {
-    if (r.classType === 'SaveVideo') continue
+    if (r.classType === 'SaveVideo' || r.classType === 'PreviewVideo') continue
     if (r.classType === GATE_CLASS || r.classType === 'Video') {
       if (!madeVideoOnlyEncoded(prompt, r.id, depth + 1)) return false
       continue

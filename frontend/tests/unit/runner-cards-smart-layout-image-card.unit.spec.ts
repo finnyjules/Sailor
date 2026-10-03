@@ -1,6 +1,6 @@
 /**
  * LC9: Smart Layout read by an Image card (28 saved graphs, off
- * NEEDS_LOCAL_ENGINE). Python's Image card doesn't declare INPUT_IS_LIST, so
+ * NEEDS_LOCAL_ENGINE; the list is empty since step 4, C4). Python's Image card doesn't declare INPUT_IS_LIST, so
  * fed Smart Layout's list it runs once per item (each a batch of one, so
  * `batch_index` slices nothing), shows every item, and hands a list on: its
  * own readers are held to the same list readers (eligibility.ts
@@ -20,9 +20,9 @@ import type { RunnerFamily } from '#shared/runner/families'
 import { EVERY_KNOWN_FAMILY } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
-import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_WORDS } from '#shared/runner/localOnly'
+import { NEEDS_LOCAL_ENGINE } from '#shared/runner/localOnly'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { engineRoute, needsEngineDescription } from '~/lib/runner/needsEngine'
+import { MISSING_OUTPUT_WORDS, engineRoute, engineRunPrompt, leftOutNotice } from '~/lib/runner/needsEngine'
 import type { OutputFile } from '~~/server/runner/types'
 import { SAVE_OUTSIDE } from '~~/server/runner/results'
 import { IMAGE_EXPORT_TOO_MUCH, imageExportKeptBytes } from '~~/server/runner/cards/imageExport'
@@ -254,7 +254,7 @@ describe('fix round 1: the Image card’s export (nodes_image.py Image.process)'
   })
 })
 
-// ── Fix round 1: the Text card showing a LoRA node's log (on NEEDS_LOCAL_ENGINE) ──
+// ── Fix round 1: the Text card showing a LoRA node's log (on NEEDS_LOCAL_ENGINE until step 4, C4) ──
 
 const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, never>
 /** Flux Dev + LoRAs as saved before slots C and D (de3b2ec3's): its four required settings missing, as Python validates it. */
@@ -287,14 +287,22 @@ describe('fix round 1: the Text card showing a LoRA node’s log', () => {
     expect(ofType(k.seen, 'executed').map(m => (m.data as { node: string }).node).sort()).toEqual(['i', 'l'])
   }, 60_000)
 
-  it('a LoRA node that runs: the log card isn’t taken, so the workflow routes by the list, named', () => {
+  it('C4: a LoRA node that runs: the log card reads an output the node no longer has, so it is dropped as ComfyUI drops it and the rest goes to the runner', () => {
     const p: ApiPrompt = { m: multiLora(), mi: card(['m', 0]), t: logCard(), l: smartLayout(), i: card(['l', 0]) }
     expect(pruneInvalidOutputs(p, EVERY_KNOWN_FAMILY).dropped).toEqual([])
     expect(runnerTakesWorkflow(p, EVERY_KNOWN_FAMILY)).toBe(false)
+    expect(NEEDS_LOCAL_ENGINE).toEqual({})
+    // ComfyUI's validate_inputs reads RETURN_TYPES[1] of a one-output class, which raises: the card's output
+    // fails validation and the rest runs. The canvas hands the runner the same (engineRunPrompt).
+    const pruned = engineRunPrompt(p, CATALOG as never)!
+    expect(Object.keys(pruned).sort()).toEqual(['i', 'l', 'm', 'mi'])
+    expect(runnerTakesWorkflow(pruned, EVERY_KNOWN_FAMILY)).toBe(true)
+    expect(leftOutNotice([{ prompt: p, pruned, titleOf }])).toMatchObject({ title: 'Some nodes were left out' })
+    // Judged whole (were the runner to decline the rest), the card is named in plain words, never sent to the engine.
     const route = (o: Partial<Parameters<typeof engineRoute>[1]>) =>
       engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: EVERY_KNOWN_FAMILY, hosted: false, engineUp: true, catalog: CATALOG, ...o })
-    expect(route({})).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['LoRA log']) } })
-    expect(route({ engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['LoRA log']) })
-    expect(route({ hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“LoRA log”: ${NEEDS_LOCAL_ENGINE_WORDS}` })
+    for (const o of [{}, { engineUp: false }, { hosted: true }]) {
+      expect(route(o)).toEqual({ to: 'refused', title: '“LoRA log” can’t run', description: `“LoRA log”: ${MISSING_OUTPUT_WORDS}` })
+    }
   })
 })
