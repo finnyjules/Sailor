@@ -25,7 +25,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { AddressInfo } from 'node:net'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
@@ -46,6 +46,7 @@ import { LAYOUT_BAD_SHAPE, LAYOUT_MAX_REMOTE_FONTS, LAYOUT_TOO_MANY_FONTS, layou
 import { LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MANY_ELEMENTS, LAYOUT_TOO_MANY_READERS, LAYOUT_TOO_MANY_TREATED, LAYOUT_TOO_MUCH_TEXT, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED, layoutTextProblem } from '#shared/template-grid/limits'
 import type { RenderRequest } from '~~/server/templates/schema'
 import type { OutputFile } from '~~/server/runner/types'
+import { __setInputUploadsEngineRootForTests } from '~~/server/utils/inputUploads'
 
 const CARDS: ReadonlySet<RunnerFamily> = new Set(['cards'])
 /** What a v2 layout needs besides its formats and elements. */
@@ -111,8 +112,18 @@ async function runNode(inputs: Record<string, unknown>, files: Record<string, Ui
 let server: Server
 let base = ''
 let hits: string[] = []
+/** R10.8: the files a loopback /view names, read off disk (the engine folders of a scratch root). */
+let viewPng: Buffer
+let viewRoot = ''
 beforeAll(async () => {
   const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#ff0000' } }).png().toBuffer()
+  viewPng = png
+  const root = mkdtempSync(join(tmpdir(), 'r108-view-root-'))
+  for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
+  for (const name of ['own.png', 'a.png', 'wired.png', 'plain.png']) writeFileSync(join(root, 'output', name), png)
+  writeFileSync(join(root, 'temp', 'a.png'), png)
+  writeFileSync(join(root, 'output', 'big.png'), Buffer.alloc(4096))
+  viewRoot = root
   server = createServer((req, res) => {
     hits.push(req.url ?? '')
     if (req.url?.startsWith('/view?redirect')) { res.writeHead(302, { location: '/internal-admin' }); res.end(); return }
@@ -125,6 +136,8 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 afterAll(() => { server.closeAllConnections(); server.close() })
+// After the setup file's own empty root (tests/unit/__setup__/engine-root-safety-net.ts).
+beforeEach(() => { __setInputUploadsEngineRootForTests(viewRoot) })
 afterEach(() => {
   hits = []
   vi.restoreAllMocks()
@@ -237,42 +250,51 @@ describe('the image fetcher (route and runner)', () => {
     expect(hits).toEqual([])
   })
 
-  it('locally, a loopback /view on ComfyUI’s configured port (or the route’s own) is fetched; any other port, or hosted, is refused', async () => {
+  it('locally, a loopback /view on the engine’s port (or the route’s own) is read off disk, never fetched; any other port, or hosted, is refused', async () => {
     await expect(safeImageFetcher({ hosted: false })(`${base}/view?filename=a.png&type=temp`)).rejects.toThrow(FETCH_REFUSED)
     const port = Number(new URL(base).port)
-    expect((await safeImageFetcher({ hosted: false, viewPorts: [port] })(`${base}/view?filename=own.png`)).contentType).toBe('image/png')
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
-    const got = await safeImageFetcher({ hosted: false })(`${base}/view?filename=a.png&type=temp`)
+    const own = await safeImageFetcher({ hosted: false, viewPorts: [port] })(`${base}/view?filename=own.png`)
+    expect(own.contentType).toBe('image/png')
+    expect(Buffer.from(own.data).equals(viewPng)).toBe(true)
+    // R10.8: the engine's port needs nothing listening on it.
+    const got = await safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=a.png&type=temp')
     expect(got.contentType).toBe('image/png')
+    expect(Buffer.from(got.data).equals(viewPng)).toBe(true)
+    // Read by name, under GET /view's own rules.
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=missing.png')).rejects.toThrow('image fetch failed (404)')
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=../a.png')).rejects.toThrow('image fetch failed (400)')
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=a.png&subfolder=..')).rejects.toThrow('image fetch failed (403)')
     await expect(safeImageFetcher({ hosted: true })(`${base}/view?filename=a.png`)).rejects.toThrow(FETCH_REFUSED)
-    expect(hits).toEqual(['/view?filename=own.png', '/view?filename=a.png&type=temp'])
+    await expect(safeImageFetcher({ hosted: true })('http://127.0.0.1:8188/view?filename=a.png')).rejects.toThrow(FETCH_REFUSED)
+    expect(hits).toEqual([])
   })
 
-  it('no connection is reused: an allowed /view, then another path on the same host, is refused', async () => {
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
-    const f = safeImageFetcher({ hosted: false })
+  it('an allowed /view is read off disk; another path on the same host is refused', async () => {
+    const port = Number(new URL(base).port)
+    const f = safeImageFetcher({ hosted: false, viewPorts: [port] })
     for (const host of [base, base.replace('127.0.0.1', 'localhost')]) {
       await f(`${host}/view?filename=a.png`)
       await expect(f(`${host}/admin?secret=1`)).rejects.toThrow(FETCH_REFUSED)
       await expect(f(`${host}/view/`)).rejects.toThrow(FETCH_REFUSED)
     }
-    expect(hits).toEqual(['/view?filename=a.png', '/view?filename=a.png'])
+    expect(hits).toEqual([])
   })
 
   it('refuses the IPv6 forms that carry an IPv4 address, and site-local', () => {
     for (const a of ['::7f00:1', '::127.0.0.1', '::ffff:0:7f00:1', '::ffff:7f00:1', '2002:7f00:1::1', '2001::1', 'fec0::1', '64:ff9b::7f00:1']) expect(addressAllowed(a), a).toBe(false)
   })
 
-  it('checks every redirect again', async () => {
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
-    await expect(safeImageFetcher({ hosted: false })(`${base}/view?redirect=1`)).rejects.toThrow(FETCH_REFUSED)
-    expect(hits).toEqual(['/view?redirect=1'])
+  it('a loopback /view is never asked, so it can’t redirect anywhere', async () => {
+    const port = Number(new URL(base).port)
+    await expect(safeImageFetcher({ hosted: false, viewPorts: [port] })(`${base}/view?redirect=1`)).rejects.toThrow('image fetch failed (404)')
+    expect(hits).toEqual([])
   })
 
-  it('stops at its byte cap and its timeout', async () => {
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
-    await expect(safeImageFetcher({ hosted: false, maxBytes: 1000 })(`${base}/view?big=1`)).rejects.toThrow(FETCH_TOO_LARGE)
-    await expect(safeImageFetcher({ hosted: false, timeoutMs: 200 })(`${base}/view?slow=1`)).rejects.toThrow(FETCH_TIMEOUT)
+  it('stops at its byte cap (a file read off disk too)', async () => {
+    await expect(safeImageFetcher({ hosted: false, maxBytes: 1000 })('http://127.0.0.1:8188/view?filename=big.png')).rejects.toThrow(FETCH_TOO_LARGE)
+    expect(hits).toEqual([])
+    // FETCH_TIMEOUT: a download's limit (no loopback answer is downloaded any more).
+    expect(FETCH_TIMEOUT).toMatch(/20 seconds/)
   })
 
   it('the route’s render refuses a layout naming a local server, without fetching it', async () => {
@@ -498,7 +520,7 @@ describe('round 3', () => {
     expect(JSON.stringify(seen[0]!.env)).not.toContain('secret-test-value')
   })
 
-  it('under nuxi dev (a Unix socket, no local port) the editor’s loopback /view on the app’s port is fetched', async () => {
+  it('under nuxi dev (a Unix socket, no local port) the editor’s loopback /view on the app’s port is read', async () => {
     // A socket over a Unix path has no localPort, as nuxi dev's worker.
     const sockPath = join(mkdtempSync(join(tmpdir(), 'r16-sock-')), 's.sock')
     const unix = createNetServer(s => s.end())
@@ -523,8 +545,8 @@ describe('round 3', () => {
       const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
       const png = await route({ node: { req: { socket: {}, headers: { host: `127.0.0.1:${port}` } }, res: new EventEmitter() } })
       expect(png.length).toBeGreaterThan(0)
-      expect(hits).toEqual(['/view?filename=wired.png'])
-      hits = []
+      // R10.8: read off disk by name, not asked of the port.
+      expect(hits).toEqual([])
       // Round 4: a Host header naming the port no longer opens it.
       vi.stubEnv('NUXT_PORT', '1')
       for (const host of [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, `evil.test:${port}`]) {
@@ -578,12 +600,13 @@ describe('round 3', () => {
   }, 60_000)
 
   it('one deadline for the whole render, fetches included', async () => {
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
     __setRenderDeadlineForTests(300)
     try {
-      const layout = JSON.stringify({ version: 2, id: 's', master: 'a', formats: { a: { w: 120, h: 120 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [{ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover' }, content: `${base}/view?slow=1` }] })
+      const layout = JSON.stringify({ version: 2, id: 's', master: 'a', formats: { a: { w: 120, h: 120 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [{ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover' }, content: 'http://pic.test/slow.png' }] })
+      // A download that never answers, ended only by the render's signal.
+      const slow = (_url: string, o: { signal?: AbortSignal } = {}) => new Promise<never>((_r, j) => o.signal?.addEventListener('abort', () => j(new Error('Stopped'))))
       const t0 = Date.now()
-      await expect(renderTemplatePng(smartLayoutRequests({ layout, aspects: '' }, {})[0]!)).rejects.toThrow(RENDER_TIMEOUT)
+      await expect(renderTemplatePng(smartLayoutRequests({ layout, aspects: '' }, {})[0]!, { fetcher: slow })).rejects.toThrow(RENDER_TIMEOUT)
       expect(Date.now() - t0).toBeLessThan(2000)
     }
     finally { __setRenderDeadlineForTests(null) }
@@ -593,8 +616,7 @@ describe('round 3', () => {
     const big = new ArrayBuffer(60 * 1024 * 1024)
     const tree = { type: 'div', props: { children: ['a', 'b'].map(x => ({ type: 'img', props: { src: `http://pic.test/${x}.png` } })) } }
     await expect(inlineTreeImages(tree, async () => ({ data: big, contentType: 'image/png' }))).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
-    await expect(safeImageFetcher({ hosted: false })(`${base}/view?big=1`, { budget: { left: 1000 } })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=big.png', { budget: { left: 1000 } })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
   })
 
   it('at most 256 elements, for the route too; the route’s body is limited', async () => {
@@ -885,7 +907,7 @@ process.exit(0)
     }, 60_000)
   })
 
-  it('localhost connects over IPv4 first: a [::1] listener on the same port is not reached', async () => {
+  it('a localhost /view is read off disk: neither a 127.0.0.1 nor a [::1] listener on the port is reached', async () => {
     const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00ff00' } }).png().toBuffer()
     const v4 = createServer((_q, res) => { res.writeHead(200, { 'content-type': 'image/png' }); res.end(png) })
     await new Promise<void>(r => v4.listen(0, '127.0.0.1', r))
@@ -895,7 +917,8 @@ process.exit(0)
     try {
       for (let i = 0; i < 3; i++) {
         const got = await safeImageFetcher({ hosted: false, viewPorts: [port] })(`http://localhost:${port}/view?filename=a.png`)
-        expect(Buffer.from(got.data).equals(png)).toBe(true)
+        expect(Buffer.from(got.data).equals(viewPng)).toBe(true)
+        expect(Buffer.from(got.data).equals(png)).toBe(false)
       }
       // Its addresses are still all checked: another path is refused.
       await expect(safeImageFetcher({ hosted: false, viewPorts: [port] })(`http://localhost:${port}/admin`)).rejects.toThrow(FETCH_REFUSED)
@@ -945,8 +968,8 @@ describe('round 5: no picture reaches the renderer by address', () => {
   }, 60_000)
 
   it('every odd picture address is refused plainly (400) before any request, for img sources and fills', async () => {
-    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)   // even an allowed /view port: the odd forms never reach it
-    const hp = hostPort()
+    const hp = '127.0.0.1:8188'   // even the engine's /view port: the odd forms never reach it
+    expect(hostPort()).toBeTruthy()
     const srcs = [
       `http:${hp}/view?c`, `"http://${hp}/view?d"`, `'http://${hp}/view?e'`, `http:\\\\${hp}/view?f`,
       `HTTP://${hp}/view?b`, ` http://${hp}/view?g`, `https:${hp}/view?h`, `//${hp}/view?i`, '/view?filename=x.png', `http://${hp}\\view?j`, 'DATA:image/png;base64,AAAA',
@@ -972,9 +995,10 @@ describe('round 5: no picture reaches the renderer by address', () => {
     await expect(routeWith({ template: v2({ background: { fill: `url(http://${hp}/view?r2)` } }), aspect: 'a' })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_STYLE_URL })
     expect(hits).toEqual([])
     // Still fine: a plain address through the safe fetcher, and embedded pictures in a fill.
-    const png = await renderTemplatePng({ template: v2({ elements: [image(at('/view?plain'))] }) as never, aspect: 'a' })
+    const png = await renderTemplatePng({ template: v2({ elements: [image('http://127.0.0.1:8188/view?filename=plain.png')] }) as never, aspect: 'a' })
     expect(png.length).toBeGreaterThan(0)
-    expect(hits).toEqual(['/view?plain'])
+    // R10.8: read off disk, nothing asked of any port.
+    expect(hits).toEqual([])
     const dot = (await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00f' } }).png().toBuffer()).toString('base64')
     const ok = await renderTemplatePng({ template: v2({ background: { fill: `url(data:image/png;base64,${dot})` }, elements: [shape(`url("data:image/png;base64,${dot}")`)] }) as never, aspect: 'a' })
     expect(ok.length).toBeGreaterThan(0)

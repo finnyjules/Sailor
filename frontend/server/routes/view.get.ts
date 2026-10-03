@@ -4,8 +4,7 @@ import { createReadStream, existsSync, openSync } from 'node:fs'
 import { join } from 'node:path'
 import { getRequestHeaders, setResponseStatus } from 'h3'
 import { deployMode } from '../utils/deployMode'
-import { ownedOutputKeys } from '../utils/graphRuns'
-import { harvestPendingOutputs, viewGateDecision } from '../utils/engineGate'
+import { hostedViewGate } from '../native/viewGate'
 import { VIEW_SECURITY_HEADERS, resolveViewTarget, viewFileResponse, type ViewQuery } from '../native/view'
 
 const CACHE_DIR = join(process.cwd(), '.cache', 'images')
@@ -36,33 +35,7 @@ export default defineEventHandler(async (event) => {
   // used to walk straight past a `type === 'output'` gate and return the
   // protected bytes. viewGateDecision resolves it the engine's way.
   // type=temp/type=input stay ungated this stage (documented gap).
-  if (deployMode() === 'hosted') {
-    const userId = event.context.userId
-    if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-    // Round-2 review F5: `?filename=a.png&filename=b.png` makes getQuery return
-    // an ARRAY, and the `as string` cast above is a lie the gate then trips
-    // over — viewGateDecision calls .startsWith on it and the tenant check dies
-    // with a TypeError, i.e. a 500 instead of a decision. Reject rather than
-    // coerce: String(['a','b']) is "a,b", which is neither what the gate would
-    // check nor what the loop below forwards for a repeated key, so coercion
-    // would let the gate key and the engine request disagree about the file.
-    if (Array.isArray(query.filename) || Array.isArray(query.type) || Array.isArray(query.subfolder)) {
-      throw createError({ statusCode: 400, message: 'invalid filename' })
-    }
-    const gate = viewGateDecision({ filename, type, subfolder })
-    if (gate.kind === 'reject') throw createError({ statusCode: gate.status, message: gate.message })
-    if (gate.kind === 'check') {
-      let owned = await ownedOutputKeys(userId)
-      if (!owned.has(gate.key)) {
-        // Race window: the client saw the WS 'executed' event a beat before
-        // the settle watcher recorded outputs. Harvest this user's pending
-        // runs once, then re-check.
-        await harvestPendingOutputs(userId)
-        owned = await ownedOutputKeys(userId)
-        if (!owned.has(gate.key)) throw createError({ statusCode: 404, message: 'Image not found' })
-      }
-    }
-  }
+  if (deployMode() === 'hosted') await hostedViewGate(event.context.userId, query as ViewQuery)
 
   // Engine-free Phase A: the bytes come straight off disk, resolved exactly as
   // ComfyUI's view_image resolved them (server/native/view.ts).

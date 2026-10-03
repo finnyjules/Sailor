@@ -6,6 +6,7 @@
  * .env.hosted and vendor dashboards.
  */
 import { isHosted } from '~~/server/utils/deployMode'
+import { ENGINE_MAIN_PORT, engineHealth } from '~~/server/native/engineHealth'
 
 export interface ConsoleLink { label: string; href: string }
 export interface ConsoleCard {
@@ -101,12 +102,6 @@ const SECTIONS: ConsoleSection[] = [
         blurb: 'The ⛵ State of the Build artifact — thesis, roadmap acts, surface maturity. Updated on every commit.',
         primary: { label: 'Open dashboard', href: 'https://claude.ai/code/artifact/beb788b5-493b-4597-aa66-ce8a5609df89' },
       },
-      {
-        name: 'ComfyUI engine',
-        status: 'live',
-        blurb: 'The local engine this canvas runs on. Always 127.0.0.1, never localhost.',
-        primary: { label: 'Engine · :8188', href: 'http://127.0.0.1:8188' },
-      },
     ],
   },
   {
@@ -143,8 +138,27 @@ const SECTIONS: ConsoleSection[] = [
   },
 ]
 
-export default defineEventHandler(() => {
+/**
+ * The local engine's card (step 3, R10.8): shown only while the engine is up —
+ * it runs only the local-only nodes now, and a link to nothing helps nobody.
+ */
+export function engineCard(): ConsoleCard {
+  return {
+    name: 'Local engine',
+    status: 'live',
+    blurb: 'Runs the local-only nodes on this Mac, while it is on. Always 127.0.0.1, never localhost.',
+    primary: { label: 'Open the local engine', href: `http://127.0.0.1:${ENGINE_MAIN_PORT}` },
+  }
+}
+
+/** The console's sections; the engine's card joins "Code & deploy" when the engine is up. */
+export function consoleSections(engineUp: boolean): ConsoleSection[] {
+  if (!engineUp) return SECTIONS
+  return SECTIONS.map(s => s.title === 'Code & deploy' ? { ...s, cards: [...s.cards, engineCard()] } : s)
+}
+
+export default defineEventHandler(async () => {
   if (isHosted())
     throw createError({ statusCode: 404, message: 'Not found' })
-  return { sections: SECTIONS }
+  return { sections: consoleSections(await engineHealth() === 'up') }
 })

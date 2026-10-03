@@ -1,5 +1,5 @@
 // Proxy ComfyUI API paths to the backend.
-// The ComfyUI iframes load directly from :8188, but the Nuxt frontend
+// The ComfyUI iframes load directly from the engine, but the Nuxt frontend
 // still makes fetch() calls to these paths (e.g. /queue, /comfyui/settings).
 
 import { PROXY_PREFIXES } from '../utils/authGuard'

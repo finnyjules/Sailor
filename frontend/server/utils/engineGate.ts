@@ -501,7 +501,7 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
   return parsed
 }
 
-const MAIN_ENGINE = 'http://127.0.0.1:8188'
+const MAIN_ENGINE = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
 const HARVEST_CAP = 20
 
 /**

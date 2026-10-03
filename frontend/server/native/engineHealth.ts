@@ -13,7 +13,12 @@ export const ENGINE_HEALTH_CACHE_MS = 3_000
 export const ENGINE_HEALTH_TIMEOUT_MS = 1_500
 /** The local engine's port. */
 export const ENGINE_MAIN_PORT = 8188
-const ENGINE_ORIGIN = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
+/**
+ * The local engine's address — the one place a server file names it (R10.8;
+ * guarded by tests/unit/server-engine-port-guard.unit.spec.ts). Only the
+ * local-only paths (decision 4's classes, the local proxy) may reach it.
+ */
+export const ENGINE_ORIGIN = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
 
 /** True when the engine answers /system_stats at all (any status), false on refusal or timeout. */
 export async function probeEngine(fetchFn: typeof fetch = (...a) => fetch(...a)): Promise<boolean> {

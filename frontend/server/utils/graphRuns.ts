@@ -43,7 +43,7 @@ export function savedInputKey(o: { filename: string; subfolder?: string }): stri
 
 /**
  * `target` (review I4) is the engine base URL that actually ran the prompt
- * (`http://127.0.0.1:8188`). The /view race-window harvest polls it.
+ * (the local engine, ENGINE_ORIGIN). The /view race-window harvest polls it.
  * Nullable so pre-existing rows (and any caller that doesn't know) fall back
  * to the main engine.
  */

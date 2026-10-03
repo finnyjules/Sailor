@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { historyEntryToRecord, type GenKind } from '~/lib/generations'
+import { isRunnerPromptId } from '#shared/runner/messages'
 
 // Every saved generation in a project, grouped by project. Unlike
 // useRecentProjects (which caps at 3 images for the home cards), this keeps the
@@ -91,7 +92,8 @@ export function useProjectGenerations() {
         const res = await fetch('/history')
         const data = (await res.json()) as Record<string, any>
         for (const [promptId, entry] of Object.entries(data)) {
-          if (recordedPromptIds.has(promptId)) continue
+          // A runner stage is in the durable records already (the runner writes them, R10.8).
+          if (recordedPromptIds.has(promptId) || isRunnerPromptId(promptId)) continue
           const parsed = historyEntryToRecord(promptId, entry)
           if (!parsed) continue
           const e = entry as any

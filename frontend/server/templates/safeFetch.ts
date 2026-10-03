@@ -14,11 +14,14 @@
  *   - redirects are followed by hand (at most 3), each one checked again;
  *   - 20 seconds in all, and at most 30 MB.
  * Locally (not hosted) one exception keeps the canvas working: a loopback
- * `/view` URL on ComfyUI's configured port (SAILOR_COMFY_ORIGIN, as Python
- * reads it; 8188 by default), which Python sends for a wired picture, or on
- * the ports the caller names (the route: the port its own request came in
- * on and the app's configured port, which the editor's absolute /view URLs
- * use; never the Host header's). Hosted, loopback is refused like the rest.
+ * `/view` URL on the engine's port (8188), which Python sent for a wired
+ * picture, or on the ports the caller names (the route: the port its own
+ * request came in on and the app's configured port, which the editor's
+ * absolute /view URLs use; never the Host header's). Step 3, R10.8: such a
+ * URL is never fetched — Sailor reads the file it names off disk, by name,
+ * exactly as GET /view resolves it (server/native/view.ts), under the same
+ * byte cap and budget; no connection is made to any port. Hosted, loopback
+ * is refused like the rest.
  *
  * Fix round 2: no connection is ever reused (`agent: false`), so every
  * request resolves and checks its address, and the connected socket's
@@ -39,6 +42,8 @@ import http from 'node:http'
 import https from 'node:https'
 import type { LookupFunction } from 'node:net'
 import type { ByteBudget, ImageFetcher } from './inlineImages'
+import { ENGINE_MAIN_PORT } from '../native/engineHealth'
+import { readViewFile, viewQueryOf } from '../native/viewRead'
 import { LAYOUT_IMAGES_TOO_LARGE } from '../../shared/template-grid/limits'
 
 export const FETCH_REFUSED = 'An image in this layout points at a private network address, which is not allowed'
@@ -76,20 +81,41 @@ function unmapped(address: string): { address: string; family: 'ipv4' | 'ipv6' }
   return { address, family: isIP(address) === 6 ? 'ipv6' : 'ipv4' }
 }
 
-/** Whether an address may be fetched; `loopbackOk`: a loopback address is let through (local /view). */
+/** Whether an address may be fetched; `loopbackOk`: a loopback address is let through. */
 export function addressAllowed(address: string, loopbackOk = false): boolean {
   const a = unmapped(address)
   if (loopbackOk && LOOPBACK.check(a.address, a.family)) return true
   return !BLOCKED.check(a.address, a.family)
 }
 
-/** ComfyUI's port, as Python's _COMFY_VIEW_ORIGIN reads it. */
+/** The engine's port, on which Python's wired pictures named their `/view` URLs. */
 export function comfyViewPort(): number {
-  try {
-    const u = new URL(process.env.SAILOR_COMFY_ORIGIN || 'http://127.0.0.1:8188')
-    return Number(u.port || (u.protocol === 'https:' ? 443 : 80))
+  return ENGINE_MAIN_PORT
+}
+
+/** A host that is this machine: `localhost`, or a loopback address written as one. */
+function isLoopbackHost(host: string): boolean {
+  if (/^localhost\.?$/i.test(host)) return true
+  if (!isIP(host)) return false
+  const a = unmapped(host)
+  return LOOPBACK.check(a.address, a.family)
+}
+
+/**
+ * A loopback `/view` URL, read off disk by name (R10.8): the file GET /view
+ * would serve, or the status it would answer. The caller's cap, budget and
+ * signal apply as to a download.
+ */
+async function readLoopbackView(u: URL, o: { maxBytes: number; budget?: ByteBudget; words: SafeFetchWords; stopped: () => boolean }): Promise<{ status: number; contentType: string | null; data: ArrayBuffer }> {
+  const r = await readViewFile(viewQueryOf(u.searchParams), o.maxBytes)
+  if (o.stopped()) throw new Error('Stopped')
+  if (r.kind === 'tooLarge') throw new FetchRefused(o.words.tooLarge)
+  if (r.kind === 'status') return { status: r.status, contentType: null, data: new ArrayBuffer(0) }
+  if (o.budget) {
+    if (r.data.byteLength > o.budget.left) throw new FetchRefused(LAYOUT_IMAGES_TOO_LARGE)
+    o.budget.left -= r.data.byteLength
   }
-  catch { return 8188 }
+  return { status: 200, contentType: r.contentType, data: r.data.buffer.slice(r.data.byteOffset, r.data.byteOffset + r.data.byteLength) as ArrayBuffer }
 }
 
 /**
@@ -115,7 +141,7 @@ export function localViewPorts(o: { localPort?: unknown; env?: NodeJS.ProcessEnv
 export interface SafeFetchOptions {
   /** Hosted (a shared server): no loopback exception. */
   hosted: boolean
-  /** Locally, loopback ports whose `/view` may be fetched besides ComfyUI's (the route's own). */
+  /** Locally, loopback ports whose `/view` is read besides the engine's (the route's own). */
   viewPorts?: readonly number[]
   timeoutMs?: number
   maxBytes?: number
@@ -130,15 +156,15 @@ export interface SafeFetchWords { refused: string; tooLarge: string; timeout: st
 const LAYOUT_WORDS: SafeFetchWords = { refused: FETCH_REFUSED, tooLarge: FETCH_TOO_LARGE, timeout: FETCH_TIMEOUT }
 
 /** One request, its answer's status, headers and body (at most `maxBytes`). */
-function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxBytes: number; budget?: ByteBudget; stopped: () => boolean; words: SafeFetchWords; accept: string }): Promise<{ status: number; location?: string; contentType: string | null; data: ArrayBuffer }> {
+function requestOnce(u: URL, o: { signal: AbortSignal; maxBytes: number; budget?: ByteBudget; stopped: () => boolean; words: SafeFetchWords; accept: string }): Promise<{ status: number; location?: string; contentType: string | null; data: ArrayBuffer }> {
   const { words } = o
   const host = hostOf(u)
-  if (isIP(host) && !addressAllowed(host, loopbackOk)) return Promise.reject(new FetchRefused(words.refused))
+  if (isIP(host) && !addressAllowed(host)) return Promise.reject(new FetchRefused(words.refused))
   const checkedLookup: LookupFunction = (hostname, options, cb) => {
     dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return (cb as (e: Error) => void)(err)
       const list = addresses as unknown as { address: string; family: number }[]
-      if (!list.length || list.some(a => !addressAllowed(a.address, loopbackOk))) return (cb as (e: Error) => void)(new FetchRefused(words.refused))
+      if (!list.length || list.some(a => !addressAllowed(a.address))) return (cb as (e: Error) => void)(new FetchRefused(words.refused))
       // `localhost` over IPv4 first (fix round 4): on this kind of machine
       // [::1] can be another listener on the same port (a 426 answer).
       if (/^localhost\.?$/i.test(hostname)) list.sort((a, b) => (a.family === 4 ? 0 : 1) - (b.family === 4 ? 0 : 1))
@@ -201,7 +227,7 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
     req.on('socket', (sock) => {
       sock.once('connect', () => {
         const at = sock.remoteAddress
-        if (at && !addressAllowed(at, loopbackOk)) req.destroy(new FetchRefused(words.refused))
+        if (at && !addressAllowed(at)) req.destroy(new FetchRefused(words.refused))
       })
     })
     req.on('error', (e) => {
@@ -217,7 +243,7 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
 export interface SafeFetchPolicy {
   /** Hosted (a shared server): no loopback exception. */
   hosted: boolean
-  /** Locally, a loopback `/view` on ComfyUI's port (or these) is let through; false for callers that never need it. */
+  /** Locally, a loopback `/view` on the engine's port (or these) is read off disk; false for callers that never need it. */
   loopbackView: boolean
   viewPorts?: readonly number[]
   timeoutMs: number
@@ -245,8 +271,10 @@ export async function safeFetch(url: string, p: SafeFetchPolicy, o: { signal?: A
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchRefused(p.words.refused)
     const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
-    const loopbackOk = p.loopbackView && !p.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!p.viewPorts?.includes(port))
-    const r = await requestOnce(u, loopbackOk, { signal, maxBytes: p.maxBytes, budget: o.budget, stopped, words: p.words, accept: p.accept }).catch((e: unknown) => {
+    const localView = p.loopbackView && !p.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!p.viewPorts?.includes(port))
+    // R10.8: a loopback /view is read by name, never fetched over a port.
+    if (localView && isLoopbackHost(hostOf(u))) return readLoopbackView(u, { maxBytes: p.maxBytes, budget: o.budget, words: p.words, stopped })
+    const r = await requestOnce(u, { signal, maxBytes: p.maxBytes, budget: o.budget, stopped, words: p.words, accept: p.accept }).catch((e: unknown) => {
       if (stopped()) throw new Error('Stopped')
       if (signal.aborted && !(e instanceof FetchRefused)) throw new FetchRefused(p.words.timeout)
       throw e

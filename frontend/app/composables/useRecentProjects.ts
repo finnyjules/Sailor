@@ -1,4 +1,5 @@
 import { historyEntryToRecord, type GenOutput } from '~/lib/generations'
+import { isRunnerPromptId } from '#shared/runner/messages'
 import { buildPreviewImages } from '~/lib/projectCover'
 
 export interface RecentProject {
@@ -129,6 +130,8 @@ export function useRecentProjects() {
         const data = (await res.json()) as Record<string, any>
         const byFingerprint = new Map<string, RecentProject>()
         for (const [promptId, entry] of Object.entries(data)) {
+          // A runner stage: the runner wrote its own record (R10.8) — never re-posted from here.
+          if (isRunnerPromptId(promptId)) continue
           const parsed = historyEntryToRecord(promptId, entry)
           if (!parsed) continue
           if (parsed.projectUuid && durableIds.has(parsed.projectUuid)) {
