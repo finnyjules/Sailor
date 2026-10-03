@@ -19,8 +19,8 @@ import { PNG } from 'pngjs'
 
 const thisDir = fileURLToPath(new URL('.', import.meta.url))
 const repoRoot = path.resolve(thisDir, '../..')
-const fixturesDir = path.join(repoRoot, 'tests-unit', 'timeline_fixtures')
-const goldenDir = path.join(repoRoot, 'tests-unit', 'timeline_golden')
+const fixturesDir = path.join(repoRoot, 'frontend', 'tests', 'fixtures', 'timeline')
+const goldenDir = path.join(repoRoot, 'frontend', 'tests', 'fixtures', 'timeline-golden')
 
 // Perceptibility threshold for "this channel sample differs": 8/255.
 // CALIBRATION (Julien's dev Mac, 2026-06-09, 14 frames across 3 fixtures):

@@ -87,7 +87,7 @@ async function readEmbedVideo(blob: Blob) {
 }
 
 // The last file the recorder made, so a debugging script can pull it out of
-// the page (fileBase64) and inspect it with compare_videos.py.
+// the page (fileBase64) and inspect it with ffprobe.
 const lastFile: { browser?: Blob } = {}
 
 async function fileBase64(which: 'browser') {

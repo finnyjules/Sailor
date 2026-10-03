@@ -748,11 +748,9 @@ describe('the runner\'s deliberate deviation: the conditioning render makes the 
     expect(paidNoCall('PoseMannequin', withPictures(c).n!.inputs)).toBe(false)
   })
 
-  it('the ComfyUI path is unchanged: Python still raises there (priced as a call, charged only if it finished, which it never does)', () => {
+  it('the ComfyUI path\'s price is unchanged: Python raised there (priced as a call, charged only if it finished, which it never did)', () => {
     const c = caseNamed('pose · mannequin · conditioning render')
     expect(priceGraph(withPictures(c)).nodes!.n).toBe(14)
-    const src = readFileSync(resolve(__dirname, '../../../comfy_extras/nodes_pose_mannequin.py'), 'utf8')
-    expect(src).toContain('cond = _load_input_image(pose_cond_image) or _load_input_image(mannequin_image)')
   })
 })
 

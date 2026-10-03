@@ -54,12 +54,9 @@ describe('pyMod is Python’s float %', () => {
   })
 })
 
-describe('ratio sets match comfy_api_nodes/image_models.py', () => {
-  const src = readFileSync(fileURLToPath(new URL('../../../comfy_api_nodes/image_models.py', import.meta.url)), 'utf8')
-  const python = new Map<string, Set<string>>()
-  for (const m of src.matchAll(/^(_[A-Z0-9_]+_AR)\s*=\s*\{([^}]*)\}/gm)) {
-    python.set(m[1]!, new Set([...m[2]!.matchAll(/"([^"]+)"/g)].map(x => x[1]!)))
-  }
+describe('ratio sets match comfy_api_nodes/image_models.py (frozen at C7)', () => {
+  const frozen = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/python-image-ratio-sets.json', import.meta.url)), 'utf8')).sets as Record<string, string[]>
+  const python = new Map<string, Set<string>>(Object.entries(frozen).map(([k, v]) => [k, new Set(v)]))
   // Sets whose builders the runner does not port.
   const NOT_PORTED: Record<string, string> = {
     _IDEOGRAM_V3_AR: 'ideogram-v3 runs on fal, which takes image_size; its Replicate builder is not ported',
@@ -67,10 +64,8 @@ describe('ratio sets match comfy_api_nodes/image_models.py', () => {
     _KREA_AR: 'krea-2-large and krea-2-medium are priced, but the runner takes them only with their own family (not built yet)',
   }
 
-  it('the Python file has the sets (the parser works)', () => {
+  it('the frozen file has the sets (every `_X_AR =` line was parsed when it was frozen)', () => {
     expect(python.size).toBeGreaterThan(20)
-    // Every `_X_AR =` line was parsed: a set the parser skipped would go unchecked.
-    expect(python.size).toBe(src.match(/^_[A-Z0-9_]+_AR\s*=/gm)!.length)
     expect(python.get('_OPENAI_AR')).toEqual(new Set(['1:1', '3:2', '2:3']))
   })
   it('every Python set is ported the same, or named as not ported', () => {

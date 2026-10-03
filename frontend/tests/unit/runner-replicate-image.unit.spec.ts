@@ -140,19 +140,11 @@ describe('optFloat', () => {
 
 // ── The model list, guarded against the Python catalog ───────────────────
 
-interface PyModel { id: string; slug: string; builder: string; primary: string; tags: string[] }
-const PY_SRC = readFileSync(fileURLToPath(new URL('../../../comfy_api_nodes/image_models.py', import.meta.url)), 'utf8')
+interface PyModel { id: string; slug: string; builder: string; primary: string; fal_slug: string | null; tags: string[] }
 
-/** Every ImageModel(...) entry of image_models.py MODELS. */
+/** Every ImageModel(...) entry of image_models.py MODELS, frozen when Python left the repo (C7). */
 function pythonModels(): PyModel[] {
-  const block = PY_SRC.slice(PY_SRC.indexOf('MODELS: list[ImageModel] = ['), PY_SRC.indexOf('\nIMAGE_MODELS_BY_ID:'))
-  const chunks = block.split(/\n\s*ImageModel\(/).slice(1)
-  return chunks.map((ch) => {
-    const head = ch.match(/^"([^"]+)",\s*"[^"]*",\s*"[^"]*",\s*"([^"]+)",\s*sorted\([^)]*\),\s*(\w+)/)
-    if (!head) throw new Error(`could not read an ImageModel entry: ${ch.slice(0, 80)}`)
-    const tags = ch.match(/tags=\(([^)]*)\)/)?.[1]?.match(/"([^"]+)"/g)?.map(t => t.slice(1, -1)) ?? []
-    return { id: head[1]!, slug: head[2]!, builder: head[3]!, primary: ch.match(/primary="(\w+)"/)?.[1] ?? 'replicate', tags }
-  })
+  return JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/python-image-models.json', import.meta.url)), 'utf8')).models
 }
 
 describe('the Replicate image list', () => {
@@ -161,7 +153,7 @@ describe('the Replicate image list', () => {
 
   it('reads the Python catalog', () => {
     expect(py.length).toBeGreaterThanOrEqual(43)
-    expect(byId.get('flux-2-pro')).toEqual({ id: 'flux-2-pro', slug: 'black-forest-labs/flux-2-pro', builder: '_b_flux_2_pro', primary: 'replicate', tags: ['flagship'] })
+    expect(byId.get('flux-2-pro')).toEqual({ id: 'flux-2-pro', slug: 'black-forest-labs/flux-2-pro', builder: '_b_flux_2_pro', primary: 'replicate', fal_slug: 'fal-ai/flux-2-pro', tags: ['flagship'] })
     expect(byId.get('flux-schnell')!.primary).toBe('fal')
   })
 
@@ -172,7 +164,7 @@ describe('the Replicate image list', () => {
       expect(IMAGE_MODELS_BY_ID[id]!.pricePerImage!, id).toBeGreaterThan(0)
       const m = byId.get(id)
       expect(m, id).toBeDefined()
-      expect(PY_SRC, id).toContain(`def ${m!.builder}(`)
+      expect(m!.builder, id).toMatch(/^_b_\w+$/)
       expect(m!.primary, id).toBe('replicate')
       expect(RUNNER_REPLICATE_IMAGE_MODELS[id]!.slug, id).toBe(m!.slug)
     }
@@ -223,7 +215,7 @@ describe('the Replicate image list', () => {
 
   it('sends flux-2-* to Replicate, their Python primary, not their fal twin (D5)', async () => {
     for (const id of ['flux-2-max', 'flux-2-pro', 'flux-2-flex', 'flux-2-dev']) {
-      expect(PY_SRC).toMatch(new RegExp(`ImageModel\\("${id}"[^\\n]*\\n\\s*fal_slug="fal-ai/${id}"`))
+      expect(byId.get(id)!.fal_slug, id).toBe(`fal-ai/${id}`)
       const plan = await planNode({ prompt: one(img(id)), nodeId: '1', filesFrom: () => [], toUrl: async () => 'x', gateOpen: false })
       if (plan.kind !== 'provider') throw new Error('expected a provider plan')
       expect(plan.provider).toBe('replicate')

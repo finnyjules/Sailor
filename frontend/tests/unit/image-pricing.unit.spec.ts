@@ -22,8 +22,6 @@ import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes, widgetValueMap } from '~/lib/costEstimate'
 
 const SINK = { class_type: 'SaveImage', inputs: {} }
-const REPO = fileURLToPath(new URL('../../../', import.meta.url))
-const PY = readFileSync(`${REPO}comfy_api_nodes/image_models.py`, 'utf8')
 
 /** What priceGraph charges for one image node plus an output node (includes 1 credit base render). */
 function charge(inputs: Record<string, unknown>): number {
@@ -33,12 +31,12 @@ function charge(inputs: Record<string, unknown>): number {
 /** The catalogue models with no published price: refused, never charged at 0. */
 const UNPRICED = ['reve-create', 'seedream-5-pro']
 
-/** The ids whose Python primary is fal (`primary="fal"` in image_models.py). */
+/** The ids whose Python primary was fal (`primary="fal"` in image_models.py, frozen at C7). */
 function pythonFalPrimaries(): string[] {
-  const out: string[] = []
-  const re = /ImageModel\("([^"]+)"[\s\S]*?(?=ImageModel\(|\n\]\n)/g
-  for (const m of PY.matchAll(re)) if (/primary="fal"/.test(m[0])) out.push(m[1]!)
-  return out
+  return [
+    'flux-1.1-pro', 'flux-schnell', 'nano-banana-pro', 'nano-banana-2', 'ideogram-v3-quality', 'ideogram-v3-balanced',
+    'ideogram-v3-turbo', 'seedream-5-pro', 'seedream-5-lite', 'seedream-4', 'krea-2-large', 'krea-2-medium',
+  ]
 }
 
 describe('the image rate card', () => {
@@ -131,23 +129,17 @@ function bflMp(label: unknown, allowed: string[]): number {
 }
 
 /**
- * Picture counts the Python Replicate fallover of a fal-first model can ask
- * for, where they exceed the fal builder's (the ComfyUI path uses it when fal
- * is not set up). Parsed from comfy_api_nodes/image_models.py.
+ * Picture counts the Python Replicate fallover of a fal-first model could ask
+ * for, where they exceed the fal builder's (the ComfyUI path used it when fal
+ * was not set up). Parsed from comfy_api_nodes/image_models.py's builders
+ * (`min(N, _opt_int(adv, "<field>"…`), frozen when Python left the repo (C7);
+ * the other fal-first models' fallovers capped no count.
  */
-function pyReplicateBody(id: string): string {
-  const head = new RegExp(`ImageModel\\("${id}",[^\\n]*?,\\s+(_b_\\w+),?\\s*\\n`).exec(PY)
-  expect(head, id).not.toBeNull()
-  const i = PY.indexOf(`def ${head![1]}(`)
-  expect(i, head![1]).toBeGreaterThan(0)
-  const rest = PY.slice(i + 4)
-  return rest.slice(0, rest.search(/\ndef |\n# [-=]{3,}/))
+const PY_FALLOVER_COUNT_CAPS: Record<string, Record<string, number>> = {
+  'flux-schnell': { num_outputs: 4 },
+  'seedream-5-lite': { max_images: 15 },
 }
-function pyCountCap(body: string, field: string): number | null {
-  const m = new RegExp(`min\\((\\d+), _opt_int\\(adv, "${field}"`).exec(body)
-  return m ? Number(m[1]) : null
-}
-const SEEDREAM_LITE_PY_MAX = pyCountCap(pyReplicateBody('seedream-5-lite'), 'max_images')!
+const SEEDREAM_LITE_PY_MAX = PY_FALLOVER_COUNT_CAPS['seedream-5-lite']!.max_images!
 /** The count the Seedream 5 Lite fallover sends (_b_seedream_5_lite), which the price covers. */
 function seedreamLiteFalloverCount(adv: Record<string, unknown>): number {
   return optStr(adv, 'sequential_image_generation', 'disabled') === 'auto'
@@ -271,10 +263,7 @@ describe('settings parity: the price reads what the builder sends', () => {
     expect(falFirst.length).toBeGreaterThanOrEqual(12)
     for (const id of falFirst) {
       if (!imageRate(id)) continue // unpriced (seedream-5-pro): refused on both paths
-      const body = pyReplicateBody(id)
-      for (const field of ['max_images', 'num_outputs', 'num_images']) {
-        const cap = pyCountCap(body, field)
-        if (cap == null) continue
+      for (const [field, cap] of Object.entries(PY_FALLOVER_COUNT_CAPS[id] ?? {})) {
         expect(maxImageCount(id), `${id} ${field}`).toBeGreaterThanOrEqual(cap)
         // …and a request at that cap is priced for all of it.
         const adv = { [field]: cap, sequential_image_generation: 'auto' }
@@ -291,7 +280,6 @@ describe('settings parity: the price reads what the builder sends', () => {
       'nano-banana-pro': { '1K': 0.15, '2K': 0.15, '4K': 0.30 },
     }
     for (const [id, tiers] of Object.entries(REPLICATE_TIERS)) {
-      expect(pyReplicateBody(id), id).toContain('"resolution": _opt_str(adv, "resolution"')
       for (const [tier, usd] of Object.entries(tiers)) {
         expect(providerUsd('GenerateImageNode', { model: id, model_options: JSON.stringify({ resolution: tier }) })!, `${id} ${tier}`)
           .toBeGreaterThanOrEqual(usd)
@@ -304,26 +292,9 @@ describe('settings parity: the price reads what the builder sends', () => {
   // The models the runner does not build: their Python builders send nothing
   // the service prices by (no size, quality, count or style pictures).
   it('the ComfyUI-only models send one picture and no priced setting (Python builders)', () => {
-    const body = (name: string) => {
-      const i = PY.indexOf(`def ${name}(`)
-      expect(i, name).toBeGreaterThan(0)
-      const rest = PY.slice(i + 4)
-      return rest.slice(0, rest.search(/\ndef |\n# -{3,}/))
-    }
-    const builderOf: Record<string, string> = {
-      'recraft-v4-pro-svg': '_b_recraft_v4',
-      'recraft-v4-svg': '_b_recraft_v4',
-      'recraft-v3-svg': '_b_recraft_v3_svg',
-      'krea-2-large': '_fal_krea2',
-      'krea-2-medium': '_fal_krea2',
-    }
-    for (const [id, fn] of Object.entries(builderOf)) {
-      expect(PY, id).toMatch(new RegExp(`ImageModel\\("${id}"[^\\n]*${fn === '_fal_krea2' ? '_b_krea2' : fn}`))
-      const b = body(fn)
-      expect(b, fn).toContain('"prompt": prompt')
-      for (const field of ['num_outputs', 'num_images', 'resolution', 'quality', '"size"', 'megapixels', 'image_style_references', 'refs']) {
-        expect(b.replace('refs: list[str] | None = None', ''), `${fn} sends ${field}`).not.toContain(field)
-      }
+    // Each one's Python builder (frozen at C7: _b_recraft_v4, _b_recraft_v3_svg,
+    // _fal_krea2) sent the prompt and no count, size, quality or style picture.
+    for (const id of ['recraft-v4-pro-svg', 'recraft-v4-svg', 'recraft-v3-svg', 'krea-2-large', 'krea-2-medium']) {
       for (const ar of ['1:1', '16:9', undefined]) {
         expect(effectiveImageSettings(id, ar, '{"resolution":"4K","quality":"high","num_outputs":4}'))
           .toEqual({ images: 1, tier: null, megapixels: null, webSearch: false })

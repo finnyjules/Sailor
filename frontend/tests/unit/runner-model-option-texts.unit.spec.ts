@@ -98,7 +98,16 @@ describe('the lists of option texts are the builders\' own', () => {
   })
 
   it('Python\'s builders (video_models.py, image_models.py `_opt_str`) read no other free-text option', () => {
-    const read = (file: string) => new Set([...readFileSync(resolve(__dirname, `../../../comfy_api_nodes/${file}`), 'utf8').matchAll(/_opt_str\(adv, "([a-z_]+)"/g)].map(m => m[1]!))
+    // Every `_opt_str(adv, "<key>"` in each Python file, frozen when Python left the repo (C7).
+    const PY_OPT_STR: Record<string, string[]> = {
+      'video_models.py': ['end_image_url', 'image_url', 'negative_prompt', 'prompt_expansion_mode', 'resolution', 'style'],
+      'image_models.py': [
+        'background', 'creativity', 'input_fidelity', 'magic_prompt', 'megapixels', 'negative_prompt', 'output_format',
+        'output_megapixels', 'quality', 'resolution', 'safety_filter_level', 'sequential_image_generation', 'size',
+        'speed_mode', 'style', 'style_type', 'version',
+      ],
+    }
+    const read = (file: string) => new Set(PY_OPT_STR[file])
     // Links (handled as references), and choices Python passes on as picked in the gallery: not the user's own words.
     const videoChoices = new Set(['image_url', 'end_image_url', 'resolution', 'style', 'prompt_expansion_mode'])
     expect([...read('video_models.py')].filter(k => !videoChoices.has(k)).sort()).toEqual([...MODEL_OPTION_TEXT_KEYS.GenerateVideoNode].sort())

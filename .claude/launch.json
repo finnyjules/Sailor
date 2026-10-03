@@ -30,12 +30,6 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--dir", "frontend", "dev", "--dotenv", ".env.hosted", "--port", "3004", "--host", "127.0.0.1"],
       "port": 3004
-    },
-    {
-      "name": "comfyui",
-      "runtimeExecutable": "/Users/julien/Documents/GitHub/Sailor/.venv/bin/python3.12",
-      "runtimeArgs": ["main.py", "--listen", "127.0.0.1", "--port", "8188"],
-      "port": 8188
     }
   ]
 }

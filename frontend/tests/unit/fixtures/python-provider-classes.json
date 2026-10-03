@@ -1,0 +1,26 @@
+{
+  "note": "The node_id of every IO.ComfyNode class in comfy_api_nodes/nodes_replicate.py, and in each comfy_extras module that dispatched to a provider (the lazy `from comfy_api_nodes.nodes_replicate import`), frozen when Python left the repo (step 4, C7). Read by price-graph.unit.spec.ts.",
+  "nodes_replicate": [
+      "FluxLoRARemoteNode", "FluxMultiLoRARemoteNode", "FluxProRemoteNode", "FluxKontextRemoteNode", "KlingVideoRemoteNode", "ClarityUpscaleRemoteNode",
+      "IdeogramV3TurboRemoteNode", "Veo3RemoteNode", "Seedance2RemoteNode", "WhisperRemoteNode", "MusicGenRemoteNode", "MiniMaxSpeechRemoteNode",
+      "Hunyuan3DRemoteNode", "Hunyuan3DMultiViewNode", "RemoveBackgroundRemoteNode", "RestorePhotoRemoteNode", "DescribeImageRemoteNode", "LipsyncRemoteNode",
+      "GenerateImageNode", "EditImageNode", "DevelopImageNode", "GenerateFromReferencesNode", "BlendSceneNode", "RestyleFromImageNode",
+      "RestyleWithLoRANode", "ProductShotNode", "RotateCameraNode", "TextEffectNode", "GenerateVideoNode", "FilmShotNode",
+      "UpscaleImageNode", "EnhanceDetailNode", "RemoveBackgroundNode", "RestorePhotoNode", "FixFacesNode", "LayerizeGraphicNode",
+      "SplitPhotoLayersNode", "SeedreamLayerizeNode", "OutpaintImageNode", "DescribeImageNode", "LipsyncNode", "LipSyncNode",
+      "TranscribeAudioNode", "GenerateMusicNode", "GenerateSpeechNode", "Generate3DNode", "SketchToImageNode", "ExtractTextNode",
+      "FindObjectsNode", "ConsistentFaceNode", "EnhanceVideoNode", "DescribeVideoNode", "CloneSingingVoiceNode", "IdentifySpeakersNode",
+      "ChatLLMNode", "ImprovePromptNode", "SummarizeTextNode", "TranslateTextNode", "RewriteToneNode", "BrainstormIdeasNode",
+      "ReasonStepByStepNode"
+  ],
+  "comfy_extras": {
+    "nodes_edit_actions.py": ["RemoveObjectNode","TextEditNode","RecolorObjectNode"],
+    "nodes_lens_reframe.py": ["LensReframe"],
+    "nodes_person_swap.py": ["PersonSwap"],
+    "nodes_pose_mannequin.py": ["PoseMannequin"],
+    "nodes_relight.py": ["RelightNode"],
+    "nodes_swap_background.py": ["SwapBackgroundNode"],
+    "nodes_swap_product.py": ["SwapProductNode"],
+    "nodes_turntable.py": ["TurntableNode"]
+  }
+}

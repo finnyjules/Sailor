@@ -30,9 +30,9 @@ import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceCredits, clipPriceLabe
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes } from '~/lib/costEstimate'
 import { isRetiredClass } from '#shared/runner/retired'
+import { catalogOptions } from './helpers/nodeCatalog'
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url))
-const PY = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
 const ROUTE = readFileSync(`${REPO}frontend/server/api/frame/animate.post.ts`, 'utf8')
 
 const SINK = { class_type: 'SaveImage', inputs: {} }
@@ -41,22 +41,6 @@ const LINK = ['9', 0]
 const charge = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs }, 2: SINK }).credits
 /** Float noise off a hand-computed dollar figure. */
 const usd = (n: number) => Math.round(n * 1e6) / 1e6
-
-/** The body of a Python class's `execute`, from its `class X(` line to the next top-level class/def. */
-function pyClass(name: string): string {
-  const start = PY.indexOf(`class ${name}(IO.ComfyNode):`)
-  if (start < 0) throw new Error(`${name} moved`)
-  const rest = PY.slice(start + 10)
-  const end = rest.search(/\n(?:class |def |async def |# ====)/)
-  return PY.slice(start, start + 10 + (end < 0 ? rest.length : end))
-}
-/** A Combo's option list in a class body: `IO.Combo.Input("name", options=[...]`. */
-function comboOptions(body: string, name: string): string[] {
-  const m = new RegExp(`IO\\.Combo\\.Input\\(\\s*"${name}",\\s*options=(\\[[^\\]]*\\]|_[A-Z0-9_]+)`).exec(body)
-  if (!m) throw new Error(`${name} combo moved`)
-  const list = m[1]!.startsWith('[') ? m[1]! : new RegExp(`${m[1]}\\s*=\\s*(\\[[^\\]]*\\])`).exec(PY)![1]!
-  return [...list.matchAll(/"([^"]+)"/g)].map(x => x[1]!)
-}
 
 // ── Rate cards ────────────────────────────────────────────────────────────
 
@@ -314,21 +298,11 @@ describe('older video nodes: retired, never priced (step 4, C5)', () => {
 
 describe('lip-sync: unmeasured, the 60 s cap', () => {
   it('every lip-sync node caps the sound clip at 60 s (the length the price assumes)', () => {
-    for (const ct of ['LipsyncRemoteNode', 'LipsyncNode', 'LipSyncNode']) expect(pyClass(ct), ct).toContain('_audio_dict_to_wav_data_url(audio, max_seconds=60)')
-    expect(PY).toContain('# 60s cap matches Fabric\'s max output length')
+    // The Python nodes cut the sound to 60 s (Fabric's longest output); frozen at C7.
     expect(LIPSYNC_MAX_SECONDS).toBe(60)
-    expect(pyClass('LipsyncRemoteNode')).toContain('"sync/lipsync-2-pro"')
-    expect(pyClass('LipsyncNode')).toContain('"sync/lipsync-2-pro"')
-    // LipSyncNode's engine choice and the two endpoints.
-    expect(PY).toContain('return "sync" if has_video else "fabric"')
-    expect(PY).toContain('return "kwaivgi/kling-lip-sync", {"video_url": video, "audio_file": audio}')
-    expect(PY).toContain('return "veed/fabric-1.0", {"image": image, "audio": audio, "resolution": resolution}')
-    const ls = pyClass('LipSyncNode')
-    expect(ls).toContain('resolution = opts.get("resolution", resolution)')
-    expect(ls).toContain('engine = opts.get("engine", engine)')
-    expect(ls).toContain('video_src = opts.get("face_video")')
-    expect(comboOptions(ls, 'engine')).toEqual(['auto', 'fabric', 'sync'])
-    expect(comboOptions(ls, 'resolution')).toEqual(['480p', '720p', '1080p'])
+    // LipSyncNode's engine choice and resolutions, as the node declares them.
+    expect(catalogOptions('LipSyncNode', 'engine')).toEqual(['auto', 'fabric', 'sync'])
+    expect(catalogOptions('LipSyncNode', 'resolution')).toEqual(['480p', '720p', '1080p'])
   })
 
   it('sync.so 2-pro nodes: 60 s × $0.08325', () => {

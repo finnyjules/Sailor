@@ -43,6 +43,7 @@ import { ANSWER_NOT_SOUND } from '~~/server/runner/answerDownload'
 import { NO_OUTPUTS_MESSAGE, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodeMediaCheck } from '~~/server/runner/nodeMedia'
 import { createFakeFal } from './__runner__/kit'
+import { catalogOptions } from './helpers/nodeCatalog'
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-audio-gen.json'), 'utf8')) as {
   cases: (PaidCase & { text_len?: number })[]
@@ -159,9 +160,11 @@ describe('the fixture', () => {
 
   it('the lists are Python\'s', () => {
     expect(MINIMAX_VOICES.length).toBe(17)
-    const python = readFileSync(resolve(__dirname, '../../../comfy_api_nodes/nodes_replicate.py'), 'utf8')
-    for (const v of MINIMAX_VOICES) expect(python).toContain(`"${v}"`)
-    expect(python).toContain(`_MINIMAX_EMOTIONS = [${MINIMAX_EMOTIONS.map(e => `"${e}"`).join(', ')}]`)
+    // As the Python nodes declared them (the node catalogue, C6).
+    for (const ct of ['GenerateSpeechNode', 'MiniMaxSpeechRemoteNode']) {
+      for (const v of MINIMAX_VOICES) expect(catalogOptions(ct, 'voice_id'), ct).toContain(v)
+      expect(catalogOptions(ct, 'emotion'), ct).toEqual([...MINIMAX_EMOTIONS])
+    }
   })
 })
 

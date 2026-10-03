@@ -6,15 +6,16 @@
 # (docs/deploy/media-tools.md). The runtime's own `ffmpeg -version` step below
 # fails the build if they ever drift apart.
 #
-# PYTHON_BASE builds the tools only (meson and ninja come from a pinned venv);
-# no Python reaches the runtime image (step 3, R10.10).
+# PYTHON_BASE builds the video tools only: dav1d's build tools, meson and
+# ninja, come from a pinned venv. No Python reaches the runtime image (step 3,
+# R10.10), and the repo itself holds none (step 4, C7).
 # python:3.12-slim's multi-arch index digest, read from Docker Hub on 2026-09-28
 # (Debian trixie, snapshot @1789689600).
 ARG PYTHON_BASE=python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 # node:22-trixie-slim's multi-arch index digest, read from Docker Hub on
 # 2026-10-02 (Node 22.23.3, Debian trixie, the same snapshot @1789689600).
-# Used by both the build stage and the runtime, so native modules are
-# installed on the system they run on.
+# Used by the build stage, the depth model download and the runtime, so native
+# modules are installed on the system they run on.
 ARG NODE_BASE=node:22-trixie-slim@sha256:b26b04c123d9ff8ab646ceb18b9d75a1173acf64b9a401094b906d27b29338d4
 
 ###############################################################################
@@ -61,7 +62,7 @@ RUN MEDIA_TOOLS_WORK=/tmp/media-tools-work scripts/media-tools/build.sh /opt/med
 # Fetched here at build time only: the server reads them from
 # NUXT_DEPTH_MODEL_DIR and never downloads a model at run time in hosted.
 ###############################################################################
-FROM ${PYTHON_BASE} AS depth-model
+FROM ${NODE_BASE} AS depth-model
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -104,11 +105,11 @@ COPY --from=depth-model /opt/depth-model /opt/depth-model
 ENV NUXT_DEPTH_MODEL_DIR=/opt/depth-model
 
 # Sailor's data folders and files beside the server: LoRA sidecars and covers,
-# blueprints, shader_effects, scenes/ (the Timeline scene
-# defaults and thumbnails), and the frontend's own data the server reads by path
-# (server/runner/video/fonts/ for captions, server/runner/effects/asciiGlyphs.bin
-# for Ascii, the stored node list). .dockerignore keeps ComfyUI's Python source,
-# requirements and every *.py out of the image.
+# shader_effects, scenes/ (the Timeline scene defaults and thumbnails), and the
+# frontend's own data the server reads by path (server/runner/video/fonts/ for
+# captions, server/runner/effects/asciiGlyphs.bin for Ascii, the stored node
+# list). .dockerignore keeps the user's data, the tests and anything Python left
+# on a local disk out of the image.
 COPY . .
 
 # Overlay the built Nuxt output from stage 1.

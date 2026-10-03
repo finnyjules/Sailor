@@ -44,42 +44,19 @@ import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 const defaultClipCredits = (id: string) =>
   creditsForUsdServer(videoUsd(id, effectiveVideoSettings(id, undefined, undefined, {})!)!)
 
-const REPO = fileURLToPath(new URL('../../../', import.meta.url))
-const PY = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
-const CLASS_RE = /class ([A-Za-z0-9_]+)\(IO\.ComfyNode\)/g
-
 /**
- * The node_id of every IO.ComfyNode class in a Python module — the name the
- * canvas sends as class_type, and so the name priceGraph must key on. It can
- * differ from the Python class name (PersonSwapNode → "PersonSwap"); keying
- * the price book by class name once priced three nodes at 0 in hosted.
+ * The node_id of every provider node class — the name the canvas sends as
+ * class_type, and so the name priceGraph must key on. It can differ from the
+ * Python class name (PersonSwapNode → "PersonSwap"); keying the price book by
+ * class name once priced three nodes at 0 in hosted. Read from the Python
+ * modules (nodes_replicate.py, and the comfy_extras nodes that dispatched to a
+ * provider) and frozen when Python left the repo (C7).
  */
-function nodeIdsOf(src: string): string[] {
-  const heads = [...src.matchAll(CLASS_RE)]
-  return heads.map((m, i) => {
-    const body = src.slice(m.index! + m[0].length, heads[i + 1]?.index ?? src.length)
-    const id = /node_id\s*=\s*"([^"]+)"/.exec(body)?.[1]
-    if (!id) throw new Error(`class ${m[1]} has no node_id`)
-    return id
-  })
+const PROVIDER_CLASSES = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/python-provider-classes.json', import.meta.url)), 'utf8')) as {
+  nodes_replicate: string[], comfy_extras: Record<string, string[]>
 }
-
-const REPLICATE_CLASSES = nodeIdsOf(PY)
-
-/** comfy_extras nodes that dispatch to a provider: the marker is the lazy
- *  `from comfy_api_nodes.nodes_replicate import ...` every one of them uses. */
-function comfyExtrasProviderClasses(): string[] {
-  const dir = join(REPO, 'comfy_extras')
-  const out: string[] = []
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith('.py')) continue
-    const src = readFileSync(join(dir, name), 'utf8')
-    if (!src.includes('from comfy_api_nodes.nodes_replicate import')) continue
-    out.push(...nodeIdsOf(src))
-  }
-  return out
-}
-const EXTRAS_CLASSES = comfyExtrasProviderClasses()
+const REPLICATE_CLASSES = PROVIDER_CLASSES.nodes_replicate
+const EXTRAS_CLASSES = Object.values(PROVIDER_CLASSES.comfy_extras).flat()
 const ALL_PROVIDER_CLASSES = [...REPLICATE_CLASSES, ...EXTRAS_CLASSES]
 
 function classify(c: string): 'flat' | 'model' | 'settings' | 'per-second' | 'paid' | 'exempt' | 'retired' | 'UNCLASSIFIED' {
@@ -348,9 +325,8 @@ describe('model-aware pricing: engine-picker nodes', () => {
   })
 
   it('the engine labels still match the Python node schemas', () => {
-    const upscale = PY.match(/_UPSCALE_MODELS\s*=\s*\[([^\]]+)\]/)
-    expect(upscale, '_UPSCALE_MODELS moved — re-check the engine price map').toBeTruthy()
-    const labels = [...upscale![1]!.matchAll(/"([^"]+)"/g)].map(m => m[1]!)
+    // nodes_replicate.py's _UPSCALE_MODELS, frozen at C7.
+    const labels = ['Clarity', 'Crystal', 'Real-ESRGAN', 'Recraft Crisp', 'Topaz']
     for (const label of labels) {
       expect(() => priceGraph({ 1: { class_type: 'UpscaleImageNode', inputs: { model: label } } }), label)
         .not.toThrow()

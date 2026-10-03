@@ -5,7 +5,7 @@ import { migrateEditState } from '../../shared/timeline/types'
 
 // The golden fixtures are real EditState JSON — if the type vocabulary drifts
 // (a renamed field, a new required key), this catches it from the TS side.
-const fixturesDir = fileURLToPath(new URL('../../../tests-unit/timeline_fixtures', import.meta.url))
+const fixturesDir = fileURLToPath(new URL('../fixtures/timeline', import.meta.url))
 
 describe('golden fixtures are valid EditStates', () => {
   const files = readdirSync(fixturesDir).filter(f => f.endsWith('.json'))

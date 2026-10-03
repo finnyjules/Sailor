@@ -187,7 +187,7 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     expect(runRefusal([{ prompt: { k: { class_type: 'KSampler', inputs: {} } }, titleOf: () => 'Sampler' }], { runnerOn: true, families: EVERY }))
       .toEqual({ title: '“Sampler” can’t run', description: `“Sampler”: ${NOT_RUN_WORDS} Use Generate an image instead.` })
     const proven: [string, string][] = [
-      ['blueprints-retired.unit.spec.ts', 'every blueprint in the repo holds a class Sailor doesn’t run'],
+      ['blueprints-retired.unit.spec.ts', 'the blueprints folder is gone (C7): every blueprint held a class Sailor doesn’t run'],
       ['blueprints-retired.unit.spec.ts', 'node search lists only the classes the runner takes, plus the cards, here and hosted'],
       ['blueprints-retired.unit.spec.ts', 'the sidebar fetches no blueprint and shows no blueprint tab or section'],
       ['engine-path-alias.unit.spec.ts', 'C6: the blueprint list is gone: a plain 404 in every spelling and verb, never proxied'],

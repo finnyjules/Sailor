@@ -15,7 +15,7 @@ import * as path from 'node:path'
 
 const thisDir = fileURLToPath(new URL('.', import.meta.url))
 const repoRoot = path.resolve(thisDir, '../..')
-const mp4Path = path.join(repoRoot, 'tests-unit', 'timeline_fixtures', 'assets', 'counter_30f.mp4')
+const mp4Path = path.join(repoRoot, 'frontend', 'tests', 'fixtures', 'timeline', 'assets', 'counter_30f.mp4')
 
 function indexOf(gray: number): number {
   return Math.round((gray - 8) / 8)

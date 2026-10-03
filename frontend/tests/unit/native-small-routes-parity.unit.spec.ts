@@ -1,14 +1,14 @@
 /**
- * Parity with the Python itself for the small /sailor routes: the REAL
- * handlers (lifted out with `ast` by
- * fixtures/native-small-routes-python-oracle.py and run with aiohttp's own
- * `web`) and the native ones answer the same requests over the same temp
- * engine root, and each side reads what the other wrote.
+ * Parity with the Python itself for the small /sailor routes: ComfyUI's REAL
+ * handlers and the native ones answer the same requests over the same temp
+ * data root, and each side reads what the other wrote.
  *
- * Needs the repo's `.venv` (Python + aiohttp + numpy + fontTools); skipped without it.
+ * Python left the repo in step 4, C7: the Python's answers, and the files it
+ * wrote, were frozen then into fixtures/native-small-routes-python-answers.json
+ * (the shader catalog as it stood then is in fixtures/native-small-routes-shader-effects/)
+ * and are replayed by helpers/frozenOracle.ts. Nothing here runs Python.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { spawnSync } from 'node:child_process'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -23,15 +23,13 @@ import {
 } from '../../server/native/spacePresets'
 import { fontSubsetRoute } from '../../server/native/fontSubset'
 import { cleanupFramesRoute, clearDatasetRoute, saveCaptionsRoute } from '../../server/native/inputHousekeeping'
+import { frozenOracle } from './helpers/frozenOracle'
 
 const REPO = path.resolve(__dirname, '..', '..', '..')
-const PYTHON = path.join(REPO, '.venv', 'bin', 'python')
-const ORACLE = path.join(__dirname, 'fixtures', 'native-small-routes-python-oracle.py')
-const hasPython = fs.existsSync(PYTHON)
+const FROZEN = path.join(__dirname, 'fixtures', 'native-small-routes-python-answers.json')
+const SHADER_EFFECTS_AT_C7 = path.join(__dirname, 'fixtures', 'native-small-routes-shader-effects')
 const FONTS = path.join(REPO, 'Assets', 'Fonts', 'Free Fonts')
 
-// Each oracle call starts a Python process (aiohttp, numpy, fontTools imports).
-vi.setConfig({ testTimeout: 120_000 })
 
 interface PyCall { handler: string, path?: string, match_info?: Record<string, string>, body?: string | null, body_b64?: string, file?: string, text?: string }
 interface PyResult { status: number, content_type: string, body: any }
@@ -41,19 +39,9 @@ let home: string
 let input: string
 let bridge: string
 
+const oracle = frozenOracle(FROZEN)
 function python(calls: PyCall[]): PyResult[] {
-  // PYTHONDONTWRITEBYTECODE: importing comfy_extras must not leave __pycache__ in the real checkout.
-  const env: Record<string, string> = { ...process.env as Record<string, string>, HOME: home, PYTHONDONTWRITEBYTECODE: '1' }
-  delete env.HF_HOME
-  delete env.HUGGINGFACE_HUB_CACHE
-  const r = spawnSync(PYTHON, [ORACLE], {
-    input: JSON.stringify({ root, calls: calls.map(c => ({ path: '/', ...c })) }),
-    encoding: 'utf8',
-    env,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-  if (r.status !== 0) throw new Error(`oracle failed: ${r.stderr}`)
-  return JSON.parse(r.stdout)
+  return oracle(root, calls.map(c => ({ path: '/', ...c }))) as PyResult[]
 }
 
 beforeEach(() => {
@@ -68,9 +56,15 @@ afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
 const json = (value: unknown) => async () => ({ ok: true as const, value })
 const bytes = (b: Buffer) => async () => b
 
-describe.skipIf(!hasPython)('shader_effects catalog', () => {
+describe('shader_effects catalog', () => {
   it('the real catalog: identical payload (every effect, param, default, texture version and inlined source)', () => {
-    fs.cpSync(path.join(REPO, 'shader_effects'), path.join(root, 'shader_effects'), { recursive: true })
+    // The catalog as it stood when the Python's answer was frozen (C7): its
+    // manifest and shaders, and empty stand-ins for the textures, whose
+    // versions come from their mtimes only.
+    fs.cpSync(SHADER_EFFECTS_AT_C7, path.join(root, 'shader_effects'), { recursive: true })
+    for (const f of fs.readdirSync(path.join(root, 'shader_effects', 'assets'))) {
+      fs.utimesSync(path.join(root, 'shader_effects', 'assets', f), 1_790_000_000, 1_790_000_000)
+    }
     // CRLF line endings in a shader: Python's text mode reads them as \n.
     const frag = path.join(root, 'shader_effects', 'noise_distortion.frag')
     fs.writeFileSync(frag, fs.readFileSync(frag, 'utf8').replace(/\n/g, '\r\n'))
@@ -130,6 +124,7 @@ describe.skipIf(!hasPython)('shader_effects catalog', () => {
     fs.mkdirSync(path.join(dir, 'assets'), { recursive: true })
     fs.writeFileSync(path.join(dir, 'z.frag'), 'x')
     fs.writeFileSync(path.join(dir, 'assets', 't.png'), 'png')
+    fs.utimesSync(path.join(dir, 'assets', 't.png'), 1_790_000_000, 1_790_000_000)
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
       version: 3,
       effects: [{
@@ -147,7 +142,7 @@ describe.skipIf(!hasPython)('shader_effects catalog', () => {
   })
 })
 
-describe.skipIf(!hasPython)('Space Type presets and thumbnails', () => {
+describe('Space Type presets and thumbnails', () => {
   it('a preset saved by either side reads back the same through both, byte-identical on disk', async () => {
     const scene = { text: 'Hé "quoted"\n', size: 12, nested: { a: [1, 2.5, null, true], emoji: '🌊' } }
     const [pySave] = python([{ handler: '_space_default_save', match_info: { effect_id: 'burst' }, body: JSON.stringify(scene) }])
@@ -191,6 +186,7 @@ describe.skipIf(!hasPython)('Space Type presets and thumbnails', () => {
     expect(pySave!.body).toEqual({ ok: true })
     expect(await spaceThumbnailSaveRoute(bridge, 'coil', bytes(png))).toEqual({ status: 200, body: { ok: true } })
     fs.utimesSync(path.join(bridge, 'scene_thumbnails', 'ball.png'), 1_790_000_000.75, 1_790_000_000.75)
+    fs.utimesSync(path.join(bridge, 'scene_thumbnails', 'coil.png'), 1_790_000_001, 1_790_000_001)
     fs.writeFileSync(path.join(bridge, 'scene_thumbnails', 'BAD.png'), png)
 
     const [pyList, pyGetCoil, pyGetBall, pyMissing, pyBad, pyEmpty, pyBadSave] = python([
@@ -222,7 +218,7 @@ describe.skipIf(!hasPython)('Space Type presets and thumbnails', () => {
   })
 })
 
-describe.skipIf(!hasPython)('font_subset', () => {
+describe('font_subset', () => {
   const ttf = path.join(FONTS, 'Aspekta', 'Aspekta-400.ttf')
   const otf = path.join(FONTS, 'Absans', 'Absans-Regular.otf')
   const hasFonts = fs.existsSync(ttf) && fs.existsSync(otf)
@@ -276,7 +272,7 @@ describe.skipIf(!hasPython)('font_subset', () => {
   })
 })
 
-describe.skipIf(!hasPython)('LoRA dataset captions and clearing', () => {
+describe('LoRA dataset captions and clearing', () => {
   it('save_captions writes the same sidecars and answers the same', () => {
     fs.mkdirSync(path.join(input, 'lora', 'set'), { recursive: true })
     const body = {
@@ -351,7 +347,7 @@ describe.skipIf(!hasPython)('LoRA dataset captions and clearing', () => {
   })
 })
 
-describe.skipIf(!hasPython)('motion/cleanup_frames', () => {
+describe('motion/cleanup_frames', () => {
   it('deletes exactly the same files and counts the same', () => {
     const names = [
       'slate_1_0001.png', 'slate_22_0002.png', 'slate_3_0003.png', 'slate_4_12345.png', 'slate_5_0001.jpg',

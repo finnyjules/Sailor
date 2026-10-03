@@ -35,6 +35,7 @@ import { estimateUsdForNodes, upstreamInputSeconds, vueNodesToEstimateInput } fr
 import { COST_CONFIRM_EVENT, requestCostConfirm, type CostConfirmRequestDetail } from '~/lib/costConfirmRequest'
 import { confirmAnimateCost } from '~/composables/useLayerAnimate'
 import { clipPriceCredits } from '~/data/clip-models'
+import { catalogInput, catalogOptions } from './helpers/nodeCatalog'
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const SINK = { class_type: 'SaveVideo', inputs: {} }
@@ -111,9 +112,8 @@ describe('lip-sync billed by the measured clip', () => {
       expect(() => priceGraph({ 1: { class_type: ct, inputs: { sync_mode: 'silence' } }, 2: SINK })).toThrow(UnpricedGraphError)
       expect(nodeCreditEstimate(ct, { sync_mode: 'silence' })).toBeNull()
     }
-    // The Python offers exactly these five modes on both nodes.
-    const py = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
-    expect(py.match(/options=\["loop", "bounce", "cut_off", "silence", "remap"\]/g)!.length).toBe(2)
+    // Both nodes offer exactly these five modes.
+    for (const ct of ['LipsyncNode', 'LipsyncRemoteNode']) expect(catalogOptions(ct, 'sync_mode'), ct).toEqual(['loop', 'bounce', 'cut_off', 'silence', 'remap'])
   })
 
   it('the media a lip-sync price reads, as execute resolves it', () => {
@@ -140,9 +140,6 @@ describe('lip-sync billed by the measured clip', () => {
     expect(parseViewRef('/view?filename=sub\\x.png&type=input')).toBeNull()
     expect(parseViewRef('https://site/view?filename=x.png&type=input')).toBeNull()
     expect(parseViewRef(7)).toBeNull()
-    const py = readFileSync(`${REPO}comfy_api_nodes/video_models.py`, 'utf8')
-    expect(py).toContain('if not isinstance(src, str) or not src.startswith("/view?"):')
-    expect(py).toContain('if not name or "/" in name or "\\\\" in name or ".." in name:')
   })
 
   it('MusicGen / Generate music: the duration widget, 1–30 s; anything else unknown', () => {
@@ -151,8 +148,9 @@ describe('lip-sync billed by the measured clip', () => {
     expect(sourceAudioSeconds('GenerateMusicNode', { duration: 0 })).toBe(1)
     expect(sourceAudioSeconds('GenerateMusicNode', { duration: LINK })).toBe(30)
     expect(sourceAudioSeconds('GenerateSpeechNode', { text: 'hi' })).toBeNull()
-    const py = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
-    expect(py).toContain('IO.Int.Input("duration", default=8, min=1, max=30, step=1, tooltip="Seconds.")')
+    for (const ct of ['MusicGenRemoteNode', 'GenerateMusicNode']) {
+      expect(catalogInput(ct, 'duration'), ct).toEqual(['INT', { tooltip: 'Seconds.', default: 8, min: 1, max: 30, step: 1 }])
+    }
   })
 
   it('the runner runs lip-sync as Lip-sync a character on sync-3 (F22, which measures its own files); the older nodes only with sound-in on (R3.10, which measures the WAV it sends)', () => {
@@ -441,7 +439,7 @@ describe('review I2, M2, M3', () => {
 
 describe('the /view? link parser reads links exactly as the engine does', () => {
   type Case = { src: string, python: string | null, lists: Record<'filename' | 'type' | 'subfolder', string[]> }
-  // Recorded from .venv/bin/python: video_models.parse_view_ref and
+  // Recorded from the engine's Python (frozen; Python left the repo in C7): video_models.parse_view_ref and
   // parse_qs(urlsplit(src).query) for each case (tab/CR/LF, "#", "&amp;", "+",
   // %20, %2B, blank values, duplicate keys, bad percent escapes, bad UTF-8, …).
   const CASES = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/pricing/view-ref-python.json', import.meta.url)), 'utf8')) as Case[]
@@ -484,14 +482,5 @@ describe('the /view? link parser reads links exactly as the engine does', () => 
     expect(pyParseQs('filename=%zz%4')!.get('filename')).toEqual(['%zz%4'])
   })
 
-  it('live parity with the engine’s own parser, when the repo venv is here', async () => {
-    const py = `${REPO}.venv/bin/python`
-    const { existsSync } = await import('node:fs')
-    if (!existsSync(py)) return
-    const { execFileSync } = await import('node:child_process')
-    const script = 'import json,sys\nfrom comfy_api_nodes.video_models import parse_view_ref\nprint(json.dumps([parse_view_ref(s) for s in json.load(sys.stdin)]))'
-    const got = JSON.parse(execFileSync(py, ['-c', script], { cwd: REPO, input: JSON.stringify(CASES.map(c => c.src)), encoding: 'utf8' })) as (string | null)[]
-    expect(got).toEqual(CASES.map(c => c.python))
-  })
 
 })

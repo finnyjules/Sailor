@@ -84,11 +84,9 @@ describe('moodboardStyleBlock', () => {
 
 describe('moodboardStyleBlock — Python-twin parity (shared fixtures, Task B4)', () => {
   // The Python twin (comfy_extras/nodes_moodboard.py moodboard_style_block)
-  // compiles the SAME block server-side and must produce byte-identical
-  // strings. Both sides assert these shared fixtures — the Python side is
-  // tests-unit/comfy_api_test/moodboard_node_test.py (which also runs the
-  // broken control: a reordered palette join fails parity there).
-  const FIXTURES_DIR = resolve(__dirname, '../../../tests-unit/comfy_api_test/fixtures')
+  // compiled the SAME block server-side, byte-identical, against these shared
+  // fixtures. Python left the repo in step 4, C7; the fixtures stay frozen.
+  const FIXTURES_DIR = resolve(__dirname, 'fixtures/moodboard-style-block')
   const FIXTURE_FILES = [
     'moodboard_style_block_full.json',
     'moodboard_style_block_no_avoids.json',

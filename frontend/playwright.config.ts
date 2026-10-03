@@ -1,11 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
-// Tests assume both servers are already running:
-//   pnpm --dir frontend dev --port 3002
-//   python main.py --listen 127.0.0.1 --port 8188
-//
-// (We don't `webServer` either of them because the Python backend takes
-// ~60-90s to load all nodes and starting it per-run would dominate runtime.)
+// Tests assume the dev server is already running (the only server; no
+// ComfyUI or Python since step 4):
+//   pnpm --dir frontend dev
 
 export default defineConfig({
   testDir: './tests',

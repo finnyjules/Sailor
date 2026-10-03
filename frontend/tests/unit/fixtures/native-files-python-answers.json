@@ -1,0 +1,756 @@
+{
+ "parity with server.py > /upload/image: same answers, same files, same numbering": [
+  {
+   "calls": "4168aacf83ecdadd599285e9c201e67368de4a23b8b5ce94af75c2fe6a2650fb",
+   "result": [
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "51",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEucG5nIiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEgKDEpLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "51",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEucG5nIiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEgKDEpLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEgKDIpLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "51",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEucG5nIiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEgKDEpLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImEgKDMpLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "60",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImFyY2hpdmUudGFyLmd6IiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "64",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImFyY2hpdmUudGFyICgxKS5neiIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "53",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIi5oaWRkZW4iLCAic3ViZm9sZGVyIjogIiIsICJ0eXBlIjogImlucHV0In0="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "57",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIi5oaWRkZW4gKDEpIiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "63",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIlx1MDBmYyBcdTAwZjEucG5nIiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "67",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIlx1MDBmYyBcdTAwZjEgKDEpLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "60",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogInQucG5nIiwgInN1YmZvbGRlciI6ICJjbGlwcy8yMDI2IiwgInR5cGUiOiAidGVtcCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "64",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogInQgKDEpLnBuZyIsICJzdWJmb2xkZXIiOiAiY2xpcHMvMjAyNiIsICJ0eXBlIjogInRlbXAifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm8ucG5nIiwgInN1YmZvbGRlciI6ICIiLCAidHlwZSI6ICJvdXRwdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "54",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImRvdC5wbmciLCAic3ViZm9sZGVyIjogIi4iLCAidHlwZSI6ICJpbnB1dCJ9"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "59",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIngucG5nIiwgInN1YmZvbGRlciI6ICJhL2IvLi4vYyIsICJ0eXBlIjogImlucHV0In0="
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    }
+   ],
+   "written": {
+    "input/.hidden": "QQ==",
+    "input/.hidden (1)": "Qg==",
+    "input/a/c/x.png": "WA==",
+    "input/a (1).png": "TkVXRVI=",
+    "input/a (2).png": "VEhSRUU=",
+    "input/a (3).png": "Tk9QRQ==",
+    "input/a.png": "TkVX",
+    "input/archive.tar (1).gz": "Qg==",
+    "input/archive.tar.gz": "QQ==",
+    "input/dot.png": "RA==",
+    "input/ü ñ (1).png": "Vg==",
+    "input/ü ñ.png": "VQ==",
+    "output/o.png": "Tw==",
+    "temp/clips/2026/t (1).png": "VDI=",
+    "temp/clips/2026/t.png": "VA=="
+   },
+   "mtimes": {
+    "input/.hidden": 1791051400.481145,
+    "input/.hidden (1)": 1791051400.482022,
+    "input/a/c/x.png": 1791051400.4881558,
+    "input/a (1).png": 1791051400.4777973,
+    "input/a (2).png": 1791051400.4759881,
+    "input/a (3).png": 1791051400.4787588,
+    "input/a.png": 1791051400.4768927,
+    "input/archive.tar (1).gz": 1791051400.48046,
+    "input/archive.tar.gz": 1791051400.4795732,
+    "input/dot.png": 1791051400.4873216,
+    "input/ü ñ (1).png": 1791051400.4838257,
+    "input/ü ñ.png": 1791051400.4829035,
+    "output/o.png": 1791051400.4865718,
+    "temp/clips/2026/t (1).png": 1791051400.4856708,
+    "temp/clips/2026/t.png": 1791051400.484719
+   },
+   "made": [
+    "input/a",
+    "input/a/c",
+    "temp/clips",
+    "temp/clips/2026"
+   ],
+   "removed": []
+  }
+ ],
+ "parity with server.py > known divergence: a filename with a leading \"/\" is refused, where aiohttp's parser silently dropped the slash": [
+  {
+   "calls": "335379a9dd43000fae1953e2cf19d377af0bb4dafcbea0783df775976822da35",
+   "result": [
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "53",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogImFicy5wbmciLCAic3ViZm9sZGVyIjogIiIsICJ0eXBlIjogImlucHV0In0="
+    }
+   ],
+   "written": {
+    "input/abs.png": "RQ=="
+   },
+   "mtimes": {
+    "input/abs.png": 1791051400.6947172
+   },
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with server.py > known divergence: an empty filename is a 400, where the Python crashed with a 500": [
+  {
+   "calls": "8a1caeba35992854b2ac36bc326f09cd48df74e80c7146606c051afa0adcded6",
+   "result": [
+    {
+     "status": 500,
+     "headers": {
+      "content-type": "text/plain; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:40 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3",
+      "connection": "close"
+     },
+     "body": "NTAwIEludGVybmFsIFNlcnZlciBFcnJvcgoKU2VydmVyIGdvdCBpdHNlbGYgaW4gdHJvdWJsZQ=="
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with server.py > /upload/mask: same answers, same pixels, same text chunks and ICC": [
+  {
+   "calls": "d3095678d62860c8b3cefdb25491c055cdf26e9999e2c5bed14df13c84e4657d",
+   "result": [
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm0xLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm0yLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm0zLnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "56",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm00LnBuZyIsICJzdWJmb2xkZXIiOiAibWFza3MiLCAidHlwZSI6ICJ0ZW1wIn0="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "59",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogInRha2VuICgxKS5wbmciLCAic3ViZm9sZGVyIjogIiIsICJ0eXBlIjogImlucHV0In0="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm01LnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm02LnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm03LnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "52",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "eyJuYW1lIjogIm04LnBuZyIsICJzdWJmb2xkZXIiOiAiIiwgInR5cGUiOiAiaW5wdXQifQ=="
+    },
+    {
+     "status": 500,
+     "headers": {
+      "content-type": "text/plain; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3",
+      "connection": "close"
+     },
+     "body": "NTAwIEludGVybmFsIFNlcnZlciBFcnJvcgoKU2VydmVyIGdvdCBpdHNlbGYgaW4gdHJvdWJsZQ=="
+    },
+    {
+     "status": 500,
+     "headers": {
+      "content-type": "text/plain; charset=utf-8",
+      "content-length": "55",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3",
+      "connection": "close"
+     },
+     "body": "NTAwIEludGVybmFsIFNlcnZlciBFcnJvcgoKU2VydmVyIGdvdCBpdHNlbGYgaW4gdHJvdWJsZQ=="
+    }
+   ],
+   "written": {
+    "input/m1.png": "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAECAYAAABGM/VAAAAAKHRFWHRwcm9tcHQAeyIxIjogeyJjbGFzc190eXBlIjogIktTYW1wbGVyIn19eG/jAAAAAA10RVh0d29ya2Zsb3cAY2Fm6WO8mb4AAAAeaVRYdG5vdGUAAABqYQDjg47jg7zjg4gA5ryi5a2XIOKck47yML8AAAApSURBVHheY2BgYGAw5W62zRJjq5qv2Ln9ig7PFxbBRHZZQW5UTLSgLQBEOgrvLoq0EwAAAABJRU5ErkJggg==",
+    "input/m2.png": "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAECAYAAABGM/VAAAABdmlDQ1BJQ0MgUHJvZmlsZQAAeJx1kTtLA0EUhb9ExaiRFFqIWKSIwSIBURBLjYVNkBAjGLXJbl5CEpfdDRJsBRsLwUK08VX4D7QVbBUEQRFErC19NRLWO0kgQXSW2ftxZs7l7llwRwt60WqfgmLJNuOzEf9icsnf+UoXA3jwEUzpljEdi0X5d33d41L1Lqx6/X/vz9WTzlg6uDzCE7ph2sIyDdF121C8Ldyv51Np4SPhkCkDCl8rXavzi+JcnT8Um4n4DLhVT3+uhbUW1vNmUXhEOFAslPXGPOpLvJnSwrzUQdlDWMSZJYIfjTKrFLAJSy1JZn/7Rmu+OdbEo8vboIIpjhx58YZELUvXjNSs6Bl5ClRU7r/ztLLjY/Xu3gh0PDvO+zB07kJ1x3G+jx2negJtT3BZavrXJKfJT9F3mlrgEHybcH7V1LQ9uNiCgUcjZaZqUptsdzYLb2fQm4S+W+hermfVOOf0ARIb8otuYP8AgnLft/IDBf5oDBTrivoAAAAoSURBVHheY2BgYPhvyt38P0uM7f98xc7/V3R4/rMIJrIzCHKjYuIFAdWwC7VEtCWEAAAAAElFTkSuQmCC",
+    "input/m3.png": "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAECAYAAABGM/VAAAAATklEQVR4XmNkYGBgcJVP5bXnXMNrxxHKe+jHal4WnggRdzP5v7wMGxl4d7r/4fUPV+VltD0R0MfAwMDby/aMF0SDMCMDA8NVZO1eGut4ATHpEscG447WAAAAAElFTkSuQmCC",
+    "input/taken (1).png": "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAECAYAAABGM/VAAAAAN0lEQVR4XmNkYGBgUFVVteXg4LBVU1MD0yz29vayqqqqshwcHHAau+CKFSvgHDU1Ndndu3fbAgCf+AyeWb+WwAAAAABJRU5ErkJggg==",
+    "temp/masks/m4.png": "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAECAYAAABGM/VAAAAAN0lEQVR4XmNkYGBgUFVVteXg4LBVU1MD0yz29vayqqqqshwcHHAau+CKFSvgHDU1Ndndu3fbAgCf+AyeWb+WwAAAAABJRU5ErkJggg=="
+   },
+   "mtimes": {
+    "input/m1.png": 1791051401.0620708,
+    "input/m2.png": 1791051401.0637877,
+    "input/m3.png": 1791051401.0649822,
+    "input/taken (1).png": 1791051401.0673835,
+    "temp/masks/m4.png": 1791051401.0662096
+   },
+   "made": [
+    "temp/masks"
+   ],
+   "removed": []
+  }
+ ],
+ "parity with server.py > /view: same status, type, disposition, ranges and bytes for each type": [
+  {
+   "calls": "0ec7ec4ba5e06d8d4c1165274938cfffd8a6f2db1b53f65d4bd183fac4ec184b",
+   "result": [
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"a.png\"",
+      "content-type": "image/png",
+      "etag": "\"18db17c28a4470ba-3\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "3",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "T1VU"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"a.png\"",
+      "content-type": "image/png",
+      "etag": "\"18db17c28a45f2a3-2\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "2",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "SU4="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"a.png\"",
+      "content-type": "image/png",
+      "etag": "\"18db17c28a471966-3\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "3",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "VE1Q"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"a.png\"",
+      "content-type": "image/png",
+      "etag": "\"18db17c28a45f2a3-2\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "2",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "SU4="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"a.png\"",
+      "content-type": "image/png",
+      "etag": "\"18db17c28a4470ba-3\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "3",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "T1VU"
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"v.mp4\"",
+      "content-type": "video/mp4",
+      "etag": "\"18db17c28a49b91d-a\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "10",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "MDEyMzQ1Njc4OQ=="
+    },
+    {
+     "status": 206,
+     "headers": {
+      "content-disposition": "filename=\"v.mp4\"",
+      "content-type": "video/mp4",
+      "etag": "\"18db17c28a49b91d-a\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "4",
+      "accept-ranges": "bytes",
+      "content-range": "bytes 2-5/10",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "MjM0NQ=="
+    },
+    {
+     "status": 206,
+     "headers": {
+      "content-disposition": "filename=\"v.mp4\"",
+      "content-type": "video/mp4",
+      "etag": "\"18db17c28a49b91d-a\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "3",
+      "accept-ranges": "bytes",
+      "content-range": "bytes 7-9/10",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "Nzg5"
+    },
+    {
+     "status": 206,
+     "headers": {
+      "content-disposition": "filename=\"v.mp4\"",
+      "content-type": "video/mp4",
+      "etag": "\"18db17c28a49b91d-a\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "3",
+      "accept-ranges": "bytes",
+      "content-range": "bytes 7-9/10",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "Nzg5"
+    },
+    {
+     "status": 416,
+     "headers": {
+      "content-disposition": "filename=\"v.mp4\"",
+      "content-type": "video/mp4",
+      "content-range": "bytes */10",
+      "transfer-encoding": "chunked",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 416,
+     "headers": {
+      "content-disposition": "filename=\"v.mp4\"",
+      "content-type": "video/mp4",
+      "content-range": "bytes */10",
+      "transfer-encoding": "chunked",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"page.html\"",
+      "content-type": "application/octet-stream",
+      "etag": "\"18db17c28a4ac7ca-8\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "8",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "PGI+eDwvYj4="
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"ü ñ.WAV\"",
+      "content-type": "audio/x-wav",
+      "etag": "\"18db17c28a4bef33-1\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "1",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "Vw=="
+    },
+    {
+     "status": 404,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 404,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 200,
+     "headers": {
+      "content-disposition": "filename=\"写真 😀.png\"",
+      "content-type": "image/png",
+      "etag": "\"18db17c28a4dfc45-3\"",
+      "last-modified": "Sat, 03 Oct 2026 18:16:42 GMT",
+      "content-length": "3",
+      "accept-ranges": "bytes",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": "Q0pL"
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 403,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 403,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 400,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    },
+    {
+     "status": 404,
+     "headers": {
+      "content-length": "0",
+      "date": "Sat, 03 Oct 2026 18:16:41 GMT",
+      "server": "Python/3.12 aiohttp/3.13.3"
+     },
+     "body": ""
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  }
+ ]
+}

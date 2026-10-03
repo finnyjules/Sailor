@@ -9,7 +9,7 @@ import * as path from 'node:path'
 
 const thisDir = fileURLToPath(new URL('.', import.meta.url))
 const repoRoot = path.resolve(thisDir, '../..')
-const fixturesDir = path.join(repoRoot, 'tests-unit', 'timeline_fixtures', 'assets')
+const fixturesDir = path.join(repoRoot, 'frontend', 'tests', 'fixtures', 'timeline', 'assets')
 
 const STATE = {
   version: 2,

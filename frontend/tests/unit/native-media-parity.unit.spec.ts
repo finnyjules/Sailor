@@ -1,32 +1,36 @@
 /**
- * Parity with the Python itself: the REAL handlers from
- * comfy_extras/nodes_timeline.py (lifted out with `ast` by
- * fixtures/native-media-python-oracle.py and run with aiohttp's own `web`)
- * and the native ones answer the same requests over the same temp engine
- * root, and each side reads what the other wrote.
+ * Parity with the Python itself: the REAL handlers from ComfyUI's
+ * comfy_extras/nodes_timeline.py and the native ones answer the same
+ * requests over the same temp data root, and each side reads what the other
+ * wrote.
  *
- * Needs the repo's `.venv` (Python + aiohttp + Pillow); skipped without it.
+ * Python left the repo in step 4, C7: the Python's answers, and the files it
+ * wrote, were frozen then into fixtures/native-media-python-answers.json and
+ * are replayed by helpers/frozenOracle.ts. Nothing here runs Python.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { spawnSync } from 'node:child_process'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import * as M from '../../server/native/media'
+import { frozenOracle } from './helpers/frozenOracle'
 
-const REPO = path.resolve(__dirname, '..', '..', '..')
-const PYTHON = path.join(REPO, '.venv', 'bin', 'python')
-const ORACLE = path.join(__dirname, 'fixtures', 'native-media-python-oracle.py')
-const hasPython = fs.existsSync(PYTHON)
+// Asset ids are random; fixed here so the Python's frozen answers name the same ids.
+vi.mock('node:crypto', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:crypto')>()
+  let n = 0
+  return { ...real, randomUUID: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}` }
+})
+
+const FROZEN = path.join(__dirname, 'fixtures', 'native-media-python-answers.json')
 
 interface PyCall { handler: string, path: string, match_info?: Record<string, string>, body?: string }
 interface PyResult { status: number, content_type: string, body: any, cache_control: string | null }
 
+const oracle = frozenOracle(FROZEN)
 function python(root: string, calls: PyCall[]): PyResult[] {
-  const r = spawnSync(PYTHON, [ORACLE], { input: JSON.stringify({ root, calls }), encoding: 'utf8' })
-  if (r.status !== 0) throw new Error(`oracle failed: ${r.stderr}`)
-  return JSON.parse(r.stdout)
+  return oracle(root, calls) as PyResult[]
 }
 
 let root: string
@@ -50,9 +54,10 @@ function touch(file: string, mtimeSec: number, bytes = 'x') {
 }
 async function png(file: string, w: number, h: number) {
   await sharp({ create: { width: w, height: h, channels: 4, background: '#c83c0a80' } }).png().toFile(file)
+  fs.utimesSync(file, 1_790_000_000, 1_790_000_000)
 }
 
-describe.skipIf(!hasPython)('parity with the Python handlers', () => {
+describe('parity with the Python handlers', () => {
   it('output and input listings: same items, same order, same fields, same mtimes', () => {
     // Equal mtimes on purpose: ties must keep the same (directory) order.
     const names = ['b.png', 'A.MP4', 'z.wav', 'c.gif', 'ü-ñ.webp', 'x.txt', '.hid.png', 'm.JPEG', 'q.m4a']

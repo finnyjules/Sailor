@@ -1,40 +1,18 @@
 # VCS / tooling
 .git
 .github
-.ci
 .claude
 *.log
 **/.DS_Store
 
-# Python — the image carries no Python and no ComfyUI (step 3, R10.10).
-# ComfyUI's source, its requirements and every *.py stay out; Sailor's data
-# folders (blueprints, shader_effects, scenes' Timeline scene
-# defaults and thumbnails, library/loras sidecars) still ship.
+# Python — the image carries none and the repo holds none (step 4, C7). A
+# local disk may still have ComfyUI's leftovers (the old .venv, __pycache__);
+# they never ship.
 .venv
 **/__pycache__
 **/*.py
 **/*.py[cod]
 .pytest_cache
-comfy
-comfy_api
-comfy_api_nodes
-comfy_config
-comfy_execution
-comfy_extras
-api_server
-app
-middleware
-utils
-alembic_db
-alembic.ini
-requirements.txt
-manager_requirements.txt
-pyproject.toml
-pytest.ini
-tests
-tests-unit
-script_examples
-extra_model_paths.yaml.example
 
 # Node / Nuxt (frontend is rebuilt inside the image)
 **/node_modules

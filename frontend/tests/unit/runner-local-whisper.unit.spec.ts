@@ -49,6 +49,7 @@ import { decodeAudio } from '~~/server/media/decode'
 import { mediaLimiter } from '~~/server/media/run'
 import { WHISPER_RESAMPLE_SLACK, whisperSoundBound } from '~~/server/runner/localModelStart'
 import { MEDIA_WORDS } from '#shared/runner/media'
+import { catalogInput, catalogOptions } from './helpers/nodeCatalog'
 
 /** Every tool process the tests start (fix round 1: none may outlive a closed request), and a hook on each spawn. */
 const PROCS = vi.hoisted(() => ({ pids: [] as number[], onSpawn: null as null | ((tool: string, pid: number) => void) }))
@@ -162,9 +163,9 @@ describe('the fixture', () => {
   })
 
   it('the options are Python\'s', () => {
-    const python = readFileSync(resolve(__dirname, '../../../comfy_extras/nodes_audio_ml.py'), 'utf8')
-    expect(python).toContain(`options=[${WHISPER_MODEL_SIZES.map(s => `"${s}"`).join(', ')}]`)
-    expect(python).toContain('IO.Float.Input(\n                    "fps", default=30.0, min=1.0, max=120.0')
+    // As the Python node declared them (the node catalogue, C6).
+    expect(catalogOptions('WhisperTranscribe', 'model_size')).toEqual([...WHISPER_MODEL_SIZES])
+    expect(catalogInput('WhisperTranscribe', 'fps')).toEqual(['FLOAT', expect.objectContaining({ default: 30, min: 1, max: 120 })])
     // Wizper's languages are its saved schema's.
     const lang = (SCHEMA.components!.schemas as Record<string, any>).WizperInput.properties.language.anyOf[0].enum as string[]
     expect(WIZPER_LANGUAGES).toEqual(lang)

@@ -6,11 +6,11 @@ import { migrateEditState } from '../../shared/timeline/types'
 import { createSpaceTypeClip } from '../../app/composables/timelineSpaceTypeClip'
 import { defaultSpaceTypeState } from '../../app/lib/spacetype/state'
 
-const fixturesDir = fileURLToPath(new URL('../../../tests-unit/timeline_fixtures', import.meta.url))
+const fixturesDir = fileURLToPath(new URL('../fixtures/timeline', import.meta.url))
 
 function loadFixture(name: string) {
   const state = migrateEditState(JSON.parse(readFileSync(`${fixturesDir}/${name}`, 'utf-8')))!
-  // All fixture assets are 320×180 (see tests-unit/timeline_fixtures/generate_assets.py).
+  // All fixture assets are 320×180 (tests/fixtures/timeline/assets/).
   const dims = new Map<string, { w: number; h: number }>()
   for (const track of state.tracks) for (const clip of track.clips) {
     if ('path' in clip && clip.path) dims.set(clip.id, { w: 320, h: 180 })

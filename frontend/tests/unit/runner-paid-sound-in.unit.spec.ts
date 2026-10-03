@@ -48,6 +48,7 @@ import { hostedRequestProblems, requestProblems } from '~~/server/runner/request
 import { pyInt16, pythonWav, pythonWavOf, silenceWav, type PythonWav } from '~~/server/runner/soundWav'
 import { decodeAudio } from '~~/server/media/decode'
 import { probeMedia } from '~~/server/media/probe'
+import { catalogOptions } from './helpers/nodeCatalog'
 
 // ── The fixture ──────────────────────────────────────────────────────────────
 
@@ -199,9 +200,9 @@ describe('the fixture', () => {
   })
 
   it('the lists are Python\'s', () => {
-    const python = readFileSync(resolve(__dirname, '../../../comfy_api_nodes/nodes_replicate.py'), 'utf8')
-    expect(python).toContain(`_RVC_PRESET_VOICES = [\n    ${RVC_PRESET_VOICES.slice(0, 7).map(v => `"${v}"`).join(', ')},`)
-    expect(python).toContain(`options=[${SOUND_IN_LANGUAGES.map(l => `"${l}"`).join(',')}]`)
+    // As the Python nodes declared them (the node catalogue, C6).
+    expect(catalogOptions('CloneSingingVoiceNode', 'rvc_model')).toEqual([...RVC_PRESET_VOICES])
+    for (const ct of ['TranscribeAudioNode', 'IdentifySpeakersNode']) expect(catalogOptions(ct, 'language'), ct).toEqual([...SOUND_IN_LANGUAGES])
   })
 })
 

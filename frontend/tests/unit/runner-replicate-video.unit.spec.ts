@@ -54,7 +54,6 @@ interface ReplicateVideoCase {
 const CASES = (JSON.parse(readFileSync(
   fileURLToPath(new URL('./fixtures/runner-families.json', import.meta.url)), 'utf8')) as { replicateVideo: ReplicateVideoCase[] }).replicateVideo
 
-const PY_SRC = readFileSync(fileURLToPath(new URL('../../../comfy_api_nodes/video_models.py', import.meta.url)), 'utf8')
 
 const REPLICATE_VIDEO: ReadonlySet<RunnerFamily> = new Set(['replicate-video'])
 const OTHERS: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== 'replicate-video'))
@@ -161,9 +160,8 @@ describe('replicate-video plans', () => {
   })
 
   it('the legacy label Kling 2.1 runs kling-v2.5-turbo-pro on Replicate', async () => {
+    // The same remap as nodes_replicate.py's ("Kling 2.1": "kling-v2.5-turbo-pro", frozen at C7).
     expect(LEGACY_VIDEO_MODEL_REMAP['Kling 2.1']).toBe('kling-v2.5-turbo-pro')
-    const nodeSrc = readFileSync(fileURLToPath(new URL('../../../comfy_api_nodes/nodes_replicate.py', import.meta.url)), 'utf8')
-    expect(nodeSrc).toMatch(/"Kling 2\.1":\s*"kling-v2\.5-turbo-pro"/)
     const p = await plan(node('Kling 2.1'))
     if (p.kind !== 'provider') throw new Error('expected a provider plan')
     expect(p.provider).toBe('replicate')
@@ -254,17 +252,9 @@ it('no elements: payload unchanged from today', () => {
 
 interface PyVideoModel { id: string; slug: string; provider: string; modes: string[]; builder: string }
 
-/** Every VideoModel(...) entry of video_models.py MODELS. */
+/** Every VideoModel(...) entry of video_models.py MODELS, frozen when Python left the repo (C7). */
 function pythonModels(): PyVideoModel[] {
-  const block = PY_SRC.slice(PY_SRC.indexOf('MODELS: list[VideoModel] = ['), PY_SRC.indexOf('\nVIDEO_MODELS_BY_ID:'))
-  return block.split(/\n\s*VideoModel\(/).slice(1).map((ch) => {
-    const id = ch.match(/\bid="([^"]+)"/)?.[1]
-    const slug = ch.match(/replicate_slug="([^"]+)"/)?.[1]
-    const builder = ch.match(/build_input=(\w+)/)?.[1]
-    const modes = ch.match(/modes=\[([^\]]*)\]/)?.[1]?.match(/"([^"]+)"/g)?.map(m => m.slice(1, -1))
-    if (!id || !slug || !builder || !modes) throw new Error(`could not read a VideoModel entry: ${ch.slice(0, 80)}`)
-    return { id, slug, builder, modes, provider: ch.match(/provider="(\w+)"/)?.[1] ?? 'replicate' }
-  })
+  return JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/python-video-models.json', import.meta.url)), 'utf8')).models
 }
 
 describe('the Replicate video list', () => {
@@ -292,7 +282,7 @@ describe('the Replicate video list', () => {
       const m = byId.get(id)!
       expect(RUNNER_REPLICATE_VIDEO_MODELS[id]!.slug, id).toBe(m.slug)
       expect([...RUNNER_REPLICATE_VIDEO_MODELS[id]!.modes], id).toEqual(m.modes)
-      expect(PY_SRC, id).toContain(`def ${m.builder}(`)
+      expect(m.builder, id).toMatch(/^_b_\w+$/)
     }
   })
 

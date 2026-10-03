@@ -1,0 +1,24 @@
+{
+  "note": "Every VideoModel(...) entry of comfy_api_nodes/video_models.py MODELS (id, Replicate slug, build_input function, modes, provider), frozen when Python left the repo (step 4, C7). Each builder was defined in the file then. Read by runner-replicate-video.",
+  "models": [
+    {"id":"veo-3.1","slug":"google/veo-3.1","builder":"_b_veo_3_1","modes":["t2v","i2v"],"provider":"fal"},
+    {"id":"veo-3.1-fast","slug":"google/veo-3.1-fast","builder":"_b_veo_3_1_fast","modes":["t2v","i2v"],"provider":"fal"},
+    {"id":"sora-2","slug":"openai/sora-2","builder":"_b_sora_2","modes":["t2v"],"provider":"replicate"},
+    {"id":"sora-2-pro","slug":"openai/sora-2-pro","builder":"_b_sora_2_pro","modes":["t2v"],"provider":"replicate"},
+    {"id":"flux-3","slug":"black-forest-labs/flux-3","builder":"_b_flux_3","modes":["t2v","i2v"],"provider":"fal"},
+    {"id":"runway-gen-4.5","slug":"runwayml/gen-4.5","builder":"_b_runway_gen_4_5","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"kling-v3","slug":"kwaivgi/kling-v3-video","builder":"_b_kling_v3","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"kling-v2.5-turbo-pro","slug":"kwaivgi/kling-v2.5-turbo-pro","builder":"_b_kling_v2_5_turbo_pro","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"seedance-2.0","slug":"bytedance/seedance-2.0","builder":"_b_seedance_2_0","modes":["t2v","i2v"],"provider":"fal"},
+    {"id":"seedance-2.0-fast","slug":"bytedance/seedance-2.0-fast","builder":"_b_seedance_2_0_fast","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"hailuo-2.3","slug":"minimax/hailuo-2.3","builder":"_b_hailuo_2_3","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"hailuo-h3","slug":"minimax/h3","builder":"_b_hailuo_h3","modes":["t2v","i2v"],"provider":"fal"},
+    {"id":"hailuo-h3-max","slug":"minimax/h3-max","builder":"_b_hailuo_h3_max","modes":["t2v","i2v"],"provider":"fal"},
+    {"id":"wan-2.7-t2v","slug":"wan-video/wan-2.7-t2v","builder":"_b_wan_2_7_t2v","modes":["t2v"],"provider":"replicate"},
+    {"id":"wan-2.5-i2v-fast","slug":"wan-video/wan-2.5-i2v-fast","builder":"_b_wan_2_5_i2v_fast","modes":["i2v"],"provider":"replicate"},
+    {"id":"luma-ray-2-720p","slug":"luma/ray-2-720p","builder":"_b_luma_ray_2_720p","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"ltx-video","slug":"lightricks/ltx-video","builder":"_b_ltx_video","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"pixverse-v6","slug":"pixverse/pixverse-v6","builder":"_b_pixverse_v6","modes":["t2v","i2v"],"provider":"replicate"},
+    {"id":"fabric-1.0","slug":"veed/fabric-1.0","builder":"_b_fabric_1_0","modes":["i2v"],"provider":"replicate"}
+  ]
+}

@@ -27,31 +27,15 @@ describe('new model catalog entries', () => {
 
 // ---------------------------------------------------------------------------
 // TS ↔ Python catalog parity — the Python side (comfy_api_nodes/image_models.py)
-// can't be imported from vitest, so read its source text and extract the
-// `ImageModel(...)` entries with a regex, then compare per-model tag lists.
-// Execution-side gates (B3's refs ride-along) key off the Python tags, so a
-// drift here means the UI promises a capability the backend won't honor.
+// listed each model's tags; execution-side gates (B3's refs ride-along) keyed
+// off them. Python left the repo in step 4, C7: its tag lists were frozen then
+// into fixtures/python-image-models.json.
 // ---------------------------------------------------------------------------
 
-const PY_CATALOG_PATH = resolve(__dirname, '../../../comfy_api_nodes/image_models.py')
-
-/** Extract { id: tags[] } from the Python catalog's MODELS list. */
+/** { id: tags[] } from the Python catalog's MODELS list, as it stood at C7. */
 function pythonTagsById(): Record<string, string[]> {
-  const src = readFileSync(PY_CATALOG_PATH, 'utf-8')
-  const listStart = src.indexOf('MODELS: list[ImageModel] = [')
-  expect(listStart, 'MODELS list not found in image_models.py').toBeGreaterThan(-1)
-  const body = src.slice(listStart)
-  // Split on constructor calls; each chunk runs to the next call (or EOF) and
-  // therefore contains the whole entry, including its `tags=(...)` kwarg.
-  const chunks = body.split('ImageModel(').slice(1)
-  const out: Record<string, string[]> = {}
-  for (const chunk of chunks) {
-    const id = chunk.match(/^\s*"([^"]+)"/)?.[1]
-    if (!id) continue
-    const tagsTuple = chunk.match(/tags=\(([^)]*)\)/)?.[1] ?? ''
-    out[id] = [...tagsTuple.matchAll(/"([^"]+)"/g)].map(m => m[1]!)
-  }
-  return out
+  const { models } = JSON.parse(readFileSync(resolve(__dirname, 'fixtures', 'python-image-models.json'), 'utf-8')) as { models: { id: string, tags: string[] }[] }
+  return Object.fromEntries(models.map(m => [m.id, m.tags]))
 }
 
 describe('image catalog TS ↔ Python parity', () => {

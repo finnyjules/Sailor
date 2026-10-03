@@ -7,7 +7,8 @@ import { PNG } from 'pngjs'
 // Browser/server shader parity gate: renders every catalog effect through the
 // WebGL2 singleton renderer (frontend/app/lib/shaderfx/renderer.ts) on the
 // /dev/shaderfx-harness page and diffs against the server-GL golden PNGs in
-// tests-unit/shaderfx_golden (rendered at u_time=0.7, u_seed=42, defaults).
+// tests/fixtures/shaderfx-golden (rendered by the old Python server-GL path at
+// u_time=0.7, u_seed=42, defaults; frozen when Python left the repo, step 4 C7).
 //
 // Requires the WORKTREE's dev server. The shared playwright.config.ts baseURL
 // (3002) may point at a different checkout's dev server — override with:
@@ -16,7 +17,7 @@ import { PNG } from 'pngjs'
 const thisDir = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = path.resolve(thisDir, '..', '..')
 const CATALOG = path.join(ROOT, 'shader_effects')
-const GOLDEN = path.join(ROOT, 'tests-unit', 'shaderfx_golden')
+const GOLDEN = path.join(ROOT, 'frontend', 'tests', 'fixtures', 'shaderfx-golden')
 
 const BASE_URL = process.env.SHADERFX_BASE_URL ?? ''
 
@@ -91,7 +92,7 @@ for (const eff of manifest.effects as ManifestEffect[]) {
   for (const size of SIZES) {
     test(`parity: ${eff.id} @ ${size}`, async ({ page }) => {
       const goldenPath = path.join(GOLDEN, `${eff.id}_${size}.png`)
-      expect(fs.existsSync(goldenPath), `missing golden ${goldenPath} — run generate_goldens.py`).toBe(true)
+      expect(fs.existsSync(goldenPath), `missing golden ${goldenPath}`).toBe(true)
 
       const uniforms: Record<string, UniformValue> = { u_time: GOLDEN_TIME, u_seed: GOLDEN_SEED, u_hasInput: 1 }
       for (const p of eff.params) Object.assign(uniforms, paramUniforms(p))

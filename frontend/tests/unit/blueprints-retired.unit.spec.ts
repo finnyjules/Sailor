@@ -1,9 +1,9 @@
 /**
  * Step 4, C6: Sailor offers no blueprint and serves no blueprint list.
  *
- *   - Every blueprint in the repo's `blueprints/` folder is built from classes
+ *   - Every blueprint in ComfyUI's `blueprints/` folder was built from classes
  *     Sailor doesn't run (the local diffusion stack, GLSL shaders, Comfy's own
- *     partner nodes), so none is kept: `/global_subgraphs` and its module
+ *     partner nodes), so none is kept (the folder left the repo in C7): `/global_subgraphs` and its module
  *     (server/native/globalSubgraphs.ts) are gone, and the path is a plain 404
  *     here and hosted (engine-path-alias.unit.spec.ts).
  *   - Sailor offers only the classes the runner takes, plus the cards: node
@@ -27,27 +27,11 @@ const FRONTEND = path.resolve(__dirname, '..', '..')
 const REPO = path.resolve(FRONTEND, '..')
 const CATALOG: Record<string, any> = JSON.parse(gunzipSync(fs.readFileSync(path.join(FRONTEND, 'server', 'assets', 'nodeCatalog.json.gz'))).toString('utf8'))
 const BLUEPRINTS = path.join(REPO, 'blueprints')
-/** The canvas's own UI nodes, which never run. */
-const CANVAS_ONLY = new Set(['Note', 'MarkdownNote', 'Reroute', 'PrimitiveNode'])
-
-/** Every class inside a blueprint (its subgraphs' too), its own subgraph ids and the canvas's UI nodes left out. */
-function blueprintClasses(wf: any): string[] {
-  const subgraphIds = new Set<string>((wf.definitions?.subgraphs ?? []).map((s: { id: string }) => s.id))
-  const classes = new Set<string>()
-  for (const n of wf.nodes ?? []) classes.add(n.type)
-  for (const s of wf.definitions?.subgraphs ?? []) for (const n of s.nodes ?? []) classes.add(n.type)
-  return [...classes].filter(c => !subgraphIds.has(c) && !CANVAS_ONLY.has(c))
-}
-
 describe('C6: no blueprint is kept, so the blueprint list is gone', () => {
-  it('every blueprint in the repo holds a class Sailor doesn’t run', () => {
-    const files = fs.existsSync(BLUEPRINTS) ? fs.readdirSync(BLUEPRINTS).filter(n => !n.startsWith('.') && n.endsWith('.json')) : []
-    for (const f of files) {
-      const wf = JSON.parse(fs.readFileSync(path.join(BLUEPRINTS, f), 'utf8'))
-      const notRun = blueprintClasses(wf).filter(c => !sailorOffersClass(c))
-      // A blueprint built only from classes Sailor runs would be worth offering: bring the list back for it.
-      expect(notRun.length, f).toBeGreaterThan(0)
-    }
+  it('the blueprints folder is gone (C7): every blueprint held a class Sailor doesn’t run', () => {
+    // Each of ComfyUI's blueprints was built from classes Sailor doesn't run
+    // (checked here until C7 removed the folder from the repo).
+    expect(fs.existsSync(BLUEPRINTS)).toBe(false)
   })
 
   it('the module and the native route are gone; the path is a plain 404 hosted, in every spelling', () => {

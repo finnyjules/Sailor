@@ -5,8 +5,6 @@
  * Upscale / Enhance detail at the largest accepted input × the scale chosen.
  * The badge, the run estimate and the charge all read the one calculation.
  */
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -34,9 +32,6 @@ import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCredit
 import { estimateUsdForNodes, upstreamInputPixels, vueNodesToEstimateInput, widgetValueMap } from '~/lib/costEstimate'
 import type { OutputFile } from '~~/server/runner/types'
 
-const REPO = fileURLToPath(new URL('../../../', import.meta.url))
-const PY = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
-const PY_REFS = readFileSync(`${REPO}comfy_api_nodes/replicate_refs.py`, 'utf8')
 
 const SINK = { class_type: 'SaveImage', inputs: {} }
 const LINK = ['9', 0]
@@ -45,17 +40,12 @@ const LINK = ['9', 0]
 const charge = (ct: string, inputs: Record<string, unknown>) =>
   priceGraph({ 1: { class_type: ct, inputs }, 2: SINK }).credits
 
-/** The Python option list `name = [...]` in nodes_replicate.py. */
-function pyList(name: string, src = PY): string[] {
-  const m = new RegExp(`${name}\\s*=\\s*\\[([^\\]]+)\\]`).exec(src)
-  if (!m) throw new Error(`${name} moved`)
-  return [...m[1]!.matchAll(/"([^"]+)"/g)].map(x => x[1]!)
-}
-
-const EDIT_MODELS = pyList('_IMAGE_EDIT_MODELS')
-const BLEND_MODELS = pyList('_BLEND_SCENE_MODELS')
-const UPSCALE_MODELS = pyList('_UPSCALE_MODELS')
-const ENHANCE_MODELS = pyList('ENHANCE_ENGINES', PY_REFS)
+// The Python nodes' option lists (nodes_replicate.py, replicate_refs.py),
+// frozen when Python left the repo (step 4, C7).
+const EDIT_MODELS = ['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro']
+const BLEND_MODELS = ['Flux Kontext Pro', 'Flux 2 Pro', 'Nano Banana']
+const UPSCALE_MODELS = ['Clarity', 'Crystal', 'Real-ESRGAN', 'Recraft Crisp', 'Topaz']
+const ENHANCE_MODELS = ['Creative', 'Faithful', 'Diffusion Refine']
 
 // ── The settings grid ────────────────────────────────────────────────────
 
@@ -265,25 +255,11 @@ describe('settings parity: the price reads what each runner builder sends', () =
     expect(LARGEST_INPUT_PIXELS).toBe(nanoBananaPixels('4K', null))
   })
 
-  it('the Nano Banana edits carry the ComfyUI path\'s fallback chain, read from _run_nano_banana_edit', () => {
-    // nodes_replicate.py: the fal twin of the slug (_NANO_BANANA_FAL_EDIT),
-    // then fal Nano Banana Pro unless that was first, then the slug on
-    // Replicate — each at the same resolution. A new step there fails this.
-    const i = PY.indexOf('async def _run_nano_banana_edit(')
-    expect(i).toBeGreaterThan(0)
-    const rest = PY.slice(i + 4)
-    const body = rest.slice(0, rest.search(/\nasync def |\ndef |\nclass /))
-    const twins = /_NANO_BANANA_FAL_EDIT\s*=\s*\{([^}]+)\}/.exec(PY)![1]!
-    const falTwin = Object.fromEntries([...twins.matchAll(/"([^"]+)":\s*"([^"]+)"/g)].map(m => [m[1]!, m[2]!]))
-    expect(falTwin).toEqual({ 'google/nano-banana-2': 'fal-ai/nano-banana-2/edit', 'google/nano-banana-pro': 'fal-ai/nano-banana-pro/edit' })
-    // The chain's steps, in order: exactly one appended fal step (Pro), one fal loop, one Replicate last resort.
-    expect(body.match(/fal_chain\.append\(/g)).toHaveLength(1)
-    expect(body).toContain('_pro = "fal-ai/nano-banana-pro/edit"')
-    expect(body).toMatch(/if fal_primary != _pro:\s*\n\s*fal_chain\.append\(\(_pro,/)
-    expect(body.match(/_run_fal_nano_banana_edit\(/g)).toHaveLength(1)
-    expect(body.match(/_run_prediction\(/g)).toHaveLength(1)
-    expect(body).toContain('await _run_prediction(replicate_slug, nb_input)')
-    expect(body).toMatch(/"resolution": resolution/)
+  it('the Nano Banana edits carry the ComfyUI path\'s fallback chain (_run_nano_banana_edit)', () => {
+    // nodes_replicate.py, frozen at C7: the fal twin of the slug
+    // (_NANO_BANANA_FAL_EDIT), then fal Nano Banana Pro unless that was first,
+    // then the slug on Replicate — each at the same resolution.
+    const falTwin: Record<string, string> = { 'google/nano-banana-2': 'fal-ai/nano-banana-2/edit', 'google/nano-banana-pro': 'fal-ai/nano-banana-pro/edit' }
     const pyChain = (slug: string) => {
       const first = falTwin[slug]!
       return [first, ...(first === 'fal-ai/nano-banana-pro/edit' ? [] : ['fal-ai/nano-banana-pro/edit']), slug]
@@ -311,42 +287,23 @@ describe('settings parity: the price reads what each runner builder sends', () =
       else expect(chainOf(c), ct).toEqual(pyChain(slug))
       for (const step of [c, ...c.fallbacks!]) expect(step.tier, ct).toBe(c.tier)
     }
-    // The callers: Edit image, Develop, Relight call it; References and Restyle via _run_image_edit_prediction.
-    expect(PY).toMatch(/if replicate_slug in _NANO_BANANA_FAL_EDIT:\s*\n\s*return await _run_nano_banana_edit\(/)
-    expect(readFileSync(`${REPO}comfy_extras/nodes_relight.py`, 'utf8')).toContain('await _run_nano_banana_edit(')
     // The Nano Banana actions call Replicate directly: no chain; fal's edit is the runner's backup (Task S3).
     expect(only('RemoveObjectNode', {}).fallbacks).toEqual([{ endpoint: 'fal-ai/nano-banana-2/edit', tier: '1K', inputPixels: null, outputPixels: null }])
   })
 
-  it('Upscale and Enhance detail: the engines and what they send match the Python nodes', () => {
-    const slugs = /_UPSCALE_SLUGS\s*=\s*\{([^}]+)\}/.exec(PY)![1]!
-    const pySlugs = Object.fromEntries([...slugs.matchAll(/"([^"]+)":\s*"([^"]+)"/g)].map(m => [m[1]!, m[2]!]))
-    expect(UPSCALE_ENGINE_SLUGS).toEqual(pySlugs)
+  it('Upscale and Enhance detail: the engines match the Python nodes (frozen at C7)', () => {
+    expect(UPSCALE_ENGINE_SLUGS).toEqual({
+      'Clarity': 'philz1337x/clarity-upscaler',
+      'Crystal': 'philz1337x/crystal-upscaler',
+      'Real-ESRGAN': 'nightmareai/real-esrgan',
+      'Recraft Crisp': 'recraft-ai/recraft-crisp-upscale',
+      'Topaz': 'topazlabs/image-upscale',
+    })
     expect(Object.keys(UPSCALE_ENGINE_SLUGS)).toEqual(UPSCALE_MODELS)
     expect(Object.keys(ENHANCE_ENGINE_SLUGS)).toEqual(ENHANCE_MODELS)
-    // build_enhance_input: each engine's slug, all in place.
-    const enhance = PY_REFS.slice(PY_REFS.indexOf('def build_enhance_input'))
-    expect(enhance).toContain('return "philz1337x/clarity-upscaler", body')
-    expect(enhance).toMatch(/"scale_factor": 1\.0/)
-    expect(enhance).toContain('return "topazlabs/image-upscale", {')
-    expect(enhance).toMatch(/"upscale_factor": "None"/)
-    expect(enhance).toContain('return "fermatresearch/magic-image-refiner", body')
-    expect(enhance).toMatch(/"resolution": "original"/)
-    // UpscaleImageNode: Clarity and Crystal send scale_factor (1–10, default 2); Topaz its own factor.
-    expect(PY).toMatch(/IO\.Float\.Input\("scale_factor", default=2\.0, min=1\.0, max=10\.0/)
-    expect(PY).toMatch(/IO\.Combo\.Input\("topaz_upscale_factor", options=\["None", "2x", "4x", "6x"\],\s*default="2x"/)
-    const upscale = PY.slice(PY.indexOf('class UpscaleImageNode'), PY.indexOf('class EnhanceDetailNode'))
-    expect(upscale).toMatch(/"scale_factor": scale_factor/)
-    expect(upscale).toMatch(/"scale_factor": float\(scale_factor\)/)
-    expect(upscale).toMatch(/"upscale_factor": topaz_upscale_factor/)
   })
 
   it('Lens reframe and Pose Mannequin make the Nano Banana actions\' call: google/nano-banana-2 at 1K', () => {
-    for (const file of ['nodes_lens_reframe.py', 'nodes_pose_mannequin.py']) {
-      const src = readFileSync(`${REPO}comfy_extras/${file}`, 'utf8')
-      expect(src, file).toMatch(/_run_prediction\("google\/nano-banana-2", (\{|input_dict)/)
-      expect(src, file).toContain('"resolution": "1K"')
-    }
     // The same call as the actions, fal's edit their runner backup (family nano-extras, R3.15).
     expect(only('LensReframe', {})).toEqual(only('RemoveObjectNode', {}))
     expect(only('PoseMannequin', {})).toEqual(only('RemoveObjectNode', {}))
@@ -827,21 +784,10 @@ function charge2(model: string, px: number): number {
 // ── P4 fix round 2 ───────────────────────────────────────────────────────
 
 describe('RestyleWithLoRANode: priced by its calls', () => {
-  it('reads the calls and the re-roll rule from the Python', () => {
-    const i = PY.indexOf('class RestyleWithLoRANode')
-    const body = PY.slice(i, PY.indexOf('\nclass ', i + 10))
-    expect(Number(/_RESTYLE_MAX_NB_RETRIES\s*=\s*(\d+)/.exec(PY)![1])).toBe(RESTYLE_LORA_NB_RETRIES)
-    expect(body).toMatch(/for attempt in range\(1 \+ _RESTYLE_MAX_NB_RETRIES\):/)
-    // A re-roll follows a call that SUCCEEDED (and was billed): the loop only
-    // breaks on a photo target or an output classified as an illustration.
-    expect(body).toMatch(/best_url = await _run_nano_banana_edit\(\s*\n\s*\[content_url, style_url\], instruction,\s*\n\s*resolution=resolution/)
-    expect(body).toMatch(/if await _classify_image_style\(best_url\) == "illustration":\s*\n\s*matched = True\s*\n\s*break/)
-    // Moondream: one caption, one classification of the reference, one per pass.
-    expect(body.match(/"lucataco\/moondream2"/g)).toHaveLength(1)
-    expect(body.match(/_classify_image_style\(/g)).toHaveLength(2)
-    expect(PY).toMatch(/async def _classify_image_style[\s\S]{0,400}"lucataco\/moondream2"/)
-    expect(body).toContain('flux_model = "black-forest-labs/flux-dev-lora"')
-    expect(body).toMatch(/IO\.Combo\.Input\("resolution", options=\["1K", "2K", "4K"\], default="1K"/)
+  it('the calls and the re-roll rule of the Python node (_RESTYLE_MAX_NB_RETRIES = 2, frozen at C7)', () => {
+    // A re-roll follows a call that SUCCEEDED (and was billed): the Python loop
+    // only broke on a photo target or an output classified as an illustration.
+    expect(RESTYLE_LORA_NB_RETRIES).toBe(2)
     const steps = editSteps('RestyleWithLoRANode', { resolution: '2K' })!
     expect(steps.map(st => [st.call.endpoint, st.times])).toEqual([
       ['lucataco/moondream2', 5], ['black-forest-labs/flux-dev-lora', 1], ['fal-ai/nano-banana-2/edit', 3],

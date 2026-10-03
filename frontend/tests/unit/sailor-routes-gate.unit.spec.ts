@@ -33,10 +33,9 @@
  * on disk (the victim's file survives) and by asserting no fetch; the faked
  * engine fetch now only answers the video/audio work native code hands on.
  */
-import fs, { readFileSync, readdirSync } from 'node:fs'
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // R5.6: most tests here describe the video/sound routes WITHOUT Sailor's media tools (the engine or 503), so the
@@ -625,15 +624,50 @@ describe('the data gate requires a signed-in tenant', () => {
 // ============================================================ COVERAGE GUARD
 
 /**
- * The durable deliverable: every `/sailor` route the engine registers must be
+ * The durable deliverable: every `/sailor` route the engine registered must be
  * classified into exactly one non-`unknown` bucket, and match the locked
- * disposition table below. A route added upstream but not classified here
- * fails as `unknown` (fail closed). A route whose bucket drifts fails the
- * table check. Greps ALL of comfy_extras (not just the four named modules) so
- * a route added in any module — shader_effects lives in a fifth — is caught.
+ * disposition table below. The routes were grepped from ALL of comfy_extras
+ * and custom_nodes (`routes.get|post|put|delete('/sailor…')`) and frozen when
+ * Python left the repo (step 4, C7).
  */
-const COMFY_EXTRAS = fileURLToPath(new URL('../../../comfy_extras', import.meta.url))
-const CUSTOM_NODES = fileURLToPath(new URL('../../../custom_nodes', import.meta.url))
+const ENGINE_SAILOR_ROUTES: readonly string[] = [
+  'POST /sailor/lora/save_captions',
+  'POST /sailor/lora/clear_dataset',
+  'GET /sailor/models/status',
+  'GET /sailor/models/download',
+  'POST /sailor/motion/cleanup_frames',
+  'GET /sailor/projects',
+  'GET /sailor/projects/{uuid}',
+  'PUT /sailor/projects/{uuid}',
+  'DELETE /sailor/projects/{uuid}',
+  'POST /sailor/projects/{uuid}/versions',
+  'GET /sailor/projects/{uuid}/versions/{vid}',
+  'POST /sailor/projects/{uuid}/generations',
+  'GET /sailor/projects/{uuid}/generations',
+  'GET /sailor/spend/summary',
+  'GET /sailor/shader_effects',
+  'GET /sailor/shader_effects/assets/{name}',
+  'POST /sailor/render_timeline_stream',
+  'POST /sailor/render_timeline',
+  'POST /sailor/spacetype_encode',
+  'POST /sailor/font_subset',
+  'GET /sailor/space_defaults',
+  'POST /sailor/space_default/{effect_id}',
+  'GET /sailor/space_thumbnails',
+  'POST /sailor/space_thumbnail/{effect_id}',
+  'GET /sailor/space_thumbnail/{effect_id}',
+  'POST /sailor/timeline/render_frame',
+  'GET /sailor/output_listing',
+  'GET /sailor/assets',
+  'POST /sailor/asset_import',
+  'DELETE /sailor/assets/{asset_id}',
+  'GET /sailor/input_thumbnail',
+  'GET /sailor/asset_thumbnails',
+  'GET /sailor/asset_waveform',
+  'GET /sailor/input_listing',
+  'DELETE /sailor/input_file',
+  'DELETE /sailor/output_file',
+]
 
 /** `${VERB} ${pathTemplate}` → expected bucket. THE verified disposition table. */
 const EXPECTED: Record<string, string> = {
@@ -698,47 +732,11 @@ function concrete(template: string): string {
   return template.replace(/\{[^}]+\}/g, 'X')
 }
 
-/** Every `.py` under a root, recursing subdirs (a route can move into a package
- * subfolder or a custom_nodes plugin), skipping compiled-cache dirs. */
-function pyFilesUnder(root: string): string[] {
-  const out: string[] = []
-  let entries: ReturnType<typeof readdirSync>
-  try {
-    entries = readdirSync(root, { withFileTypes: true })
-  }
-  catch {
-    return out // a root that does not exist on this checkout contributes nothing
-  }
-  for (const e of entries as any[]) {
-    const full = `${root}/${e.name}`
-    if (e.isDirectory()) {
-      if (e.name === '__pycache__' || e.name === 'node_modules' || e.name === '.git') continue
-      out.push(...pyFilesUnder(full))
-    }
-    else if (e.isFile() && e.name.endsWith('.py')) {
-      out.push(full)
-    }
-  }
-  return out
-}
-
 function grepSailorRoutes(): { verb: string, template: string }[] {
-  const out: { verb: string, template: string }[] = []
-  // Single OR double quotes — aiohttp accepts either and Python style varies.
-  const re = /routes\.(get|post|put|delete)\(['"](\/sailor[^'"]*)['"]/g
-  const seen = new Set<string>()
-  for (const file of [...pyFilesUnder(COMFY_EXTRAS), ...pyFilesUnder(CUSTOM_NODES)]) {
-    const src = readFileSync(file, 'utf8')
-    let m: RegExpExecArray | null
-    while ((m = re.exec(src)) !== null) {
-      const rec = { verb: m[1]!.toUpperCase(), template: m[2]! }
-      const key = `${rec.verb} ${rec.template}`
-      if (seen.has(key)) continue // a route defined once but scanned twice
-      seen.add(key)
-      out.push(rec)
-    }
-  }
-  return out
+  return ENGINE_SAILOR_ROUTES.map((key) => {
+    const [verb, template] = key.split(' ') as [string, string]
+    return { verb, template }
+  })
 }
 
 describe('coverage guard: every registered /sailor route is classified', () => {
@@ -783,7 +781,7 @@ describe('coverage guard: every registered /sailor route is classified', () => {
       else if (expected !== bucket) mismatches.push(`${key}: table says ${expected} but classifier says ${bucket}`)
     }
     for (const key of Object.keys(EXPECTED)) {
-      if (!seen.has(key)) mismatches.push(`${key}: in the table but NOT found in comfy_extras (route removed/renamed?)`)
+      if (!seen.has(key)) mismatches.push(`${key}: in the table but NOT among the engine's routes`)
     }
     expect(mismatches).toEqual([])
   })

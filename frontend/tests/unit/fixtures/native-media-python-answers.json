@@ -1,0 +1,588 @@
+{
+ "parity with the Python handlers > output and input listings: same items, same order, same fields, same mtimes": [
+  {
+   "calls": "e60434daa51e85c2e42dd59468108d9993bbc0aed1e47a571ee1754dd8c7023d",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "items": [
+       {
+        "filename": "z.wav",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000002.1234567
+       },
+       {
+        "filename": "q.m4a",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000002.1234567
+       },
+       {
+        "filename": "e.png",
+        "subfolder": ".cache",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000002
+       },
+       {
+        "filename": "d.mov",
+        "subfolder": "sub/deep",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000001.5
+       },
+       {
+        "filename": "A.MP4",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000001.1234567
+       },
+       {
+        "filename": "ü-ñ.webp",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000001.1234567
+       },
+       {
+        "filename": "m.JPEG",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000001.1234567
+       },
+       {
+        "filename": "c.gif",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000000.1234567
+       },
+       {
+        "filename": "b.png",
+        "subfolder": "",
+        "type": "output",
+        "size": 1,
+        "mtime": 1790000000.1234567
+       }
+      ]
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "items": [
+       {
+        "filename": "A.MP4",
+        "path": "<ROOT>/input/A.MP4",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000001
+       },
+       {
+        "filename": "c.gif",
+        "path": "<ROOT>/input/c.gif",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000001
+       },
+       {
+        "filename": "m.JPEG",
+        "path": "<ROOT>/input/m.JPEG",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000001
+       },
+       {
+        "filename": "ü-ñ.webp",
+        "path": "<ROOT>/input/ü-ñ.webp",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000000
+       },
+       {
+        "filename": "link.png",
+        "path": "<ROOT>/input/link.png",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000000
+       },
+       {
+        "filename": "z.wav",
+        "path": "<ROOT>/input/z.wav",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000000
+       },
+       {
+        "filename": "b.png",
+        "path": "<ROOT>/input/b.png",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000000
+       },
+       {
+        "filename": "q.m4a",
+        "path": "<ROOT>/input/q.m4a",
+        "type": "input",
+        "size": 1,
+        "mtime": 1790000000
+       }
+      ]
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with the Python handlers > a missing input folder: the same 500 body": [
+  {
+   "calls": "9a594c54670ef577dd5b4a85e0f67fef80aab58062ea332db0ae039779ea32a0",
+   "result": [
+    {
+     "status": 500,
+     "content_type": "application/json",
+     "body": {
+      "error": "[Errno 2] No such file or directory: '<ROOT>/input'",
+      "items": []
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with the Python handlers > delete guards: every name is refused, missing or deleted exactly as the Python does": [
+  {
+   "calls": "ec81127e06357f60688d5575141f7b8b87607d639b7f3aee58e57adcc923fb3f",
+   "result": [
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "invalid filename"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true,
+      "missing": true
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with the Python handlers > deletes remove the same files": [
+  {
+   "calls": "6950071d73cfa242d320c9dda4bfdffed7b74a01fc0d556fd5376b1d6a8cfcd6",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": [
+    "input/a.png",
+    "input/nested/b.png",
+    "output/sub/c.png"
+   ]
+  }
+ ],
+ "parity with the Python handlers > the asset library: Python imports, native reads and adds, Python reads and deletes, byte-identical file": [
+  {
+   "calls": "a9efbae17a4f5b3a1697cf3df9d0114cd48dd52c132e147c9aa7544a47997f76",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "asset": {
+       "id": "eccb5574-d371-4de4-925c-43a3a363c88b",
+       "path": "<ROOT>/input/one.png",
+       "kind": "image",
+       "name": "one.png",
+       "duration_sec": null,
+       "width": 120,
+       "height": 45,
+       "thumbnail_path": null,
+       "waveform_path": null
+      },
+      "created": true
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {
+    "user/timeline_assets.json": "WwogIHsKICAgICJpZCI6ICJlY2NiNTU3NC1kMzcxLTRkZTQtOTI1Yy00M2EzYTM2M2M4OGIiLAogICAgInBhdGgiOiAiPFJPT1Q+L2lucHV0L29uZS5wbmciLAogICAgImtpbmQiOiAiaW1hZ2UiLAogICAgIm5hbWUiOiAib25lLnBuZyIsCiAgICAiZHVyYXRpb25fc2VjIjogbnVsbCwKICAgICJ3aWR0aCI6IDEyMCwKICAgICJoZWlnaHQiOiA0NSwKICAgICJ0aHVtYm5haWxfcGF0aCI6IG51bGwsCiAgICAid2F2ZWZvcm1fcGF0aCI6IG51bGwKICB9Cl0="
+   },
+   "mtimes": {
+    "user/timeline_assets.json": 1791051400.9006624
+   },
+   "made": [],
+   "removed": []
+  },
+  {
+   "calls": "c58453b22bc3a0f5cfdf62237687189d0fb775bc3a3bfbb50bb59a14e7f08750",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "assets": [
+       {
+        "id": "eccb5574-d371-4de4-925c-43a3a363c88b",
+        "path": "<ROOT>/input/one.png",
+        "kind": "image",
+        "name": "one.png",
+        "duration_sec": null,
+        "width": 120,
+        "height": 45,
+        "thumbnail_path": null,
+        "waveform_path": null
+       },
+       {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "path": "<ROOT>/input/two ü.png",
+        "kind": "image",
+        "name": "two ü.png",
+        "duration_sec": null,
+        "width": 33,
+        "height": 77,
+        "thumbnail_path": null,
+        "waveform_path": null
+       }
+      ]
+     },
+     "cache_control": null
+    },
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "asset": {
+       "id": "00000000-0000-4000-8000-000000000001",
+       "path": "<ROOT>/input/two ü.png",
+       "kind": "image",
+       "name": "two ü.png",
+       "duration_sec": null,
+       "width": 33,
+       "height": 77,
+       "thumbnail_path": null,
+       "waveform_path": null
+      },
+      "created": false
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  },
+  {
+   "calls": "8a160381145e90ef97361f0f53c3635d1a4f264437e638cd7a71f7165ba39192",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "ok": true
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {
+    "user/timeline_assets.json": "WwogIHsKICAgICJpZCI6ICJlY2NiNTU3NC1kMzcxLTRkZTQtOTI1Yy00M2EzYTM2M2M4OGIiLAogICAgInBhdGgiOiAiPFJPT1Q+L2lucHV0L29uZS5wbmciLAogICAgImtpbmQiOiAiaW1hZ2UiLAogICAgIm5hbWUiOiAib25lLnBuZyIsCiAgICAiZHVyYXRpb25fc2VjIjogbnVsbCwKICAgICJ3aWR0aCI6IDEyMCwKICAgICJoZWlnaHQiOiA0NSwKICAgICJ0aHVtYm5haWxfcGF0aCI6IG51bGwsCiAgICAid2F2ZWZvcm1fcGF0aCI6IG51bGwKICB9Cl0="
+   },
+   "mtimes": {
+    "user/timeline_assets.json": 1791051401.2558115
+   },
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with the Python handlers > asset_import errors: the same status and body": [
+  {
+   "calls": "4abf9abe7e1ac30832e30f5bf58ff4920f209507723e301bfb1aedbc31661a4d",
+   "result": [
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "missing 'path'"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "missing 'path'"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 404,
+     "content_type": "application/json",
+     "body": {
+      "error": "not found: <ROOT>/input/nope.png"
+     },
+     "cache_control": null
+    },
+    {
+     "status": 400,
+     "content_type": "application/json",
+     "body": {
+      "error": "missing 'path'"
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {},
+   "mtimes": {},
+   "made": [],
+   "removed": []
+  }
+ ],
+ "parity with the Python handlers > input thumbnails: the Python's cache file name, and the same thumbnail size": [
+  {
+   "calls": "aae442e5bfdfc8dfc377ab427f0464ef305b91b67d0e98bfbc1ba62064eb00dd",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "image/png",
+     "body": "iVBORw0KGgoAAAANSUhEUgAAAJAAAAAwCAIAAABxOGQBAAAAYklEQVR42u3RQREAMAjAsLEnmvB/yEIHXCqhia582tO3AJiACRgwARMwYAImYMAETMCACZiAARMwAQMmYAIGTMAEDJiACRgwARMwAQMmYAIGTMAEDJiACRgwARMwYAImYPcbL10Bbh0hm30AAAAASUVORK5CYII=",
+     "cache_control": "max-age=86400"
+    }
+   ],
+   "written": {
+    "user/timeline_thumbs/input_91dec3e1f522dc365fa21633f0bbbc6c3c7e7025.png": "iVBORw0KGgoAAAANSUhEUgAAAJAAAAAwCAIAAABxOGQBAAAAYklEQVR42u3RQREAMAjAsLEnmvB/yEIHXCqhia582tO3AJiACRgwARMwYAImYMAETMCACZiAARMwAQMmYAIGTMAEDJiACRgwARMwAQMmYAIGTMAEDJiACRgwARMwYAImYPcbL10Bbh0hm30AAAAASUVORK5CYII="
+   },
+   "mtimes": {
+    "user/timeline_thumbs/input_91dec3e1f522dc365fa21633f0bbbc6c3c7e7025.png": 1791051401.5956225
+   },
+   "made": [
+    "user/timeline_thumbs"
+   ],
+   "removed": []
+  }
+ ],
+ "parity with the Python handlers > asset thumbnails: native serves the Python's cache file, and writes the same file name and format": [
+  {
+   "calls": "181248d0a9d9d1cff90c0a21bfd3a03f8c6e00ba3dfd161802ca6361ae1c05d2",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "asset": {
+       "id": "a22f9da0-cbf6-43d6-a67b-1b470f4885df",
+       "path": "<ROOT>/input/still.png",
+       "kind": "image",
+       "name": "still.png",
+       "duration_sec": null,
+       "width": 64,
+       "height": 48,
+       "thumbnail_path": null,
+       "waveform_path": null
+      },
+      "created": true
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {
+    "user/timeline_assets.json": "WwogIHsKICAgICJpZCI6ICJhMjJmOWRhMC1jYmY2LTQzZDYtYTY3Yi0xYjQ3MGY0ODg1ZGYiLAogICAgInBhdGgiOiAiPFJPT1Q+L2lucHV0L3N0aWxsLnBuZyIsCiAgICAia2luZCI6ICJpbWFnZSIsCiAgICAibmFtZSI6ICJzdGlsbC5wbmciLAogICAgImR1cmF0aW9uX3NlYyI6IG51bGwsCiAgICAid2lkdGgiOiA2NCwKICAgICJoZWlnaHQiOiA0OCwKICAgICJ0aHVtYm5haWxfcGF0aCI6IG51bGwsCiAgICAid2F2ZWZvcm1fcGF0aCI6IG51bGwKICB9Cl0="
+   },
+   "mtimes": {
+    "user/timeline_assets.json": 1791051401.7693326
+   },
+   "made": [],
+   "removed": []
+  },
+  {
+   "calls": "c9f4e00fa1e32c6e4573dd3da745aa4e196a39dbf63dafa8477a366151e5d12f",
+   "result": [
+    {
+     "status": 200,
+     "content_type": "application/json",
+     "body": {
+      "thumbnails": [
+       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAIAAAAuKetIAAAARUlEQVR42u3PQQkAQAgAML2nmeyPsa6FIGwNltMVl704TkBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQGDPBxkVAW5faIVbAAAAAElFTkSuQmCC"
+      ],
+      "asset_id": "a22f9da0-cbf6-43d6-a67b-1b470f4885df",
+      "count": 3
+     },
+     "cache_control": null
+    }
+   ],
+   "written": {
+    "user/timeline_thumbs/a22f9da0-cbf6-43d6-a67b-1b470f4885df.3.json": "eyJ0aHVtYm5haWxzIjogWyJkYXRhOmltYWdlL3BuZztiYXNlNjQsaVZCT1J3MEtHZ29BQUFBTlNVaEVVZ0FBQUVBQUFBQXdDQUlBQUFBdUtldElBQUFBUlVsRVFWUjQydTNQUVFrQVFBZ0FNTDJubWV5UHNhNkZJR3dObHRNVmw3MDRUa0JBUUVCQVFFQkFRRUJBUUVCQVFFQkFRRUJBUUVCQVFFQkFRRUJBUUVCQVFHRFBCeGtWQVc1ZmFJVmJBQUFBQUVsRlRrU3VRbUNDIl0sICJhc3NldF9pZCI6ICJhMjJmOWRhMC1jYmY2LTQzZDYtYTY3Yi0xYjQ3MGY0ODg1ZGYiLCAiY291bnQiOiAzfQ=="
+   },
+   "mtimes": {
+    "user/timeline_thumbs/a22f9da0-cbf6-43d6-a67b-1b470f4885df.3.json": 1791051401.948207
+   },
+   "made": [
+    "user/timeline_thumbs"
+   ],
+   "removed": []
+  }
+ ]
+}

@@ -1,86 +1,36 @@
 /**
  * Stage 6 Task 7b — engine file-surface coverage guards.
  *
- * These read the Python engine tree at TEST time (never at runtime) and FAIL
- * ON DRIFT, so a newly-added file-reading or file-writing node fails the suite
- * instead of silently bypassing the per-user ownership checks:
+ * These used to read the Python engine tree at TEST time and FAIL ON DRIFT, so
+ * a newly-added file-reading or file-writing node failed the suite instead of
+ * silently bypassing the per-user ownership checks. Python left the repo in
+ * step 4, C7: the per-file tables below are the frozen record of the engine's
+ * read and write sites as they stood then, and the guards check Sailor's own
+ * maps against them:
  *
  *  (A) every directory-read PRIMITIVE site — get_annotated_filepath (per-file)
- *      AND get_(input|output|temp)_directory (the per-FOLDER readers that a
- *      get_annotated_filepath-only grep MISSED, the Task 7b review Critical) —
- *      is accounted for: its file's node(s) are a per-file reader in
+ *      AND get_(input|output|temp)_directory (the per-FOLDER readers) — is
+ *      accounted for: its file's node(s) are a per-file reader in
  *      GRAPH_FILE_READERS, a per-folder reader in GRAPH_FOLDER_READERS, or the
- *      remaining hits (schema-build dir-listings, mkdir/temp staging, output
- *      writes already gated by guard B, HTTP-route helpers) are documented in a
- *      per-file `note`. A read added to a covered file bumps the per-file count
- *      and trips the guard.
+ *      remaining hits are documented in a per-file `note`.
  *  (B) every `folder_paths.get_output_directory(` write site's node is in
  *      OUTPUT_CLASS_TYPES (so its output is subfoldered under u_<hash>/) or on
  *      the explicit write-exempt list. Deliverable savers that delegate to a UI
  *      helper (no get_output_directory in-file) are enumerated separately and
  *      asserted present in OUTPUT_CLASS_TYPES.
- *
- * The grep recurses comfy_extras/ subdirs + custom_nodes/ and matches the
- * literal folder_paths primitives the engine uses.
  */
-import { readFileSync, readdirSync } from 'node:fs'
-import { join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, VIDEO_REF_LIST_KEYS, VIDEO_REF_STR_KEYS } from '../../server/utils/engineFileSurface'
 import { OUTPUT_CLASS_TYPES } from '../../server/utils/priceBook'
 
-const REPO = fileURLToPath(new URL('../../../', import.meta.url))
-const SKIP_DIRS = new Set(['__pycache__', '.venv', 'venv', 'node_modules', '.git'])
-
-/** Every .py file under the engine roots the brief greps. */
-function enginePyFiles(): string[] {
-  const out: string[] = []
-  const walk = (abs: string) => {
-    for (const ent of readdirSync(abs, { withFileTypes: true })) {
-      if (ent.isDirectory()) {
-        if (!SKIP_DIRS.has(ent.name)) walk(join(abs, ent.name))
-      }
-      else if (ent.name.endsWith('.py')) {
-        out.push(relative(REPO, join(abs, ent.name)).replace(/\\/g, '/'))
-      }
-    }
-  }
-  walk(join(REPO, 'comfy_extras'))
-  walk(join(REPO, 'custom_nodes'))
-  out.push('nodes.py')
-  return out
-}
-
-function countMatches(relPath: string, re: RegExp): number {
-  const src = readFileSync(join(REPO, relPath), 'utf8')
-  return (src.match(re) ?? []).length
-}
-
-/** Per-file live count for a folder_paths primitive across the engine tree. */
-function liveCounts(re: RegExp): Record<string, number> {
-  const out: Record<string, number> = {}
-  for (const f of enginePyFiles()) {
-    const n = countMatches(f, re)
-    if (n > 0) out[f] = n
-  }
-  return out
-}
-
 // ---------------------------------------------------------------------------
 // (A) READ surface — the FULL directory-read primitive set, not just
-// get_annotated_filepath. The pre-Task-7b guard greped ONLY
-// get_annotated_filepath, so the per-FOLDER readers (LoadImageDataSetFromFolder
-// etc., which reach the shared tree via get_input_directory /
-// get_output_directory) slipped through unmodeled — the review Critical. The
-// widened regex matches every real call site of get_annotated_filepath and
-// get_(input|output|temp)_directory (anchored to the `(` so a stray mention in
-// a comment can't spuriously trip drift), recursing comfy_extras/ subdirs +
-// custom_nodes/ + nodes.py.
+// get_annotated_filepath: the per-FOLDER readers (LoadImageDataSetFromFolder
+// etc., which reached the shared tree via get_input_directory /
+// get_output_directory) are modeled too. The counts were every real call site
+// of get_annotated_filepath and get_(input|output|temp)_directory across
+// comfy_extras/, custom_nodes/ and nodes.py, frozen at C7.
 // ---------------------------------------------------------------------------
-
-const ANNOTATED_RE = /folder_paths\.get_annotated_filepath\(/g
-const WIDE_READ_RE = /folder_paths\.get_annotated_filepath\(|folder_paths\.(?:get_)?(?:input|output|temp)_directory\(/g
 
 /**
  * Per file: `count` = the widened directory-primitive hit total (drift guard),
@@ -202,20 +152,6 @@ const READ_SURFACE_FILES: Record<string, ReadFileEntry> = {
 const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline', 'GenerateImageNode', 'RestyleFromImageNode', 'LipSyncNode', 'FilmShotNode', 'GenerateVideoNode']
 
 describe('coverage guard (A) — every engine file-READ site is accounted for', () => {
-  it('the live get_annotated_filepath per-file counts match the annotated subset (drift → fail)', () => {
-    expect(liveCounts(ANNOTATED_RE)).toEqual(
-      Object.fromEntries(
-        Object.entries(READ_SURFACE_FILES).filter(([, v]) => v.annotated > 0).map(([f, v]) => [f, v.annotated]),
-      ),
-    )
-  })
-
-  it('the live WIDENED directory-primitive per-file counts match the checked-in table (drift → fail)', () => {
-    expect(liveCounts(WIDE_READ_RE)).toEqual(
-      Object.fromEntries(Object.entries(READ_SURFACE_FILES).map(([f, v]) => [f, v.count])),
-    )
-  })
-
   it('every per-FILE reader named in a read-file entry is in GRAPH_FILE_READERS', () => {
     for (const [file, { readers }] of Object.entries(READ_SURFACE_FILES)) {
       for (const n of readers) {
@@ -240,43 +176,12 @@ describe('coverage guard (A) — every engine file-READ site is accounted for', 
     }
   })
 
-  it('the moodboard read site the style_refs entries model still exists (nodes_replicate.py)', () => {
-    const src = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
-    expect(src).toMatch(/def _moodboard_ref_data_urls\(/)
-    expect(src).toMatch(/folder_paths\.get_input_directory\(\)/)
-    for (const ct of ['GenerateImageNode', 'RestyleFromImageNode']) {
-      expect(src, `${ct} must still parse style_refs`).toMatch(new RegExp(`node_id="${ct}"`))
-    }
-  })
-
-  // P5 fix round 1: LipSyncNode's model_options `/view?filename=X&type=input` links are
-  // read from the input folder by name (parse_view_ref → _local_ref_to_data_url /
-  // _lipsync_hosted_media_url), not through get_annotated_filepath.
-  it('the view-ref read site the LipSyncNode entry models still exists (nodes_replicate.py, video_models.py)', () => {
-    const src = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
-    const vm = readFileSync(join(REPO, 'comfy_api_nodes/video_models.py'), 'utf8')
-    expect(vm).toMatch(/def parse_view_ref\(/)
-    expect(vm).toContain('if q.get("type", [""])[0] != "input":')
-    expect(src).toMatch(/node_id="LipSyncNode"/)
-    expect(src).toContain('video_src = opts.get("face_video")')
-    expect(src).toContain('audio_src = opts.get("audio")')
-    expect(src).toContain('path = os.path.join(folder_paths.get_input_directory(), name)')
-  })
-
-  // FilmShotNode's model_options `/view?filename=X&type=input` links are read from the
-  // input folder by _resolve_local_refs over two key lists; the gate walks the same lists.
-  it('the view-ref read site the FilmShotNode / GenerateVideoNode entries model still exists, with the same keys', () => {
-    const src = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
-    const tuple = (name: string) => {
-      const body = new RegExp(`^${name} = \\(([\\s\\S]*?)^\\)`, 'm').exec(src)?.[1] ?? ''
-      return [...body.matchAll(/"([a-z_]+)"/g)].map(m => m[1])
-    }
-    expect(tuple('_LOCAL_REF_LIST_KEYS')).toEqual([...VIDEO_REF_LIST_KEYS])
-    expect(tuple('_LOCAL_REF_STR_KEYS')).toEqual([...VIDEO_REF_STR_KEYS])
-    expect(src).toMatch(/def _resolve_local_refs\(/)
-    expect(src).toContain('path = os.path.join(folder_paths.get_input_directory(), filename)')
-    expect(src).toContain('advanced = _resolve_local_refs(advanced)')
-    for (const ct of ['FilmShotNode', 'GenerateVideoNode']) expect(src).toMatch(new RegExp(`node_id="${ct}"`))
+  // FilmShotNode's model_options `/view?filename=X&type=input` links were read from the
+  // input folder by _resolve_local_refs over two key lists (nodes_replicate.py, frozen
+  // at C7); the gate walks the same lists.
+  it('the view-ref keys the FilmShotNode / GenerateVideoNode entries model are the Python\'s', () => {
+    expect([...VIDEO_REF_LIST_KEYS]).toEqual(['reference_images', 'reference_videos', 'reference_audios', 'image_urls', 'video_urls', 'audio_urls'])
+    expect([...VIDEO_REF_STR_KEYS]).toEqual(['image', 'last_frame_image', 'image_url', 'end_image_url'])
   })
 
   it('every GRAPH_FOLDER_READERS class is backed by a documented folder-read site (no orphan map entry)', () => {
@@ -299,8 +204,6 @@ describe('coverage guard (A) — every engine file-READ site is accounted for', 
 // ---------------------------------------------------------------------------
 // (B) WRITE surface — folder_paths.get_output_directory(
 // ---------------------------------------------------------------------------
-
-const OUTPUT_DIR_RE = /folder_paths\.get_output_directory\(/g
 
 /**
  * Every file with a get_output_directory site, its count, and the class_type(s)
@@ -362,12 +265,6 @@ const WRITE_EXEMPT: Record<string, string> = {
 const HELPER_WRITER_NODES = ['SaveAnimatedWEBP', 'SaveAnimatedPNG', 'SaveAudio', 'SaveAudioMP3', 'SaveAudioOpus', 'Audio']
 
 describe('coverage guard (B) — every engine file-WRITE site is subfoldered or exempt', () => {
-  it('the live get_output_directory per-file counts match the checked-in table (drift → fail)', () => {
-    expect(liveCounts(OUTPUT_DIR_RE)).toEqual(
-      Object.fromEntries(Object.entries(OUTPUT_DIR_FILES).map(([f, v]) => [f, v.count])),
-    )
-  })
-
   it('every writer node is in OUTPUT_CLASS_TYPES or on the write-exempt list', () => {
     for (const [file, { writers }] of Object.entries(OUTPUT_DIR_FILES)) {
       for (const w of writers) {

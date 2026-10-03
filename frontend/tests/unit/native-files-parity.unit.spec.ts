@@ -1,14 +1,14 @@
 /**
- * Parity with the Python itself: the REAL /upload/image, /upload/mask and
- * /view handlers from server.py (lifted out with `ast` by
- * fixtures/native-files-python-oracle.py and served by a real aiohttp app)
- * and the native ones get the same request bytes over two identical temp
- * engine roots; the answers and the files left behind must match.
+ * Parity with the Python itself: ComfyUI's REAL /upload/image, /upload/mask
+ * and /view handlers from server.py and the native ones get the same request
+ * bytes over two identical temp data roots; the answers and the files left
+ * behind must match.
  *
- * Needs the repo's `.venv` (Python + aiohttp + Pillow); skipped without it.
+ * Python left the repo in step 4, C7: the Python's answers, and the files it
+ * wrote, were frozen then into fixtures/native-files-python-answers.json and
+ * are replayed by helpers/frozenOracle.ts. Nothing here runs Python.
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -18,21 +18,18 @@ import { __setInputUploadsEngineRootForTests } from '../../server/utils/inputUpl
 import { nativeEngineRoute } from '../../server/native/router'
 import { resolveViewTarget, viewFileResponse } from '../../server/native/view'
 import { pngText } from '../../server/native/uploads'
+import { frozenOracle } from './helpers/frozenOracle'
 
-const REPO = path.resolve(__dirname, '..', '..', '..')
-const PYTHON = path.join(REPO, '.venv', 'bin', 'python')
-const ORACLE = path.join(__dirname, 'fixtures', 'native-files-python-oracle.py')
 const FIXTURES = path.join(__dirname, 'fixtures', 'native-upload-mask')
-const hasPython = fs.existsSync(PYTHON)
+const FROZEN = path.join(__dirname, 'fixtures', 'native-files-python-answers.json')
 
 interface Call { method: string, path: string, headers?: Record<string, string>, body?: Buffer }
 interface Answer { status: number, headers: Record<string, string>, body: Buffer }
 
+const oracle = frozenOracle(FROZEN)
 function python(root: string, calls: Call[]): Answer[] {
-  const spec = { root, calls: calls.map(c => ({ ...c, body: c.body?.toString('base64') })) }
-  const r = spawnSync(PYTHON, [ORACLE], { input: JSON.stringify(spec), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  if (r.status !== 0) throw new Error(`oracle failed: ${r.stderr}`)
-  return (JSON.parse(r.stdout) as any[]).map(a => ({ status: a.status, headers: a.headers, body: Buffer.from(a.body, 'base64') }))
+  const spec = calls.map(c => ({ ...c, body: c.body?.toString('base64') }))
+  return (oracle(root, spec) as any[]).map(a => ({ status: a.status, headers: a.headers, body: Buffer.from(a.body, 'base64') }))
 }
 
 const app = createApp()
@@ -106,7 +103,7 @@ afterEach(() => {
 
 const json = (a: Answer) => { try { return JSON.parse(a.body.toString('utf8')) } catch { return a.body.toString('utf8') } }
 
-describe.skipIf(!hasPython)('parity with server.py', () => {
+describe('parity with server.py', () => {
   it('/upload/image: same answers, same files, same numbering', async () => {
     const calls: Call[] = [
       post('/upload/image', { name: 'a.png', bytes: 'ONE' }),

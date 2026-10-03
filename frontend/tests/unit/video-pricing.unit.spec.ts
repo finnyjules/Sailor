@@ -205,17 +205,10 @@ describe('settings parity: the price reads what the builder sends', () => {
     })
   }
 
-  // Fabric has no runner builder. _b_fabric_1_0 (comfy_api_nodes/video_models.py:465-477)
-  // sends only image, audio and `resolution` (default 720p); the clip is as long as
-  // the sound, capped at 60 s by GenerateVideoNode (nodes_replicate.py:3974).
+  // Fabric's Python builder, _b_fabric_1_0 (comfy_api_nodes/video_models.py, frozen at
+  // C7), sent only image, audio and `resolution` (default 720p) and no duration; the
+  // clip is as long as the sound, which GenerateVideoNode capped at 60 s.
   it('fabric-1.0 follows the Python builder: resolution default 720p, length = the 60 s cap', () => {
-    const REPO = fileURLToPath(new URL('../../../', import.meta.url))
-    const py = readFileSync(`${REPO}comfy_api_nodes/video_models.py`, 'utf8')
-    const body = py.slice(py.indexOf('def _b_fabric_1_0'), py.indexOf('def _b_pixverse_v6'))
-    expect(body).toContain('"resolution": _opt_str(adv, "resolution", "720p")')
-    expect(body).not.toMatch(/"duration"/)
-    const node = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
-    expect(node).toContain('audio_data_url = _audio_dict_to_wav_data_url(audio, max_seconds=60) if audio is not None else None')
     for (const dur of ['5', '10', 60, undefined]) {
       expect(effectiveVideoSettings('fabric-1.0', dur, '16:9', '{}')).toEqual({ seconds: 60, resolution: '720p', audio: true, inputVideoSeconds: 0 })
       expect(effectiveVideoSettings('fabric-1.0', dur, '16:9', '{"resolution":"480p"}')!.resolution).toBe('480p')

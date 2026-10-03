@@ -38,6 +38,7 @@ import { requestProblems } from '~~/server/runner/requestRules'
 import { ANSWER_MAX_BYTES, ANSWER_NOT_GLB, answerTooLarge } from '~~/server/runner/answerDownload'
 import { viewGateDecision } from '~~/server/utils/engineGate'
 import type { OutputFile } from '~~/server/runner/types'
+import { catalogOptions } from './helpers/nodeCatalog'
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-gen-3d.json'), 'utf8')) as { cases: PaidCase[] }
 const CASES = FIXTURE.cases
@@ -155,9 +156,9 @@ describe('the fixture', () => {
   })
 
   it('the lists are Python\'s', () => {
-    const python = readFileSync(resolve(__dirname, '../../../comfy_api_nodes/nodes_replicate.py'), 'utf8')
-    expect(python).toContain(`options=[${MULTI_VIEW_ENGINES.map(e => `"${e}"`).join(', ')}]`)
-    expect(python).toContain(`IO.Combo.Input("rodin_quality", options=[${RODIN_QUALITIES.map(e => `"${e}"`).join(', ')}]`)
+    // As the Python node declared them (the node catalogue, C6).
+    expect(catalogOptions('Hunyuan3DMultiViewNode', 'engine')).toEqual([...MULTI_VIEW_ENGINES])
+    expect(catalogOptions('Hunyuan3DMultiViewNode', 'rodin_quality')).toEqual([...RODIN_QUALITIES])
   })
 })
 

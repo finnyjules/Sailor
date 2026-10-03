@@ -2,7 +2,7 @@
  * Where Sailor's data folders live (C1, ComfyUI code removal): the one folder
  * that holds `input/`, `output/`, `temp/`, `user/` and `library/` (the user's
  * LoRAs, characters and voices — see library.ts; and the shipped
- * `blueprints/`, `shader_effects/`, `scenes/`).
+ * `shader_effects/` and `scenes/`).
  * Every server path into those folders resolves through this module.
  *
  * - `SAILOR_DATA_ROOT` names it explicitly (the hosted image sets `/app`).

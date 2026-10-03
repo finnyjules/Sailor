@@ -5,9 +5,9 @@
  * repo-root Dockerfile, start.sh, .dockerignore and fly.toml. The runtime stage
  * is Node only (no pip, no ComfyUI, no main.py, no :8188); it copies in Sailor's
  * video tools and the depth model; start.sh starts only the Nitro server and
- * keeps the volume links; .dockerignore keeps ComfyUI's Python out while the
- * data files the server reads by path (caption font, Ascii glyphs, the stored
- * node list, blueprints, shader effects, Timeline scene defaults) still ship.
+ * keeps the volume links; .dockerignore keeps any local Python leftovers out
+ * while the data files the server reads by path (caption font, Ascii glyphs,
+ * the stored node list, shader effects, Timeline scene defaults) still ship.
  * A real `docker build` and a smoke run are owed on a machine with Docker.
  */
 import fs from 'node:fs'
@@ -90,8 +90,9 @@ describe('the Dockerfile', () => {
     expect(arg('NODE_BASE')).toMatch(/^node:22-[a-z]+-slim@sha256:[0-9a-f]{64}$/)
     expect(runtime.base).toBe('${NODE_BASE}')
     expect(s.get('web')!.base).toBe('${NODE_BASE}')
-    // Python builds the video tools only (meson, ninja); the depth model stage just downloads.
+    // Python builds the video tools only (meson, ninja); the depth model stage just downloads, on the Node base (C7).
     expect(s.get('media-tools')!.base).toBe('${PYTHON_BASE}')
+    expect(s.get('depth-model')!.base).toBe('${NODE_BASE}')
   })
 
   it('the tools base and the runtime base name the same Debian release', () => {
@@ -159,13 +160,10 @@ describe('start.sh', () => {
 })
 
 describe('.dockerignore', () => {
-  it('keeps ComfyUI\'s Python source and requirements out of the image', () => {
+  it('keeps any Python a local disk still holds out of the image (the repo has none since C7)', () => {
     for (const p of [
-      'main.py', 'server.py', 'nodes.py', 'execution.py', 'folder_paths.py', 'requirements.txt', 'pyproject.toml',
-      'comfy/model_base.py', 'comfy_extras/nodes_mask.py', 'comfy_api_nodes/nodes_kling.py', 'comfy_execution/graph.py',
-      'comfy_api/latest/__init__.py', 'app/user_manager.py', 'api_server/routes/x.py', 'utils/json_util.py',
-      'middleware/cache_middleware.py', 'alembic_db/env.py', 'custom_nodes/sailor_bridge/__init__.py', 'scripts/clip_key.py',
-      '.venv/bin/python',
+      'main.py', 'comfy/__pycache__/model_base.cpython-312.pyc', 'custom_nodes/__pycache__/x.cpython-312.pyc',
+      'scripts/clip_key.py', '.venv/bin/python',
     ]) {
       expect(ignored(p), p).toBe(true)
     }
@@ -179,7 +177,6 @@ describe('.dockerignore', () => {
       'frontend/server/assets/nodeCatalog.json.gz',
       'frontend/app/data/house-styles.json',
       'frontend/server/utils/inputUploads.ts',
-      'blueprints/Brightness and Contrast.json',
       'shader_effects/aurora.frag',
       'scenes/scene_defaults/a.json',
       'library/loras/x.json',
