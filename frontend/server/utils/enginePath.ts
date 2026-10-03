@@ -122,6 +122,7 @@ export type EngineDecision =
   | { kind: 'queueGet' }
   | { kind: 'interrupt' }
   | { kind: 'objectInfo' }
+  | { kind: 'emptySubgraphs' }
   | { kind: 'outputListing' }
   | { kind: 'upload' }
   | { kind: 'sailorProjects' }
@@ -151,6 +152,10 @@ export type EngineDecision =
  *
  * Both now have explicit branches below and are deliberately NOT in this list.
  *
+ * `/global_subgraphs` left this list in step 3, R10.6: blueprints are built
+ * from local-only classes, so hosted answers an empty list itself
+ * (`emptySubgraphs`) and refuses a single blueprint, never asking ComfyUI.
+ *
  * `/ws` is deliberately here: WebSocket gating is Task 7's job and this is a
  * plain HTTP middleware; refusing it would break the canvas without closing
  * anything (the upgrade is dispatched in nuxt.config, not here).
@@ -168,7 +173,6 @@ export type EngineDecision =
 const HOSTED_RAW_ALLOW = [
   '/system_stats',
   '/extensions',
-  '/global_subgraphs',
   '/ws',
 ]
 
@@ -334,6 +338,14 @@ export function hostedEngineDecision(enginePath: string, method: string): Engine
   if (match(p, '/object_info')) {
     if (verb === 'GET') return { kind: 'objectInfo' }
     return { kind: 'forbid', message: 'Only GET /object_info is available in hosted mode' }
+  }
+
+  // Step 3, R10.6 (decision 4): blueprints run only on the local engine, so
+  // hosted offers none. The list answers empty here (the canvas then shows no
+  // blueprint section); one blueprint by id is refused. ComfyUI is never asked.
+  if (match(p, '/global_subgraphs')) {
+    if (p === '/global_subgraphs' && (verb === 'GET' || verb === 'HEAD')) return { kind: 'emptySubgraphs' }
+    return { kind: 'forbid', message: 'Blueprints are not available in hosted mode' }
   }
 
   // F4: the upload sink itself stays open, but ComfyUI's image_upload() honours

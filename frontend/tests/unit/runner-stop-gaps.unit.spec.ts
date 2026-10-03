@@ -9,6 +9,9 @@
  * `not-taken`) and every Shader effect engine case end in a plain refusal,
  * unless every refused node is local-only (tests/unit/runner-no-silent-engine.unit.spec.ts).
  *
+ * R10.6 closed row 28: hosted offers no local-only class or blueprint, and the
+ * blueprints list natively with ComfyUI off (native-global-subgraphs.unit.spec.ts).
+ *
  * Also R11.7's and R11.8's named stop-gaps: a made sound past a reader's cap
  * (named with its maker's setting to shorten), a paid video model's sound
  * into a sound effect, several still pictures into Slow motion (AI), a count
@@ -31,7 +34,8 @@ import {
 import { FRAME_WIDGET_NAMES, shownLabel, stopGapRefusal, switchedOffNodes, wiredDearestBound, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { isRunnerEligible, runnerRuleFor, runnerTakesNode } from '#shared/runner/eligibility'
-import { blockedRunRefusal, engineRoute, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
+import { blockedRunRefusal, engineRoute, localOnlyHostedWords, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
+import { hostedOffersClass } from '#shared/runner/hostedOffer'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import {
   BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, MASK_EXTRACTOR_CLASS, SAM_MASK_WORDS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
@@ -105,9 +109,6 @@ async function writePng(path: string, w = 16, h = 16) {
  */
 const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
   27: 'R10.7: local LoRA training removed',
-  // R10.2 closed the canvas route for row 28 (local-only classes go to the engine only locally, with it up);
-  // what is left is R10.6's: blueprints, and hosted offering no local-only class.
-  28: 'R10.6: blueprints and hosted node search (R10.2 closed the canvas route)',
 }
 
 /**
@@ -166,8 +167,28 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
 })
 
 describe('R11.9: every named stop-gap, one case per row', () => {
-  it('the expected exceptions are exactly rows 27 and 28 (R10)', () => {
-    expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([27, 28])
+  it('the expected exceptions are exactly row 27 (R10)', () => {
+    expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([27])
+  })
+
+  // Row 28 (decision 4): R10.2 closed the canvas route (local-only classes go to the engine only locally, with it
+  // up, named); R10.6 closed the rest. Hosted offers no local-only class in node search and no blueprint (its
+  // list is empty, never ComfyUI's); locally the blueprints list natively with ComfyUI off, and a blueprint is
+  // judged class by class like any graph. The cases live in their own specs, which must keep them.
+  it('row 28 (R10.2, R10.6): local-only classes and blueprints: hosted offers neither; locally the blueprints list without ComfyUI', () => {
+    expect(hostedOffersClass('KSampler')).toBe(false)
+    expect(hostedOffersClass('GenerateImageNode')).toBe(true)
+    expect(engineRoute([{ prompt: { k: { class_type: 'KSampler', inputs: {} } }, titleOf: () => 'Sampler' }], { runnerOn: true, families: EVERY, hosted: true, engineUp: true }))
+      .toEqual({ to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(['Sampler']) })
+    const proven: [string, string][] = [
+      ['native-global-subgraphs.unit.spec.ts', 'equals ComfyUI’s own list and entries for the repo’s blueprints'],
+      ['native-global-subgraphs.unit.spec.ts', 'each blueprint: on Sailor when the runner takes it; else the local engine locally (engine up), and plain words in hosted'],
+      ['native-global-subgraphs.unit.spec.ts', 'hosted lists only the classes the runner takes, plus the cards'],
+      ['native-global-subgraphs.unit.spec.ts', 'the sidebar fetches no blueprint and shows no blueprint tab or section in hosted'],
+      ['engine-path-alias.unit.spec.ts', 'R10.6: the blueprint list is empty in every spelling, and one blueprint is refused, never proxied'],
+      ['runner-no-silent-engine.unit.spec.ts', 'R10.2'],
+    ]
+    for (const [file, name] of proven) expect(readFileSync(join(__dirname, file), 'utf8').includes(name), `${file} — “${name}”`).toBe(true)
   })
 
   // Row 1 (R10.1): the mini apps have no engine way out. With their families off they say "This app is switched

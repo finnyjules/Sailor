@@ -367,10 +367,27 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   // reading that handler in ComfyUI's server.py — what does it read, what does
   // it write, whose data is in scope? "It's a static GET" is not an audit.
   it('still raw-proxies the engine paths that survived the round-2 handler audit', async () => {
-    for (const [p, m] of [['/system_stats', 'GET'], ['/extensions/foo.js', 'GET'], ['/global_subgraphs', 'GET']] as const) {
+    for (const [p, m] of [['/system_stats', 'GET'], ['/extensions/foo.js', 'GET']] as const) {
       proxyRequest.mockClear()
       await middleware(ev(p, m))
       expect(proxyRequest, `${m} ${p} must still proxy`).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  // Step 3, R10.6 (decision 4): /global_subgraphs left the raw allowlist. Blueprints are built from
+  // local-only classes, so hosted answers an empty list itself, in every spelling, and refuses one
+  // blueprint by id; ComfyUI is never asked.
+  it('R10.6: the blueprint list is empty in every spelling, and one blueprint is refused, never proxied', async () => {
+    for (const p of ['/global_subgraphs', '/api/global_subgraphs', '/comfyui/global_subgraphs', '/comfyui/api/global_subgraphs', '/global_subgraphs?x=1']) {
+      proxyRequest.mockClear()
+      expect(await middleware(ev(p, 'GET')), p).toEqual({})
+      expect(proxyRequest, p).not.toHaveBeenCalled()
+      expect(hostedEngineDecision(normalizeEnginePath(p), 'GET'), p).toEqual({ kind: 'emptySubgraphs' })
+    }
+    for (const [p, m] of [['/global_subgraphs/abc', 'GET'], ['/api/global_subgraphs/abc', 'GET'], ['/global_subgraphs', 'POST'], ['/global_subgraphs/../global_subgraphs/abc', 'GET']] as const) {
+      proxyRequest.mockClear()
+      expect(await status(p, m), `${m} ${p}`).toBe(403)
+      expect(proxyRequest, `${m} ${p}`).not.toHaveBeenCalled()
     }
   })
 

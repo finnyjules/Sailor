@@ -95,6 +95,9 @@ export default defineEventHandler(async (event) => {
     // F2: the canvas needs the node schemas, so this passes through a scrubber
     // that empties the shared input-directory listings instead of 403-ing.
     if (decision.kind === 'objectInfo') return handleHostedObjectInfo(event)
+    // Step 3, R10.6: hosted offers no blueprint (they are built from local-only
+    // classes) — the list is empty, answered here without the engine.
+    if (decision.kind === 'emptySubgraphs') return {}
     // F4: refuses an `overwrite` field, then forwards the identical bytes.
     if (decision.kind === 'upload') return handleHostedUpload(event)
     // Stage 6 Task 7: LoadImageOutput's remote picker — the caller's OWN

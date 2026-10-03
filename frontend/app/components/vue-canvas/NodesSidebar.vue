@@ -8,6 +8,13 @@ const {
   categories, fetchNodeTypes, addNode,
 } = useNodeSearch()
 
+// Blueprints are built from classes only the local engine runs, so hosted
+// offers none: no fetch, no tab, no section (step 3, R10.6).
+const hosted = (() => {
+  try { return useRuntimeConfig().public?.hostedMode === true }
+  catch { return false }
+})()
+
 // Blueprints data
 interface BlueprintEntry {
   id: string
@@ -19,6 +26,7 @@ interface BlueprintEntry {
 const blueprints = ref<BlueprintEntry[]>([])
 
 async function fetchBlueprints() {
+  if (hosted) return
   try {
     const list = await $fetch<Record<string, any>>('/global_subgraphs')
     // Fetch full data for each blueprint to get category
@@ -254,6 +262,7 @@ function onNodeDragStart(nodeName: string, event: DragEvent) {
         All
       </button>
       <button
+        v-if="!hosted"
         class="px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer"
         :class="activeTab === 'blueprints' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/70'"
         @click="activeTab = 'blueprints'"
@@ -303,7 +312,7 @@ function onNodeDragStart(nodeName: string, event: DragEvent) {
         </div>
 
         <!-- Subgraph Blueprints -->
-        <div v-if="blueprintTree.size > 0" class="pb-1">
+        <div v-if="!hosted && blueprintTree.size > 0" class="pb-1">
           <p class="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-3 pt-3 pb-2">
             Subgraph Blueprints
           </p>
