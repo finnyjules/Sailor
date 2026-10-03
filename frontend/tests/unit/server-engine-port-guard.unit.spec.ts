@@ -42,8 +42,9 @@ const ADDRESS_OK = new Set([
 /** May import the engine's port or origin, and why. */
 const PORT_IMPORTERS: Record<string, string> = {
   'server/middleware/comfyui-proxy.ts': 'the local-only proxy (/prompt, /ws for decision 4’s classes)',
-  'server/native/media.ts': 'local only: the engine’s answer while it is up',
-  'server/native/objectInfo.ts': 'local only: the engine’s own catalogue while it is up',
+  // R10.8 fix round 1 (M1): reachable from hosted through dispatchNative / handleHostedObjectInfo.
+  'server/native/media.ts': 'HOSTED reaches the engine here (forwardToEngine while it is up) until R10.9 — R10.9 must remove it for hosted',
+  'server/native/objectInfo.ts': 'HOSTED reaches the engine here (fromEngine while it is up) until R10.9 — R10.9 must remove it for hosted',
   'server/routes/history/index.get.ts': 'local only: the engine’s local-only runs, while it is up',
   'server/routes/history/[promptId].get.ts': 'local only: one local-only run, while it is up',
   'server/api/admin/console.get.ts': 'a link to the engine, shown only while it is up (never fetched)',
@@ -78,6 +79,18 @@ describe('the server stops calling the engine’s port (R10.8)', () => {
       .map(f => f.rel)
       .sort()
     expect(importers).toEqual(Object.keys(PORT_IMPORTERS).sort())
+  })
+
+  it('only the listed files forward to the engine through media.ts (hosted-reachable until R10.9)', () => {
+    const FORWARDERS: Record<string, string> = {
+      'server/native/smallRoutes.ts': 'HOSTED reaches the engine here (font subset forward while it is up) until R10.9 — R10.9 must remove it for hosted',
+    }
+    const importers = files
+      .filter(f => f.rel !== 'server/native/media.ts')
+      .filter(f => /import\s*\{[^}]*\bforwardToEngine\b[^}]*\}\s*from/.test(f.text))
+      .map(f => f.rel)
+      .sort()
+    expect(importers).toEqual(Object.keys(FORWARDERS).sort())
   })
 
   it('the routes R10.8 moved off the engine never use its port', () => {

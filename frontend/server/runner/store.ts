@@ -3,7 +3,7 @@
  * runner_results), one JSON file per run under .data/runs locally.
  */
 import { createHash } from 'node:crypto'
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { storeDir } from '../utils/dataDir'
 import { connectLedgerDb } from '../utils/ledgerDb'
@@ -46,16 +46,27 @@ export interface RunStore {
   listActive(): Promise<RunRecord[]>
   /** Runs holding a cancel still waiting for the provider's confirmation (checked again at server start). */
   listUnconfirmedCancels(): Promise<RunRecord[]>
-  listForUser(userId: string | null, opts?: { canvasId?: string | null; statuses?: RunStatus[] }): Promise<RunRecord[]>
+  /**
+   * The user's runs, oldest first. With `limit` (R10.8 fix round 1): only the
+   * newest `limit` runs, newest first — the store reads no more than it must
+   * (Postgres: ORDER BY … DESC LIMIT; files: the newest files by mtime).
+   */
+  listForUser(userId: string | null, opts?: ListOptions): Promise<RunRecord[]>
   getResult(userKey: string, fingerprint: string): Promise<ResultEntry | null>
   putResult(userKey: string, fingerprint: string, entry: ResultEntry): Promise<void>
 }
 
+export interface ListOptions { canvasId?: string | null; statuses?: RunStatus[]; limit?: number }
+
 const ACTIVE: RunStatus[] = ['running', 'paused']
+
+/** A usable limit, or null for none. */
+const limitOf = (o?: ListOptions): number | null =>
+  o?.limit !== undefined && Number.isInteger(o.limit) && o.limit >= 0 ? o.limit : null
 
 const hasOpenCancel = (r: RunRecord) => !!r.unconfirmedCancels?.some(c => c.gaveUpAt == null)
 
-function matches(r: RunRecord, userId: string | null, opts: { canvasId?: string | null; statuses?: RunStatus[] } = {}): boolean {
+function matches(r: RunRecord, userId: string | null, opts: ListOptions = {}): boolean {
   if (r.userId !== userId) return false
   if (opts.canvasId !== undefined && r.canvasId !== opts.canvasId) return false
   if (opts.statuses && !opts.statuses.includes(r.status)) return false
@@ -112,7 +123,25 @@ export function createFileRunStore(dir: string): RunStore {
       return (await readAll()).filter(hasOpenCancel)
     },
     async listForUser(userId, opts) {
-      return (await readAll()).filter(r => matches(r, userId, opts))
+      const limit = limitOf(opts)
+      if (limit === null) return (await readAll()).filter(r => matches(r, userId, opts))
+      // The newest files first (by mtime, the last save), parsed only until `limit` match.
+      let names: string[] = []
+      try { names = await readdir(dir) } catch { return [] }
+      const stamped: { n: string; t: number }[] = []
+      for (const n of names) {
+        if (!n.endsWith('.json') || !isRunId(n.slice(0, -5))) continue
+        try { stamped.push({ n, t: (await stat(join(dir, n))).mtimeMs }) } catch { /* gone */ }
+      }
+      stamped.sort((a, b) => b.t - a.t)
+      const out: RunRecord[] = []
+      for (const { n } of stamped) {
+        if (out.length >= limit) break
+        let r: RunRecord
+        try { r = JSON.parse(await readFile(join(dir, n), 'utf8')) } catch { continue }
+        if (matches(r, userId, opts)) out.push(r)
+      }
+      return out.sort((a, b) => b.createdAt - a.createdAt)
     },
     async getResult(userKey, fp) {
       if (!fpOk(fp)) return null
@@ -166,8 +195,14 @@ export function createPgRunStore(db: DbLike): RunStore {
         params.push(opts.statuses)
         where.push(`status = ANY($${params.length}::text[])`)
       }
+      const limit = limitOf(opts)
+      let tail = `ORDER BY (doc->>'createdAt')::bigint`
+      if (limit !== null) {
+        params.push(limit)
+        tail = `ORDER BY (doc->>'createdAt')::bigint DESC LIMIT $${params.length}`
+      }
       const { rows } = await db.query(
-        `SELECT doc FROM runner_runs WHERE ${where.join(' AND ')} ORDER BY (doc->>'createdAt')::bigint`, params)
+        `SELECT doc FROM runner_runs WHERE ${where.join(' AND ')} ${tail}`, params)
       return rows.map(r => parse(r.doc) as RunRecord).filter(r => matches(r, userId, opts))
     },
     async getResult(userKey, fp) {

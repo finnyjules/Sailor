@@ -42,6 +42,7 @@ async function post(body: unknown, userId: string | null = null) {
 
 beforeEach(async () => {
   vi.resetModules()
+  ;(await import('~~/server/lib/rateLimit'))._resetRateLimits()
   png ??= await sharp({ create: { width: 3, height: 2, channels: 3, background: '#0a0' } }).png().toBuffer()
   fetched.next = { status: 200, contentType: 'image/png', data: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'r108-image-fetch-'))
@@ -94,6 +95,31 @@ describe('POST /api/image-fetch — nothing on the engine’s port', () => {
     expect((await post({ url: 'https://pics.example/page' })).status).toBe(415)
     expect((await post({ url: 'ftp://pics.example/a.png' })).status).toBe(400)
     expect(fs.readdirSync(path.join(root, 'input'))).toEqual([])
+  })
+
+  it('trusts the bytes, not the host’s Content-Type (fix round 1, M2)', async () => {
+    // HTML sent as image/png is refused.
+    fetched.next = { status: 200, contentType: 'image/png', data: new TextEncoder().encode('<html><script>x</script></html>').buffer as ArrayBuffer }
+    expect((await post({ url: 'https://pics.example/fake.png' })).status).toBe(415)
+    // A BMP (a real picture, but not one kept here) is refused too.
+    fetched.next = { status: 200, contentType: 'image/bmp', data: new Uint8Array([0x42, 0x4d, 0, 0, 0, 0, 0, 0]).buffer as ArrayBuffer }
+    expect((await post({ url: 'https://pics.example/a.bmp' })).status).toBe(415)
+    expect(fs.readdirSync(path.join(root, 'input'))).toEqual([])
+    // A PNG sent as image/jpeg is kept, named by what it really is.
+    fetched.next = { status: 200, contentType: 'image/jpeg', data: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
+    const { name } = await (await post({ url: 'https://pics.example/b.jpg' })).json() as { name: string }
+    expect(name).toMatch(/\.png$/)
+  })
+
+  it('is rate-limited per person (30 a minute), before any download', async () => {
+    process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_x'
+    const { safeFetch } = await import('~~/server/templates/safeFetch')
+    for (let i = 0; i < 30; i++) expect((await post({ url: 'https://pics.example/a.png' }, 'user_1')).status).toBe(200)
+    ;(safeFetch as any).mockClear()
+    expect((await post({ url: 'https://pics.example/a.png' }, 'user_1')).status).toBe(429)
+    expect(safeFetch).not.toHaveBeenCalled()
+    // Another person has their own bucket.
+    expect((await post({ url: 'https://pics.example/a.png' }, 'user_2')).status).toBe(200)
   })
 
   it('says so when the input folder can’t be found', async () => {

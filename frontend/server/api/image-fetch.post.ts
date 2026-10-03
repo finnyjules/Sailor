@@ -15,17 +15,13 @@ import { parseUploadForm } from '../utils/multipart'
 import { canonicalUploadKey, recordUpload } from '../utils/inputUploads'
 import { isHosted } from '../utils/deployMode'
 import { FetchRefused, TooManyRedirects, safeFetch, type SafeFetchPolicy } from '../templates/safeFetch'
+import { sniffPictureFormat } from '../utils/graphInputPixels'
+import { assertRateLimit } from '../lib/rateLimit'
 
 const MAX_BYTES = 30 * 1024 * 1024 // a full-res press photo is <10MB; 30 is generous
 
-const EXT_BY_MIME: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/webp': '.webp',
-  'image/gif': '.gif',
-  'image/avif': '.avif',
-  'image/bmp': '.bmp',
-}
+/** The pictures kept, by what their first bytes say (never the host's Content-Type). */
+const EXT_BY_FORMAT: Record<string, string> = { png: '.png', jpeg: '.jpg', webp: '.webp', gif: '.gif' }
 
 const WORDS = {
   refused: 'Refusing to fetch a local/private address',
@@ -37,6 +33,8 @@ export default defineEventHandler(async (event) => {
   const hosted = isHosted()
   const userId: string | null = event.context.userId ?? null
   if (hosted && !userId) throw createError({ statusCode: 401, message: 'Sign in required' })
+  // Each call may write 30 MB into the input folder: per person (hosted), else per address.
+  assertRateLimit(event, 'image-fetch', 30)
 
   const body = await readBody(event)
   const url = typeof body?.url === 'string' ? body.url.trim() : ''
@@ -62,18 +60,21 @@ export default defineEventHandler(async (event) => {
   const buf = res.data
   if (buf.byteLength === 0) throw createError({ statusCode: 502, message: 'The image was empty' })
   if (buf.byteLength > MAX_BYTES) throw createError({ statusCode: 413, message: WORDS.tooLarge })
+  // The bytes must really be a PNG, JPEG, WebP or GIF, whatever the host said.
+  const format = sniffPictureFormat(new Uint8Array(buf, 0, Math.min(buf.byteLength, 32)))
+  const ext = format ? EXT_BY_FORMAT[format] : undefined
+  if (!ext) throw createError({ statusCode: 415, message: 'Not a PNG, JPEG, WebP or GIF picture' })
 
   // A readable, collision-safe input filename: sanitized url basename + short stamp.
   let rawBase = parsed.pathname.split('/').pop() || 'image'
   try { rawBase = decodeURIComponent(rawBase) } catch { /* a malformed escape stays literal */ }
   const base = rawBase.replace(/\.[a-z0-9]+$/i, '').replace(/[^a-z0-9._-]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'image'
-  const ext = EXT_BY_MIME[mime] ?? '.jpg'
   const filename = `websearch_${base}_${Date.now().toString(36)}${ext}`
 
   // Sailor's own upload, as POST /upload/image: no overwrite — a name already
   // taken gets the upload's own ` (1)` suffix, never someone else's file.
   const fd = new FormData()
-  fd.append('image', new Blob([buf], { type: mime }), filename)
+  fd.append('image', new Blob([buf], { type: `image/${format}` }), filename)
   fd.append('type', 'input')
   const encoded = new Response(fd)
   const form = await parseUploadForm(new Uint8Array(await encoded.arrayBuffer()), encoded.headers.get('content-type') || '')

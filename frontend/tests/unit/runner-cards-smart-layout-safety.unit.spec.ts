@@ -47,6 +47,7 @@ import { LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MA
 import type { RenderRequest } from '~~/server/templates/schema'
 import type { OutputFile } from '~~/server/runner/types'
 import { __setInputUploadsEngineRootForTests } from '~~/server/utils/inputUploads'
+import { __setViewCacheDirForTests, viewCacheFile } from '~~/server/native/viewRead'
 
 const CARDS: ReadonlySet<RunnerFamily> = new Set(['cards'])
 /** What a v2 layout needs besides its formats and elements. */
@@ -124,6 +125,11 @@ beforeAll(async () => {
   writeFileSync(join(root, 'temp', 'a.png'), png)
   writeFileSync(join(root, 'output', 'big.png'), Buffer.alloc(4096))
   viewRoot = root
+  // GET /view's kept copies (a scratch folder, never the real .cache/images).
+  const cacheDir = join(root, 'view-cache')
+  mkdirSync(cacheDir)
+  __setViewCacheDirForTests(cacheDir)
+  writeFileSync(viewCacheFile('gone.png', 'temp', ''), png)
   server = createServer((req, res) => {
     hits.push(req.url ?? '')
     if (req.url?.startsWith('/view?redirect')) { res.writeHead(302, { location: '/internal-admin' }); res.end(); return }
@@ -135,7 +141,7 @@ beforeAll(async () => {
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
-afterAll(() => { server.closeAllConnections(); server.close() })
+afterAll(() => { server.closeAllConnections(); server.close(); __setViewCacheDirForTests(null) })
 // After the setup file's own empty root (tests/unit/__setup__/engine-root-safety-net.ts).
 beforeEach(() => { __setInputUploadsEngineRootForTests(viewRoot) })
 afterEach(() => {
@@ -266,6 +272,17 @@ describe('the image fetcher (route and runner)', () => {
     await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=a.png&subfolder=..')).rejects.toThrow('image fetch failed (403)')
     await expect(safeImageFetcher({ hosted: true })(`${base}/view?filename=a.png`)).rejects.toThrow(FETCH_REFUSED)
     await expect(safeImageFetcher({ hosted: true })('http://127.0.0.1:8188/view?filename=a.png')).rejects.toThrow(FETCH_REFUSED)
+    expect(hits).toEqual([])
+  })
+
+  it('a temp picture gone from disk is read from GET /view’s kept copy (fix round 1, M3)', async () => {
+    const got = await safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=gone.png&type=temp')
+    expect(Buffer.from(got.data).equals(viewPng)).toBe(true)
+    expect(got.contentType).toBe('image/png')
+    // The copy is keyed by type too: an output of that name has none.
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=gone.png')).rejects.toThrow('image fetch failed (404)')
+    // A refused name never reaches the copy.
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=../gone.png&type=temp')).rejects.toThrow('image fetch failed (400)')
     expect(hits).toEqual([])
   })
 

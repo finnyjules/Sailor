@@ -1,20 +1,12 @@
-import { createHash } from 'node:crypto'
 import { readFile, copyFile, mkdir } from 'node:fs/promises'
 import { createReadStream, existsSync, openSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname } from 'node:path'
 import { getRequestHeaders, setResponseStatus } from 'h3'
 import { deployMode } from '../utils/deployMode'
 import { hostedViewGate } from '../native/viewGate'
+import { viewCacheFile } from '../native/viewRead'
 import { VIEW_SECURITY_HEADERS, resolveViewTarget, viewFileResponse, type ViewQuery } from '../native/view'
 
-const CACHE_DIR = join(process.cwd(), '.cache', 'images')
-
-function cacheKey(filename: string, type: string, subfolder: string): string {
-  const hash = createHash('sha256').update(`${type}:${subfolder}:${filename}`).digest('hex').slice(0, 16)
-  // Keep the original extension for MIME type detection
-  const ext = filename.includes('.') ? filename.slice(filename.lastIndexOf('.')) : ''
-  return `${hash}${ext}`
-}
 
 export default defineEventHandler(async (event) => {
   // On every answer — files, 206/304/416, the cache fallback and errors.
@@ -47,9 +39,9 @@ export default defineEventHandler(async (event) => {
     // temp/ is emptied every time the engine starts, so a copy is kept for
     // pages that still show those images afterwards (read back below).
     if (target.type === 'temp' && res.status === 200) {
-      const cacheFile = join(CACHE_DIR, cacheKey(filename, type, subfolder))
+      const cacheFile = viewCacheFile(filename, type, subfolder)
       if (!existsSync(cacheFile)) {
-        mkdir(CACHE_DIR, { recursive: true })
+        mkdir(dirname(cacheFile), { recursive: true })
           .then(() => copyFile(target.file, cacheFile))
           .catch(() => {})
       }
@@ -69,7 +61,7 @@ export default defineEventHandler(async (event) => {
 
   // Fallback: a copy kept by the cache above (or by the proxy this route used
   // to be), for a file that is no longer on disk.
-  const cacheFile = join(CACHE_DIR, cacheKey(filename, type, subfolder))
+  const cacheFile = viewCacheFile(filename, type, subfolder)
   if (existsSync(cacheFile)) {
     const buffer = await readFile(cacheFile)
     const ext = cacheFile.slice(cacheFile.lastIndexOf('.') + 1).toLowerCase()

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -70,6 +70,42 @@ describe('Postgres run store', () => {
     // no filters: every run of this user, oldest first
     expect((await store.listForUser('u1')).map(r => r.id)).toEqual([RUN_C, RUN_B, RUN_A, 'run_3b7c6a52-8e0e-4c4e-9c6f-1f2a3b4c5d6e'])
     expect(seen.at(-1)!.params).toEqual(['u1'])
+  })
+})
+
+// R10.8 fix round 1 (I1): /history reads only the newest runs, never every run the user made.
+const RUN_ID = (i: number) => `run_${String(i).padStart(8, '0')}-8e0e-4c4e-9c6f-1f2a3b4c5d6e`
+
+describe('listForUser with a limit', () => {
+  it('Postgres: newest first, LIMIT in the query', async () => {
+    const db = new PGlite()
+    await db.exec(readFileSync(fileURLToPath(new URL('../../server/db/schema.sql', import.meta.url)), 'utf8'))
+    const seen: { sql: string; params: unknown[] }[] = []
+    const store = createPgRunStore({ query: async (sql: string, params: unknown[] = []) => { seen.push({ sql, params }); return db.query(sql, params) } } as any)
+    for (let i = 1; i <= 5; i++) await store.save(run(RUN_ID(i), { createdAt: i * 10, status: 'done' }))
+    await store.save(run(RUN_ID(9), { userId: 'u2', createdAt: 999 }))
+    seen.length = 0
+    expect((await store.listForUser('u1', { limit: 2 })).map(r => r.id)).toEqual([RUN_ID(5), RUN_ID(4)])
+    expect(seen[0]!.sql).toMatch(/ORDER BY \(doc->>'createdAt'\)::bigint DESC LIMIT \$2/)
+    expect(seen[0]!.params).toEqual(['u1', 2])
+    expect((await store.listForUser('u1', { statuses: ['done'], limit: 3 })).map(r => r.id)).toEqual([RUN_ID(5), RUN_ID(4), RUN_ID(3)])
+    expect(seen[1]!.params).toEqual(['u1', ['done'], 3])
+  })
+
+  it('files: the newest files by mtime, parsed only until the limit, newest first', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'runner-store-limit-'))
+    const store = createFileRunStore(dir)
+    for (let i = 1; i <= 5; i++) {
+      await store.save(run(RUN_ID(i), { createdAt: i * 10, status: 'done' }))
+      utimesSync(join(dir, `${RUN_ID(i)}.json`), i * 1000, i * 1000)
+    }
+    await store.save(run(RUN_ID(9), { userId: 'u2', createdAt: 999 }))
+    utimesSync(join(dir, `${RUN_ID(9)}.json`), 9000, 9000)
+    expect((await store.listForUser('u1', { limit: 2 })).map(r => r.id)).toEqual([RUN_ID(5), RUN_ID(4)])
+    expect((await store.listForUser('u2', { limit: 2 })).map(r => r.id)).toEqual([RUN_ID(9)])
+    expect(await store.listForUser('u1', { limit: 0 })).toEqual([])
+    // Without a limit: every run, oldest first, as before.
+    expect((await store.listForUser('u1')).map(r => r.id)).toEqual([1, 2, 3, 4, 5].map(RUN_ID))
   })
 })
 

@@ -101,9 +101,8 @@ export function runHistoryEntries(run: RunRecord): Record<string, HistoryEntry> 
 
 /** The caller's most recent runs, as history entries (local: the local runs, user null). */
 export async function runnerHistory(store: RunStore, userId: string | null): Promise<Record<string, HistoryEntry>> {
-  const runs = (await store.listForUser(userId))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, HISTORY_RUN_LIMIT)
+  // The store reads only the newest runs (newest first): never every run the user made.
+  const runs = await store.listForUser(userId, { limit: HISTORY_RUN_LIMIT })
   const out: Record<string, HistoryEntry> = Object.create(null)
   for (const run of runs.reverse()) Object.assign(out, runHistoryEntries(run))
   return out

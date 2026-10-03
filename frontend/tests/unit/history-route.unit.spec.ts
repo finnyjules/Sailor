@@ -52,11 +52,12 @@ function run(id: string, userId: string | null, nodes: Record<string, NodeRecord
   }
 }
 
+const listed: unknown[] = []
 function fakeStore(runs: RunRecord[]): RunStore {
   return {
     save: async () => {}, listActive: async () => [], listUnconfirmedCancels: async () => [],
     get: async id => runs.find(r => r.id === id) ?? null,
-    listForUser: async userId => runs.filter(r => r.userId === userId),
+    listForUser: async (userId, opts) => { listed.push(opts); return runs.filter(r => r.userId === userId) },
     getResult: async () => null, putResult: async () => {},
   }
 }
@@ -168,6 +169,14 @@ describe('GET /history — nothing on the engine’s port', () => {
     expect(res.status).toBe(200)
     expect(Object.keys(await res.json()).sort()).toEqual(['old', `${RUN_A}.0.t1`])
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks the store for the newest runs only (fix round 1, I1): the limit is passed through', async () => {
+    listed.length = 0
+    await list()
+    const { HISTORY_RUN_LIMIT } = await import('~~/server/native/history')
+    expect(listed).toEqual([{ limit: HISTORY_RUN_LIMIT }])
+    expect(HISTORY_RUN_LIMIT).toBe(200)
   })
 
   it('local, engine up: its local-only runs are merged in, asked with a timeout', async () => {
