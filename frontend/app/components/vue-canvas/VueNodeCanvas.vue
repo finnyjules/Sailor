@@ -1908,7 +1908,7 @@ function onGlobalKey(e: KeyboardEvent) {
 async function createFrameAt(pos: { x: number; y: number }) {
   if (!objectInfo.value['Compositor']) await fetchObjectInfo()
   if (!objectInfo.value['Compositor']) {
-    toast.error('Couldn’t add a Frame', { description: 'The Compositor node isn’t available — is ComfyUI running?' })
+    toast.error('Couldn’t add a Frame', { description: 'Sailor couldn’t load the Frame node. Reload the page and try again.' })
     return
   }
   const frame = createNodeData('Compositor', { x: pos.x, y: pos.y })
@@ -2208,7 +2208,7 @@ async function spliceIntoEdge(edgeId: string, nodeType: string, widgetOverrides?
 async function spliceAfterNode(nodeId: string, nodeType: string, outType = 'IMAGE', widgetOverrides?: Record<string, unknown>, opts: { branch?: boolean } = {}): Promise<string | null> {
   if (!objectInfo.value[nodeType]) await fetchObjectInfo()
   if (!objectInfo.value[nodeType]) {
-    toast.error(`${nodeType} isn't available`, { description: 'Is the ComfyUI backend running with the latest nodes? Restart it and try again.' })
+    toast.error(`${nodeType} isn't available`, { description: 'Sailor doesn’t have this node right now. Reload the page and try again.' })
     return null
   }
   const src = (nodes.value as any[]).find(n => n.id === nodeId)
@@ -4058,7 +4058,7 @@ async function handleLipSyncGenerate(e: Event) {
   const wnames = new Set(((target.data?.widgetDefs ?? []) as { name: string }[]).map(w => w.name))
   for (const name of Object.keys(patch)) {
     if (!wnames.has(name)) {
-      studio.data.lipSyncError = `LipSyncNode has no '${name}' widget — restart ComfyUI to load it.`
+      studio.data.lipSyncError = `This lip sync node is out of date and can’t take that setting. Reload the page and try again.`
       return
     }
   }
@@ -5553,7 +5553,7 @@ async function handlePaste(e: ClipboardEvent) {
   } catch (err: any) {
     console.error('[paste] upload failed:', err)
     // Silent returns read as "paste is broken" — say what actually happened.
-    toast.error('Couldn’t paste the image', { description: 'Uploading it to the backend failed — is ComfyUI running?' })
+    toast.error('Couldn’t paste the image', { description: 'Sailor couldn’t upload it. Check your connection and try again.' })
     return
   }
 
@@ -6431,7 +6431,7 @@ async function injectTimelineEditState(workflow: any): Promise<void> {
       await refreshSchema(true)
       if (setNamedWidget(tl, 'edit_state', json, objectInfo.value)) continue
     }
-    throw new Error('Timeline schema is out of date — reload the page (ComfyUI restarted with new node definitions)')
+    throw new Error('The Timeline is out of date. Reload the page and try again.')
   }
 }
 
@@ -6459,7 +6459,7 @@ async function injectCompositorMotionParams(workflow: any): Promise<void> {
       await refreshSchema(true)
       if (setNamedWidget(comp, 'motion_params', json, objectInfo.value)) continue
     }
-    throw new Error('Frame schema is out of date — reload the page (ComfyUI restarted with new node definitions)')
+    throw new Error('The Frame is out of date. Reload the page and try again.')
   }
 }
 
@@ -6498,7 +6498,7 @@ async function injectCompositorCloners(workflow: any): Promise<void> {
         await refreshSchema(true)
         if (setNamedWidget(comp, name, json, objectInfo.value)) continue
       }
-      throw new Error('Frame schema is out of date — restart ComfyUI (and reload) to render layer cloners')
+      throw new Error('The Frame is out of date. Reload the page and try again.')
     }
   }
 }
@@ -6530,7 +6530,7 @@ async function injectSmartLayoutBrand(workflow: any, kitKv: string): Promise<voi
       await refreshSchema(true)
       if (setNamedWidget(node, 'brand_kit', kitKv, objectInfo.value)) continue
     }
-    throw new Error('Smart Layout schema is out of date — reload the page (ComfyUI restarted with new node definitions)')
+    throw new Error('Smart Layout is out of date. Reload the page and try again.')
   }
 }
 
@@ -8254,7 +8254,7 @@ async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: ()
   // everything else must, or the pick can't be built.
   const missing = plan.nodes.find(n => !FRONTEND_ONLY_START_TYPES.has(n.nodeType) && !objectInfo.value[n.nodeType])
   if (missing) {
-    toast.error('Couldn’t set up the project', { description: `The backend doesn’t provide “${missing.nodeType}”. Check that ComfyUI is running and up to date, then try again from the + menu.` })
+    toast.error('Couldn’t set up the project', { description: `Sailor doesn’t have “${missing.nodeType}” right now. Reload the page, then try again from the + menu.` })
     return false
   }
 

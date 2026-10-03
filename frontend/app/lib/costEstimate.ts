@@ -30,6 +30,8 @@ import { FAMILY_PRICED_CLASSES, priceNode } from '#shared/pricing/nodePrice'
 import { estimateFloored } from '#shared/pricing/estimateFloor'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { isRetiredClass } from '#shared/runner/retired'
+import { notRunBySailor } from '#shared/runner/needsEngine'
 import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY } from '#shared/runner/eligibility'
 import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, SAM_MASK_CLASSES, UPSCALE_2X_CLASS, isLocalModelClass } from '#shared/runner/localModels'
 import { LIPSYNC_MAX_SECONDS, allotMediaFiles, gateNodeOrder, mediaFileKey, readViewRef, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
@@ -184,6 +186,8 @@ export function estimateUsdForNodes(
   let credits = 0
   const breakdown: CostBreakdownItem[] = []
   for (const n of nodes) {
+    // B4: a retired node, or one Sailor doesn't run, is refused before anything is priced: it adds nothing to the run price.
+    if (isRetiredClass(n.type) || notRunBySailor(n.type)) continue
     const creditBilled = isApiCreditBilled(n)
     // R7 (USER ruling, fix round 1): a per-frame node is priced as it is held: the pictures the canvas sees
     // coming in, else the frame cap ("up to"); local runs too (ruling (a): they cost the same few cents).

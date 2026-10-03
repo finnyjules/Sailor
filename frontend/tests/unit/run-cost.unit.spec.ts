@@ -7,7 +7,7 @@ function replicateNode(id: string, usd = 0.03) {
   return {
     id,
     data: {
-      nodeType: 'NanoBananaRemoteNode',
+      nodeType: 'FluxLoRARemoteNode',
       title: 'Nano Banana',
       priceBadge: { expr: `{"type":"usd","usd":${usd}}` },
       category: null,

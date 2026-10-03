@@ -69,7 +69,7 @@ export default defineEventHandler(async (event) => {
     ? `\n\nYour previous attempt:\n${JSON.stringify(previousAttempt)}\n\nIt failed validation:\n- ${validationErrors.join('\n- ')}\n\nReturn a corrected suggestion that fixes every error.`
     : ''
 
-  const prompt = `You are a ComfyUI pipeline-building assistant. The user clicked a node port on the canvas and described what they want. Choose 1..N nodes to insert and wire to that port.
+  const prompt = `You are a node-graph building assistant for Sailor. The user clicked a node port on the canvas and described what they want. Choose 1..N nodes to insert and wire to that port.
 
 ANCHOR (the port the user clicked):
 ${JSON.stringify(anchor)}

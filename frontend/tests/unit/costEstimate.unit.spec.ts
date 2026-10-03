@@ -44,20 +44,17 @@ describe('estimateUsdForNodes', () => {
 
   it('sums Person Swap alongside a RemoteNode', () => {
     const nodes: EstimateInputNode[] = [
-      { id: '1', type: 'FluxProRemoteNode', badgeExpr: USD_04 },
+      { id: '1', type: 'FluxLoRARemoteNode', badgeExpr: USD_04 },
       { id: '2', type: 'PersonSwap', category: 'api node/image/Replicate', badgeExpr: USD_05 },
     ]
     expect(estimateUsdForNodes(nodes)!.usd).toBeCloseTo(0.09)
   })
 
-  it('includes credit-billed stock API nodes in the estimate', () => {
+  it('adds nothing for a credit-billed stock API node (Sailor does not run it)', () => {
     const nodes: EstimateInputNode[] = [
       { id: '1', type: 'OpenAIImage', category: 'api node/image/OpenAI', badgeExpr: USD_04 },
     ]
-    const est = estimateUsdForNodes(nodes)
-    expect(est).not.toBeNull()
-    expect(est!.usd).toBeCloseTo(0.04)
-    expect(est!.breakdown[0]!.credits).toBe(true)
+    expect(estimateUsdForNodes(nodes)).toBeNull()
   })
 })
 
@@ -69,13 +66,8 @@ describe('credit-billed API nodes', () => {
     // Real shape: a JSONata expr whose branches are {"type":"usd","usd":N} literals.
     badgeExpr: '($m := widgets.mode; $contains($m,"10") ? {"type":"usd","usd":0.7} : {"type":"usd","usd":0.35})',
   }
-  it('includes api-node categories in the estimate as an approximate floor', () => {
-    const est = estimateUsdForNodes([kling])
-    expect(est).not.toBeNull()
-    expect(est!.usd).toBeCloseTo(0.7)
-    expect(est!.approximate).toBe(true)
-    expect(est!.breakdown[0]!.credits).toBe(true)
-    expect(est!.breakdown[0]!.label).toContain('(credits)')
+  it('adds nothing for a retired partner node (a retired Kling node is refused, not priced)', () => {
+    expect(estimateUsdForNodes([kling])).toBeNull()
   })
   it('still excludes unpriced local nodes', () => {
     expect(estimateUsdForNodes([{ id: '1', type: 'LoadImage', category: 'image', badgeExpr: null }])).toBeNull()
@@ -192,17 +184,19 @@ describe('estimateUsdForNodes — hosted prices the selected model', () => {
     // sum in one shot would also give 20 here — the distinction that matters is
     // the tier boundary, so use nodes that straddle it.
     const est = estimateUsdForNodes([
-      { id: '1', type: 'FluxProRemoteNode', badgeExpr: USD_05 },   // $0.05 → 2× → 10cr
-      { id: '2', type: 'FluxProRemoteNode', badgeExpr: USD_04 },   // $0.04 → 2× → 8cr
+      { id: '1', type: 'FluxMultiLoRARemoteNode', badgeExpr: USD_05 },   // $0.05 → 2× → 10cr
+      { id: '2', type: 'FluxLoRARemoteNode', badgeExpr: USD_04 },   // $0.04 → 2× → 8cr
     ], { hosted: true })!
     expect(est.hostedCredits).toBe(10 + 8 + 1)
     // The one-shot conversion of the $0.09 total would land on 18 + 1 here too,
     // but a $0.20 total would tip into the 1.5× tier and under-quote — pin that.
     const tipped = estimateUsdForNodes([
-      { id: '1', type: 'FluxProRemoteNode', badgeExpr: '{"type":"usd","usd":0.10}' },
-      { id: '2', type: 'FluxProRemoteNode', badgeExpr: '{"type":"usd","usd":0.10}' },
+      { id: '1', type: 'FluxMultiLoRARemoteNode', badgeExpr: USD_05 },
+      { id: '2', type: 'FluxMultiLoRARemoteNode', badgeExpr: USD_05 },
+      { id: '3', type: 'FluxMultiLoRARemoteNode', badgeExpr: USD_05 },
+      { id: '4', type: 'FluxMultiLoRARemoteNode', badgeExpr: USD_05 },
     ], { hosted: true })!
-    expect(tipped.hostedCredits).toBe(20 + 20 + 1)
+    expect(tipped.hostedCredits).toBe(10 * 4 + 1)
     expect(creditsForUsd(0.20)).toBe(30) // the wrong answer the naive sum gives
   })
 
@@ -213,7 +207,7 @@ describe('estimateUsdForNodes — hosted prices the selected model', () => {
   })
 
   it('leaves non-picker nodes on the static badge', () => {
-    const est = estimateUsdForNodes([{ id: '1', type: 'FluxProRemoteNode', badgeExpr: USD_04 }], { hosted: true })!
+    const est = estimateUsdForNodes([{ id: '1', type: 'FluxLoRARemoteNode', badgeExpr: USD_04 }], { hosted: true })!
     expect(est.usd).toBeCloseTo(0.04)
     expect(est.hostedCredits).toBe(creditsForUsd(0.04) + 1)
   })
@@ -260,5 +254,17 @@ describe('vueNodesToEstimateInput', () => {
     expect(n!.badgeExpr).toBe(VIDEO_BADGE)
     expect(n!.category).toBe('api node/video/Replicate')
     expect(n!.id).toBe('7')
+  })
+})
+
+describe('estimateUsdForNodes: nodes Sailor does not run', () => {
+  it('adds nothing for a retired class or a stock class Sailor does not run', () => {
+    const nodes: EstimateInputNode[] = [
+      { id: '1', type: 'FluxProRemoteNode', title: 'Flux', badgeExpr: USD_05 },
+      { id: '3', type: 'KSampler', title: 'KSampler', category: 'api node/image/Replicate', badgeExpr: USD_04 },
+    ]
+    const est = estimateUsdForNodes(nodes)
+    expect(est?.usd ?? 0).toBe(0)
+    expect(est?.breakdown ?? []).toEqual([])
   })
 })

@@ -31,8 +31,8 @@
  *
  * ε PER CLASS (255-scale; R2 rule 10, at most 2⁻⁸), pinned at about 4× the
  * worst |Δ| between this port's float and Python's (both clamped to
- * [−0.01, 1.01]) over the fixture's cases and the whole ε sweep. The sweep:
- *   cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_effects_fixtures.py --group blur --sweep
+ * [−0.01, 1.01]) over the fixture's cases and the whole ε sweep. The sweep (derived once, while the Python
+ * reference still existed, with its fixtures script `--group blur --sweep`; the values are frozen here):
  * 455 cases: 24 seeds per class (numpy default_rng(900000 + 1000·class index
  * + seed), seeds 0–23, classes in BLUR_CLASSES order; each draws every
  * widget over its range, a textured / smooth / dotted picture of 3 or 4

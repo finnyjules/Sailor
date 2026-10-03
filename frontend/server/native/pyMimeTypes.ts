@@ -7,8 +7,8 @@
  * image/video/audio/model is listed under `other` — still needed, because a
  * KNOWN non-media extension is cached by the filter while an unknown one is not.
  *
- * Regenerate (from the repo root) with:
- *   .venv/bin/python -c "import sys;sys.argv=['x'];from utils.mime_types import init_mime_types;init_mime_types();import mimetypes;d=mimetypes._db;print({e:(d.types_map[True].get(e) or d.types_map[False][e]).split('/')[0] for e in set(d.types_map[True])|set(d.types_map[False])})"
+ * Derived once, while the Python tree still existed, by running:
+ *   python -c "import sys;sys.argv=['x'];from utils.mime_types import init_mime_types;init_mime_types();import mimetypes;d=mimetypes._db;print({e:(d.types_map[True].get(e) or d.types_map[False][e]).split('/')[0] for e in set(d.types_map[True])|set(d.types_map[False])})"
  */
 const TABLE: Record<'image' | 'video' | 'audio' | 'model' | 'other', string> = {
   image: [

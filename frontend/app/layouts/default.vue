@@ -304,7 +304,7 @@ async function seedStarterGraph(nodeType: string, tries = 0) {
   if (canvas?.materializeStartGraph) {
     await canvas.refreshSchema?.()
     if (canvas.materializeStartGraph({ generatorNodeType: nodeType }) === false) {
-      toast.error('Couldn’t add the starter', { description: `The backend doesn’t provide “${nodeType}”. Check that ComfyUI is running and up to date, then try again from the + menu.` })
+      toast.error('Couldn’t add the starter', { description: `Sailor doesn’t have “${nodeType}” right now. Reload the page, then try again from the + menu.` })
     }
   } else if (tries < 40) {
     setTimeout(() => seedStarterGraph(nodeType, tries + 1), 50)
@@ -2394,15 +2394,6 @@ async function loadWorkflowForTab(tab: any) {
       if (!docHasContent(body)) {
         if (tab.promptId) {
           body = await fetchWorkflowFromHistory(tab.promptId)
-        }
-        else if (tab.workflowId) {
-          // Try to load from recent workflows API
-          try {
-            const res = await fetch(`/api/workflows/${tab.workflowId}`)
-            const data = await res.json()
-            body = data?.workflow || null
-          }
-          catch { body = null }
         }
       }
       // Swap the real content in only if the placeholder is still what's
