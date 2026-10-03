@@ -14,8 +14,8 @@ import { dropNode, waitForBackend, dismissStartModal, openFirstStudioCard } from
 
 /**
  * A local variant of tests/_helpers.ts's openBlankWorkflow that does NOT wait for
- * 'networkidle'. Against the live backend this suite runs against (a real ComfyUI at
- * 127.0.0.1:8188), the app polls /system_stats continuously, so 'networkidle' never
+ * 'networkidle'. Against the live backend this suite runs against (the real dev server on
+ * 127.0.0.1:3002), the app polls /api/health continuously, so 'networkidle' never
  * fires and the shared helper times out before it reaches the "Start a blank project"
  * button. Copied from tests/scene3d-texture-picker.spec.ts (itself copied from
  * tests/scene3d-grouping.spec.ts) — kept local rather than hoisted into a shared

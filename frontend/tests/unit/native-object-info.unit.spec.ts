@@ -28,6 +28,7 @@ import {
   pyFilterFilesContentTypes,
   pyGuessTopType,
 } from '../../server/native/objectInfo'
+import { __setResourceOwnersDbForTests } from '../../server/utils/resourceOwners'
 import { handleHostedObjectInfo, UPLOAD_FLAG_KEYS } from '../../server/utils/engineGate'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, RUNNER_SPECIAL_CLASSES } from '#shared/runner/eligibility'
 import { EDITOR_ONLY_ADVICE_OF, RETIRED_CLASSES } from '#shared/runner/retired'
@@ -209,7 +210,7 @@ describe('the catalogue, refreshed from disk (C5: no engine; C6: the only source
 // --------------------------------------------------------------------- hosted
 
 describe('hosted: the scrub applies to whichever body is served', () => {
-  afterEach(() => { __setInputUploadsDbForTests(null) })
+  afterEach(() => { __setInputUploadsDbForTests(null); __setResourceOwnersDbForTests(null) })
 
   it('scrubs the refreshed catalogue to the caller\'s own uploads', async () => {
     writeCatalog(staleCatalog())
@@ -220,13 +221,19 @@ describe('hosted: the scrub applies to whichever body is served', () => {
         throw new Error(`unexpected sql: ${sql}`)
       },
     })
+    __setResourceOwnersDbForTests({
+      async query(_sql: string, params: unknown[] = []) { return { rows: params[1] === 'z' ? [{ user_id: 'u2' }] : [] } },
+    })
     const out = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any) as any
     expect(out.LoadImage.input.required.image[0]).toEqual(['b.png'])
     expect(out.AudioWaveform.input.required.audio_file[1]).toMatchObject({ default: 'b.png', options: ['b.png'] })
     expect(JSON.stringify(out)).not.toContain('song.mp3')
     expect(JSON.stringify(out)).not.toContain('lora_dataset')
-    // LoRA lists are shared assets and stay refreshed.
-    expect(out.FluxLoRARemoteNode.input.required.lora_name[1].options).toEqual(['sub/a.pt', 'z.safetensors', '[None]'])
+    // LoRA lists: curated (no owner row) and the caller's own stay; another
+    // tenant's LoRA (z, owned by u2) is gone. The owner sees it.
+    expect(out.FluxLoRARemoteNode.input.required.lora_name[1].options).toEqual(['sub/a.pt', '[None]'])
+    const owner = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u2' } } as any) as any
+    expect(owner.FluxLoRARemoteNode.input.required.lora_name[1].options).toEqual(['sub/a.pt', 'z.safetensors', '[None]'])
   })
 
   it('never asks the engine (R10.9): the stored catalog is served and scrubbed even while an engine answers', async () => {

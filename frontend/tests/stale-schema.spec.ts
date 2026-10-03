@@ -11,10 +11,8 @@ import { dismissStartModal, dropNode, openBlankWorkflow, timelineEditorOverlay, 
 // 'Timeline state failed' toast with the reload remedy.
 //
 // Scoping: the parent fetches `/object_info` relative to its own origin
-// (127.0.0.1:3002, proxied by Nuxt); the ComfyUI iframe talks to :8188
-// directly. Filtering the route by port doctors ONLY the parent's schema —
-// the iframe layer (its `bridge_warning` toast) is not exercised here, since
-// a live iframe loaded after the restart genuinely has the new definitions.
+// (127.0.0.1:3002, served by Sailor). Filtering the route by port doctors only
+// that fetch.
 
 test.describe('stale /object_info schema', () => {
   test('Timeline run with edit_state missing from the cached schema toasts the reload remedy', async ({ page }) => {

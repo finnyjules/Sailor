@@ -18,10 +18,10 @@ import { assertCanonicalMultipart, parseUploadForm } from './multipart'
 import { canonicalUploadKey, engineDirForType, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { bakeFolderAbandoned } from '../runner/shaderBakeFiles'
 import { normalizeEnginePath } from './enginePath'
-import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
+import { hostedCanMutate, hostedCanRead, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
 import { decodeSegment, dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
-import { matchObjectInfoRoute, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
+import { MODEL_INPUT_LISTS, findSpec, matchObjectInfoRoute, setComboOptions, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 // Review C2's exact mirror of folder_paths.annotated_filepath() lives in
@@ -305,6 +305,32 @@ export async function handleHostedOutputListing(event: H3Event): Promise<string[
   return names
 }
 
+/**
+ * The LoRA pickers are refilled from the shared library (objectInfo.ts), which
+ * holds every tenant's LoRAs. Hosted keeps the curated ones (no owner row) and
+ * the caller's own, the same rule as /api/loras-local, so no one sees another
+ * tenant's LoRA file names. Mutates `catalog` in place (a clone made for this
+ * request).
+ */
+async function keepVisibleLoras(catalog: Record<string, any>, userId: string): Promise<void> {
+  const verdict = new Map<string, boolean>()
+  for (const key of Object.keys(MODEL_INPUT_LISTS)) {
+    const spec = findSpec(catalog, key)
+    if (!Array.isArray(spec)) continue
+    const opts = spec[1] && typeof spec[1] === 'object' && !Array.isArray(spec[1]) ? spec[1] as Record<string, unknown> : null
+    const list = Array.isArray(spec[0]) ? spec[0] : (opts && Array.isArray(opts.options) ? opts.options : null)
+    if (!list) continue
+    const kept: string[] = []
+    for (const name of list as string[]) {
+      if (!/\.[A-Za-z0-9]+$/.test(name)) { kept.push(name); continue } // "[None]"
+      const stem = name.replace(/\.[^.]+$/, '')
+      if (!verdict.has(stem)) verdict.set(stem, hostedCanRead(await ownerOf('lora', stem), userId))
+      if (verdict.get(stem)) kept.push(name)
+    }
+    setComboOptions(spec, kept, false)
+  }
+}
+
 export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   const userId = event.context.userId
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
@@ -320,6 +346,7 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   // alphabetically-first directory entry — this mirrors that ordering scoped
   // to the caller's own files) and for deterministic tests.
   const ownedFilenames = Array.from(owned).sort()
+  await keepVisibleLoras(served.body, userId)
   // Sailor's model menus go on after the scrub, which still applies.
   return withModelOverlay(scrubObjectInfo(served.body, ownedFilenames) as Record<string, any>)
 }

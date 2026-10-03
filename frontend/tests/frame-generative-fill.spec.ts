@@ -97,7 +97,7 @@ function distinctQuantisedColours(png: PNG): number {
 }
 
 test('terrain_bands as a Frame layer fill paints the field, not the fallback gradient', async ({ page }) => {
-  // This dev instance's backend (ComfyUI on :8188) is shared with other,
+  // This dev instance's backend (the Nuxt server on :3002) is shared with other,
   // concurrently-running sessions' frontends — a single slow/contended attempt
   // inside the setup retry loop below can already approach the default 60s
   // test timeout on its own, leaving no room for the retry it's there for.

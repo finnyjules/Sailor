@@ -35,9 +35,8 @@ import { dropNode, waitForBackend, dismissStartModal, openFirstStudioCard } from
 
 /**
  * A local variant of tests/_helpers.ts's openBlankWorkflow that does NOT wait for
- * 'networkidle'. Against the live backend this suite runs against (a real ComfyUI
- * at 127.0.0.1:8188, per the task's environment — not a mocked one), the app polls
- * /system_stats continuously, so 'networkidle' never fires and the shared helper
+ * 'networkidle'. Against the live backend this suite runs against (the real dev server on 127.0.0.1:3002, not a mocked one), the app polls
+ * /api/health continuously, so 'networkidle' never fires and the shared helper
  * times out entirely before it even reaches the "Start a blank project" button.
  * Kept local rather than patched into the shared helper because parallel sessions
  * are actively touching this repo and other specs already depend on the shared

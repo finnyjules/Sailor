@@ -116,7 +116,7 @@ export async function openFirstStudioCard(page: Page) {
   await host.getByRole('button', { name: 'Open', exact: true }).click()
 }
 
-/** Wait for ComfyUI's /object_info to respond — proves the backend is ready. */
+/** Wait for Sailor's /object_info to respond — proves the server is ready. */
 export async function waitForBackend(page: Page) {
   await expect.poll(async () => {
     const r = await page.request.get('/object_info').catch(() => null)
