@@ -13,7 +13,8 @@
  * registered names work everywhere.
  *
  * Body: `{ folder: 'moodboard_<ms>', slug: '<moodboard id>' }`
- * → `{ files: ['mb_<slug>_0.png', …] }` in the guarded list route's order.
+ * → `{ files: ['mb_<slug>_0.png', …] }` in the guarded list route's order
+ * (hosted: `mb_<userhash>_<slug>_<i>`, LC11 fix round 1).
  * Idempotent per slug — a re-save overwrites the same flat names. Guarded
  * like every moodboard route: folder must match MOODBOARD_FOLDER_RE (never a
  * lora_dataset_* folder), slug must match MOODBOARD_ID_RE (no traversal in
@@ -29,6 +30,18 @@ import { MOODBOARD_FOLDER_RE, MOODBOARD_ID_RE, MOODBOARD_MAX_REFS } from '../../
 import { moodboardInputDir, safeImageFile } from '../../utils/moodboardImages'
 import { canonicalUploadKey, recordUpload, uploadOwner } from '../../utils/inputUploads'
 import { isHosted } from '../../utils/deployMode'
+import { shortUserHash } from '../../utils/meterGraphRun'
+
+/**
+ * LC11 fix round 1: the flat copy's name. Hosted puts the person's hash in it
+ * (`mb_<userhash>_<slug>_<i>`), so one person's copies can never land on
+ * another's — the input root is shared and slugs are not secret. Local keeps
+ * `mb_<slug>_<i>`. Copies made under the old hosted names stay readable by
+ * their owners through their rows.
+ */
+export function flatRefName(slug: string, i: number, ext: string, userId: string | null, hosted: boolean): string {
+  return hosted && userId ? `mb_${shortUserHash(userId)}_${slug}_${i}.${ext}` : `mb_${slug}_${i}.${ext}`
+}
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<Record<string, any>>(event)
@@ -45,6 +58,7 @@ export default defineEventHandler(async (event) => {
 
   const hosted = isHosted()
   const userId = event.context.userId ?? null
+  if (hosted && !userId) throw createError({ statusCode: 401, statusMessage: 'Sign in required' })
   const sources = names.filter(safeImageFile).sort().slice(0, MOODBOARD_MAX_REFS)
 
   // I1 — this route reads files OUT of `folder` and re-records the copies as the
@@ -62,10 +76,23 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const targets = sources.map((src, i) => ({ src, flat: flatRefName(slug, i, src.split('.').pop()!.toLowerCase(), userId, hosted) }))
+
+  // LC11 fix round 1: a copy never overwrites someone else's file. Every target
+  // is checked before anything is written: a name another person owns, or one
+  // already on disk that nobody recorded (somebody's, fail closed), is refused
+  // with 404, as a foreign folder is.
+  if (hosted) {
+    for (const { flat } of targets) {
+      const owner = await uploadOwner(canonicalUploadKey('input', '', flat))
+      if (owner === userId) continue
+      const onDisk = await fs.access(path.join(inputDir, flat)).then(() => true, () => false)
+      if (owner !== null || onDisk) throw createError({ statusCode: 404, statusMessage: 'not found' })
+    }
+  }
+
   const files: string[] = []
-  for (const [i, src] of sources.entries()) {
-    const ext = src.split('.').pop()!.toLowerCase()
-    const flat = `mb_${slug}_${i}.${ext}`
+  for (const { src, flat } of targets) {
     await fs.copyFile(path.join(inputDir, folder, src), path.join(inputDir, flat))
     if (hosted && userId) await recordUpload(userId, canonicalUploadKey('input', '', flat))
     files.push(flat)

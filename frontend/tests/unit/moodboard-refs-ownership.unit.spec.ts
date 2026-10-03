@@ -21,6 +21,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createApp, eventHandler, toWebHandler } from 'h3'
 import { __setInputUploadsDbForTests, canonicalUploadKey } from '../../server/utils/inputUploads'
+import { shortUserHash } from '../../server/utils/meterGraphRun'
 
 const g = globalThis as any
 g.defineEventHandler = (fn: any) => fn
@@ -117,16 +118,17 @@ describe('refs.post — cross-tenant folder read is refused', () => {
     setHosted()
     await seedFolder('moodboard_222', ['a.png', 'b.png'], 'u1')
     const res = await refsHandler(ev({ body: { folder: 'moodboard_222', slug: 'mine' }, userId: 'u1' }))
-    expect(res.files).toEqual(['mb_mine_0.png', 'mb_mine_1.png'])
-    await fs.access(path.join(inputDir, 'mb_mine_0.png'))
-    expect(uploads.get(canonicalUploadKey('input', '', 'mb_mine_0.png'))).toBe('u1')
+    const h = shortUserHash('u1')
+    expect(res.files).toEqual([`mb_${h}_mine_0.png`, `mb_${h}_mine_1.png`])
+    await fs.access(path.join(inputDir, `mb_${h}_mine_0.png`))
+    expect(uploads.get(canonicalUploadKey('input', '', `mb_${h}_mine_0.png`))).toBe('u1')
   })
 
   it('hosted: curated folder (no owner rows) → still copyable (own-or-curated read)', async () => {
     setHosted()
     await seedFolder('moodboard_333', ['a.png'], null)
     const res = await refsHandler(ev({ body: { folder: 'moodboard_333', slug: 'curated' }, userId: 'u1' }))
-    expect(res.files).toEqual(['mb_curated_0.png'])
+    expect(res.files).toEqual([`mb_${shortUserHash('u1')}_curated_0.png`])
   })
 
   it('local mode: unchanged — copies regardless of ownership, no registry read', async () => {
@@ -172,5 +174,58 @@ describe('images.post — cross-tenant folder write is refused', () => {
     const body = await res.json()
     expect(body.files.length).toBe(1)
     expect(uploads.get(canonicalUploadKey('input', 'moodboard_666', body.files[0]))).toBe('u1')
+  })
+})
+
+describe('LC11 fix round 1: a flat copy never overwrites another person\'s file (two accounts)', () => {
+  it('hosted: A and B saving the same slug get their own copies; neither overwrites the other', async () => {
+    setHosted()
+    await seedFolder('moodboard_501', ['a.png'], 'uA')
+    await fs.writeFile(path.join(inputDir, 'moodboard_501', 'a.png'), 'A-bytes')
+    await seedFolder('moodboard_502', ['b.png'], 'uB')
+    await fs.writeFile(path.join(inputDir, 'moodboard_502', 'b.png'), 'B-bytes')
+    const a = await refsHandler(ev({ body: { folder: 'moodboard_501', slug: 'shared' }, userId: 'uA' }))
+    const b = await refsHandler(ev({ body: { folder: 'moodboard_502', slug: 'shared' }, userId: 'uB' }))
+    expect(a.files[0]).not.toBe(b.files[0])
+    expect(await fs.readFile(path.join(inputDir, a.files[0]), 'utf8')).toBe('A-bytes')
+    expect(await fs.readFile(path.join(inputDir, b.files[0]), 'utf8')).toBe('B-bytes')
+    expect(uploads.get(canonicalUploadKey('input', '', a.files[0]))).toBe('uA')
+    expect(uploads.get(canonicalUploadKey('input', '', b.files[0]))).toBe('uB')
+    // A's re-save of its own copy still overwrites in place.
+    await fs.writeFile(path.join(inputDir, 'moodboard_501', 'a.png'), 'A-bytes-2')
+    expect((await refsHandler(ev({ body: { folder: 'moodboard_501', slug: 'shared' }, userId: 'uA' }))).files).toEqual(a.files)
+    expect(await fs.readFile(path.join(inputDir, a.files[0]), 'utf8')).toBe('A-bytes-2')
+  })
+
+  it('hosted: a target name owned by someone else (B planted it) is refused 404 before any write', async () => {
+    setHosted()
+    await seedFolder('moodboard_601', ['a.png', 'b.png'], 'uA')
+    const planted = `mb_${shortUserHash('uA')}_board_1.png`
+    await fs.writeFile(path.join(inputDir, planted), 'B-bytes')
+    uploads.set(canonicalUploadKey('input', '', planted), 'uB')
+    expect(await statusOf(refsHandler(ev({ body: { folder: 'moodboard_601', slug: 'board' }, userId: 'uA' })))).toBe(404)
+    expect(await fs.readFile(path.join(inputDir, planted), 'utf8')).toBe('B-bytes')
+    // Nothing else was written either: the check runs before the first copy.
+    expect((await fs.readdir(inputDir)).filter(n => n.startsWith('mb_'))).toEqual([planted])
+  })
+
+  it('hosted: a target already on disk that nobody recorded is refused (fail closed)', async () => {
+    setHosted()
+    await seedFolder('moodboard_701', ['a.png'], 'uA')
+    const name = `mb_${shortUserHash('uA')}_board_0.png`
+    await fs.writeFile(path.join(inputDir, name), 'somebody')
+    expect(await statusOf(refsHandler(ev({ body: { folder: 'moodboard_701', slug: 'board' }, userId: 'uA' })))).toBe(404)
+    expect(await fs.readFile(path.join(inputDir, name), 'utf8')).toBe('somebody')
+  })
+
+  it('hosted: an old-style copy (`mb_<slug>_<i>`) stays its owner\'s and is never overwritten by B', async () => {
+    setHosted()
+    await fs.writeFile(path.join(inputDir, 'mb_old_0.png'), 'A-old')
+    uploads.set(canonicalUploadKey('input', '', 'mb_old_0.png'), 'uA')
+    await seedFolder('moodboard_801', ['a.png'], 'uB')
+    const b = await refsHandler(ev({ body: { folder: 'moodboard_801', slug: 'old' }, userId: 'uB' }))
+    expect(b.files[0]).toBe(`mb_${shortUserHash('uB')}_old_0.png`)
+    expect(await fs.readFile(path.join(inputDir, 'mb_old_0.png'), 'utf8')).toBe('A-old')
+    expect(uploads.get(canonicalUploadKey('input', '', 'mb_old_0.png'))).toBe('uA')
   })
 })

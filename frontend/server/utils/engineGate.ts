@@ -9,6 +9,7 @@
  * race-window harvest of the engine's history) are gone; every one left here
  * answers from Sailor's own files and records.
  */
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { H3Event } from 'h3'
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus } from 'h3'
@@ -92,6 +93,22 @@ export function publicInputFile(folder: string, filename: string): boolean {
 export function inPublicInputFolder(folder: string): boolean {
   const top = folder.split('/')[0]
   return (PUBLIC_INPUT_FOLDERS as readonly string[]).includes(top ?? '')
+}
+
+/**
+ * LC11 fix round 1: a person's own `u_<hash>` folder, the name the runner
+ * saves under (runner/results.ts userSubfolder, meterGraphRun.shortUserHash:
+ * sha256 of the user id, 12 hex). Computed here, not imported, because
+ * meterGraphRun imports this module; a spec pins the two equal.
+ */
+export function ownUserFolder(userId: string): string {
+  return `u_${createHash('sha256').update(userId).digest('hex').slice(0, 12)}`
+}
+
+/** Whether a resolved folder is inside some person's `u_<hash>` folder other than this person's own. */
+export function inOtherUserFolder(folder: string, userId: string): boolean {
+  const top = (folder.split('/')[0] ?? '').toLowerCase()
+  return /^u_[0-9a-f]{12}$/.test(top) && top !== ownUserFolder(userId)
 }
 
 /**
@@ -441,6 +458,18 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
   if (inPublicInputFolder(resolvedFolder(subfolder ?? '')) || inPublicInputFolder(resolvedFolder(bakeTarget))) {
     throw createError({ statusCode: 400, message: 'Files can’t be uploaded into that folder' })
   }
+  // LC11 fix round 1: another person's `u_<hash>` folder (their runs' files and
+  // previews, which /view serves to them by folder) takes nothing from anyone
+  // else, in any folder type, by any spelling, before anything is written.
+  if (inOtherUserFolder(resolvedFolder(subfolder ?? ''), userId) || inOtherUserFolder(resolvedFolder(bakeTarget), userId)) {
+    throw createError({ statusCode: 403, message: 'That folder belongs to another account' })
+  }
+  // LC11 fix round 1 (gap 4): a `/` in the file name would put the file in a
+  // folder nobody named (or, as the native write runs, fail part-way). No
+  // browser sends one; it is refused before anything is written.
+  if (((await form.file('image'))?.filename ?? '').includes('/')) {
+    throw createError({ statusCode: 400, message: 'A file name can’t contain “/”' })
+  }
   if (bakeTarget === 'shader_bake' || bakeTarget.startsWith('shader_bake/')) {
     const name = (await form.file('image'))?.filename || ''
     if (!/^shader_bake_[0-9a-f]{32}\.png$/.test(name)) {
@@ -508,8 +537,16 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
         typeof stored.subfolder === 'string' ? stored.subfolder : '',
         stored.name,
       )
+      // LC11 fix round 1: also under the file's resolved place (the folder as
+      // the reader resolves it), the key /view and the runner look a file up
+      // by, so its owner can read back an upload sent to `./pasted/`.
+      const storedType = typeof stored.type === 'string' && stored.type ? stored.type : 'input'
+      const placed = resolvedFolder(path.posix.join(typeof stored.subfolder === 'string' ? stored.subfolder : '', stored.name))
+      const cut = placed.lastIndexOf('/')
+      const resolvedKey = canonicalUploadKey(storedType, cut < 0 ? '' : placed.slice(0, cut), placed.slice(cut + 1))
       try {
         await recordUpload(userId, key)
+        if (resolvedKey !== key) await recordUpload(userId, resolvedKey)
       }
       catch (e) {
         console.error('[engineGate] failed to record upload ownership', { key, error: e })

@@ -741,3 +741,54 @@ describe('LC11: nobody uploads into a public input folder (anyone can read those
     expect(written()).toContain('input/pasted/a.png')
   })
 })
+
+// ------------------------------------------------------- LC11 fix round 1
+
+describe('LC11 fix round 1 (gap 3): another person\'s u_<hash> folder takes no upload', () => {
+  it('ownUserFolder is the runner\'s own folder name (runner/results userSubfolder)', async () => {
+    const { ownUserFolder } = await import('../../server/utils/engineGate')
+    const { userSubfolder } = await import('../../server/runner/results')
+    for (const id of ['u1', 'u2', 'user_2xYz']) expect(ownUserFolder(id)).toBe(userSubfolder(id, true))
+  })
+  it('input, temp and output, by every spelling, refused 403 before disk', async () => {
+    const { ownUserFolder } = await import('../../server/utils/engineGate')
+    const other = ownUserFolder('u2')
+    for (const type of ['input', 'temp', 'output']) {
+      for (const subfolder of [other, `${other}/sub`, `./${other}/`, `x/../${other}`, `${other}//deep`, ` ${other} `, other.toUpperCase(), `${other}\\sub`]) {
+        rawBody.mockResolvedValue(upload({ filename: 'live_preview_n_00001.png', fields: { type, subfolder } }))
+        await expect(handleHostedUpload(ev()), `${type} ${subfolder}`).rejects.toMatchObject({ statusCode: 403 })
+      }
+    }
+    expect(written()).toEqual([])
+  })
+  it('the uploader\'s own u_<hash> folder still takes an upload', async () => {
+    const { ownUserFolder } = await import('../../server/utils/engineGate')
+    rawBody.mockResolvedValue(upload({ filename: 'mine.png', fields: { type: 'temp', subfolder: ownUserFolder('u1') } }))
+    await handleHostedUpload(ev())
+    expect(written()).toContain(`temp/${ownUserFolder('u1')}/mine.png`)
+  })
+})
+
+describe('LC11 fix round 1 (gap 4): names with `/`, and where an upload is recorded', () => {
+  it('a `/` in the file name is refused 400 before disk (it used to fail part-way with a 500)', async () => {
+    rawBody.mockResolvedValue(upload({ filename: 'a/b.png', fields: { subfolder: 'pasted' } }))
+    await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
+    expect(written()).toEqual([])
+  })
+  it('a dotted subfolder: recorded where it lands too, so the owner reads it back through /view; nobody else does', async () => {
+    const { hostedViewGate } = await import('../../server/native/viewGate')
+    rawBody.mockResolvedValue(upload({ filename: 'b.png', fields: { subfolder: './pasted//' } }))
+    await handleHostedUpload(ev())
+    expect(written()).toContain('input/pasted/b.png')
+    expect(owners.get(canonicalUploadKey('input', './pasted//', 'b.png'))).toBe('u1')
+    expect(owners.get('input:pasted:b.png')).toBe('u1')
+    await expect(hostedViewGate('u1', { type: 'input', subfolder: 'pasted', filename: 'b.png' })).resolves.toBeUndefined()
+    await expect(hostedViewGate('u2', { type: 'input', subfolder: 'pasted', filename: 'b.png' })).rejects.toMatchObject({ statusCode: 404 })
+  })
+  it('a plain upload records exactly one row, as before', async () => {
+    rawBody.mockResolvedValue(upload({ filename: 'plain.png' }))
+    const before = queries.filter(q => /insert/i.test(q)).length
+    await handleHostedUpload(ev())
+    expect(queries.filter(q => /insert/i.test(q)).length - before).toBe(1)
+  })
+})
