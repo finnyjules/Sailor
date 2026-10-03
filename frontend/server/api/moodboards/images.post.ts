@@ -42,16 +42,16 @@ export default defineEventHandler(async (event) => {
   const userId = event.context.userId ?? null
 
   // I1 — a caller-supplied EXISTING folder must not be another tenant's. Before
-  // creating/writing, gate an already-populated folder by the same own-or-curated
-  // per-file read images.get.ts enforces: if any image already in it belongs to
-  // another tenant, refuse (404) rather than write into their board. A brand-new
-  // mint folder (or an empty/curated one) passes — first writer owns it.
+  // creating/writing, gate an already-populated folder by the same
+  // caller-owned per-file rule images.get.ts enforces (LC12): if any image already
+  // in it is another person's OR has no owner row, refuse (404) before writing, so
+  // a folder never ends up mixed. A brand-new or empty folder passes — first writer owns it.
   if (hosted) {
     let existing: string[] = []
     try { existing = await fs.readdir(dir) } catch { /* new folder — nothing to guard */ }
     for (const name of existing.filter(safeImageFile)) {
       const owner = await uploadOwner(canonicalUploadKey('input', folder, name))
-      if (owner !== null && owner !== userId) throw createError({ statusCode: 404, statusMessage: 'not found' })
+      if (owner !== userId) throw createError({ statusCode: 404, statusMessage: 'not found' })
     }
   }
 

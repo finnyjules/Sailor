@@ -176,6 +176,29 @@ describe('images.post — cross-tenant folder write is refused', () => {
     expect(names).toEqual(['00_existing.png']) // nothing new landed
   })
 
+  it('hosted (LC12 fix 1): a folder holding an UNOWNED file → 404, nothing written', async () => {
+    setHosted()
+    await seedFolder('moodboard_556', ['00_old.png'], null)
+    expect((await handlerFor('u1')(upload('moodboard_556'))).status).toBe(404)
+    expect(await fs.readdir(path.join(inputDir, 'moodboard_556'))).toEqual(['00_old.png'])
+  })
+
+  it('hosted (LC12 fix 1): A can add to A\'s folder, B cannot, and a mixed folder refuses A', async () => {
+    setHosted()
+    await seedFolder('moodboard_557', ['00_a.png'], 'uA')
+    expect((await handlerFor('uB')(upload('moodboard_557'))).status).toBe(404)
+    expect((await handlerFor('uA')(upload('moodboard_557', 'n.png'))).status).toBe(200)
+    await seedFolder('moodboard_558', ['00_a.png'], 'uA')
+    await seedFolder('moodboard_558', ['01_x.png'], 'uB')
+    expect((await handlerFor('uA')(upload('moodboard_558'))).status).toBe(404)
+  })
+
+  it('local: unowned existing folder still accepts uploads', async () => {
+    setLocal()
+    await seedFolder('moodboard_559', ['00_old.png'], null)
+    expect((await handlerFor(null)(upload('moodboard_559'))).status).toBe(200)
+  })
+
   it('hosted: minting a NEW folder writes fine and records ownership', async () => {
     setHosted()
     const res = await handlerFor('u1')(upload('moodboard_666'))
