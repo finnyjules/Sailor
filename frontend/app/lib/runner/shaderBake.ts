@@ -22,17 +22,27 @@
  * its frames (keeps nothing). A failure says whether the graph or this
  * browser caused it (`cause`), for default.vue to refuse or fall back.
  *
+ * LC13: one of your own effects (a My effect, `mine_…~vN`) is baked the same
+ * way, from the def the canvas draws it with (the page's live catalogue: the
+ * My effects library, or a project's copy): its version's code assembled with
+ * the shared preamble, its dials, `resolveUniforms`, the same renderer. The
+ * bake names the digest of that code and those dials (`source`,
+ * myEffectSourceDigest), which the key covers and the server checks against
+ * the person's own My effects store before the hold. A My effect this page
+ * doesn't have, or one that isn't generative with no picture wired, fails as
+ * the graph's (plain words, the run not sent).
+ *
  * A node it can't bake is left without `sailor_baked`, and so to the engine
- * (or named as needing it): an effect the runner doesn't know (a My effect,
- * a draft), a picture made in the same run (ruling: refused for now),
- * settings Python reads differently from the browser (paramsPortable). A
- * still's render or upload that fails is reported back (`failed`), for a toast.
+ * (or named as needing it): an effect the runner doesn't know (a draft), a
+ * picture made in the same run (ruling: refused for now), settings Python
+ * reads differently from the browser (paramsPortable). A still's render or
+ * upload that fails is reported back (`failed`), for a toast.
  */
 import type { ApiPrompt } from '#shared/runner/graph'
 import { familyOn, type RunnerFamily } from '#shared/runner/families'
 import { runnerTakesNode } from '#shared/runner/eligibility'
 import {
-  SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, aspectSize, framePlan, resolveShaderEffectId, shaderBakeKey,
+  SHADER_EFFECT_IDS, SHADER_ENGINE_WORDS, SHADER_GENERATIVE_IDS, SHADER_MY_EFFECT_WORDS, aspectSize, framePlan, myEffectRefOf, myEffectSourceDigest, resolveShaderEffectId, shaderBakeKey,
   shaderBakedText, shaderBakeProblem, shaderFrameCap, shaderFrameCount, shaderSeedUniform, shaderSourceOfNode, shaderSourcesOf, shaderTooManyFramesWords, sha256Hex,
   type ShaderClipSource,
 } from '#shared/runner/shaderBakeKey'
@@ -205,9 +215,14 @@ export function bakeUniforms(def: EffectDef, params: string, o: { time: number; 
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
-/** The built-in effect a node names, when the runner can replay it. */
+/**
+ * The effect a node names, when the runner can replay it: a built-in one, or (LC13) one of your own, by
+ * the exact id the node stores (`mine_x~vN`, or a bare `mine_x`: version 1's hidden copy), as the
+ * node's own preview finds it (ShaderEffectNode.vue).
+ */
 function bakeableEffect(catalog: ShaderFxCatalog, raw: unknown): EffectDef | null {
   if (typeof raw !== 'string') return null
+  if (myEffectRefOf(raw)) return catalog.effects.find(e => e.id === raw && e.mine && !e.draft) ?? null
   const id = resolveShaderEffectId(raw)
   if (!SHADER_EFFECT_IDS.includes(id)) return null
   return catalog.effects.find(e => e.id === id && !e.mine && !e.draft && !e.versionOf) ?? null
@@ -226,15 +241,25 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
     if (node.class_type !== 'ShaderEffect') continue
     const inputs = node.inputs ?? {}
     delete inputs.sailor_baked
+    const mine = myEffectRefOf(inputs.effect)
     const def = bakeableEffect(ctx.catalog, inputs.effect)
-    if (!def) continue
     const { time, duration, fps, seed, resolution, aspect, params } = inputs
     if (!num(time) || !num(duration) || !num(fps) || !num(seed) || !num(resolution) || typeof aspect !== 'string') continue
     const sources = shaderSourcesOf(prompt, nodeId)
     const src = shaderSourceOfNode(prompt, nodeId)
     if (!sources || !src) continue
-    if (src.kind === 'none' && !SHADER_GENERATIVE_IDS.includes(def.id)) continue
+    // LC13: one of your own effects this page doesn't have (removed, or someone else's): the graph's, in plain words.
+    if (!def) {
+      if (mine) result.failed.push({ nodeId, error: SHADER_MY_EFFECT_WORDS.missing, cause: 'graph' })
+      continue
+    }
+    if (src.kind === 'none' && !(mine ? def.generative : SHADER_GENERATIVE_IDS.includes(def.id))) {
+      if (mine) result.failed.push({ nodeId, error: SHADER_ENGINE_WORDS.needsPicture, cause: 'graph' })
+      continue
+    }
     if (!paramsPortable(def, params)) continue
+    // LC13: the code and dials this My effect is drawn with, which its key covers (the server checks them against its store).
+    const effectSource = mine ? myEffectSourceDigest(def.source, def.params) : undefined
     const plan = framePlan(1, time, duration, fps)
     const step = Math.max(1, Math.trunc(fps))
     let animated = plan.length > 1 || src.kind === 'clip'
@@ -313,7 +338,7 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
         for (const [, t] of plan) await render(base, size.w, size.h, t, !!picture)
       }
       stopCheck(signal)
-      inputs.sailor_baked = shaderBakedText(files, await shaderBakeKey(inputs, sources, ctx.catalog.version, files))
+      inputs.sailor_baked = shaderBakedText(files, await shaderBakeKey(inputs, sources, ctx.catalog.version, files, effectSource), effectSource)
       result.baked.push(nodeId)
     }
     catch (e) {
@@ -357,7 +382,7 @@ export function takeWantsShaderBake(prompt: ApiPrompt | null | undefined, famili
       const plan = framePlan(1, num(inputs.time) ? inputs.time : 0, num(inputs.duration) ? inputs.duration : 0, num(inputs.fps) ? inputs.fps : 1).length
       const several = src?.kind === 'clip' || plan > 1 || (animatedPictures && src?.kind === 'picture')
       const files = Array.from({ length: several ? 2 : 1 }, (_, i) => `shader_bake_${String(i).padStart(32, '0')}.png`)
-      p[id] = { ...prompt[id]!, inputs: { ...inputs, sailor_baked: shaderBakedText(files, '0'.repeat(64)) } }
+      p[id] = { ...prompt[id]!, inputs: { ...inputs, sailor_baked: shaderBakedText(files, '0'.repeat(64), myEffectRefOf(inputs.effect) ? '0'.repeat(64) : undefined) } }
     }
     return p
   }
@@ -514,9 +539,16 @@ function loadImage(url: string): Promise<HTMLImageElement> {
  */
 export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | null | undefined)[], families: ReadonlySet<RunnerFamily>, o: { hosted?: boolean; tabId?: string | null; onStart?: () => void } = {}): Promise<ShaderBakeResult> {
   return bakeShaderTakes(prompts, families, async () => {
-    const { fetchShaderFxCatalog, assetUrl } = await import('~/lib/shaderfx/catalog')
+    const { fetchShaderFxCatalog, assetUrl, loadOwnEffects } = await import('~/lib/shaderfx/catalog')
     const { ShaderFxRenderer } = await import('~/lib/shaderfx/renderer')
-    const catalog = await fetchShaderFxCatalog()
+    let catalog = await fetchShaderFxCatalog()
+    // LC13: one of your own effects is drawn from the live catalogue the canvas draws it from (built-ins, the
+    // My effects library once loaded, a project's copies): wait for the library, then read that catalogue.
+    if (prompts.some(p => !!p && Object.values(p).some(n => n.class_type === 'ShaderEffect' && myEffectRefOf(n.inputs?.effect)))) {
+      await loadOwnEffects().catch(() => {})
+      const { currentShaderEffects } = await import('~/lib/shaderfx/catalogStore')
+      catalog = { version: catalog.version, effects: currentShaderEffects() }
+    }
     const renderer = new ShaderFxRenderer()
     const textures = new Map<string, Promise<HTMLImageElement>>()
     return {

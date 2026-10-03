@@ -118,7 +118,9 @@ const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
  * runner-no-silent-engine.unit.spec.ts). The list of cases silently left to the engine is empty. R10.2 fix
  * round 1 (c): one of your own effects goes to the local engine again, locally with it up, but named (the
  * local-engine toast), never silently; elsewhere it gets its words. Fix round 2: so does one whose picture is
- * made in the same run (NEEDS_LOCAL_ENGINE_SHADER_CASES; runner-no-silent-engine.unit.spec.ts).
+ * made in the same run (NEEDS_LOCAL_ENGINE_SHADER_CASES; runner-no-silent-engine.unit.spec.ts). LC13: one of
+ * your own effects runs in Sailor once the browser has drawn it; one not drawn (its run bound for the engine,
+ * which can't run it) is refused plainly everywhere, never sent to the engine.
  */
 const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {}
 const SHADER_CLOSED_CASES: Readonly<Record<string, string>> = {
@@ -145,7 +147,7 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
     const stale = shader({})
     stale.fx!.inputs.sailor_baked = shaderBakedText([`shader_bake_${'0'.repeat(32)}.png`], 'f'.repeat(64))
     const cases: [string, ApiPrompt][] = [
-      ['a My effect or a draft', shader({ effect: 'mine_abc~v1' })],
+      ['a My effect or a draft', shader({ effect: 'mine_abcdefghijkl~v1' })],
       ['an effect the runner doesn’t know', shader({ effect: 'no_such_effect' })],
       ['params only Python reads', shader({ params: '{"u_amount":"0.5"}' })],
       ['a bake that no longer agrees with its settings', stale],
@@ -155,12 +157,10 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
       expect(runnerTakesNode(p, 'fx', SH), name).toBe(false)
       expect(needsEngineReasons(p, { runnerOn: true, families: SH }), name).toEqual([SHADER_CLOSED_CASES[name]])
       const local = engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: false, engineUp: true })
-      if (name === 'a My effect or a draft') {
-        expect(local, name).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: 'Only the engine can run “Halftone”.' } })
-        expect(engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: true, engineUp: true }), name)
-          .toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
-      }
-      else expect(local, name).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
+      expect(local, name).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
+      // LC13: hosted alike (a My effect is no longer on the local-engine list).
+      expect(engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: true, engineUp: true }), name)
+        .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
     }
     expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_CLOSED_CASES['a wired setting'])
   })

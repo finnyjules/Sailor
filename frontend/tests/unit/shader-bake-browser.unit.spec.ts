@@ -28,6 +28,12 @@ import {
 import { parseParams, resolveUniforms } from '~/lib/shaderfx/params'
 import type { ShaderPass } from '~/lib/shaderfx/renderer'
 import type { EffectDef, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import { expandMyEffect } from '~/lib/myEffects/defs'
+import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
+import { assembleSource } from '#shared/shadergen/contract'
+import type { MyEffectRecord } from '#shared/myEffects/record'
+import { SHADER_ENGINE_WORDS, SHADER_MY_EFFECT_WORDS, myEffectSourceDigest } from '#shared/runner/shaderBakeKey'
+import { myEffectRecordDigest } from '~~/server/runner/myEffectBake'
 
 interface UniformCase { effect: string; case: string; params: string; uniforms?: Record<string, number | number[]>; error?: string }
 const FX = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-effects-shader.json'), 'utf8')) as { uniforms: UniformCase[] }
@@ -225,6 +231,7 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
       0: card('src.png'),
       g: gen,
       made: { class_type: 'ShaderEffect', inputs: { image: ['g', 0], ...shaderInputs() } },
+      // A `mine_` name of no shape a My effect has (LC13: a real one is baked, below).
       mine: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: 'mine_abc~v1' }) } },
       junk: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ params: '{"u_x": "0.5"}'.replace('u_x', defOf('halftone').params[0]!.uniform) }) } },
       still: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'halftone' }) },
@@ -570,5 +577,127 @@ describe('R11.9c: an animated Shader effect, every frame baked in the browser', 
       const browser = loadFramesPickOf({ w, h, fps: fps ? Math.round(fps * 1000) / 1000 : null }, s)
       expect(browser, JSON.stringify([w, h, fps, s])).toEqual({ tw: server.tw, th: server.th, start: server.start, stride: server.stride, count: server.count })
     }
+  })
+})
+
+// ── LC13: one of your own effects (a My effect) ─────────────────────────────
+
+describe('LC13: a My effect is baked as the canvas draws it, its code and dials named in the bake', () => {
+  const take = SPIKE_TAKES.rain![0]!
+  const later = SPIKE_TAKES.rain![1]!
+  const ID = 'mine_abcdefghijkl'
+  const rec = (over: Partial<MyEffectRecord> = {}): MyEffectRecord => ({
+    id: ID, name: 'Droplets', from: null, animated: true, generative: false, createdAt: 'x', updatedAt: 'x',
+    versions: [
+      { label: 'v1', body: take.body, params: take.params, values: {}, note: '', createdAt: 'x' },
+      { label: 'v2', body: later.body, params: later.params, values: {}, note: '', createdAt: 'x' },
+    ],
+    ...over,
+  })
+  /** The page's live catalogue with the library's My effect in it (catalog.ts mergeOwn: expandMyEffect). */
+  const withMine = (page: ReturnType<typeof fakePage>, r: MyEffectRecord = rec()) => {
+    page.ctx.catalog = { version: CATALOG.version, effects: [...CATALOG.effects, ...expandMyEffect(r)] }
+    return page
+  }
+  const defIn = (page: ReturnType<typeof fakePage>, id: string) => page.ctx.catalog.effects.find(d => d.id === id)!
+
+  it('a still: the version\'s own code and the node preview\'s uniforms, the digest the server works out from the store, the key over it, taken', async () => {
+    const page = withMine(fakePage())
+    const params = JSON.stringify({ u_density: 12 })
+    const p: ApiPrompt = { 0: card('src.png'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: `${ID}~v1`, params }) } }, s: saveImage(['fx', 0]) }
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: ['fx'], failed: [] })
+    const def = defIn(page, `${ID}~v1`)
+    expect(page.renders).toHaveLength(1)
+    const { passes, w, h } = page.renders[0]!
+    expect([w, h]).toEqual([23, 19])
+    // The code compiled is v1's body with the shared preamble, the def ShaderEffectNode.vue draws (not v2's).
+    expect(passes[0]!.source).toBe(assembleSource(take.body))
+    expect(passes[0]!.source).toBe(def.source)
+    expect(passes[0]!.id).toBe(`${ID}~v1`)
+    // The node preview's uniforms: resolveUniforms(def, params) + u_time, u_seed, u_hasInput.
+    expect(passes[0]!.uniforms).toEqual({ ...resolveUniforms(def, parseParams(params)), u_time: 0.5, u_seed: 2345, u_hasInput: 1, u_pass: 0, u_passCount: 1 })
+    expect(passes[0]!.uniforms.u_density).toBe(12)
+    const baked = parseShaderBaked(p.fx!.inputs.sailor_baked)!
+    // The digest: the browser's (from the def it drew) is the server's (from the stored record).
+    expect(baked.source).toBe(myEffectSourceDigest(def.source, def.params))
+    expect(baked.source).toBe(myEffectRecordDigest(rec(), 0))
+    expect(baked.source).not.toBe(myEffectRecordDigest(rec(), 1))
+    expect(baked.key).toBe(shaderBakeKeySync(p.fx!.inputs, ['src.png'], SHADER_CATALOG_VERSION, baked.files, baked.source))
+    expect(baked.key).toBe(await shaderBakeKey(p.fx!.inputs, ['src.png'], CATALOG.version, baked.files, baked.source))
+    expect(runnerTakesNode(p, 'fx', SHADER)).toBe(true)
+    // The key binds the digest: another digest under the same key is not this bake; none at all neither.
+    const other = structuredClone(p)
+    other.fx!.inputs.sailor_baked = JSON.stringify({ ...JSON.parse(p.fx!.inputs.sailor_baked as string), source: myEffectRecordDigest(rec(), 1) })
+    expect(runnerTakesNode(other, 'fx', SHADER)).toBe(false)
+    const none = structuredClone(p)
+    none.fx!.inputs.sailor_baked = JSON.stringify({ files: baked.files, key: baked.key })
+    expect(runnerTakesNode(none, 'fx', SHADER)).toBe(false)
+  })
+
+  it('the newest version, and a bare id (version 1, stored before versions were pinned), each draw their own code', async () => {
+    const page = withMine(fakePage())
+    const p: ApiPrompt = {
+      0: card('src.png'),
+      v2: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: `${ID}~v2` }) } },
+      bare: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: ID }) } },
+    }
+    expect((await bakeShaderEffects(p, page.ctx)).baked.sort()).toEqual(['bare', 'v2'])
+    expect(page.renders.map(r => r.passes[0]!.source)).toEqual([assembleSource(later.body), assembleSource(take.body)])
+    expect(parseShaderBaked(p.v2!.inputs.sailor_baked)!.source).toBe(myEffectRecordDigest(rec(), 1))
+    expect(parseShaderBaked(p.bare!.inputs.sailor_baked)!.source).toBe(myEffectRecordDigest(rec(), 0))
+  })
+
+  it('animated: a generative My effect\'s frame_plan frames (u_time stepped), one PNG each, taken as a batch', async () => {
+    const page = withMine(fakePage(), rec({ generative: true }))
+    const p: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: `${ID}~v1`, duration: 0.5, fps: 6 }) }, s: saveImage(['fx', 0]) }
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: ['fx'], failed: [] })
+    expect(page.renders.map(r => r.passes[0]!.uniforms.u_time)).toEqual(framePlan(1, 0.5, 0.5, 6).map(([, t]) => t))
+    const { w, h } = aspectSize(256, '16:9')
+    expect(page.renders.every(r => r.w === w && r.h === h && r.passes[0]!.uniforms.u_hasInput === 0)).toBe(true)
+    expect(page.events).toEqual(['render', 'upload', 'render', 'upload', 'render', 'upload'])
+    expect(runnerTakesNode(p, 'fx', SHADER)).toBe(true)
+    expect(shaderMakesBatch(p, 'fx')).toBe(true)
+    // Over an animated picture: one frame each.
+    const gif = withMine(fakePage({ animated: true, frames: 3 }))
+    const q: ApiPrompt = { 0: card('anim.gif'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: `${ID}~v1` }) } }, s: saveImage(['fx', 0]) }
+    expect((await bakeShaderEffects(q, gif.ctx)).baked).toEqual(['fx'])
+    expect(gif.renders).toHaveLength(3)
+    expect(runnerTakesNode(q, 'fx', SHADER)).toBe(true)
+  })
+
+  it('one this page doesn\'t have, or one that works on a picture with none wired: the graph\'s, in plain words, nothing drawn', async () => {
+    const page = fakePage()
+    const p: ApiPrompt = { 0: card('src.png'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs({ effect: `${ID}~v1` }) } } }
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: [], failed: [{ nodeId: 'fx', error: SHADER_MY_EFFECT_WORDS.missing, cause: 'graph' }] })
+    const alone = withMine(fakePage())
+    const q: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: `${ID}~v1` }) } }
+    expect(await bakeShaderEffects(q, alone.ctx)).toEqual({ baked: [], failed: [{ nodeId: 'fx', error: SHADER_ENGINE_WORDS.needsPicture, cause: 'graph' }] })
+    expect(page.renders.length + alone.renders.length).toBe(0)
+  })
+
+  it('caps and Stop are unchanged: over the frame cap refused before any render; Stop keeps nothing', async () => {
+    const big = withMine(fakePage(), rec({ generative: true }))
+    const p: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: `${ID}~v1`, duration: 301 / 60, fps: 60 }) } }
+    const r = await bakeShaderEffects(p, big.ctx, { hosted: true })
+    expect(r.failed).toEqual([{ nodeId: 'fx', error: shaderTooManyFramesWords(300, false), cause: 'graph', animated: true }])
+    expect(big.renders).toHaveLength(0)
+    const drawing = withMine(fakePage({ onRender: n => { if (n === 2) stopShaderBakes() } }), rec({ generative: true }))
+    const q: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: `${ID}~v1`, duration: 1, fps: 4 }) }, s: saveImage(['fx', 0]) }
+    expect(takeWantsShaderBake(q, SHADER)).toBe(true)
+    const stopped = await bakeShaderTakes([q], SHADER, async () => ({ ...drawing.ctx, release: () => {} }))
+    expect(stopped).toEqual({ baked: [], failed: [], stopped: true })
+    expect(drawing.uploads).toHaveLength(1)
+    expect(q.fx!.inputs.sailor_baked).toBeUndefined()
+    expect(drawing.abandoned).toEqual([drawing.subfolders[0]])
+  })
+
+  it('a take whose reader needs a My effect\'s frames (Create video) is judged as the bake will leave it, and baked', () => {
+    const MEDIA_SHADER: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake', 'media-video'])
+    const p: ApiPrompt = {
+      fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: `${ID}~v1`, duration: 0.5, fps: 8 }) },
+      c: { class_type: 'CreateVideo', inputs: { images: ['fx', 0], fps: 8 } },
+      s: { class_type: 'SaveVideo', inputs: { video: ['c', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } },
+    }
+    expect(takeWantsShaderBake(p, MEDIA_SHADER)).toBe(true)
   })
 })

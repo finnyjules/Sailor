@@ -73,6 +73,8 @@ export type RunnerReasonCode =
   | 'picture-batch'
   /** R11.3's stop-gaps: a lip-sync medium given as a web address or a data: link, not a file in Sailor. */
   | 'not-a-file'
+  /** LC13: a Shader effect's My effect that isn't the person's own, or changed after its frames were drawn. */
+  | 'my-effect'
 
 /** Row 25: a switched-off node, by its own title (null: none known). */
 export function switchedOffWords(title: string | null): string {

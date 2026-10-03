@@ -19,6 +19,12 @@
  * R11.9c (USER ruling (d)): an animated Shader effect (its time setting
  * making several frames, an animated picture, or a clip's frames) is baked
  * the same way, a PNG a frame, and the runner keeps them as one frame batch.
+ * LC13: a My effect (one of your own, `mine_…~vN`) is baked the same way;
+ * its bake also carries `source`, the digest of the GLSL the browser compiled
+ * and the dials it declares (myEffectSourceDigest), which its key covers. The
+ * server checks that digest against the My effects store, the person's own
+ * (server/runner/myEffectBake.ts), before the hold. The server never compiles
+ * or runs the effect's code: it only hashes its text.
  * The key is worked out synchronously here
  * (eligibility is synchronous, in the browser and on the server alike); the
  * browser's `shaderBakeKey` computes the same digest over Web Crypto.
@@ -33,6 +39,7 @@ import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 import { pyFloatOf } from './pyText'
 import { familyOn, type RunnerFamily } from './families'
 import { MEDIA_CAPS } from './media'
+import { MY_EFFECT_ID_BODY } from '../myEffects/record'
 
 /** The catalog's `version` (shader_effects/manifest.json) the runner replays bakes of. */
 export const SHADER_CATALOG_VERSION = 1
@@ -42,8 +49,8 @@ export const SHADER_LEGACY_EFFECT_IDS: Readonly<Record<string, string>> = { fila
 
 /**
  * The catalog's effects, as the node's `effect` options list them (the legacy
- * names apart). An effect not listed (a new one, a My effect, a draft) is left
- * to the engine.
+ * names apart). An effect not listed (a new one, a draft) is refused; a My
+ * effect (LC13) is taken on its own terms (myEffectRefOf).
  */
 export const SHADER_EFFECT_IDS: readonly string[] = [
   'noise_distortion', 'halftone', 'risograph', 'wave', 'swirl', 'pinch_bulge', 'water_ripple',
@@ -74,8 +81,11 @@ export const SHADER_GENERATIVE_IDS: readonly string[] = [
  * browser bakes them; these words are for where it can't go.
  */
 export const SHADER_ENGINE_WORDS = {
-  /** A My effect or a draft (its id is the user's own: `mine_…`). */
-  myEffect: 'This shader is one of your own effects, which only the local engine runs in a workflow for now. Pick one of Sailor’s effects to run it here.',
+  /**
+   * LC13: one of your own effects that wasn't drawn for this run (its run bound for the local engine, which
+   * can't run them: Python's node knows only the catalogue). Sailor runs them, drawn in your browser.
+   */
+  myEffect: 'This shader is one of your own effects, and the local engine can’t run those. Run it in a workflow without local-engine nodes, or pick one of Sailor’s effects.',
   /** An effect id the runner's catalog doesn't list. */
   unknownEffect: 'This shader effect isn’t one Sailor knows yet. Pick another effect.',
   /** A setting wired in from another node. */
@@ -86,6 +96,17 @@ export const SHADER_ENGINE_WORDS = {
   keyMismatch: 'This shader changed after its frames were drawn. Run it again.',
   /** Fix round 1: an effect that works on a picture, with none wired in (Python raises; never ran anywhere). */
   needsPicture: 'This shader effect works on a picture. Wire one into it, or pick an effect that makes its own.',
+} as const
+
+/**
+ * LC13: a My effect bake the server can't accept, in plain words (checked before the hold against the My
+ * effects store: server/runner/myEffectBake.ts; the browser says `missing` too when its page doesn't have it).
+ */
+export const SHADER_MY_EFFECT_WORDS = {
+  /** Not in the person's My effects: removed, or (hosted) someone else's. */
+  missing: 'This shader’s effect isn’t in your My effects: it was removed, or it belongs to someone else. Pick another effect.',
+  /** The effect's code or dials differ from what the frames were drawn with. */
+  changed: 'This shader’s effect changed after its frames were drawn. Run it again.',
 } as const
 
 /** The node's `aspect` options. */
@@ -149,14 +170,52 @@ export function canonicalJson(v: unknown): string {
 /** The settings the key covers, as the prompt carries them. */
 const KEYED_INPUTS = ['effect', 'params', 'time', 'duration', 'fps', 'seed', 'resolution', 'aspect'] as const
 
-/** The text the key hashes: the node's settings as sent, its source files, the catalog's version, the baked files. */
-export function shaderBakeKeyText(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[]): string {
+/**
+ * The text the key hashes: the node's settings as sent, its source files, the catalog's version, the baked
+ * files, and (LC13) for a My effect the digest of the code and dials its frames were drawn with
+ * (`myEffectSourceDigest`); a built-in effect's text is unchanged.
+ */
+export function shaderBakeKeyText(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[], effectSource?: string): string {
   const o: Record<string, unknown> = {}
   for (const k of KEYED_INPUTS) o[k] = inputs[k]
   o.source = [...sources]
   o.catalogVersion = catalogVersion
   o.files = [...files]
+  if (effectSource !== undefined) o.effectSource = effectSource
   return canonicalJson(o)
+}
+
+// ── LC13: My effects ────────────────────────────────────────────────────────
+
+const MY_EFFECT_REF_RE = new RegExp(`^(${MY_EFFECT_ID_BODY})(?:~v([1-9]\\d{0,3}))?$`)
+
+/**
+ * LC13: a My effect as a Shader effect names it: its record id and the code version it renders
+ * (app/lib/myEffects/defs.ts: `mine_x~vN` is version N's code, `versions[N-1]`; a bare `mine_x`, stored
+ * before versions were pinned, is version 1). Null for anything else.
+ */
+export function myEffectRefOf(effect: unknown): { id: string; codeIndex: number } | null {
+  if (typeof effect !== 'string') return null
+  const m = MY_EFFECT_REF_RE.exec(effect)
+  if (!m) return null
+  return { id: m[1]!, codeIndex: m[2] ? Number(m[2]) - 1 : 0 }
+}
+
+/** The dial fields a render reads (resolveUniforms): what the digest covers of each dial, undefined left out. */
+const DIAL_FIELDS = ['uniform', 'type', 'default', 'min', 'max', 'step', 'options'] as const
+
+/**
+ * LC13: the text a My effect's digest hashes: the GLSL source the browser compiles (the version's body
+ * assembled with the shared preamble: shared/shadergen/contract.ts assembleSource) and its dials as declared.
+ */
+export function myEffectSourceText(source: string, params: readonly unknown[]): string {
+  const dials = params.map((p) => {
+    const o = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const k of DIAL_FIELDS) if (o[k] !== undefined) out[k] = o[k]
+    return out
+  })
+  return canonicalJson({ source, dials })
 }
 
 /**
@@ -211,8 +270,13 @@ export function sha256HexSync(bytes: Uint8Array): string {
 }
 
 /** The key, worked out synchronously (eligibility). */
-export function shaderBakeKeySync(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[]): string {
-  return sha256HexSync(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion, files)))
+export function shaderBakeKeySync(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[], effectSource?: string): string {
+  return sha256HexSync(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion, files, effectSource)))
+}
+
+/** LC13: a My effect's digest (sha256 hex of myEffectSourceText), synchronously: the same on the server and in the browser. */
+export function myEffectSourceDigest(source: string, params: readonly unknown[]): string {
+  return sha256HexSync(new TextEncoder().encode(myEffectSourceText(source, params)))
 }
 
 /** SHA-256 of bytes over Web Crypto (the browser, and node's global `crypto`), as lowercase hex. */
@@ -224,25 +288,30 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 /** The key over Web Crypto; the same digest as shaderBakeKeySync. */
-export async function shaderBakeKey(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[]): Promise<string> {
-  return sha256Hex(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion, files)))
+export async function shaderBakeKey(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[], effectSource?: string): Promise<string> {
+  return sha256Hex(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion, files, effectSource)))
 }
 
 // ── What the prompt carries ─────────────────────────────────────────────────
 
-export interface ShaderBaked { files: string[]; key: string }
+/** `source` (LC13): a My effect's digest (myEffectSourceDigest), which the key covers; absent for a built-in effect. */
+export interface ShaderBaked { files: string[]; key: string; source?: string }
 
-/** `inputs.sailor_baked` as the runner reads it, or null: JSON text of `{ files: [non-empty text…], key: 64 hex }`. */
+/**
+ * `inputs.sailor_baked` as the runner reads it, or null: JSON text of `{ files: [non-empty text…], key: 64
+ * hex }`, plus (LC13) `source`: 64 hex, for a My effect.
+ */
 export function parseShaderBaked(raw: unknown): ShaderBaked | null {
   if (typeof raw !== 'string') return null
   let v: unknown
   try { v = JSON.parse(raw) }
   catch { return null }
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
-  const { files, key } = v as { files?: unknown; key?: unknown }
+  const { files, key, source } = v as { files?: unknown; key?: unknown; source?: unknown }
   if (typeof key !== 'string' || !/^[0-9a-f]{64}$/.test(key)) return null
   if (!Array.isArray(files) || !files.length || files.some(f => typeof f !== 'string' || !f.trim())) return null
-  return { files: files as string[], key }
+  if (source !== undefined && (typeof source !== 'string' || !/^[0-9a-f]{64}$/.test(source))) return null
+  return { files: files as string[], key, ...(source !== undefined ? { source } : {}) }
 }
 
 /**
@@ -263,9 +332,9 @@ export function bakedFileHash(raw: string): string | null {
   return /^shader_bake_([0-9a-f]{32})\.png$/.exec(parts[parts.length - 1]!)?.[1] ?? null
 }
 
-/** `inputs.sailor_baked` for these uploaded files and this key. */
-export function shaderBakedText(files: readonly string[], key: string): string {
-  return JSON.stringify({ files: [...files], key })
+/** `inputs.sailor_baked` for these uploaded files and this key (LC13: and a My effect's digest). */
+export function shaderBakedText(files: readonly string[], key: string, source?: string): string {
+  return JSON.stringify(source !== undefined ? { files: [...files], key, source } : { files: [...files], key })
 }
 
 /**
@@ -486,20 +555,25 @@ export function shaderBakeTaken(prompt: ApiPrompt, nodeId: string): boolean {
   const inputs = prompt[nodeId]?.inputs ?? {}
   if (typeof inputs.effect !== 'string') return false
   const effect = resolveShaderEffectId(inputs.effect)
-  if (!SHADER_EFFECT_IDS.includes(effect)) return false
+  // LC13: one of your own effects, baked over the code and dials its digest names (the key covers it); the
+  // start checks the digest against the My effects store, the owner's (server/runner/myEffectBake.ts).
+  const mine = myEffectRefOf(inputs.effect)
+  if (!mine && !SHADER_EFFECT_IDS.includes(effect)) return false
   const plan = shaderPlanCount(inputs)
   if (plan === null) return false
   const src = shaderSourceOfNode(prompt, nodeId)
   if (!src) return false
-  if (src.kind === 'none' && !SHADER_GENERATIVE_IDS.includes(effect)) return false
+  // A My effect's own generative flag is the store's, checked at the start.
+  if (src.kind === 'none' && !mine && !SHADER_GENERATIVE_IDS.includes(effect)) return false
   const baked = parseShaderBaked(inputs.sailor_baked)
   if (!baked) return false
+  if (!!mine !== (baked.source !== undefined)) return false
   const n = baked.files.length
   if (src.kind === 'none' && n !== plan) return false
   if (src.kind === 'picture' && n !== plan && n < 2) return false
   // A name that isn't one of the bake's own input files is left to the engine now, not failed late.
   if (baked.files.some(f => bakedFileHash(f) === null)) return false
-  return baked.key === shaderBakeKeySync(inputs, shaderSourcesOf(prompt, nodeId)!, SHADER_CATALOG_VERSION, baked.files)
+  return baked.key === shaderBakeKeySync(inputs, shaderSourcesOf(prompt, nodeId)!, SHADER_CATALOG_VERSION, baked.files, baked.source)
 }
 
 /** The settings a Shader effect reads as typed (a wire into any of them leaves it to the engine). */
@@ -534,10 +608,11 @@ export function shaderParamsLookPortable(text: unknown): boolean {
 /**
  * Why the runner leaves a Shader effect to the engine, when there is a plain
  * reason to give (else null): its picture made in the run, and (R11.9c fix
- * round 1, M1) a My effect, an effect the runner doesn't know, a wired
- * setting, params only Python reads, or a bake that no longer agrees with
- * its settings. A node simply not baked (its take bound for the engine, or a
- * still whose bake failed in this browser) names none.
+ * round 1, M1) an effect the runner doesn't know, a wired setting, params
+ * only Python reads, or a bake that no longer agrees with its settings. A
+ * node simply not baked (its take bound for the engine) names none, but for
+ * (LC13) one of your own effects: the runner takes it once the browser has
+ * drawn it, and the local engine can't run it at all.
  */
 export function shaderEngineReason(prompt: ApiPrompt, nodeId: string, families: ReadonlySet<RunnerFamily>): string | null {
   const node = prompt[nodeId]
@@ -546,15 +621,19 @@ export function shaderEngineReason(prompt: ApiPrompt, nodeId: string, families: 
   const image = inputs.image
   if (isLink(image) && sourceEnd(prompt, image).kind === 'made') return SHADER_NEEDS_PICTURE_FIRST
   if (SHADER_SETTINGS.some(k => isLink(inputs[k]))) return SHADER_ENGINE_WORDS.wired
-  if (typeof inputs.effect === 'string' && !SHADER_EFFECT_IDS.includes(resolveShaderEffectId(inputs.effect))) {
-    return inputs.effect.startsWith('mine_') ? SHADER_ENGINE_WORDS.myEffect : SHADER_ENGINE_WORDS.unknownEffect
-  }
-  if (!isLink(image) && typeof inputs.effect === 'string' && !SHADER_GENERATIVE_IDS.includes(resolveShaderEffectId(inputs.effect))) return SHADER_ENGINE_WORDS.needsPicture
+  // LC13: one of your own effects is the runner's (drawn in the browser); a `mine_` name of no shape a My effect has is unknown.
+  const mine = myEffectRefOf(inputs.effect)
+  if (!mine && typeof inputs.effect === 'string' && !SHADER_EFFECT_IDS.includes(resolveShaderEffectId(inputs.effect))) return SHADER_ENGINE_WORDS.unknownEffect
+  if (!mine && !isLink(image) && typeof inputs.effect === 'string' && !SHADER_GENERATIVE_IDS.includes(resolveShaderEffectId(inputs.effect))) return SHADER_ENGINE_WORDS.needsPicture
   if (!shaderParamsLookPortable(inputs.params)) return SHADER_ENGINE_WORDS.oddParams
   const baked = parseShaderBaked(inputs.sailor_baked)
   if (baked && !shaderBakeTaken(prompt, nodeId)) {
     const sources = shaderSourcesOf(prompt, nodeId)
-    if (sources && baked.key !== shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION, baked.files)) return SHADER_ENGINE_WORDS.keyMismatch
+    if (sources && baked.key !== shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION, baked.files, baked.source)) return SHADER_ENGINE_WORDS.keyMismatch
+    // LC13: a My effect's bake must name the code it was drawn with (a built-in's names none).
+    if (!!mine !== (baked.source !== undefined)) return SHADER_ENGINE_WORDS.keyMismatch
   }
+  // LC13: not drawn for this run (the browser draws only a run the runner takes): the local engine can't run it.
+  if (mine && !baked) return SHADER_ENGINE_WORDS.myEffect
   return null
 }

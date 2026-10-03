@@ -26,6 +26,7 @@ import { depthModelFilesPresent, fillDepthModel } from '../utils/depthModel'
 import { captureError } from '../utils/observe'
 import { nativeGenerationPost } from '../native/router'
 import { storeDir } from '../utils/dataDir'
+import { readMyEffect } from '../utils/myEffectsStore'
 import { join } from 'node:path'
 
 /** comfy_api_nodes/fal_refs.py's ramp: min(2s, 0.35s × 1.5^attempt). */
@@ -113,6 +114,8 @@ export function getEngine(): Engine {
     held: createFileHeldBytes(join(storeDir('data'), 'runner-held')),
     // Bytes the runner makes itself (keptBytes.ts), beside the run store.
     kept: createFileKeptBytes(join(storeDir('data'), 'runner-kept')),
+    // LC13: a Shader effect's My effect, read as /api/my-effects reads it (hosted: only the person's own).
+    myEffect: (id, userId) => readMyEffect(id, userId),
   })
   g.__sailorRunnerEngine = engine
   return engine

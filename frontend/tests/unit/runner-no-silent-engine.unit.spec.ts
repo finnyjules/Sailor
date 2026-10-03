@@ -285,14 +285,21 @@ describe('fix round 3: the review’s minors', () => {
   })
 })
 
-describe('fix round 1 (c): a Shader effect showing one of your own effects goes to the local engine, named', () => {
-  const mine = shader({ effect: 'mine_abc~v1' })
-  it('locally with the engine up: there, with the toast naming it', () => {
-    expect(route(mine)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) } })
+describe('LC13: a Shader effect showing one of your own effects is the runner\'s; never the local engine', () => {
+  // Not drawn for this run (the browser draws only a run the runner takes): the local engine can't run it
+  // (Python's node knows only the catalogue), so it is refused plainly everywhere, never sent there.
+  const mine = shader({ effect: 'mine_abcdefghijkl~v1' })
+  it('locally with the engine up: refused with its words, not sent to the engine', () => {
+    expect(route(mine)).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_ENGINE_WORDS.myEffect}` })
   })
-  it('hosted, or the engine off: words', () => {
-    expect(route(mine, { hosted: true })).toEqual({ to: 'refused', title: 'This workflow can’t run here', description: `“Halftone”: ${SHADER_ENGINE_WORDS.myEffect}` })
-    expect(route(mine, { engineUp: false })).toEqual({ to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) })
+  it('hosted, or the engine off: the same words', () => {
+    expect(route(mine, { hosted: true })).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_ENGINE_WORDS.myEffect}` })
+    expect(route(mine, { engineUp: false })).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_ENGINE_WORDS.myEffect}` })
+  })
+  it('even riding with a node the local engine runs: refused, not sent (the M-3 ride-along is for catalogue effects)', () => {
+    const p: ApiPrompt = { ...kSampler(), ...mine }
+    p.s2 = saveImage(['d', 0])
+    expect(route(p).to).toBe('refused')
   })
 })
 
@@ -302,7 +309,8 @@ describe('fix round 2: a Shader effect whose picture is made in the same run goe
   delete chain[0]
   it('is on the explicit list by its cause, with its words and plan', () => {
     expect(NEEDS_LOCAL_ENGINE_SHADER_CASES.pictureMadeInRun).toMatchObject({ words: SHADER_NEEDS_PICTURE_FIRST, plan: 'port' })
-    expect(NEEDS_LOCAL_ENGINE_SHADER_CASES.myEffect).toMatchObject({ words: SHADER_ENGINE_WORDS.myEffect, plan: 'port' })
+    // LC13: one of your own effects was ported off the list.
+    expect(Object.keys(NEEDS_LOCAL_ENGINE_SHADER_CASES)).toEqual(['pictureMadeInRun'])
   })
   it('locally with the engine up: there, with the toast naming it', () => {
     expect(route(chain)).toEqual({ to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription(['Halftone']) } })

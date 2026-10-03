@@ -299,7 +299,8 @@ describe('eligibility (shader-bake and cards on)', () => {
     expect(runnerTakesNode(cardShader({ duration: 2 }), 'fx', SHADER)).toBe(false)
     const gen: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora', duration: 2 }) }, s: saveImage(['fx', 0]) }
     expect(runnerTakesNode(baked(gen, 'fx', [FAKE_BAKE], []), 'fx', SHADER)).toBe(false)
-    expect(runnerTakesNode(cardShader({ effect: 'mine_abc~v2' }), 'fx', SHADER)).toBe(false)
+    // LC13: a My effect's bake must name its code's digest (`source`); this one names none.
+    expect(runnerTakesNode(cardShader({ effect: 'mine_abcdefghijkl~v2' }), 'fx', SHADER)).toBe(false)
     expect(runnerTakesNode(cardShader({ time: ['9', 0] }), 'fx', SHADER)).toBe(false)
     expect(runnerTakesNode(cardShader({ aspect: '2:1' }), 'fx', SHADER)).toBe(false)
   })
@@ -662,7 +663,13 @@ describe('R11.9c: an animated Shader effect is baked frame by frame and kept as 
   it('fix round 1 (M1): each Shader effect still left to the engine names its cause in plain words', () => {
     const reason = (p: ApiPrompt) => needsEngineReasons(p, { runnerOn: true, families: SHADER })
     const one = (over: Record<string, unknown>) => cardShader(over)
-    expect(reason(one({ effect: 'mine_abc~v2' }))).toEqual([SHADER_ENGINE_WORDS.myEffect])
+    // LC13: a My effect baked without its code's digest is a bake that doesn't agree; unbaked, the local engine can't run it.
+    expect(reason(one({ effect: 'mine_abcdefghijkl~v2' }))).toEqual([SHADER_ENGINE_WORDS.keyMismatch])
+    const mineUnbaked = one({ effect: 'mine_abcdefghijkl~v2' })
+    delete mineUnbaked.fx!.inputs.sailor_baked
+    expect(reason(mineUnbaked)).toEqual([SHADER_ENGINE_WORDS.myEffect])
+    // A `mine_` name of no shape a My effect has is an unknown effect.
+    expect(reason(one({ effect: 'mine_abc~v2' }))).toEqual([SHADER_ENGINE_WORDS.unknownEffect])
     expect(reason(one({ effect: 'no_such_effect' }))).toEqual([SHADER_ENGINE_WORDS.unknownEffect])
     // A setting wired from a node whose value is made in the run (a typed card's is put in as typed, R11.9a).
     expect(shaderEngineReason(one({ seed: ['9', 0] }), 'fx', SHADER)).toBe(SHADER_ENGINE_WORDS.wired)

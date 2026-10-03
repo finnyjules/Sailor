@@ -441,7 +441,7 @@ function isUnbakedShader(node: ApiNode): boolean {
  * engine, used where it can't go (hosted, the engine off), or null when it
  * isn't one: its class is in NEEDS_LOCAL_ENGINE and nothing more particular
  * refuses it, or it is a Shader effect in one of NEEDS_LOCAL_ENGINE_SHADER_CASES
- * (one of your own effects; fix round 2: its picture made in the same run).
+ * (fix round 2: its picture made in the same run; LC13: one of your own effects is no longer one).
  */
 function needsLocalEngineWords(node: ApiNode, shaderWhy: string | null, switchedOff: boolean): string | null {
   if (node.class_type === 'ShaderEffect') return Object.values(NEEDS_LOCAL_ENGINE_SHADER_CASES).some(c => c.words === shaderWhy) ? shaderWhy : null

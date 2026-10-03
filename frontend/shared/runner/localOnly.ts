@@ -17,7 +17,7 @@
  *
  * Pure; relative imports only.
  */
-import { SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST } from './shaderBakeKey'
+import { SHADER_NEEDS_PICTURE_FIRST } from './shaderBakeKey'
 
 /** Every local-only class, by its ComfyUI class name, grouped by its Python file. */
 export const LOCAL_ONLY_CLASSES: ReadonlySet<string> = new Set([
@@ -286,7 +286,7 @@ export type NeedsLocalEnginePlan = 'port' | 'retire' | 'keep local'
  * Ported off the list: Smart Layout (LC9: the runner hands its pictures to
  * an Image card too, eligibility.ts LIST_PASSERS).
  *
- * Two Shader effect cases are the same by their setting, not their class
+ * One Shader effect case is the same by its setting, not its class
  * (NEEDS_LOCAL_ENGINE_SHADER_CASES, ./needsEngine.ts).
  */
 export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {
@@ -312,14 +312,12 @@ export const NEEDS_LOCAL_ENGINE_WORDS = 'Sailor can’t run this node yet. It ru
  * local engine, by cause, each with its words for where it can't go (hosted,
  * the engine off) and its plan. Counts are Shader effect nodes in the saved
  * graphs (2026-10-02 scan).
+ *
+ * Ported off the list: one of your own effects (LC13: the browser draws a My
+ * effect as the canvas does, and the server checks the bake against the
+ * person's own My effects store; the local engine never could run one).
  */
-export const NEEDS_LOCAL_ENGINE_SHADER_CASES: Readonly<Record<'myEffect' | 'pictureMadeInRun', { words: string; plan: NeedsLocalEnginePlan; savedNodes: number; why: string }>> = {
-  myEffect: {
-    words: SHADER_ENGINE_WORDS.myEffect,
-    plan: 'port',
-    savedNodes: 0,
-    why: 'One of your own effects: the browser bakes only the catalogue’s effects, and the server checks a bake against the catalogue.',
-  },
+export const NEEDS_LOCAL_ENGINE_SHADER_CASES: Readonly<Record<'pictureMadeInRun', { words: string; plan: NeedsLocalEnginePlan; savedNodes: number; why: string }>> = {
   pictureMadeInRun: {
     words: SHADER_NEEDS_PICTURE_FIRST,
     plan: 'port',

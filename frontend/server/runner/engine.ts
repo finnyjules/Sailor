@@ -10,6 +10,8 @@ import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, outputKindsFor, r
 import { outputKind } from '#shared/runner/values'
 import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/families'
 import { parseShaderBaked, shaderOverCapWords } from '#shared/runner/shaderBakeKey'
+import type { MyEffectRecord } from '#shared/myEffects/record'
+import { myEffectBakeProblem } from './myEffectBake'
 import { dirname } from 'node:path'
 import { bakedPngSize } from './cards/shaderEffect'
 import { bakeFoldersOf, claimShaderBakes, releaseInactiveShaderBakes, releaseShaderBakes, sweepShaderBakes } from './shaderBakeFiles'
@@ -251,6 +253,12 @@ export interface EngineDeps {
   held?: HeldBytes
   /** Bytes the runner makes itself (./keptBytes.ts). Absent: kept in memory (tests). */
   kept?: KeptBytes
+  /**
+   * LC13: a My effect as the person running may read it (server/utils/myEffectsStore.ts readMyEffect: hosted,
+   * only their own), or null. A baked Shader effect's My effect is checked against it before the hold
+   * (./myEffectBake.ts). Absent: none is there, so a My effect is refused plainly.
+   */
+  myEffect?(id: string, userId: string | null): Promise<MyEffectRecord | null>
 }
 
 export interface StartRunInput {
@@ -2568,6 +2576,9 @@ export function createEngine(deps: EngineDeps) {
           const first = refs[0]
           // A frame that isn't there or can't be read fails plainly at its turn.
           if (first && (await files.exists(first))) size = bakedPngSize(await files.read(first))
+          // LC13: one of your own effects: the person's own, at the code and dials its frames were drawn with.
+          const mine = await myEffectBakeProblem(p, id, rid => (deps.myEffect ? deps.myEffect(rid, i.userId) : Promise.resolve(null)))
+          if (mine) throw refuse(named(id, mine), 400, { nodeId: id, classType: n.class_type, code: 'my-effect' satisfies RunnerReasonCode })
           const words = shaderOverCapWords(p, id, deps.hosted(), size)
           if (words) throw stopGap({ message: words, nodeId: id, classType: n.class_type, code: 'too-much-work' })
           for (const r of refs) {
