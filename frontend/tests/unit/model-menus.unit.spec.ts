@@ -211,14 +211,16 @@ describe('applyModelOverlay', () => {
 
   it('the dropdown lists match the Python lists exactly (plus the runner-only values, last), and a value only the engine lists is kept', () => {
     // + Lip-sync a character's engine (Task F22): its sync-3 is runner-only.
-    const fixture = engineFixture(['LipSyncNode'])
+    // + Think step by step (LC1): Python's own default is DeepSeek R1, which the menu hides while its provider fails.
+    const fixture = engineFixture(['LipSyncNode', 'ReasonStepByStepNode'])
     expect(RUNNER_ONLY_VALUES.EditImageNode).toEqual(['GPT Image 2.5', 'Seedream 5 Pro'])
     expect(RUNNER_ONLY_VALUES.BlendSceneNode).toEqual(['Nano Banana 2'])
     expect(RUNNER_ONLY_VALUES.LipSyncNode).toEqual(['sync-3'])
     for (const [key, menu] of Object.entries(EDIT_MODEL_MENUS)) {
       const [cls, input] = key.split('.') as [string, string]
       expect(menu.options.map(o => o.value), key).toEqual([...opts(fixture, cls, input), ...runnerOnlyValues(cls)])
-      expect(menu.preference[0], key).toBe(cfg(fixture, cls, input).default)
+      // Think step by step defaults to GPT-5, not Python's DeepSeek R1 (hidden, never removed).
+      expect(menu.preference[0], key).toBe(key === 'ReasonStepByStepNode.model' ? 'GPT-5' : cfg(fixture, cls, input).default)
     }
     fixture.EditImageNode.input.required.model[1].options.push('Engine Only')
     expect(opts(applyModelOverlay(fixture, NO_FAMILIES), 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5', 'Seedream 5 Pro', 'Engine Only'])

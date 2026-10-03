@@ -197,7 +197,8 @@ describe('CompositorModal follows the card shape', () => {
     expect(rsc).toMatch(/paintLayersFor\(r\)/)
     const video = fnBody('generateVideo')
     expect(video).toMatch(/prepareMotionFramePainter\(\(\) => paintItemsFor\(out\.resolved\), paintLayersFor\(out\.resolved\), W, H, outputMotion\(motion, out\.resolved\)/)
-    expect(video).toMatch(/bakeMotion\(undefined, \{ signal, keepPaused: true, out \}\)/)
+    // Browser-only export (R10.4): the server fallback that re-baked through bakeMotion is gone.
+    expect(video).not.toMatch(/bakeMotion\(/)
     const bake = fnBody('bakeMotion')
     expect(bake).toMatch(/opts\?\.out \?\? outputFrame\(\)/)
     expect(bake).toMatch(/bakeAndUpload\(\s*\(\) => paintItemsFor\(out\.resolved\), paintLayersFor\(out\.resolved\), W, H, motion/)

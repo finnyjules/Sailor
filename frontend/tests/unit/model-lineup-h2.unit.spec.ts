@@ -334,10 +334,11 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     'app/lib/sketch/sketchPadPrompt.ts': ['flux-schnell'],
     'app/lib/draft/overrides.ts': ['flux-schnell'],
     'app/components/vue-canvas/VueNodeCanvas.vue': ['Nano Banana 2', 'flux-schnell'], // agent repair edits use Nano Banana; the sketch warm-up
-    // The Product shot app: its backdrop draft (flux-schnell); its relight engine,
-    // Flux 2 Pro by default (fix round 1 ruling); and Flux Kontext Pro, used only
-    // while "Keep the product exact" is on — the keep-mask needs an in-place edit.
-    'app/components/apps/ProductShotApp.vue': ['Flux 2 Pro', 'Flux Kontext Pro', 'flux-schnell'],
+    // The Product shot app: its relight engine, Flux 2 Pro by default (fix round 1 ruling).
+    'app/components/apps/ProductShotApp.vue': ['Flux 2 Pro'],
+    // The Product shot app's runner steps (R8.1): its backdrop draft (flux-schnell), and Flux Kontext Pro,
+    // used only while "Keep the product exact" is on — the keep-mask needs an in-place edit.
+    'app/lib/runner/productShotApp.ts': ['Flux Kontext Pro', 'flux-schnell'],
     // Which Upscale engine a widget belongs to (a widget → model map), not a default.
     'app/components/vue-canvas/ComfyNode.vue': ['Topaz'],
     // "Edit with Nano Banana": the action names its model.
@@ -356,6 +357,8 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     'server/utils/inpaintFalInputs.ts': ['nano-banana-pro'],
     // Film a shot's model list and its lip-sync model, named only to refuse it before the hold (R3.11).
     'shared/runner/eligibility.ts': ['fabric-1.0'],
+    // The price of Fabric, the same id (R11.2/R11.3).
+    'shared/pricing/nodePrice.ts': ['fabric-1.0'],
     // Turntable's fixed models, as Python's node hard-codes them: Luma Ray 2 for the front spin, Seedance 2.0 per arc (R3.16).
     'shared/runner/turntable.ts': ['luma-ray-2-720p', 'seedance-2.0'],
     // Upscale (2×) names the model its Python node runs; the runner calls Replicate's Real-ESRGAN for it (R7.2).
@@ -390,7 +393,7 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     /** A flagged literal allowed on purpose, with its reason above. */
     // Turntable's front spin is Luma Ray 2 because Python's node hard-codes it, though Ray 2 is hidden from the video menu (R3.16).
     // Upscale (2×) runs Real-ESRGAN on Replicate, though Real-ESRGAN is hidden from the edit menu (R7.2).
-    const FLAGGED_ON_PURPOSE = new Set(['app/components/apps/ProductShotApp.vue Flux Kontext Pro', 'shared/runner/turntable.ts luma-ray-2-720p', 'server/runner/generators/localModels.ts Real-ESRGAN'])
+    const FLAGGED_ON_PURPOSE = new Set(['app/lib/runner/productShotApp.ts Flux Kontext Pro', 'shared/runner/turntable.ts luma-ray-2-720p', 'server/runner/generators/localModels.ts Real-ESRGAN'])
     for (const [file, values] of Object.entries(ALLOWED)) {
       if (file === 'app/data/action-catalog.ts') continue // display text; 'Nano Banana' there is Sketch to image's engine
       for (const v of values) expect(flagged.has(v) && !FLAGGED_ON_PURPOSE.has(`${file} ${v}`), `${file} ${v}`).toBe(false)
@@ -409,11 +412,14 @@ describe('fix round 1', () => {
     expect(app).toContain("const BLEND_ENGINES: readonly BlendEngine[] = ['Flux 2 Pro', 'Nano Banana']")
     expect(app).toContain('const keepExact = ref(false)')
     // The keep-mask and Kontext go together, and only while the switch is on.
-    expect(app).toContain('const usePreserve = keepExact.value')
-    expect(app).toContain('model: usePreserve ? PRESERVE_MODEL : blendModel.value,')
+    // R8.1: the engine choice moved into the runner step's builder: the mask (only built while the switch is on) selects Kontext.
+    const shot = src('app/lib/runner/productShotApp.ts')
+    expect(shot).toContain("export const PRESERVE_MODEL = 'Flux Kontext Pro'")
+    expect(shot).toContain('model: o.mask ? PRESERVE_MODEL : o.model,')
+    expect(app).toContain('mask: keep ? await uploadBlob(mask,')
     const uses = [...app.matchAll(/PRESERVE_MODEL/g)].length
-    // Declared once; sent once (above); shown once, as the engine, under v-else of `!keepExact`; two look-migration reads.
-    expect(uses).toBe(5)
+    // Imported once; shown once, as the engine, under v-else of `!keepExact`; two look-migration reads.
+    expect(uses).toBe(4)
     expect(app).toContain('<div v-if="!keepExact" class="inline-flex')
     expect(app).toContain('<span v-else class="text-[11.5px] text-white/70">{{ PRESERVE_MODEL }}</span>')
     // A look saved on Kontext before H2 comes back with the switch on.
