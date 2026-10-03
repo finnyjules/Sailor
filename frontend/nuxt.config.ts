@@ -40,14 +40,6 @@ export default defineNuxtConfig({
     awsRegion: 'us-east-1',
     awsAccessKeyId: '',
     awsSecretAccessKey: '',
-    // Max number of extra headless ComfyUI worker instances (see
-    // server/utils/comfyWorkerPool.ts) parallel dispatch can spawn for
-    // cloud-only prompts. Clamped to [0,4] at read time. Override via
-    // NUXT_COMFY_POOL_SIZE. Default 2.
-    comfyPoolSize: '',
-    // Python executable used to spawn worker ComfyUI instances. Defaults to
-    // `<repoRoot>/.venv/bin/python3.12`. Override via NUXT_COMFY_PYTHON.
-    comfyPython: '',
     public: {
       // Public origin the ComfyUI canvas iframe loads from. Empty in dev →
       // falls back to http://127.0.0.1:8188. In production set via
@@ -128,27 +120,9 @@ export default defineNuxtConfig({
           socket.on('error', () => socket.destroy())
 
           const proceed = () => {
-            // Resolve which ComfyUI instance to route to via `?comfyWorker=N`
-            // (N=0-based pool index → port 8189+N; absent/invalid/out-of-range
-            // → main instance :8188). This is an inlined duplicate of the
-            // ~10-line parse in server/utils/workerRoute.ts (resolveWorkerTarget)
-            // — that's the canonical implementation; nuxt.config.ts cannot
-            // import from server/utils at config-eval time, so keep these two
-            // in sync by hand if the rules ever change.
-            let wsPort = 8188
-            let wsPath = req.url ?? '/ws'
-            const qIdx = wsPath.indexOf('?')
-            if (qIdx !== -1) {
-              const params = new URLSearchParams(wsPath.slice(qIdx + 1))
-              if (params.has('comfyWorker')) {
-                const raw = params.get('comfyWorker')
-                const n = raw === null || raw === '' ? NaN : Number(raw)
-                if (Number.isInteger(n) && n >= 0 && n <= 7) wsPort = 8189 + n
-                params.delete('comfyWorker')
-                const rest = params.toString()
-                wsPath = rest ? `${wsPath.slice(0, qIdx)}?${rest}` : wsPath.slice(0, qIdx)
-              }
-            }
+            // The one local engine (R10.3 retired the worker pool).
+            const wsPort = 8188
+            const wsPath = req.url ?? '/ws'
             const wsTarget = `127.0.0.1:${wsPort}`
 
             const proxyReq = http.request({
