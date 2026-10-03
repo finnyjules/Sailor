@@ -86,3 +86,19 @@ Test: a guard that the repo holds no `.py` outside an allow-list (expected: none
    - `comfyui.log`
    - `temp/` contents
    - the ComfyUI frontend package cache
+
+## Correction (2026-10-03, after C6)
+`models/` is NOT only ComfyUI's models. It holds Sailor's own data:
+- `models/loras`: 19 GB, the user's LoRA library (safetensors, covers, json), used by the runner's Flux + LoRA;
+- `models/characters`;
+- `models/voices`.
+
+Only `models/lama` (198 MB), `models/insightface` (529 MB) and the empty folders are ComfyUI leftovers.
+
+**New task C6b (before C7):** move `loras/`, `characters/` and `voices/` into a Sailor-owned data folder, e.g. `<data root>/library/`, and update every reader: runner loraFiles, the LoRA pickers, the character and voice routes, the cloud trainer outputs.
+- Old paths are read as a fallback, with a one-time move.
+- Nothing is deleted.
+
+C9 asks to delete only `lama`, `insightface`, the empty model folders and `.venv`.
+
+Hosted note: per-user LoRA storage online is a deploy-time design question, out of this plan's scope.
