@@ -724,3 +724,20 @@ describe('R11.9c fix round 2 (N3): a shader bake folder takes only the bake’s 
     expect(written()).toEqual([`input/shader_bake/.abandoned/${'b'.repeat(32)}`])
   })
 })
+
+// ------------------------------------------------------------------ LC11
+
+describe('LC11: nobody uploads into a public input folder (anyone can read those)', () => {
+  it('sailor_textures, sailor_hdri and sailor_depth, by any spelling, are refused before disk', async () => {
+    for (const subfolder of ['sailor_textures/Wood095', 'sailor_hdri', 'sailor_depth', './sailor_depth/', 'x/../sailor_depth', 'sailor_textures', ' sailor_hdri ', 'sailor_textures\\Wood095']) {
+      rawBody.mockResolvedValue(upload({ filename: 'depth_0123456789abcdef.png', fields: { subfolder } }))
+      await expect(handleHostedUpload(ev()), subfolder).rejects.toMatchObject({ statusCode: 400 })
+    }
+    expect(written()).toEqual([])
+  })
+  it('an ordinary subfolder still takes the upload', async () => {
+    rawBody.mockResolvedValue(upload({ filename: 'a.png', fields: { subfolder: 'pasted' } }))
+    await handleHostedUpload(ev())
+    expect(written()).toContain('input/pasted/a.png')
+  })
+})

@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
   // annotated_filepath runs first), so `?type=temp&filename=x [output]`
   // used to walk straight past a `type === 'output'` gate and return the
   // protected bytes. viewGateDecision resolves it the engine's way.
-  // type=temp/type=input stay ungated this stage (documented gap).
+  // LC11: input (any subfolder) and temp answer to their owner too.
   if (deployMode() === 'hosted') await hostedViewGate(event.context.userId, query as ViewQuery)
 
   // Engine-free Phase A: the bytes come straight off disk, resolved exactly as

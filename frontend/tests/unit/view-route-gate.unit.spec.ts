@@ -24,7 +24,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { __setInputUploadsEngineRootForTests } from '../../server/utils/inputUploads'
+import { __setInputUploadsDbForTests, __setInputUploadsEngineRootForTests } from '../../server/utils/inputUploads'
 
 const g = globalThis as any
 g.defineEventHandler = (fn: any) => fn
@@ -81,9 +81,12 @@ beforeEach(() => {
     fs.writeFileSync(path.join(root, f), 'PIXELS')
   }
   __setInputUploadsEngineRootForTests(root)
+  // LC11: input and temp reads consult the upload rows; none here.
+  __setInputUploadsDbForTests({ query: async () => ({ rows: [] }) })
 })
 afterEach(() => {
   __setInputUploadsEngineRootForTests(undefined)
+  __setInputUploadsDbForTests(null)
   fs.rmSync(root, { recursive: true, force: true })
 })
 
@@ -146,8 +149,9 @@ describe('hosted /view — annotation resolves the EFFECTIVE type', () => {
     expect(fetchMock, 'the unowned file is never opened').not.toHaveBeenCalled()
   })
 
-  it('leaves genuinely-temp reads ungated (documented Stage 5 gap, unchanged)', async () => {
-    expect(await code({ type: 'temp', filename: 'scratch.png' })).toBe('served')
+  it('gates genuinely-temp reads too (LC11 closed the Stage 5 gap): not the caller\'s folder, 404', async () => {
+    expect(await code({ type: 'temp', filename: 'scratch.png' })).toBe(404)
+    expect(fetchMock, 'the unowned file is never opened').not.toHaveBeenCalled()
   })
 
   // Round-2 review F5: a repeated query key makes getQuery return an ARRAY,

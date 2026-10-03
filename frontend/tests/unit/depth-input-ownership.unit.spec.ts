@@ -3,7 +3,7 @@
  * /api/depth/surfaces) share assertInputOwned. In hosted mode it used to refuse every
  * `output`/`temp` source, which broke depth for WIRED layers (their image is an execution
  * output). It now gates `output` exactly as /view does — the caller's owned output keys — and
- * leaves `temp` ungated like /view. Step 3, R10.9: no harvest of the engine's history any more
+ * leaves `temp` to /view's rule (LC11: the caller's own folder). Step 3, R10.9: no harvest of the engine's history any more
  * (the runner records each output as it is saved; hosted never asks the engine).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,6 +31,7 @@ const fetchSpy = vi.fn(async () => new Response('{}'))
 
 import { assertInputOwned } from '../../server/utils/inputOwnership'
 import { __setInputUploadsDbForTests } from '../../server/utils/inputUploads'
+import { userSubfolder } from '../../server/runner/results'
 
 const ev = (userId: string | null) => ({ context: { userId } }) as any
 
@@ -72,8 +73,11 @@ describe('assertInputOwned — hosted output sources', () => {
     await expect(assertInputOwned(ev(null), 'output', '', 'render_0001.png')).rejects.toMatchObject({ statusCode: 404 })
   })
 
-  it('temp is ungated, exactly as /view leaves it', async () => {
-    await expect(assertInputOwned(ev('u1'), 'temp', '', 'preview_0001.png')).resolves.toBeUndefined()
+  it('temp is gated as /view gates it (LC11): the caller’s own u_<hash> folder only', async () => {
+    const own = userSubfolder('u1', true)
+    await expect(assertInputOwned(ev('u1'), 'temp', own, 'live_preview_n_00001.png')).resolves.toBeUndefined()
+    await expect(assertInputOwned(ev('u2'), 'temp', own, 'live_preview_n_00001.png')).rejects.toMatchObject({ statusCode: 404 })
+    await expect(assertInputOwned(ev('u1'), 'temp', '', 'preview_0001.png')).rejects.toMatchObject({ statusCode: 404 })
   })
 
   it('local mode never checks', async () => {
@@ -82,7 +86,10 @@ describe('assertInputOwned — hosted output sources', () => {
   })
 })
 
-describe('assertInputOwned — hosted input sources (unchanged)', () => {
+describe('assertInputOwned — hosted input sources', () => {
+  it('an input nobody recorded 404s (LC11: it used to pass)', async () => {
+    await expect(assertInputOwned(ev('u1'), 'input', 'masks', 'photo.png')).rejects.toMatchObject({ statusCode: 404 })
+  })
   it('an input owned by someone else 404s', async () => {
     __setInputUploadsDbForTests({ query: async () => ({ rows: [{ user_id: 'u2' }] }) })
     await expect(assertInputOwned(ev('u1'), 'input', '', 'photo.png')).rejects.toMatchObject({ statusCode: 404 })

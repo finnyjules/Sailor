@@ -39,7 +39,8 @@ describe('viewGateDecision', () => {
     expect(viewGateDecision({ filename: 'v.png [output]', type: 'input', subfolder: 's' })).toEqual({ kind: 'check', key: 'output:s:v.png' })
   })
   it('honours an annotation that points AWAY from output', () => {
-    expect(viewGateDecision({ filename: 'v.png [temp]', type: 'output' })).toEqual({ kind: 'ungated' })
+    // LC11: temp is gated too (its owner's u_<hash> folder, or an upload row).
+    expect(viewGateDecision({ filename: 'v.png [temp]', type: 'output' })).toEqual({ kind: 'temp', folder: '', keys: ['temp::v.png'] })
   })
   it('defaults a missing type to output', () => {
     expect(viewGateDecision({ filename: 'v.png' })).toEqual({ kind: 'check', key: 'output::v.png' })

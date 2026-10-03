@@ -219,7 +219,8 @@ describe('hosted /view of an Animate clip', () => {
     expect(clipOwnerKey('')).toBeNull()
     expect(viewGateDecision({ filename: 'a.png', type: 'input', subfolder: 'sailor_clips/clip_1_abc' })).toEqual({ kind: 'owner', key: 'input:sailor_clips/clip_1_abc:clip.json' })
     expect(viewGateDecision({ filename: 'a.png [input]', subfolder: 'sailor_clips/clip_1_abc' })).toMatchObject({ kind: 'owner' })
-    expect(viewGateDecision({ filename: 'a.png', type: 'input', subfolder: 'masks' })).toEqual({ kind: 'ungated' })
+    // LC11: other input folders answer to their upload rows, never ungated.
+    expect(viewGateDecision({ filename: 'a.png', type: 'input', subfolder: 'masks' })).toEqual({ kind: 'input', folder: 'masks', filename: 'a.png', keys: ['input:masks:a.png'] })
   })
 
   it('serves the owner, and 404s anyone else, a missing row and sailor_clips itself alike', async () => {

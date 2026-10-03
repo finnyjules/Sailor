@@ -28,11 +28,31 @@ import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/p
 export { annotatedFilepath }
 
 export type ViewGate =
-  | { kind: 'ungated' }
   | { kind: 'reject', status: number, message: string }
+  /** An output: the caller's own run recorded this key (graph_runs). */
   | { kind: 'check', key: string }
   /** LC10 fix round 1: an input file whose folder has an owner row (a Frame Animate clip): the row's owner only. */
   | { kind: 'owner', key: string }
+  /** LC11: a file Sailor itself fetched from a public catalog, or named by the hash of its source's bytes. */
+  | { kind: 'public' }
+  /**
+   * LC11: any other input file. The caller's own when an upload row names it
+   * (`keys`: the row as recorded from the raw subfolder, and as resolved), or
+   * when one of their runs saved it into their own input folder (`folder`).
+   */
+  | { kind: 'input', folder: string, filename: string, keys: string[] }
+  /** LC11: a temp file. The caller's own when it is in their own `u_<hash>` folder, or an upload row names it. */
+  | { kind: 'temp', folder: string, keys: string[] }
+
+/**
+ * The folder a subfolder names inside its type's folder, as the resolver
+ * reaches it (`path.resolve` of the subfolder inside the type's folder):
+ * `./a`, `a//b`, `a/`, `x/../a` all name `a`. A subfolder that climbs out
+ * lands on a name the resolver refuses anyway.
+ */
+export function resolvedFolder(subfolder: string): string {
+  return path.posix.resolve('/', subfolder).slice(1)
+}
 
 /**
  * The Frame Animate clip folder a /view input read lands in, by the path the
@@ -49,6 +69,47 @@ export function clipOwnerKey(subfolder: string): string | null {
 }
 
 /**
+ * LC11: the input folders Sailor writes itself, readable by every signed-in
+ * person, each to its exact shape:
+ * - `sailor_textures/<id>/`: ambientCG's CC0 texture sets (/api/scene3d/textures/fetch);
+ * - `sailor_hdri/*.hdr`: Poly Haven's CC0 HDRIs (/api/scene3d/hdri/:slug);
+ * - `sailor_depth/{depth,moge}_<16 hex>.png`: depth and surface maps, named by
+ *   the hash of the source's bytes, so only someone holding those bytes can
+ *   name one (/api/depth/estimate, /api/depth/surfaces).
+ * Hosted uploads into these folders are refused (handleHostedUpload), so
+ * nothing a person sends can land in one.
+ */
+export const PUBLIC_INPUT_FOLDERS = ['sailor_textures', 'sailor_hdri', 'sailor_depth'] as const
+
+export function publicInputFile(folder: string, filename: string): boolean {
+  if (/^sailor_textures\/[A-Za-z0-9]+$/.test(folder)) return true
+  if (folder === 'sailor_hdri') return /^[A-Za-z0-9_-]+\.hdr$/.test(filename)
+  if (folder === 'sailor_depth') return /^(depth|moge)_[0-9a-f]{16}\.png$/.test(filename)
+  return false
+}
+
+/** Whether a resolved folder is, or is inside, one of the public input folders. */
+export function inPublicInputFolder(folder: string): boolean {
+  const top = folder.split('/')[0]
+  return (PUBLIC_INPUT_FOLDERS as readonly string[]).includes(top ?? '')
+}
+
+/**
+ * LC11: the decision for an input or temp file, by the folder the reader
+ * resolves and the file name it opens (already a basename). Shared by hosted
+ * /view and every route that reads such a file by name (the depth routes).
+ */
+export function fileGateDecision(type: 'input' | 'temp', subfolder: string, filename: string): ViewGate {
+  const folder = resolvedFolder(subfolder)
+  const keys = [...new Set([canonicalUploadKey(type, subfolder, filename), canonicalUploadKey(type, folder, filename)])]
+  if (type === 'temp') return { kind: 'temp', folder, keys }
+  const clip = clipOwnerKey(subfolder)
+  if (clip) return { kind: 'owner', key: clip }
+  if (publicInputFile(folder, filename)) return { kind: 'public' }
+  return { kind: 'input', folder, filename, keys }
+}
+
+/**
  * The hosted /view decision, resolved the way the engine resolves it:
  * annotation first, `type` only as the fallback, basename last (server.py
  * does `os.path.basename(filename)` after joining the subfolder).
@@ -62,18 +123,15 @@ export function viewGateDecision(q: { filename: string, type?: string, subfolder
   }
   const { name, type: annotated } = annotatedFilepath(q.filename)
   const effective = annotated ?? (q.type || 'output')
-  // A Frame Animate clip (LC10 fix round 1): its owner only.
-  if (effective === 'input') {
-    const key = clipOwnerKey(q.subfolder || '')
-    if (key) return { kind: 'owner', key }
-  }
-  // Other type=temp / type=input reads stay ungated this stage (documented gap) — but
-  // only when that is what the engine will ACTUALLY read.
-  if (effective !== 'output') return { kind: 'ungated' }
   // The native resolver's own basename rule (POSIX: `/` only), so the key
   // checked is the file served — `x\mine.png` is its own file, not `mine.png`.
   const basename = pyBasename(name)
-  return { kind: 'check', key: outputKey({ filename: basename, subfolder: q.subfolder || '', type: 'output' }) }
+  // LC11: input and temp answer to their owner too, never ungated.
+  if (effective === 'input' || effective === 'temp') return fileGateDecision(effective, q.subfolder || '', basename)
+  // The resolver answers any other folder name 400; so does the gate.
+  if (effective !== 'output') return { kind: 'reject', status: 400, message: 'Invalid image request' }
+  // LC11: the folder as the resolver reaches it, so `./u_x/` reads as the `u_x` the run recorded.
+  return { kind: 'check', key: outputKey({ filename: basename, subfolder: resolvedFolder(q.subfolder || ''), type: 'output' }) }
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +436,11 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
   // R11.9c fix round 2 (N3): a Shader effect bake's folder (shader_bake/…) takes only the bake's own frames,
   // `shader_bake_<32 hex>.png`: nothing else (a `.claimed` marker, another file) can be put into one.
   const bakeTarget = path.posix.normalize((subfolder ?? '').trim().replace(/\\/g, '/') || '.').replace(/^(\.\/)+/, '').replace(/\/+$/, '')
+  // LC11: the public input folders (PUBLIC_INPUT_FOLDERS) hold only what Sailor
+  // fetched or made itself; anyone can read them, so nobody can upload into one.
+  if (inPublicInputFolder(resolvedFolder(subfolder ?? '')) || inPublicInputFolder(resolvedFolder(bakeTarget))) {
+    throw createError({ statusCode: 400, message: 'Files can’t be uploaded into that folder' })
+  }
   if (bakeTarget === 'shader_bake' || bakeTarget.startsWith('shader_bake/')) {
     const name = (await form.file('image'))?.filename || ''
     if (!/^shader_bake_[0-9a-f]{32}\.png$/.test(name)) {

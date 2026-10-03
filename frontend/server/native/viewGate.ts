@@ -4,17 +4,54 @@
  * path itself (./viewRead.ts) apply it before touching the disk.
  */
 import { createError } from 'h3'
-import { ownedOutputKeys } from '../utils/graphRuns'
-import { viewGateDecision } from '../utils/engineGate'
+import { ownedOutputKeys, savedInputKey } from '../utils/graphRuns'
+import { viewGateDecision, type ViewGate } from '../utils/engineGate'
 import { uploadOwner } from '../utils/inputUploads'
+import { userSubfolder } from '../runner/results'
 import type { ViewQuery } from './view'
+
+async function ownsAnyRow(userId: string, keys: string[]): Promise<boolean> {
+  for (const k of keys) if ((await uploadOwner(k)) === userId) return true
+  return false
+}
+
+/**
+ * Whether a signed-in person may read the file a gate decision names (LC11).
+ * - output: a run of theirs recorded it (graph_runs).
+ * - input: an upload row of theirs names it, or one of their runs saved it
+ *   into their own input folder (the runner's own record kind, as the runner's
+ *   start check accepts it: inputs.ts savedInputOwned); a Frame Animate clip
+ *   answers to its folder's row; the public folders to everyone.
+ * - temp: it is in their own `u_<hash>` folder (the runner's previews, as
+ *   /api/runs/preview accepts them), or an upload row of theirs names it.
+ * Anything else, a file nobody recorded included, is not theirs.
+ */
+export async function hostedGateAllows(userId: string, gate: ViewGate): Promise<boolean> {
+  switch (gate.kind) {
+    case 'reject': return false
+    case 'public': return true
+    case 'owner': return (await uploadOwner(gate.key)) === userId
+    case 'check': return (await ownedOutputKeys(userId)).has(gate.key)
+    case 'input': {
+      if (await ownsAnyRow(userId, gate.keys)) return true
+      return gate.folder === userSubfolder(userId, true)
+        && (await ownedOutputKeys(userId)).has(savedInputKey({ filename: gate.filename, subfolder: gate.folder }))
+    }
+    case 'temp': {
+      const own = userSubfolder(userId, true)
+      if (gate.folder === own || gate.folder.startsWith(`${own}/`)) return true
+      return ownsAnyRow(userId, gate.keys)
+    }
+  }
+}
 
 /**
  * Hosted: refuse a `/view` query that isn't the caller's own (401 signed out,
- * 400 a repeated key or a hashed read, 404 someone else's output). The
- * effective type is the one the resolver will use (an `[output]` annotation
- * outranks `type`). A Frame Animate clip under input/sailor_clips answers to
- * its owner row (LC10 fix round 1); other input and temp reads stay ungated.
+ * 400 a repeated key, a hashed read or an unknown folder, 404 anything that is
+ * not theirs — someone else's and missing alike, so existence is never
+ * confirmed). The effective type is the one the resolver will use (an
+ * `[output]` annotation outranks `type`). Every folder is gated (LC11): output,
+ * input in any subfolder, and temp.
  */
 export async function hostedViewGate(userId: string | null | undefined, query: ViewQuery): Promise<void> {
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
@@ -26,16 +63,5 @@ export async function hostedViewGate(userId: string | null | undefined, query: V
   if (!filename) throw createError({ statusCode: 400, message: 'Missing filename' })
   const gate = viewGateDecision({ filename, type: query.type || 'output', subfolder: query.subfolder || '' })
   if (gate.kind === 'reject') throw createError({ statusCode: gate.status, message: gate.message })
-  if (gate.kind === 'owner') {
-    // A Frame Animate clip: its folder's one owner row (LC10 fix round 1). Missing and
-    // someone else's answer alike.
-    if ((await uploadOwner(gate.key)) !== userId) throw createError({ statusCode: 404, message: 'Image not found' })
-  }
-  if (gate.kind === 'check') {
-    // The runner records each output the moment it is saved; hosted no longer
-    // harvests the engine's history for a late one (step 3, R10.9).
-    const owned = await ownedOutputKeys(userId)
-    if (!owned.has(gate.key)) throw createError({ statusCode: 404, message: 'Image not found' })
-  }
+  if (!(await hostedGateAllows(userId, gate))) throw createError({ statusCode: 404, message: 'Image not found' })
 }
-
