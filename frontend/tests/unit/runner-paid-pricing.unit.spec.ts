@@ -295,8 +295,9 @@ describe('GRAPH_NODE_CREDITS', () => {
     // (R3.3 moved the seven LLM text nodes out, R3.4 five describe nodes, R3.5 Restore and Remove background with their twins,
     // R3.6 Layerize, Seedream Layerize and Outpaint, R3.7 Separate background and foreground, R3.8 music and speech with their twins,
     // R3.9 the three 3D nodes, R3.12 Text effect, Sketch to image and Generate face references,
-    // R3.13 Flux Dev + LoRA and Flux Dev + LoRAs, R3.16 Turntable, R3.10 Transcribe, Whisper, Identify speakers and Clone a singing voice.)
-    expect(rows.length).toBeGreaterThanOrEqual(6)
+    // R3.13 Flux Dev + LoRA and Flux Dev + LoRAs, R3.16 Turntable, R3.10 Transcribe, Whisper, Identify speakers and Clone a singing voice;
+    // step 4, C5 the four retired per-model rows: Flux Pro, Kontext, Ideogram and Clarity.)
+    expect(rows.map(([ct]) => ct).sort()).toEqual(['EnhanceVideoNode', 'LoraTrainingNode'])
     for (const [ct, flat] of rows) {
       expect(PAID_NODE_CLASSES.includes(ct), ct).toBe(false)
       expect(priceGraph({ n: { class_type: ct, inputs: {} } }).nodes!.n, ct).toBe(flat)

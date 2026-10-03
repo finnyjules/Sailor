@@ -49,7 +49,6 @@ import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import sharp from 'sharp'
 import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import { PRODUCT_SHOT_UPGRADING, blockedPromptRefusal, retiredEngineRefusal } from '~~/server/utils/blockedModels'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import type { OutputFile } from '~~/server/runner/types'
 import { createEngineResultStore } from '~~/server/runner/results'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -301,11 +300,11 @@ describe('blockedModelUses: runner-only while the family is on', () => {
     expect(blockedModelUses(p, { families: ON })).toEqual(use)
   })
 
-  it('the refusal names the node and the model; the reason is the node that needs the engine', () => {
+  it('the refusal names the node and the model; the reason is the node Sailor doesn’t run (C5)', () => {
     const withEngine: ApiPrompt = { 9: { class_type: 'Image', inputs: { image: 'bottle.png' } }, 1: shot({ image: ['9', 0] }), 2: { class_type: 'KSampler', inputs: {} } }
     const titles: Record<string, string> = { 1: 'Bottle on a rock', 2: 'Old sampler', 9: 'Photo' }
     const r = blockedRunRefusal([{ prompt: withEngine, titleOf: id => titles[id] ?? 'Unnamed node' }], { runnerOn: true, families: ON })
-    expect(r).toEqual({ title: '“Bottle on a rock” uses Bria Product Shot, which only runs in Sailor', description: 'Only the engine can run “Old sampler”.' })
+    expect(r).toEqual({ title: '“Bottle on a rock” uses Bria Product Shot, which only runs in Sailor', description: '“Old sampler”: Sailor doesn’t run this node. Use Generate an image instead.' })
     const alone = blockedRunRefusal([{ prompt: p, titleOf: () => 'Bottle on a rock' }], { runnerOn: true, families: ON })
     expect(alone!.description).toBe(NOT_TAKEN_AS_SET_UP_REASON)
     expect(blockedRunRefusal([{ prompt: p, titleOf: () => 'Bottle on a rock' }], { runnerOn: false, families: ON })).toBeNull()
@@ -321,50 +320,6 @@ describe('blockedModelUses: runner-only while the family is on', () => {
 
 // ── Hosted: the SDXL refusal only while the family is off ──────────────────
 
-describe('hosted ComfyUI path: the SDXL refusal stays while off; on, the node is runner-only', () => {
-  const saved = { ...process.env }
-  afterEach(() => { process.env = { ...saved } })
-  const graph: ApiPrompt = { 1: { class_type: 'LoadImage', inputs: { image: 'p.png' } }, 2: { class_type: 'ProductShotNode', inputs: { image: ['1', 0], scene_prompt: 'a beach' } }, 3: { class_type: 'SaveImage', inputs: { images: ['2', 0] } } }
-  const meterDeps = () => ({
-    priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-    spendGuard: vi.fn(async () => {}),
-    validateFileRefs: vi.fn(async () => {}),
-    moderatePrompt: vi.fn(async () => ({ ok: true as const })),
-    hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-    getAvailable: vi.fn(async () => 3),
-    forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-    registerRun: vi.fn(async () => {}),
-    startSettle: vi.fn(),
-    releaseHold: vi.fn(async () => {}),
-  })
-  const switches = (families: ReadonlySet<RunnerFamily>) => {
-    process.env.NUXT_RUNNER_ENABLED = 'true'
-    process.env.NUXT_RUNNER_FAMILIES = [...families].join(',')
-  }
-
-  it('off (every other family on): "being upgraded", before any price, hold or forward — unchanged', async () => {
-    switches(ALL_BUT)
-    expect(retiredEngineRefusal(graph)!.error.message).toBe(PRODUCT_SHOT_UPGRADING)
-    const d = meterDeps()
-    const r = await meterGraphSubmit('u1', { prompt: graph }, d as any)
-    expect([r.status, r.body.error.message]).toEqual([400, PRODUCT_SHOT_UPGRADING])
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-  })
-
-  it('on: no "being upgraded" refusal (Bria is priced); the ComfyUI path refuses it as runner-only instead', async () => {
-    switches(ON)
-    expect(retiredEngineRefusal(graph)).toBeNull()
-    expect(blockedPromptRefusal(graph)!.error.message).toContain('“Product shot” uses Bria Product Shot, which only runs in Sailor.')
-    const d = meterDeps()
-    const r = await meterGraphSubmit('u1', { prompt: graph }, d as any)
-    expect(r.status).toBe(400)
-    expect(r.body.error.message).toContain('uses Bria Product Shot, which only runs in Sailor')
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-    expect(d.forward).not.toHaveBeenCalled()
-  })
-})
 
 // ── The price ──────────────────────────────────────────────────────────────
 

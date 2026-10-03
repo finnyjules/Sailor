@@ -144,11 +144,12 @@ export function requestPrice(endpoint: string, input: Inputs): { usd: number, cr
 
 // ── ComfyUI nodes that call one endpoint ──────────────────────────────────
 
-/** The node classes priced here. Each has left the flat table (GRAPH_NODE_CREDITS). */
+/**
+ * The node classes priced here. Each has left the flat table (GRAPH_NODE_CREDITS).
+ * (Veo3RemoteNode, KlingVideoRemoteNode and Seedance2RemoteNode left with the
+ * engine path, step 4 C5: retired in C4, refused before any price.)
+ */
 export const REMOTE_VIDEO_NODE_CLASSES: readonly string[] = [
-  'Veo3RemoteNode',
-  'KlingVideoRemoteNode',
-  'Seedance2RemoteNode',
   'LipSyncNode',
   'LipsyncNode',
   'LipsyncRemoteNode',
@@ -473,18 +474,6 @@ function pyInt(v: unknown): number | null {
   return null
 }
 
-/** `int(duration)` as sent, when the service accepts it (1…max); else the service's longest. */
-function lengthSent(v: unknown, max: number): number {
-  if (linked(v)) return max
-  const n = pyInt(v)
-  return n != null && n >= 1 && n <= max ? n : max
-}
-
-/** A widget sent as-is (`"resolution": resolution`): its text, or a key no card lists. */
-function sentAsIs(v: unknown): string {
-  return typeof v === 'string' ? v : UNLISTED
-}
-
 /** The fal endpoint LipSyncNode's sync-3 engine calls (server/runner/generators/sync3.ts). */
 export const SYNC_3_ENDPOINT = 'fal-ai/sync-lipsync/v3'
 
@@ -547,24 +536,6 @@ function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] | { re
  */
 export function remoteVideoCalls(classType: string, inputs: Inputs, measured: InputSeconds = {}): ClipCall[] | { refused: string } | null {
   switch (classType) {
-    // Veo3RemoteNode.execute sends prompt, aspect_ratio, image, negative_prompt
-    // and seed — no duration, no generate_audio. google/veo-3's schema defaults:
-    // duration 8, generate_audio true.
-    case 'Veo3RemoteNode':
-      return [{ endpoint: 'google/veo-3', seconds: 8, resolution: null, audio: true }]
-    // KlingVideoRemoteNode.execute: "duration": int(duration); no `mode`, so the
-    // schema default "standard" (720p). The schema accepts 5 or 10.
-    case 'KlingVideoRemoteNode':
-      return [{ endpoint: 'kwaivgi/kling-v2.1', seconds: lengthSent(inputs.duration, 10), resolution: '720p', audio: false }]
-    // Seedance2RemoteNode.execute: "resolution": resolution (as-is), "duration":
-    // int(duration). The schema accepts up to 15 s (-1 = the model picks).
-    case 'Seedance2RemoteNode':
-      return [{
-        endpoint: 'bytedance/seedance-2.0',
-        seconds: lengthSent(inputs.duration, 15),
-        resolution: linked(inputs.resolution) ? UNLISTED : sentAsIs(inputs.resolution),
-        audio: true,
-      }]
     // Both call sync/lipsync-2-pro with the sound clip capped at 60 s: billed
     // for the clip, in the sync modes that never run past it.
     case 'LipsyncRemoteNode':

@@ -16,8 +16,8 @@
  *   - refused before anything is priced or held when it would run (an
  *     output reads it; one nothing reads is pruned, as ComfyUI prunes it),
  *     in ComfyUI's own 400 shape (`retiredNodesResponse`), on both paths: the runner (`startRun`) and
- *     every `/prompt` bound for ComfyUI (server/utils/blockedModels.ts
- *     `blockedPromptRefusal`: the hosted meter and the local proxy); the
+ *     every run once bound for ComfyUI (server/utils/blockedModels.ts
+ *     `blockedPromptRefusal`, until the engine went: step 4, C5); the
  *     browser says so before sending anything (needsEngine.ts `blockedRunRefusal`);
  *   - a saved workflow that holds one still opens; the node card (or the
  *     subgraph card holding it) shows it as retired (ComfyNode.vue) and
@@ -31,7 +31,7 @@ import { readByOutputs } from './validate'
 /**
  * Step 4, C4: Sailor's own classes retired when ComfyUI's code goes, each with
  * the words naming its replacement by its visible name. Each was on
- * NEEDS_LOCAL_ENGINE (./localOnly.ts) with no saved graph running it
+ * NEEDS_LOCAL_ENGINE (the old local-engine list) with no saved graph running it
  * (2026-10-03 scan of 1,370 saved graphs). They stay in the committed node
  * catalogue so a saved project holding one still draws its card.
  */

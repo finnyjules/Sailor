@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { SkipBack, RotateCcw, Play, Pause } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
-import { initialTicks, continueLabel, viewUrl, isVideoFile, gateResumeRoute } from '~/lib/runner/gateChoices'
+import { initialTicks, continueLabel, viewUrl, isVideoFile } from '~/lib/runner/gateChoices'
 import { isRunnerPromptId } from '#shared/runner/messages'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
-import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = defineProps<{
   id: string
@@ -78,46 +77,20 @@ function onActionFailed(e: Event) {
 onMounted(() => window.addEventListener('sailor:runnerGateActionFailed', onActionFailed))
 onBeforeUnmount(() => window.removeEventListener('sailor:runnerGateActionFailed', onActionFailed))
 
-const hosted = hostedModeEnabled(useRuntimeConfig().public)
-
 async function resumeGate(action: 'continue' | 'redo' | 'restart') {
   const fromPause = !!props.data.paused
-  const route = gateResumeRoute(props.data.promptId, { runner: isRunner.value, hosted })
-  if (route === 'runner') {
-    wasPaused = fromPause
-    props.data.paused = false
-    window.dispatchEvent(new CustomEvent('sailor:runnerGateAction', {
-      detail: {
-        nodeId: props.id,
-        promptId: props.data.promptId,
-        action,
-        takes: fromPause && action === 'continue' && choices.value.length > 1 ? [...ticked.value] : undefined,
-      },
-    }))
-    return
-  }
-  // Hosted never reaches the engine's resume (no local engine runs there).
-  if (route === 'none') return
-  // A Gate inside a run on the local engine (R10.2's local-only route): the
-  // engine's own resume, locally only.
+  // A Gate pauses only inside a runner run (step 4, C5: no local engine runs one).
+  if (!isRunner.value) return
+  wasPaused = fromPause
   props.data.paused = false
-  try {
-    const res = await $fetch<{ prompt_id?: string }>('/gate/resume', {
-      method: 'POST',
-      body: {
-        node_id: props.id,
-        prompt_id: props.data.promptId,
-        action,
-        from_pause: fromPause,
-      },
-    })
-    // Update promptId so subsequent clicks use the new prompt context
-    if (res?.prompt_id) {
-      props.data.promptId = res.prompt_id
-    }
-  } catch (err: any) {
-    console.error('[Gate] Resume failed:', err?.data || err?.message || err)
-  }
+  window.dispatchEvent(new CustomEvent('sailor:runnerGateAction', {
+    detail: {
+      nodeId: props.id,
+      promptId: props.data.promptId,
+      action,
+      takes: fromPause && action === 'continue' && choices.value.length > 1 ? [...ticked.value] : undefined,
+    },
+  }))
 }
 </script>
 

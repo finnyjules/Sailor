@@ -10,7 +10,7 @@ import { pipeline } from 'node:stream/promises'
 import { link, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { pyIntOf } from '#shared/runner/pyText'
-import { shortUserHash } from '../utils/meterGraphRun'
+import { shortUserHash } from '../utils/userHash'
 import type { OutputFile } from './types'
 
 /** What `save` is asked to write. */

@@ -2700,7 +2700,7 @@ const filmShotLabel = (name: string) => {
  * Step 4, C4: why the runner doesn't take this Film a shot even with every
  * family on, in plain words naming what to change, or null (it takes it with
  * every family on: a family that is off is named as switched off instead).
- * Before C4 such a shot went to the local engine (NEEDS_LOCAL_ENGINE); no
+ * Before C4 such a shot went to the local engine (the old NEEDS_LOCAL_ENGINE); no
  * saved graph holds one (2026-10-03 scan: the runner takes every one).
  */
 export function filmShotRefusalWords(inputs: Record<string, unknown>): string | null {

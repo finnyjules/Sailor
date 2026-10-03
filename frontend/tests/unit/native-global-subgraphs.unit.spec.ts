@@ -25,12 +25,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GLOBAL_SUBGRAPHS_PREFIXES, matchGlobalSubgraphsRoute, runGlobalSubgraphs } from '../../server/native/globalSubgraphs'
 import { NATIVE_ENGINE_PREFIXES, decodeSegment, nativeEnginePath } from '../../server/native/router'
 import { graphToPrompt } from '~/lib/graph/graphToPrompt'
-import { engineRoute, isCustomClass } from '#shared/runner/needsEngine'
+import { isCustomClass, runRefusal } from '#shared/runner/needsEngine'
 import { EVERY_KNOWN_FAMILY } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
-import { isLocalOnlyClass, NEEDS_LOCAL_ENGINE } from '#shared/runner/localOnly'
+import { isStockClass } from '#shared/runner/stockClasses'
 import { isRetiredClass } from '#shared/runner/retired'
-import { hostedOffersClass } from '#shared/runner/hostedOffer'
+import { sailorOffersClass } from '#shared/runner/offer'
 
 const FRONTEND = path.resolve(__dirname, '..', '..')
 const REPO = path.resolve(FRONTEND, '..')
@@ -273,14 +273,14 @@ describe('R10.6: a blueprint runs on Sailor when all its classes do, otherwise R
       for (const c of classes) {
         if (subgraphIds.has(c) || CANVAS_ONLY.has(c)) continue
         expect(isCustomClass(c), `${f}: ${c}`).toBe(false)
-        expect(isLocalOnlyClass(c) || isRetiredClass(c) || Object.hasOwn(NEEDS_LOCAL_ENGINE, c) || !isCustomClass(c), `${f}: ${c}`).toBe(true)
+        expect(isStockClass(c) || isRetiredClass(c) || !isCustomClass(c), `${f}: ${c}`).toBe(true)
       }
     }
   })
 
-  it('each blueprint: on Sailor when the runner takes it; else the local engine locally (engine up), and plain words in hosted', () => {
+  it('each blueprint: on Sailor when the runner takes it; else plain words, here and hosted alike', () => {
     let onSailor = 0
-    let toEngine = 0
+    let notRun = 0
     let saved = 0
     const unbuilt: string[] = []
     for (const [f, wf] of blueprintWorkflows()) {
@@ -298,52 +298,41 @@ describe('R10.6: a blueprint runs on Sailor when all its classes do, otherwise R
       if (Object.keys(prompt).some(id => id.startsWith('saver:'))) saved++
       const titleOf = (id: string) => prompt[id]?._meta?.title ?? f
       if (isRunnerEligible(prompt, EVERY_KNOWN_FAMILY, { plainRefusals: true })) { onSailor++; continue }
-      const opts = { runnerOn: true, families: EVERY_KNOWN_FAMILY, catalog: CATALOG, engineUp: true }
-      const local = engineRoute([{ prompt, titleOf }], { ...opts, hosted: false })
-      // Locally: the local engine (decision 4), or plain words (a node named, or the run's own words when
-      // a stand-in left a proxied setting empty); never ComfyUI's name, never a silent fallback.
-      if (local.to === 'engine') toEngine++
-      else expect(local.description, f).toMatch(/^(“[^”]+”: |Nothing )/)
-      if (local.to === 'refused') expect(local.description, f).not.toMatch(/comfy/i)
-      else expect(local.to, f).toBe('engine')
-      const hosted = engineRoute([{ prompt, titleOf }], { ...opts, hosted: true })
-      expect(hosted.to, f).toBe('refused')
-      if (hosted.to === 'refused') {
-        expect(hosted.description, f).toMatch(/runs? only on the local engine|^(“[^”]+”: |Nothing )/)
-        expect(hosted.description, f).not.toMatch(/comfy/i)
-      }
-      const off = engineRoute([{ prompt, titleOf }], { ...opts, hosted: false, engineUp: false })
-      expect(off.to, f).toBe('refused')
+      // C5: plain words (the nodes Sailor doesn't run named, a node named, or the run's own words when a
+      // stand-in left a proxied setting empty); never ComfyUI's name, never a silent fallback.
+      const r = runRefusal([{ prompt, titleOf }], { runnerOn: true, families: EVERY_KNOWN_FAMILY, catalog: CATALOG })
+      expect(r.description, f).toMatch(/^(“[^”]+”|Nothing )/)
+      expect(r.description, f).not.toMatch(/comfy|engine/i)
+      if (/Sailor doesn’t run th(is node|ese nodes)/.test(r.description)) notRun++
     }
     // Every stock blueprint is built on the local diffusion stack today.
     expect(onSailor).toBe(0)
-    expect(toEngine).toBeGreaterThan(BLUEPRINT_FILES.length / 2)
+    expect(notRun).toBeGreaterThan(BLUEPRINT_FILES.length / 2)
     expect(saved).toBeGreaterThan(BLUEPRINT_FILES.length / 2)
     expect(unbuilt.sort()).toEqual(['Canny to Video (LTX 2.0).json', 'Depth to Video (ltx 2.0).json', 'Pose to Video (LTX 2.0).json', 'Text to Audio (ACE-Step 1.5).json'])
   })
 })
 
-describe('R10.6: hosted offers no local-only class or blueprint', () => {
-  it('hostedOffersClass: the runner’s classes and the cards; never a local-only, retired, custom or local-engine-only class', () => {
-    const offered = Object.keys(CATALOG).filter(hostedOffersClass)
+describe('R10.6, C5: Sailor offers no stock class or blueprint, here or hosted', () => {
+  it('sailorOffersClass: the runner’s classes and the cards; never a stock, retired or custom class', () => {
+    const offered = Object.keys(CATALOG).filter(sailorOffersClass)
     expect(offered.length).toBeGreaterThan(200)
     for (const c of offered) {
-      expect(isLocalOnlyClass(c), c).toBe(false)
+      expect(isStockClass(c), c).toBe(false)
       expect(isRetiredClass(c), c).toBe(false)
       expect(isCustomClass(c), c).toBe(false)
     }
     // Step 4, C4: Preview video is the runner's now; Font Playground, Kinetic Typography and the per-model nodes are retired.
     for (const c of ['GenerateImageNode', 'GenerateVideoNode', 'Image', 'Video', 'SaveImage', 'FilmShotNode', 'SmartLayout', 'Text', 'Timeline', 'PreviewVideo']) {
-      expect(hostedOffersClass(c), c).toBe(true)
+      expect(sailorOffersClass(c), c).toBe(true)
     }
     for (const c of ['KSampler', 'CheckpointLoaderSimple', 'GLSLShader', 'RenderType', 'KineticType', 'FluxProRemoteNode', 'MyCustomPackNode', 'GeminiNode']) {
-      expect(hostedOffersClass(c), c).toBe(false)
+      expect(sailorOffersClass(c), c).toBe(false)
     }
-    // Every catalogue class is offered, or is one hosted refuses (C4: no Sailor class still needs the local engine).
-    expect(NEEDS_LOCAL_ENGINE).toEqual({})
+    // Every catalogue class is offered, or is a stock or retired class Sailor refuses.
     for (const c of Object.keys(CATALOG)) {
-      if (hostedOffersClass(c)) continue
-      expect(isLocalOnlyClass(c) || isRetiredClass(c), c).toBe(true)
+      if (sailorOffersClass(c)) continue
+      expect(isStockClass(c) || isRetiredClass(c), c).toBe(true)
     }
   })
 
@@ -365,26 +354,23 @@ describe('R10.6: hosted offers no local-only class or blueprint', () => {
       return s.nodeTypes.value.map((n: { name: string }) => n.name)
     }
 
-    it('hosted lists only the classes the runner takes, plus the cards', async () => {
-      const names = await searched(true)
-      expect(names.length).toBeGreaterThan(200)
-      expect(names.filter(n => !hostedOffersClass(n))).toEqual([])
-      expect(names).toEqual(expect.arrayContaining(['GenerateImageNode', 'SaveImage', 'Timeline']))
-      expect(names).not.toContain('KSampler')
-      expect(names).not.toContain('MyCustomPackNode')
-    })
-
-    it('locally the local-only classes and custom nodes stay offered', async () => {
-      const names = await searched(false)
-      expect(names).toEqual(expect.arrayContaining(['KSampler', 'CheckpointLoaderSimple', 'MyCustomPackNode', 'GenerateImageNode']))
+    it('node search lists only the classes the runner takes, plus the cards, here and hosted', async () => {
+      for (const hosted of [true, false]) {
+        const names = await searched(hosted)
+        expect(names.length).toBeGreaterThan(200)
+        expect(names.filter(n => !sailorOffersClass(n))).toEqual([])
+        expect(names).toEqual(expect.arrayContaining(['GenerateImageNode', 'SaveImage', 'Timeline']))
+        for (const c of ['KSampler', 'CheckpointLoaderSimple', 'MyCustomPackNode']) expect(names, `${hosted}: ${c}`).not.toContain(c)
+      }
     })
   })
 
-  it('the sidebar fetches no blueprint and shows no blueprint tab or section in hosted', () => {
+  it('the sidebar fetches no blueprint and shows no blueprint tab or section', () => {
     const src = fs.readFileSync(path.join(FRONTEND, 'app', 'components', 'vue-canvas', 'NodesSidebar.vue'), 'utf8')
     expect(src).toMatch(/async function fetchBlueprints\(\) \{\n\s+if \(hosted\) return/)
     expect(src).toMatch(/<button\s+v-if="!hosted"[^>]*>\s*Blueprints\s*<\/button>/)
     expect(src).toContain('v-if="!hosted && blueprintTree.size > 0"')
-    expect(src).toMatch(/const hosted = \(\(\) => \{\n\s+try \{ return useRuntimeConfig\(\)\.public\?\.hostedMode === true \}/)
+    // C5: the hosted rule is the only rule.
+    expect(src).toMatch(/\nconst hosted = true\n/)
   })
 })

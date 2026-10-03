@@ -1,23 +1,13 @@
 /**
  * The media routes through the native dispatcher (server/native/router.ts),
  * driven through a real h3 app against a temp engine root: aiohttp's route
- * table (paths, verbs, 404/405), the thumbnail's bytes and headers, and the
- * hand-off to the local engine for video/audio — 503 when it is not there.
- * `fetch` is stubbed in every test, so nothing here can reach a real engine.
+ * table (paths, verbs, 404/405), the thumbnail's bytes and headers, and
+ * video/audio without Sailor's media tools — a plain 503 (step 4, C5: there is
+ * no engine to hand them to). `fetch` is stubbed in every test: nothing is asked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
-// R5.6: these tests describe the video/sound routes WITHOUT Sailor's media tools (the engine or 503), so the
+// R5.6: these tests describe the video/sound routes WITHOUT Sailor's media tools (a plain 503), so the
 // tools are pinned missing whatever this machine has built; with them, see native-media-video.unit.spec.ts.
 vi.mock('../../server/media/tools', async orig => ({
   ...(await orig() as object),
@@ -161,7 +151,7 @@ describe('thumbnails', () => {
   })
 })
 
-describe('video and audio need the local engine', () => {
+describe('video and audio without the media tools: a plain 503, no engine (C5)', () => {
   beforeEach(() => {
     fs.writeFileSync(path.join(root, 'input', 'clip.mp4'), 'not really a video')
     fs.writeFileSync(path.join(root, 'user', 'timeline_assets.json'), pyDumps([
@@ -169,83 +159,21 @@ describe('video and audio need the local engine', () => {
     ], 2))
   })
 
-  it('with the engine down: 503 "This needs the local engine" for thumbnails and waveforms', async () => {
-    for (const p of ['/sailor/input_thumbnail?filename=clip.mp4', '/sailor/asset_thumbnails?asset_id=vid', '/sailor/asset_waveform?asset_id=vid']) {
+  it('503 in plain words for thumbnails and waveforms, and nothing is asked', async () => {
+    engineAnswers({ thumbnails: ['data:engine'] })
+    for (const p of ['/sailor/input_thumbnail?filename=clip.mp4', '/sailor/asset_thumbnails?asset_id=vid', '/sailor/asset_waveform?asset_id=vid', '/comfyui/api/sailor/asset_thumbnails?asset_id=vid&count=4']) {
       const r = await call('GET', p)
-      expect([r.status, r.body], p).toEqual([503, { error: 'This needs the local engine' }])
+      expect([r.status, r.body], p).toEqual([503, { error: 'Sailor can’t read this file right now. Try again in a moment.' }])
     }
+    expect(engineFetch).not.toHaveBeenCalled()
   })
 
-  it('with the engine down, an import still records the asset (no duration, no size)', async () => {
+  it('an import still records the asset (no duration, no size), and nothing is asked', async () => {
+    engineAnswers({ asset: { id: 'e1' }, created: true })
     fs.writeFileSync(path.join(root, 'input', 'new.webm'), 'x')
     const r = await call('POST', '/sailor/asset_import', JSON.stringify({ path: 'new.webm' }))
     expect(r.status).toBe(200)
     expect(r.body.asset).toMatchObject({ kind: 'video', duration_sec: null, width: null, height: null })
-  })
-
-  it('with the engine up, the request goes to it unchanged — same path and query — and its answer comes back', async () => {
-    engineAnswers({ thumbnails: ['data:engine'], asset_id: 'vid', count: 4 })
-    const r = await call('GET', '/comfyui/api/sailor/asset_thumbnails?asset_id=vid&count=4')
-    expect(r.body).toEqual({ thumbnails: ['data:engine'], asset_id: 'vid', count: 4 })
-    expect(engineFetch).toHaveBeenCalledTimes(1)
-    const [url, init] = engineFetch.mock.calls[0]!
-    expect(url).toBe('http://127.0.0.1:8188/sailor/asset_thumbnails?asset_id=vid&count=4')
-    expect(init).toMatchObject({ method: 'GET', headers: { origin: 'http://127.0.0.1:8188' } })
-  })
-
-  it('an engine thumbnail keeps its bytes and headers', async () => {
-    engineFetch.mockResolvedValue(new Response(Buffer.from([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png', 'cache-control': 'max-age=86400' } }))
-    const r = await call('GET', '/sailor/input_thumbnail?filename=clip.mp4')
-    expect([...r.buf]).toEqual([0x89, 0x50, 0x4e, 0x47])
-    expect(r.headers.get('cache-control')).toBe('max-age=86400')
-  })
-
-  it('the main engine already known down (cached health): no forward, the plain 503', async () => {
-    engineHealthState.value = 'down'
-    engineFetch.mockResolvedValue(new Response(Buffer.from([0x89]), { status: 200, headers: { 'content-type': 'image/png' } }))
-    const r = await call('GET', '/sailor/input_thumbnail?filename=clip.mp4')
-    expect(r.status).toBe(503)
-    expect(r.body).toEqual({ error: 'This needs the local engine' })
     expect(engineFetch).not.toHaveBeenCalled()
-  })
-
-  it('an import forwards the same body to the engine', async () => {
-    engineAnswers({ asset: { id: 'e1' }, created: true })
-    const body = JSON.stringify({ path: 'clip.mp4' })
-    const r = await call('POST', '/sailor/asset_import', body)
-    expect(r.body).toEqual({ asset: { id: 'e1' }, created: true })
-    const [url, init] = engineFetch.mock.calls[0]!
-    expect(url).toBe('http://127.0.0.1:8188/sailor/asset_import')
-    expect(init.method).toBe('POST')
-    expect(Buffer.from(init.body).toString()).toBe(body)
-  })
-
-  // A2 follow-up fix, item 1: the engine forward had no timeout at all —
-  // a stuck ComfyUI process would hang the request open indefinitely.
-  it('thumbnails/waveforms carry a 30s abort timeout; asset_import carries 120s', async () => {
-    const spy = vi.spyOn(AbortSignal, 'timeout')
-    engineAnswers({ thumbnails: [] })
-    await call('GET', '/sailor/asset_thumbnails?asset_id=vid')
-    await call('GET', '/sailor/asset_waveform?asset_id=vid')
-    await call('GET', '/sailor/input_thumbnail?filename=clip.mp4')
-    expect(spy.mock.calls.filter(c => c[0] === 30_000).length).toBeGreaterThanOrEqual(3)
-
-    spy.mockClear()
-    fs.writeFileSync(path.join(root, 'input', 'new2.webm'), 'x')
-    engineAnswers({ asset: { id: 'e2' }, created: true })
-    await call('POST', '/sailor/asset_import', JSON.stringify({ path: 'new2.webm' }))
-    expect(spy).toHaveBeenCalledWith(120_000)
-    spy.mockRestore()
-  })
-
-  it('an abort/timeout from the engine is treated exactly like the engine being down (503 / null-field)', async () => {
-    engineFetch.mockRejectedValue(new DOMException('The operation was aborted', 'TimeoutError'))
-    const r = await call('GET', '/sailor/asset_thumbnails?asset_id=vid')
-    expect([r.status, r.body]).toEqual([503, { error: 'This needs the local engine' }])
-
-    fs.writeFileSync(path.join(root, 'input', 'new3.webm'), 'x')
-    const imp = await call('POST', '/sailor/asset_import', JSON.stringify({ path: 'new3.webm' }))
-    expect(imp.status).toBe(200)
-    expect(imp.body.asset).toMatchObject({ kind: 'video', duration_sec: null })
   })
 })

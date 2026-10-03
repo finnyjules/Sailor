@@ -276,8 +276,8 @@ const runStatus = computed(() => runRowStatus({
 }))
 // Variant (direct-execution only): re-roll THIS node as four fresh-seeded
 // takes. Same 'self' scope + event; the `takes` count flows through
-// runVueWorkflow to the dispatch site (one runner run, or queued in order on
-// the local engine). Gated on the direct flag because takes are a direct-only path.
+// runVueWorkflow to the dispatch site (one runner run). Gated on the direct
+// flag because takes are a direct-only path.
 const { directExecutionEnabled } = useDirectExecutionEnabled()
 function rerollTakesParallel() { dispatchRun({ rerollScope: 'self', takes: 4 }) }
 // Variant: fresh run of everything before this node, new seeds throughout.

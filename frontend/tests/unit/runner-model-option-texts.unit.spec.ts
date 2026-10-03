@@ -20,7 +20,6 @@ import { FILM_SHOT_MODEL_IDS, RUNNER_IMAGE_MODEL_IDS, RUNNER_NODE_RULES } from '
 import { MODEL_OPTION_TEXT_CLASSES, MODEL_OPTION_TEXT_KEYS, modelOptionTexts } from '#shared/runner/modelOptionTexts'
 import { planNode } from '~~/server/runner/executors'
 import { extractGraphPromptTexts } from '~~/server/utils/graphPromptText'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 /** Option fields that carry reference links, not words (server/runner/shotRefs.ts). */
@@ -181,33 +180,4 @@ describe('moderated before the hold (hosted)', () => {
     expect(k2.replicate.submitted()[0]!.payload.negative_prompt).toBe('smudged')
   })
 
-  it.each([
-    ['Generate a video', { n: node('GenerateVideoNode'), ...video('n') }],
-    ['Film a shot', { n: node('FilmShotNode'), ...video('n') }],
-    ['Generate an image', { n: { ...imageNode(), inputs: { ...imageNode().inputs, model: 'flux-schnell' } }, ...picture('n') }],
-  ] as const)('the hosted ComfyUI /prompt meter: %s is refused before pricing or any hold', async (_n, p) => {
-    const d = {
-      priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-      spendGuard: vi.fn(async () => {}),
-      validateFileRefs: vi.fn(async () => {}),
-      moderatePrompt: blocked(),
-      hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-      getAvailable: vi.fn(async () => 3),
-      forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-      registerRun: vi.fn(async () => {}),
-      startSettle: vi.fn(),
-      releaseHold: vi.fn(async () => {}),
-    }
-    let refused = false
-    try {
-      const r = await meterGraphSubmit('u1', { prompt: p }, d as never)
-      refused = r.status >= 400
-    }
-    catch { refused = true }
-    expect(refused).toBe(true)
-    expect(d.moderatePrompt.mock.calls.map(c => c[0])).toContain('NEGWORDS')
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-    expect(d.forward).not.toHaveBeenCalled()
-  })
 })

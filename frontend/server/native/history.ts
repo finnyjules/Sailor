@@ -6,11 +6,10 @@
  *   - the runner's run records (server/runner/store.ts): one entry per
  *     finished stage, keyed by its stage key — the promptId the runner's
  *     generation records and run events use;
- *   - locally, the disk cache of earlier engine entries (.cache/history.json);
- *   - locally, the engine itself, only while it is up — the one kind of run it
- *     still makes is decision 4's local-only run (shared/runner/localOnly.ts).
- * Hosted reads the caller's own runs only, and never the engine or the cache
- * (a shared, cross-tenant file).
+ *   - locally, the disk cache of earlier engine entries (.cache/history.json;
+ *     step 4, C5: there is no engine to ask any more).
+ * Hosted reads the caller's own runs only, and never the cache (a shared,
+ * cross-tenant file).
  */
 import type { OutputFile, RunRecord, StageCharge, TakeRecord } from '../runner/types'
 import { runIdOf, type RunStore } from '../runner/store'

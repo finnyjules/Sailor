@@ -23,7 +23,6 @@ import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
 import { MOODBOARD_DEFAULT_MODEL, moodboardDefaultModel } from '../../app/lib/graph/moodboardApply'
 import { blockedPromptRefusal, retiredEngineRefusal } from '../../server/utils/blockedModels'
 import { blockedRunRefusal } from '../../app/lib/runner/needsEngine'
-import { meterGraphSubmit } from '../../server/utils/meterGraphRun'
 import { priceGraph } from '../../server/utils/priceBook'
 import { makeKit } from './__runner__/kit'
 
@@ -276,18 +275,6 @@ describe('a Sora node is refused by all three checks, before any call', () => {
       }
     })
 
-    it(`${id}: the server meter answers 400 with no price, hold or forward`, async () => {
-      for (const cls of ['GenerateVideoNode', 'FilmShotNode']) {
-        const d = meterDeps()
-        const r = await meterGraphSubmit('u1', { prompt: one(vid(id, cls)) }, d as any)
-        expect(r.status, cls).toBe(400)
-        expect((r.body as any).error.message, cls).toMatch(new RegExp(`^${label} was discontinued by its service on 24 Sep 2026\\.`))
-        expect((r.body as any).node_errors[1].class_type, cls).toBe(cls)
-        expect(d.priceGraph).not.toHaveBeenCalled()
-        expect(d.hold).not.toHaveBeenCalled()
-        expect(d.forward).not.toHaveBeenCalled()
-      }
-    })
 
     it(`${id}: the runner refuses it with replicate-video on, before any hold or call`, async () => {
       const k = makeKit({ hosted: true, deps: { families: () => new Set<RunnerFamily>(['replicate-video']) } })
@@ -440,36 +427,8 @@ describe('fix round 1', () => {
       3: { class_type: 'SaveImage', inputs: { images: ['2', 0] } },
     })
 
-    it('Product shot on SDXL', async () => {
-      const d = meterDeps()
-      const r = await meterGraphSubmit('u1', { prompt: shot }, d as any)
-      expect(r.status).toBe(400)
-      expect(r.body.error.message).toBe('Product shot is being upgraded — try Swap background for now.')
-      expect(r.body.node_errors[2].class_type).toBe('ProductShotNode')
-      expect(d.priceGraph).not.toHaveBeenCalled()
-      expect(d.hold).not.toHaveBeenCalled()
-      expect(d.forward).not.toHaveBeenCalled()
-    })
 
-    it('Restyle on IP-Adapter (fofr/style-transfer), naming the default by its name', async () => {
-      const d = meterDeps()
-      const r = await meterGraphSubmit('u1', { prompt: restyle('Style Transfer · IP-Adapter') }, d as any)
-      expect(r.status).toBe(400)
-      expect(r.body.error.message).toBe('Restyle’s Style Transfer engine has been retired. Pick another model in “Restyle from image”, such as Nano Banana 2.')
-      expect(r.body.node_errors[2].errors[0].extra_info).toEqual({ input_name: 'model', input_value: 'Style Transfer · IP-Adapter' })
-      expect(d.priceGraph).not.toHaveBeenCalled()
-      expect(d.hold).not.toHaveBeenCalled()
-      expect(d.forward).not.toHaveBeenCalled()
-    })
 
-    it('control: Restyle on another engine (hidden plain Nano Banana too) is priced, held and forwarded', async () => {
-      for (const model of ['Nano Banana 2', 'Nano Banana']) {
-        const d = meterDeps()
-        const r = await meterGraphSubmit('u1', { prompt: restyle(model) }, d as any)
-        expect(r.status, model).toBe(200)
-        expect(d.hold, model).toHaveBeenCalledTimes(1)
-      }
-    })
 
     it('local mode is unchanged: the local proxy check lets both through', () => {
       expect(blockedPromptRefusal(shot)).toBeNull()

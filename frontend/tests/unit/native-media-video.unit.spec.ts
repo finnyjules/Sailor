@@ -28,7 +28,7 @@ vi.mock('~~/server/media/tools', async (importOriginal) => {
     mediaTools: async () => (tools.mode === 'real' ? real.mediaTools() : tools.mode === 'fake' ? tools.fake : null),
   }
 })
-// The hosted gate's own checks (engineGate.ts): which mode, and a cached engine-health state that never reaches :8188.
+// The hosted gate's own checks (engineGate.ts): which mode.
 const deploy = vi.hoisted(() => ({ mode: 'local' as 'local' | 'hosted' }))
 vi.mock('~~/server/utils/deployMode', () => ({ deployMode: () => deploy.mode, isHosted: () => deploy.mode === 'hosted' }))
 // The Frame's worker, watched (a large thumbnail frame is resized there): the real one, counted.
@@ -37,7 +37,6 @@ vi.mock('~~/server/runner/compositor/worker', async (importOriginal) => {
   const real = await importOriginal<typeof import('~~/server/runner/compositor/worker')>()
   return { ...real, pixelsInWorker: ((...a: Parameters<typeof real.pixelsInWorker>) => { workerCalls.n++; return real.pixelsInWorker(...a) }) as typeof real.pixelsInWorker }
 })
-vi.mock('~~/server/native/engineHealth', async orig => ({ ...(await orig() as object), engineHealth: async () => 'down' as const }))
 
 const g = globalThis as any
 g.defineEventHandler ??= (fn: unknown) => fn
@@ -283,8 +282,8 @@ describe('the routes answer from Sailor when the tools are ready (the engine nev
 
 // ── without the tools: exactly as before ─────────────────────────────────────
 
-describe('with the tools missing, the routes forward (or answer 503) exactly as today', () => {
-  it('route functions hand a video or sound to the engine when there is no native reader', async () => {
+describe('with the tools missing, the routes answer 503 in plain words (step 4, C5: no engine to forward to)', () => {
+  it('route functions hand a video or sound to their stand-in when there is no native reader', async () => {
     addClip('v_h264_601.mp4', 'clip.mp4')
     writeAssets([{ id: 'vid', path: join(input, 'clip.mp4'), kind: 'video' }])
     const engine = vi.fn(async () => ({ status: 200, body: { from: 'engine' } }))
@@ -295,7 +294,7 @@ describe('with the tools missing, the routes forward (or answer 503) exactly as 
     expect(engine).toHaveBeenCalledTimes(4)
   })
 
-  it('through runMediaRoute with no tools and the engine down: 503 for thumbnails and waveforms, an import without numbers', async () => {
+  it('through runMediaRoute with no tools: 503 for thumbnails and waveforms, an import without numbers, nothing asked', async () => {
     tools.mode = 'none'
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
     const clip = addClip('v_h264_601.mp4', 'clip.mp4')
@@ -303,7 +302,7 @@ describe('with the tools missing, the routes forward (or answer 503) exactly as 
     const ctx = { userDir: user, inputDir: input, outputDir: join(root, 'output') }
     const ev = (p: string, method = 'GET') => ({ path: p, method, context: {} }) as any
     for (const [h, p] of [['inputThumbnail', '/sailor/input_thumbnail?filename=clip.mp4'], ['assetThumbnails', '/sailor/asset_thumbnails?asset_id=vid'], ['assetWaveform', '/sailor/asset_waveform?asset_id=vid']] as const) {
-      expect(await M.runMediaRoute(ctx, { name: h }, ev(p), p.split('?')[0]!), p).toEqual(M.NEEDS_ENGINE)
+      expect(await M.runMediaRoute(ctx, { name: h }, ev(p), p.split('?')[0]!), p).toEqual(M.MEDIA_UNAVAILABLE)
     }
     addClip('v_h264_601.mp4', 'new.mp4')
     const raw = Buffer.from(JSON.stringify({ path: 'new.mp4' }))
@@ -658,7 +657,7 @@ describe('route jobs are fair and bounded (fix round 1, Important 2)', () => {
 })
 
 describe('if the media module fails to load, the routes behave as without the tools (Minor 6)', () => {
-  it('forwards (503 with the engine down) and logs', async () => {
+  it('answers 503 in plain words and logs', async () => {
     await requireMediaTools()
     vi.resetModules()
     vi.doMock('~~/server/media/thumbnails', () => { throw new Error('sharp failed to load') })
@@ -670,7 +669,7 @@ describe('if the media module fails to load, the routes behave as without the to
       writeAssets([{ id: 'vid', path: clip, kind: 'video' }])
       const ctx = { userDir: user, inputDir: input, outputDir: join(root, 'output') }
       const r = await fresh.runMediaRoute(ctx, { name: 'assetThumbnails' }, { path: '/sailor/asset_thumbnails?asset_id=vid', method: 'GET', context: {} } as any, '/sailor/asset_thumbnails')
-      expect(r).toEqual(fresh.NEEDS_ENGINE)
+      expect(r).toEqual(fresh.MEDIA_UNAVAILABLE)
       expect(err.mock.calls.some(c => String(c[0]).includes('media.route.unavailable'))).toBe(true)
       err.mockRestore()
     }

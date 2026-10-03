@@ -14,10 +14,10 @@
  *   - redirects are followed by hand (at most 3), each one checked again;
  *   - 20 seconds in all, and at most 30 MB.
  * Locally (not hosted) one exception keeps the canvas working: a loopback
- * `/view` URL on the engine's port (8188), which Python sent for a wired
- * picture, or on the ports the caller names (the route: the port its own
+ * `/view` URL on the ports the caller names (the route: the port its own
  * request came in on and the app's configured port, which the editor's
- * absolute /view URLs use; never the Host header's). Step 3, R10.8: such a
+ * absolute /view URLs use; never the Host header's). Step 4, C5: the engine's
+ * own port is no longer one (no saved project names it). Step 3, R10.8: such a
  * URL is never fetched — Sailor reads the file it names off disk, by name,
  * exactly as GET /view resolves it (server/native/view.ts), under the same
  * byte cap and budget; no connection is made to any port. Hosted, loopback
@@ -42,7 +42,6 @@ import http from 'node:http'
 import https from 'node:https'
 import type { LookupFunction } from 'node:net'
 import type { ByteBudget, ImageFetcher } from './inlineImages'
-import { ENGINE_MAIN_PORT } from '../native/engineHealth'
 import { readViewFile, viewQueryOf } from '../native/viewRead'
 import { LAYOUT_IMAGES_TOO_LARGE } from '../../shared/template-grid/limits'
 
@@ -86,11 +85,6 @@ export function addressAllowed(address: string, loopbackOk = false): boolean {
   const a = unmapped(address)
   if (loopbackOk && LOOPBACK.check(a.address, a.family)) return true
   return !BLOCKED.check(a.address, a.family)
-}
-
-/** The engine's port, on which Python's wired pictures named their `/view` URLs. */
-export function comfyViewPort(): number {
-  return ENGINE_MAIN_PORT
 }
 
 /** A host that is this machine: `localhost`, or a loopback address written as one. */
@@ -271,7 +265,7 @@ export async function safeFetch(url: string, p: SafeFetchPolicy, o: { signal?: A
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchRefused(p.words.refused)
     const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
-    const localView = p.loopbackView && !p.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!p.viewPorts?.includes(port))
+    const localView = p.loopbackView && !p.hosted && u.pathname === '/view' && !!p.viewPorts?.includes(port)
     // R10.8: a loopback /view is read by name, never fetched over a port.
     if (localView && isLoopbackHost(hostOf(u))) return readLoopbackView(u, { maxBytes: p.maxBytes, budget: o.budget, words: p.words, stopped })
     const r = await requestOnce(u, { signal, maxBytes: p.maxBytes, budget: o.budget, stopped, words: p.words, accept: p.accept }).catch((e: unknown) => {

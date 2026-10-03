@@ -6,11 +6,12 @@
  * true now; the rows that belong to R9/R10 are listed as
  * expected exceptions until those tasks land, so the list must shrink then.
  * R10.2 closed the canvas's silent fallback: a decline (`switched-off`,
- * `not-taken`) and every Shader effect engine case end in a plain refusal,
- * unless every refused node is local-only (tests/unit/runner-no-silent-engine.unit.spec.ts).
+ * `not-taken`) and every Shader effect engine case end in a plain refusal;
+ * step 4, C5 made that true of the stock classes too: there is no local engine
+ * (tests/unit/runner-no-silent-engine.unit.spec.ts).
  *
- * R10.6 closed row 28: hosted offers no local-only class or blueprint, and the
- * blueprints list natively with ComfyUI off (native-global-subgraphs.unit.spec.ts).
+ * R10.6 closed row 28: hosted offers no stock class or blueprint; C5 made that
+ * the only offer rule, here and hosted (native-global-subgraphs.unit.spec.ts).
  *
  * Also R11.7's and R11.8's named stop-gaps: a made sound past a reader's cap
  * (named with its maker's setting to shorten), a paid video model's sound
@@ -34,8 +35,9 @@ import {
 import { FRAME_WIDGET_NAMES, shownLabel, stopGapRefusal, switchedOffNodes, wiredDearestBound, withStaticWiredSettings } from '#shared/runner/stopGaps'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { isRunnerEligible, runnerRuleFor, runnerTakesNode } from '#shared/runner/eligibility'
-import { blockedRunRefusal, engineRoute, localOnlyHostedWords, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { hostedOffersClass } from '#shared/runner/hostedOffer'
+import { blockedRunRefusal, needsEngineReasons, nodesNeedingEngine, runRefusal } from '#shared/runner/needsEngine'
+import { sailorOffersClass } from '#shared/runner/offer'
+import { NOT_RUN_WORDS } from '#shared/runner/stockClasses'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import {
   BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_WORDS, MASK_EXTRACTOR_CLASS, SAM_MASK_WORDS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
@@ -121,7 +123,8 @@ const EXPECTED_EXCEPTIONS: Readonly<Record<number, string>> = {
  * made in the same run (NEEDS_LOCAL_ENGINE_SHADER_CASES; runner-no-silent-engine.unit.spec.ts). LC13: one of
  * your own effects runs in Sailor once the browser has drawn it; one not drawn (its run bound for the engine,
  * which can't run it) is refused plainly everywhere, never sent to the engine. Step 4, C4: the picture made in
- * the same run is refused plainly everywhere too; NEEDS_LOCAL_ENGINE_SHADER_CASES is empty.
+ * the same run is refused plainly everywhere too; NEEDS_LOCAL_ENGINE_SHADER_CASES is empty. Step 4, C5: the
+ * local engine and its lists are gone.
  */
 const SHADER_ENGINE_CASES: Readonly<Record<string, { closedBy: string; words: string }>> = {}
 const SHADER_CLOSED_CASES: Readonly<Record<string, string>> = {
@@ -138,7 +141,7 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
     expect(Object.keys(SHADER_ENGINE_CASES)).toHaveLength(0)
     for (const [name, words] of Object.entries(SHADER_CLOSED_CASES)) expect(words, name).toMatch(/^[A-Z].*\.$/)
   })
-  it('each graph case is refused, locally with the engine up, naming the node and its cause', () => {
+  it('each graph case is refused, naming the node and its cause', () => {
     const SH: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake'])
     const shader = (over: Record<string, unknown>, image?: Link): ApiPrompt => ({
       ...(image ? {} : { 0: { class_type: 'Image', inputs: { image: 'src.png', export: false, filename_prefix: 'ComfyUI', batch_index: -1 } } }),
@@ -157,20 +160,15 @@ describe('R10.2: the Shader effects once left to the engine are refused plainly,
     for (const [name, p] of cases) {
       expect(runnerTakesNode(p, 'fx', SH), name).toBe(false)
       expect(needsEngineReasons(p, { runnerOn: true, families: SH }), name).toEqual([SHADER_CLOSED_CASES[name]])
-      const local = engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: false, engineUp: true })
-      expect(local, name).toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
-      // LC13: hosted alike (a My effect is no longer on the local-engine list).
-      expect(engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: SH, hosted: true, engineUp: true }), name)
-        .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
+      expect(runRefusal([{ prompt: p, titleOf }], { runnerOn: true, families: SH }), name)
+        .toEqual({ title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES[name]}` })
     }
     expect(shaderEngineReason(shader({ seed: ['9', 0] }), 'fx', SH)).toBe(SHADER_CLOSED_CASES['a wired setting'])
     // Step 4, C4: its picture made in the run is refused the same way, never sent to the local engine.
     const SHB: ReadonlySet<RunnerFamily> = new Set(['cards', 'shader-bake', 'effects-blur'])
     const made: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), ...shader({}, ['b', 0]) }
-    for (const hosted of [false, true]) {
-      expect(engineRoute([{ prompt: made, titleOf }], { runnerOn: true, families: SHB, hosted, engineUp: true }))
-        .toEqual({ to: 'refused', title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES['its picture made in the run']}` })
-    }
+    expect(runRefusal([{ prompt: made, titleOf }], { runnerOn: true, families: SHB }))
+      .toEqual({ title: '“Halftone” can’t run', description: `“Halftone”: ${SHADER_CLOSED_CASES['its picture made in the run']}` })
   })
 })
 
@@ -179,20 +177,20 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     expect(Object.keys(EXPECTED_EXCEPTIONS).map(Number)).toEqual([27])
   })
 
-  // Row 28 (decision 4): R10.2 closed the canvas route (local-only classes go to the engine only locally, with it
-  // up, named); R10.6 closed the rest. Hosted offers no local-only class in node search and no blueprint (its
-  // list is empty, never ComfyUI's); locally the blueprints list natively with ComfyUI off, and a blueprint is
-  // judged class by class like any graph. The cases live in their own specs, which must keep them.
-  it('row 28 (R10.2, R10.6): local-only classes and blueprints: hosted offers neither; locally the blueprints list without ComfyUI', () => {
-    expect(hostedOffersClass('KSampler')).toBe(false)
-    expect(hostedOffersClass('GenerateImageNode')).toBe(true)
-    expect(engineRoute([{ prompt: { k: { class_type: 'KSampler', inputs: {} } }, titleOf: () => 'Sampler' }], { runnerOn: true, families: EVERY, hosted: true, engineUp: true }))
-      .toEqual({ to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(['Sampler']) })
+  // Row 28 (decision 4): R10.2 closed the canvas route; R10.6 closed the rest; step 4, C5 removed the local
+  // engine: a stock class is refused plainly everywhere, and node search offers none, here or hosted, nor a
+  // blueprint. A blueprint is judged class by class like any graph. The cases live in their own specs, which
+  // must keep them.
+  it('row 28 (R10.2, R10.6, C5): stock classes and blueprints: never offered, a stock class refused plainly', () => {
+    expect(sailorOffersClass('KSampler')).toBe(false)
+    expect(sailorOffersClass('GenerateImageNode')).toBe(true)
+    expect(runRefusal([{ prompt: { k: { class_type: 'KSampler', inputs: {} } }, titleOf: () => 'Sampler' }], { runnerOn: true, families: EVERY }))
+      .toEqual({ title: '“Sampler” can’t run', description: `“Sampler”: ${NOT_RUN_WORDS} Use Generate an image instead.` })
     const proven: [string, string][] = [
       ['native-global-subgraphs.unit.spec.ts', 'equals ComfyUI’s own list and entries for the repo’s blueprints'],
-      ['native-global-subgraphs.unit.spec.ts', 'each blueprint: on Sailor when the runner takes it; else the local engine locally (engine up), and plain words in hosted'],
-      ['native-global-subgraphs.unit.spec.ts', 'hosted lists only the classes the runner takes, plus the cards'],
-      ['native-global-subgraphs.unit.spec.ts', 'the sidebar fetches no blueprint and shows no blueprint tab or section in hosted'],
+      ['native-global-subgraphs.unit.spec.ts', 'each blueprint: on Sailor when the runner takes it; else plain words, here and hosted alike'],
+      ['native-global-subgraphs.unit.spec.ts', 'node search lists only the classes the runner takes, plus the cards, here and hosted'],
+      ['native-global-subgraphs.unit.spec.ts', 'the sidebar fetches no blueprint and shows no blueprint tab or section'],
       ['engine-path-alias.unit.spec.ts', 'R10.6: the blueprint list is empty in every spelling, and one blueprint is refused, never proxied'],
       ['runner-no-silent-engine.unit.spec.ts', 'R10.2'],
     ]
@@ -592,9 +590,9 @@ describe('R11.9: every named stop-gap, one case per row', () => {
     const p: ApiPrompt = { l: loadImage(), b: blur(['l', 0]), s: saveImage(['b', 0]) }
     expect(switchedOffNodes(p, off)).toEqual(['b'])
     expect(needsEngineReasons(p, { runnerOn: true, families: off, titleOf: id => (id === 'b' ? 'Soft blur' : id) })).toEqual([switchedOffWords('Soft blur')])
-    // R10.2: never the engine, even locally with it up.
-    expect(engineRoute([{ prompt: p, titleOf: id => (id === 'b' ? 'Soft blur' : id) }], { runnerOn: true, families: off, hosted: false, engineUp: true }))
-      .toEqual({ to: 'refused', title: '“Soft blur” can’t run', description: switchedOffWords('Soft blur') })
+    // R10.2: refused, named.
+    expect(runRefusal([{ prompt: p, titleOf: id => (id === 'b' ? 'Soft blur' : id) }], { runnerOn: true, families: off }))
+      .toEqual({ title: '“Soft blur” can’t run', description: switchedOffWords('Soft blur') })
     const k = makeKit({ deps: { families: () => off } })
     await writePng(join(k.root, 'input', 'p.png'))
     const err = await k.engine.startRun({ userId: k.userId, takes: [p], workflow: { nodes: [{ id: 'b', type: 'Blur', title: 'Soft blur' }] }, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)

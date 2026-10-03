@@ -9,11 +9,11 @@
  * race-window harvest of the engine's history) are gone; every one left here
  * answers from Sailor's own files and records.
  */
-import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { H3Event } from 'h3'
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus } from 'h3'
 import { ownedOutputKeys, outputKey } from './graphRuns'
+import { shortUserHash } from './userHash'
 import { assertCanonicalMultipart, parseUploadForm } from './multipart'
 import { canonicalUploadKey, engineDirForType, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { bakeFolderAbandoned } from '../runner/shaderBakeFiles'
@@ -97,12 +97,11 @@ export function inPublicInputFolder(folder: string): boolean {
 
 /**
  * LC11 fix round 1: a person's own `u_<hash>` folder, the name the runner
- * saves under (runner/results.ts userSubfolder, meterGraphRun.shortUserHash:
- * sha256 of the user id, 12 hex). Computed here, not imported, because
- * meterGraphRun imports this module; a spec pins the two equal.
+ * saves under (runner/results.ts userSubfolder, ./userHash.ts shortUserHash:
+ * sha256 of the user id, 12 hex).
  */
 export function ownUserFolder(userId: string): string {
-  return `u_${createHash('sha256').update(userId).digest('hex').slice(0, 12)}`
+  return `u_${shortUserHash(userId)}`
 }
 
 /** Whether a resolved folder is inside some person's `u_<hash>` folder other than this person's own. */

@@ -123,6 +123,7 @@ import { uploadRefFile } from '~/lib/shotdirector/refUpload'
 import { useCharacters } from '~/composables/useCharacters'
 import { defaultState, identityRefs, normalizeStateId } from '#shared/characters/types'
 import { rerolledSeed } from '#shared/runner/seedLimits'
+import { sailorOffersClass } from '#shared/runner/offer'
 import { upstreamSeedScope } from '~/lib/artifact/nextSteps'
 import { runStudioCascade, planStudiosToBakeForRun, hasStudioBaker, isStudioNode, isArtifactNode, type CascadeDeps } from '~/lib/studio/cascade'
 import { emitCanvasOcclusion } from '~/lib/studio/occlusion'
@@ -328,9 +329,10 @@ const snapGrid: [number, number] = [16, 16]
 function agentNodeTypes(): NodeTypeLite[] {
   const oi = (objectInfo.value || {}) as Record<string, any>
   // Drop raw nodes a capability supersedes (e.g. provider upscalers → UpscaleImageNode)
-  // so the agent never offers a redundant low-level node over the curated one.
+  // so the agent never offers a redundant low-level node over the curated one; and
+  // (step 4, C5) any class Sailor doesn't run: a stock class, a custom node, a retired one.
   const hidden = supersededNodeTypes()
-  const fromInfo = Object.keys(oi).filter(name => !hidden.has(name)).map((name) => {
+  const fromInfo = Object.keys(oi).filter(name => !hidden.has(name) && sailorOffersClass(name)).map((name) => {
     const info = oi[name]
     return {
       name,
@@ -3111,26 +3113,15 @@ function getWorkflowWithSubgraphs() {
 function takeFromExecutedEvent(event: MessageEvent): any | null {
   const output = event.data.output
   if (!output) return null
-  // Parallel-run pool: a result produced by an extra worker (its iframe is
-  // tagged data-worker) lives on THAT worker's origin. The default :8188
-  // /view proxy can't see other workers' files and filenames collide, so
-  // make those URLs absolute to the producing worker. Worker 0 / single
-  // worker → relative (served via the proxy, unchanged).
-  let originPrefix = ''
-  const src = event.source as Window | null
-  if (src) {
-    for (const f of document.querySelectorAll('iframe[data-worker]')) {
-      const frame = f as HTMLIFrameElement
-      if (frame.contentWindow === src) { originPrefix = new URL(frame.src).origin; break }
-    }
-  }
+  // Results are served same-origin by Sailor's /view (the worker pool and its
+  // per-worker origins are gone: R10.3, step 4 C5).
   const toUrl = (f: any) => {
     const params = new URLSearchParams({ filename: f.filename, type: f.type })
     if (f.subfolder) params.set('subfolder', f.subfolder)
     // Cache-buster: live-preview nodes reuse a fixed filename, so without
     // a unique query the browser would serve the stale cached file.
     params.set('t', String(Date.now()))
-    return `${originPrefix}/view?${params}`
+    return `/view?${params}`
   }
   const take = buildTake((event.data as any).prompt_id ?? null, output, toUrl)
   return takeHasContent(take) ? take : null

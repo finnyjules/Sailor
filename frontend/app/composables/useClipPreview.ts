@@ -5,10 +5,10 @@ const thumbCache = new Map<string, string[]>()   // key = `${assetId}:${count}`
 const waveformCache = new Map<string, number[]>() // key = `${assetId}:${buckets}`
 const inFlight = new Set<string>()
 
-// Video thumbnails and waveforms need the local engine. Without it the server
-// answers 503. That is NOT cached as an empty result any more (a session-long
-// [] used to hide a thumbnail forever if the engine merely hadn't started
-// yet) — instead the 503 is remembered for RETRY_SUPPRESS_MS so the clip
+// Video thumbnails and waveforms need Sailor's media tools. Without them the
+// server answers 503. That is NOT cached as an empty result any more (a
+// session-long [] used to hide a thumbnail forever if the tools merely weren't
+// ready yet) — instead the 503 is remembered for RETRY_SUPPRESS_MS so the clip
 // isn't re-fetched on every render, and returns null meanwhile, same as
 // before the fetch ever ran. Once that window passes, the next render tries
 // again.

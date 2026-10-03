@@ -39,7 +39,6 @@ import { firstOutputUrl } from '~~/server/runner/generators/repair'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { SYNC_3_APP, sync3NodeProblem, sync3Sources } from '~~/server/runner/generators/sync3'
 import { hostedRequestProblems, requestProblems } from '~~/server/runner/requestRules'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { ANSWER_NOT_SOUND } from '~~/server/runner/answerDownload'
 import { NO_OUTPUTS_MESSAGE, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodeMediaCheck } from '~~/server/runner/nodeMedia'
@@ -330,30 +329,6 @@ describe('refusals before the hold, in plain words', () => {
     expect(replicate.submitted()[0]!.payload.voice_id).toBe('sailor_clone_7f3a')
   })
 
-  it('the hosted /prompt meter (the ComfyUI path) refuses a cloned voice, a wired voice and a twin\'s cloned voice before pricing or any hold', async () => {
-    const cloned = CASES.find(c => c.name === 'speech · cloned voice')!
-    const twin = sample('MiniMaxSpeechRemoteNode')
-    const prompts: ApiPrompt[] = [
-      { n: node(cloned), a: card('n') },
-      { v: { class_type: 'PrimitiveString', inputs: { value: 'Wise_Woman' } }, n: node(speech, { voice_id: ['v', 0] }), a: card('n') },
-      { n: node(twin, { voice_id: 'sailor_clone_7f3a' }), a: card('n') },
-    ]
-    for (const prompt of prompts) {
-      const d = meterDeps()
-      const r = await meterGraphSubmit('u1', { prompt }, d as any)
-      expect(r.status).toBe(400)
-      expect((r.body as any).error.message).toBe(SPEECH_VOICE_NOT_OFFERED)
-      expect(Object.values((r.body as any).node_errors).map((e: any) => e.class_type)).toEqual([prompt.n!.class_type])
-      expect(d.priceGraph).not.toHaveBeenCalled()
-      expect(d.hold).not.toHaveBeenCalled()
-      expect(d.forward).not.toHaveBeenCalled()
-    }
-    // A preset voice goes through to pricing and ComfyUI.
-    const d = meterDeps()
-    const ok = await meterGraphSubmit('u1', { prompt: { n: node(twin), a: card('n') } }, d as any)
-    expect(ok.status).toBe(200)
-    expect(d.forward).toHaveBeenCalled()
-  })
 })
 
 describe('moderation (every text sent)', () => {

@@ -52,8 +52,8 @@ beforeEach(async () => {
   fs.writeFileSync(path.join(root, 'output', 'pick.png'), PICK)
   fs.writeFileSync(path.join(root, 'output', 'u_1', 'mine.png'), PICK)
   ;(await import('~~/server/utils/inputUploads')).__setInputUploadsEngineRootForTests(root)
-  // Nothing listens on the engine's port.
-  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed: connect ECONNREFUSED 127.0.0.1:8188') }))
+  // Nothing is ever fetched.
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed: connect ECONNREFUSED') }))
 })
 afterEach(() => {
   delete process.env.NUXT_CLERK_SECRET_KEY
@@ -75,11 +75,16 @@ describe('POST /api/scene3d/gen-3d — a canvas pick, nothing on the engine’s 
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('a loopback /view address is read off disk too, never fetched', async () => {
-    const res = await post({ imageUrl: 'http://127.0.0.1:8188/view?filename=pick.png' })
-    expect(res.status).toBe(200)
-    expect(sent().equals(PICK)).toBe(true)
-    expect(fetch).not.toHaveBeenCalled()
+  it('a loopback /view address on the app’s own port is read off disk too, never fetched; the engine’s port no longer (C5)', async () => {
+    vi.stubEnv('NUXT_PORT', '3002')
+    try {
+      const res = await post({ imageUrl: 'http://127.0.0.1:3002/view?filename=pick.png' })
+      expect(res.status).toBe(200)
+      expect(sent().equals(PICK)).toBe(true)
+      expect((await post({ imageUrl: 'http://127.0.0.1:8188/view?filename=pick.png' })).status).toBe(400)
+      expect(fetch).not.toHaveBeenCalled()
+    }
+    finally { vi.unstubAllEnvs() }
   })
 
   it('GET /view’s rules: a missing file is 404, a name that leaves the folder 400/403 — before any paid call', async () => {

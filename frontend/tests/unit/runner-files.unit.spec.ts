@@ -7,7 +7,7 @@ import { HANDOFF_MAX_REMEMBERED, HANDOFF_TTL_MS, createHandoff, sha256Hex, mimeF
 import {
   parseStyleRefs, moodboardFiles, parseInputFileRef, collectInputFiles, assertFilesOwned,
 } from '~~/server/runner/inputs'
-import { shortUserHash } from '~~/server/utils/meterGraphRun'
+import { shortUserHash } from '~~/server/utils/userHash'
 
 function engineRoot() {
   const root = mkdtempSync(join(tmpdir(), 'runner-engine-'))

@@ -76,16 +76,14 @@ export const SHADER_GENERATIVE_IDS: readonly string[] = [
 
 /**
  * R11.9c fix round 1 (M1): the plain words for each Shader effect the runner doesn't take, by cause.
- * R10.2: each is a refusal now, everywhere: the words say what to change. Fix round 1 (c): one of your
- * own effects still goes to the local engine, locally with it up (NEEDS_LOCAL_ENGINE's toast), until the
- * browser bakes them; these words are for where it can't go.
+ * R10.2: each is a refusal now, everywhere: the words say what to change.
  */
 export const SHADER_ENGINE_WORDS = {
   /**
-   * LC13: one of your own effects that wasn't drawn for this run (its run bound for the local engine, which
-   * can't run them: Python's node knows only the catalogue). Sailor runs them, drawn in your browser.
+   * LC13: one of your own effects that wasn't drawn for this run (the browser draws it only for a run the
+   * runner takes; C5: there is no local engine to run it otherwise).
    */
-  myEffect: 'This shader is one of your own effects, and the local engine can’t run those. Run it in a workflow without local-engine nodes, or pick one of Sailor’s effects.',
+  myEffect: 'This shader is one of your own effects, and it wasn’t drawn for this run. Remove the nodes Sailor doesn’t run, then run it again.',
   /** An effect id the runner's catalog doesn't list. */
   unknownEffect: 'This shader effect isn’t one Sailor knows yet. Pick another effect.',
   /** A setting wired in from another node. */
@@ -610,9 +608,9 @@ export function shaderParamsLookPortable(text: unknown): boolean {
  * reason to give (else null): its picture made in the run, and (R11.9c fix
  * round 1, M1) an effect the runner doesn't know, a wired setting, params
  * only Python reads, or a bake that no longer agrees with its settings. A
- * node simply not baked (its take bound for the engine) names none, but for
+ * node simply not baked (its run not the runner's) names none, but for
  * (LC13) one of your own effects: the runner takes it once the browser has
- * drawn it, and the local engine can't run it at all.
+ * drawn it, and nothing else can run it.
  */
 export function shaderEngineReason(prompt: ApiPrompt, nodeId: string, families: ReadonlySet<RunnerFamily>): string | null {
   const node = prompt[nodeId]
@@ -633,7 +631,7 @@ export function shaderEngineReason(prompt: ApiPrompt, nodeId: string, families: 
     // LC13: a My effect's bake must name the code it was drawn with (a built-in's names none).
     if (!!mine !== (baked.source !== undefined)) return SHADER_ENGINE_WORDS.keyMismatch
   }
-  // LC13: not drawn for this run (the browser draws only a run the runner takes): the local engine can't run it.
+  // LC13: not drawn for this run (the browser draws only a run the runner takes): nothing else can run it.
   if (mine && !baked) return SHADER_ENGINE_WORDS.myEffect
   return null
 }

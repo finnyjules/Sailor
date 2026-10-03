@@ -88,7 +88,8 @@ export async function imageExportKeptBytes(
     const s = scaleAtMost(inputs.scale)
     const png = isLink(inputs.format) || String(inputs.format ?? 'png').toLowerCase() === 'png'
     const embeds = png && (isLink(inputs.embed_metadata) || pyTruthy(inputs.embed_metadata ?? true))
-    const perFile = 64 * 1024 + MAX_SIDE + 4 * Math.ceil(s * 2 * MAX_SIDE + 1) + (embeds ? (text ??= savedFrameTextBytes(prompt, o.workflow ?? null)) : 0)
+    // A byte bound, not a price (step 4, C5: written factor-first so the markup guard, price-graph.unit.spec.ts, does not take it for one).
+    const perFile = 64 * 1024 + MAX_SIDE + 4 * Math.ceil(2 * s * MAX_SIDE + 1) + (embeds ? (text ??= savedFrameTextBytes(prompt, o.workflow ?? null)) : 0)
     const sl = isLink(inputs.images) ? smartLayoutBehind(prompt, inputs.images) : null
     let pixels: number
     let count: number

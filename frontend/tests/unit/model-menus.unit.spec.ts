@@ -9,15 +9,10 @@
  * it is put back afterwards. The real line-up is tested in
  * model-lineup-h2.unit.spec.ts.
  *
- * `fetch` is stubbed in every source test, so nothing here reaches a real engine.
+ * `fetch` is stubbed in every source test, so nothing here reaches anything
+ * (step 4, C5: there is no engine; /object_info serves the stored catalog).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -27,7 +22,6 @@ import { createApp, eventHandler, toWebHandler } from 'h3'
 import { __setInputUploadsDbForTests, __setInputUploadsEngineRootForTests } from '../../server/utils/inputUploads'
 import { nativeEngineRoute } from '../../server/native/router'
 import {
-  __objectInfoSaveSettledForTests,
   __setObjectInfoBaselineFileForTests,
   __setObjectInfoCacheFileForTests,
 } from '../../server/native/objectInfo'
@@ -250,7 +244,6 @@ async function get(p: string) {
 
 describe('every /object_info source is overlaid', () => {
   beforeEach(() => {
-    engineHealthState.value = 'up'
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'model-menus-root-')))
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'model-menus-store-')))
     for (const d of ['input', 'output', 'user', 'models']) fs.mkdirSync(path.join(root, d))
@@ -265,7 +258,6 @@ describe('every /object_info source is overlaid', () => {
     flagScenario()
   })
   afterEach(async () => {
-    await __objectInfoSaveSettledForTests()
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
     __setInputUploadsDbForTests(null)
@@ -279,32 +271,16 @@ describe('every /object_info source is overlaid', () => {
   const engineAnswers = (body: unknown) => engineFetch.mockImplementation(async () => new Response(JSON.stringify(body), { status: 200 }))
   const families = (on: boolean) => vi.stubEnv('NUXT_RUNNER_FAMILIES', on ? 'fal-edit,replicate-image,replicate-video' : '')
 
-  it('engine: parsed, overlaid and re-serialised; the saved copy is the engine\'s own', async () => {
-    engineAnswers(engineFixture())
-    expectOverlaid((await get('/object_info')).body, false)
-    families(true)
-    expectOverlaid((await get('/object_info')).body, true)
-    await __objectInfoSaveSettledForTests()
-    const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'object_info.json'), 'utf8'))
-    expect(saved.EditImageNode.input.required.model[1].hidden_options).toBeUndefined()
-    expect(saved.GenerateImageNode.input.required.model[1].default).toBe('flux-2-pro')
-  })
-
-  it('engine: one node\'s body too', async () => {
-    engineAnswers({ EditImageNode: engineFixture().EditImageNode })
+  it('one node\'s body too, from the stored catalog; an engine that would answer is never asked (C5)', async () => {
+    fs.mkdirSync(path.join(tmp, 'data'))
+    fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(engineFixture()))
+    engineAnswers({ EditImageNode: {} })
     const one = (await get('/object_info/EditImageNode')).body
     expect(one.EditImageNode.input.required.model[1]).toMatchObject({ default: 'Nano Banana 2', hidden_options: ['Flux Kontext Pro', 'Flux 2 Pro'] })
+    expect(engineFetch).not.toHaveBeenCalled()
   })
 
-  it('engine answers unparseable text: the stored catalog, overlaid (hidden models never shown)', async () => {
-    const file = path.join(tmp, 'baseline.json.gz')
-    fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(engineFixture())))
-    __setObjectInfoBaselineFileForTests(file)
-    engineFetch.mockImplementation(async () => new Response('{"KSampler": NaN}', { status: 200 }))
-    expectOverlaid((await get('/object_info')).body, false)
-  })
-
-  it('saved copy (engine down)', async () => {
+  it('saved copy', async () => {
     fs.mkdirSync(path.join(tmp, 'data'))
     fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(engineFixture()))
     expectOverlaid((await get('/object_info')).body, false)
@@ -312,7 +288,7 @@ describe('every /object_info source is overlaid', () => {
     expectOverlaid((await get('/object_info')).body, true)
   })
 
-  it('committed baseline (engine down, nothing saved)', async () => {
+  it('committed baseline (nothing saved)', async () => {
     const file = path.join(tmp, 'baseline.json.gz')
     fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(engineFixture())))
     __setObjectInfoBaselineFileForTests(file)

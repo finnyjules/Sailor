@@ -9,16 +9,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -238,18 +228,13 @@ describe('font_subset', () => {
     }
   })
 
-  it.skipIf(!hasFonts)('engine down: the whole font; engine up: the engine\'s own subset, with the same body', async () => {
+  it.skipIf(!hasFonts)('the whole font comes back, and nothing is asked (step 4, C5: no engine subset)', async () => {
     const b64 = fs.readFileSync(TTF).toString('base64')
-    const down = await post('/sailor/font_subset', { font: b64, text: 'a' })
-    expect(down.body).toMatchObject({ font: b64, before: fs.statSync(TTF).size, after: fs.statSync(TTF).size })
-    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8188/sailor/font_subset')
-    expect(JSON.parse(String(engineFetch.mock.calls[0]?.[1]?.body))).toEqual({ font: b64, text: 'a' })
-
-    engineFetch.mockReset()
     engineFetch.mockResolvedValue(new Response(JSON.stringify({ font: 'c3Vi', before: 55484, after: 3 }), { headers: { 'content-type': 'application/json; charset=utf-8' } }))
-    expect((await post('/sailor/font_subset', { font: b64, text: 'a' })).body).toEqual({ font: 'c3Vi', before: 55484, after: 3 })
+    const r = await post('/sailor/font_subset', { font: b64, text: 'a' })
+    expect(r.body).toMatchObject({ font: b64, before: fs.statSync(TTF).size, after: fs.statSync(TTF).size })
+    expect(engineFetch).not.toHaveBeenCalled()
 
-    engineFetch.mockClear()
     expect((await post('/sailor/font_subset', { font: 'abc' })).status).toBe(400)
     expect(engineFetch, 'a request the Python would refuse is refused here, never forwarded').not.toHaveBeenCalled()
   })

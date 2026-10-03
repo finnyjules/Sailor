@@ -26,7 +26,6 @@ import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import {
   SHADER_CATALOG_VERSION, SHADER_ENGINE_WORDS, SHADER_MY_EFFECT_WORDS, aspectSize, myEffectRefOf, shaderBakeKeySync, shaderBakedText, shaderTooManyFramesWords,
 } from '#shared/runner/shaderBakeKey'
-import { NEEDS_LOCAL_ENGINE_SHADER_CASES } from '#shared/runner/localOnly'
 import type { MyEffectRecord } from '#shared/myEffects/record'
 import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
 import { myEffectBakeProblem, myEffectRecordDigest } from '~~/server/runner/myEffectBake'
@@ -137,8 +136,7 @@ const refusal = async (k: ReturnType<typeof kit>, p: ApiPrompt, userId: string |
   k.engine.startRun({ userId, takes: [p], ...START }).then(() => null, e => e as Error & { statusCode?: number; data?: Record<string, unknown> })
 
 describe('LC13: a My effect\'s bake is checked against the person\'s own My effects store, then replayed', () => {
-  it('is no longer on the local-engine list (empty since step 4, C4)', () => {
-    expect(NEEDS_LOCAL_ENGINE_SHADER_CASES).toEqual({})
+  it('names its My effect by id and code version (the local-engine list is gone: step 4, C5)', () => {
     expect(myEffectRefOf(`${ID}~v3`)).toEqual({ id: ID, codeIndex: 2 })
     expect(myEffectRefOf(ID)).toEqual({ id: ID, codeIndex: 0 })
     for (const bad of ['mine_abc~v1', `${ID}~v0`, `${ID}~v1x`, 'halftone', 3]) expect(myEffectRefOf(bad), String(bad)).toBeNull()

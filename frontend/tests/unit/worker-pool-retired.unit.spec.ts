@@ -1,18 +1,13 @@
 /**
  * R10.3 guard: the ComfyUI worker pool is gone (extra headless engines on
  * :8189+, `/api/pool/ensure`, the `?comfyWorker=N` routing, spill and parallel
- * dispatch, per-worker sockets). One socket to the local engine stays for
- * R10.2's explicit local-only route.
- *
- * The engine's `/gate/resume` stays for one case only: a Gate inside a run the
- * local engine is running (a KSampler graph on the local-only route) still
- * pauses in Python and needs the engine to resume it. It is sent locally only;
- * hosted never sends it and its proxy refuses it (enginePath F1).
+ * dispatch, per-worker sockets). Step 4, C5: so are the last socket to the
+ * local engine and its `/gate/resume`: a Gate pauses only in a runner run, and
+ * resumes through the runner.
  */
 import { describe, expect, it } from 'vitest'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { gateResumeRoute } from '~/lib/runner/gateChoices'
 import { hostedEngineDecision, normalizeEnginePath } from '../../server/utils/enginePath'
 
 const root = process.cwd()
@@ -48,40 +43,27 @@ describe('R10.3: the worker pool is gone', () => {
     ]) expect(existsSync(join(root, f)), f).toBe(false)
   })
 
-  it('the run channel keeps one socket and queues on the local engine only', () => {
-    const src = readFileSync(join(root, 'app/composables/useDirectExecution.ts'), 'utf8')
-    expect(src).not.toMatch(/new Map<number, SocketState>|ensurePoolSocket|giveUpWorker|\/api\/pool/)
-    expect(src).toContain("$fetch<{ prompt_id?: string }>('/prompt'")
+  it('the run channel to the local engine is gone too (step 4, C5)', () => {
+    expect(existsSync(join(root, 'app/composables/useDirectExecution.ts'))).toBe(false)
   })
 })
 
-describe('R10.3: the engine Gate resume is local-only', () => {
-  it('only the Gate card (local branch) names /gate/resume', () => {
-    // R10.9: hosted refuses the whole /gate prefix as an engine-only route (404), without naming resume.
-    const hits = sources.filter(s => s.text.includes('/gate/resume')).map(s => s.file).sort()
-    expect(hits).toEqual(['app/components/vue-canvas/ComfyGateNode.vue'])
+describe('C5: the Gate resumes through the runner only', () => {
+  it('nothing names /gate/resume or the engine resume route', () => {
+    const hits = sources.filter(s => /\/gate\/resume|gateResumeRoute/.test(s.text)).map(s => s.file).sort()
+    expect(hits).toEqual([])
   })
 
-  it('the Gate card sends it only after the runner and hosted have been turned away', () => {
+  it('the Gate card sends its action to the runner, and nothing else', () => {
     const src = readFileSync(join(root, 'app/components/vue-canvas/ComfyGateNode.vue'), 'utf8')
-    const runner = src.indexOf("if (route === 'runner') {")
-    const none = src.indexOf("if (route === 'none') return")
-    const resume = src.indexOf("'/gate/resume'")
-    expect(runner).toBeGreaterThan(0)
-    expect(none).toBeGreaterThan(runner)
-    expect(resume).toBeGreaterThan(none)
-    expect(src).toContain('gateResumeRoute(props.data.promptId, { runner: isRunner.value, hosted })')
+    const guard = src.indexOf('if (!isRunner.value) return')
+    const send = src.indexOf("new CustomEvent('sailor:runnerGateAction'")
+    expect(guard).toBeGreaterThan(0)
+    expect(send).toBeGreaterThan(guard)
+    expect(src).not.toMatch(/\$fetch|fetch\(/)
   })
 
-  it('routes runner Gates to the runner, local engine Gates to the engine, and nothing in hosted', () => {
-    expect(gateResumeRoute('runner-abc', { runner: true, hosted: false })).toBe('runner')
-    expect(gateResumeRoute('runner-abc', { runner: true, hosted: true })).toBe('runner')
-    expect(gateResumeRoute('p1', { runner: false, hosted: false })).toBe('engine')
-    expect(gateResumeRoute('p1', { runner: false, hosted: true })).toBe('none')
-    expect(gateResumeRoute(undefined, { runner: false, hosted: false })).toBe('none')
-  })
-
-  it('hosted refuses /gate/resume at the proxy (a plain 404 since R10.9)', () => {
+  it('/gate/resume is a plain 404 at the proxy (R10.9; locally too since C5)', () => {
     for (const p of ['/gate/resume', '/comfyui/gate/resume', '/api/gate/resume']) {
       expect(hostedEngineDecision(normalizeEnginePath(p), 'POST').kind, p).toBe('notFound')
     }

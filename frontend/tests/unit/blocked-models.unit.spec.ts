@@ -19,9 +19,8 @@ import { NO_FAMILIES, type ModelFlags, type RunnerFamily } from '../../shared/ru
 import { IMAGE_MODELS_BY_ID } from '../../app/data/image-models'
 import { VIDEO_MODELS_BY_ID } from '../../app/data/video-models'
 import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
-import { blockedPromptBody, blockedRunRefusal, needsEngineDescription } from '../../app/lib/runner/needsEngine'
+import { blockedPromptBody, blockedRunRefusal } from '../../app/lib/runner/needsEngine'
 import { blockedPromptRefusal } from '../../server/utils/blockedModels'
-import { meterGraphSubmit } from '../../server/utils/meterGraphRun'
 import { priceGraph } from '../../server/utils/priceBook'
 import { makeKit } from './__runner__/kit'
 
@@ -123,15 +122,14 @@ describe('browser: refused before any /prompt', () => {
     expect(SWITCH_OFF_REASON).toBe('Its switch is off.')
   })
 
-  it('runner-only with an engine-only node beside it: the reason names that node', () => {
+  it('runner-only with a stock node beside it: the reason names that node as one Sailor doesn’t run (C5)', () => {
     flag(IMAGE_MODELS_BY_ID['flux-schnell']!, { runnerOnly: true, family: 'replicate-image' })
     const prompt: ApiPrompt = { 1: img('flux-schnell'), 2: card('1'), 3: { class_type: 'KSampler', inputs: { seed: 1 } } }
     const r = blockedRunRefusal([{ prompt, titleOf }], { runnerOn: true, families: fams('replicate-image') })
     expect(r).toEqual({
       title: `“Hero shot” uses ${IMAGE_MODELS_BY_ID['flux-schnell']!.label}, which only runs in Sailor`,
-      description: needsEngineDescription(['Old sampler']),
+      description: '“Old sampler”: Sailor doesn’t run this node. Use Generate an image instead.',
     })
-    expect(r!.description).toBe('Only the engine can run “Old sampler”.')
   })
 
   it('a run with nothing blocked goes on; every take is checked', () => {
@@ -140,21 +138,17 @@ describe('browser: refused before any /prompt', () => {
     expect(blockedRunRefusal([{ prompt: { 1: vid('veo-3.1') }, titleOf }, { prompt: { 1: vid('sora-2') }, titleOf }], { runnerOn: false })).not.toBeNull()
   })
 
-  it('runVueWorkflow checks after the runner declined or was skipped, and returns before any /prompt', () => {
+  it('runVueWorkflow checks after the runner declined or was skipped, and returns (C5: there is no /prompt to send)', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../app/layouts/default.vue'), 'utf8')
     const start = src.indexOf('async function runVueWorkflowBody(') // LC8 (B5): runVueWorkflow wraps this body
     const body = src.slice(start, src.indexOf('\n}\n', start))
     const runner = body.indexOf('sentToRunner = true')
     const check = body.indexOf('blockedRunRefusal(')
     const refuse = body.indexOf('return false', check)
-    const queues = [...body.matchAll(/direct\.queue\(/g)].map(m => m.index!)
-    expect(queues).toHaveLength(2)
+    expect(body).not.toMatch(/direct\.queue\(/)
     expect(runner).toBeGreaterThan(0)
     expect(check).toBeGreaterThan(runner)
     expect(body.slice(check - 60, check)).toContain('sentToRunner ? null :')
-    for (const q of queues) {
-      expect(q).toBeGreaterThan(refuse)
-    }
     expect(body.slice(check, refuse)).toContain('toast.error(blocked.title, { description: blocked.description })')
   })
 })
@@ -176,56 +170,6 @@ function deps() {
   }
 }
 
-describe('server: refused before pricing and any hold', () => {
-  it('meterGraphSubmit answers ComfyUI\'s 400 shape, takes no hold and never forwards', async () => {
-    flag(VIDEO_MODELS_BY_ID['sora-2']!, { discontinued: '2026-09-24' })
-    const d = deps()
-    const r = await meterGraphSubmit('u1', { prompt: { 4: vid('sora-2'), 5: card('4') } }, d as any)
-    expect(r.status).toBe(400)
-    expect(r.body).toEqual({
-      error: {
-        type: 'value_not_in_list',
-        message: 'Sora 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”, such as Hailuo H3 Max.',
-        details: 'Pick another model in “Generate a video”, such as Hailuo H3 Max.',
-        extra_info: {},
-      },
-      node_errors: {
-        4: {
-          errors: [{
-            type: 'value_not_in_list',
-            message: 'Sora 2 was discontinued by its service on 24 Sep 2026.',
-            details: 'Pick another model in “Generate a video”, such as Hailuo H3 Max.',
-            extra_info: { input_name: 'model', input_value: 'sora-2' },
-          }],
-          dependent_outputs: [],
-          class_type: 'GenerateVideoNode',
-        },
-      },
-    })
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-    expect(d.forward).not.toHaveBeenCalled()
-    expect(d.registerRun).not.toHaveBeenCalled()
-  })
-
-  it('a runner-only model: the reason follows the server\'s own switch', async () => {
-    flag(IMAGE_MODELS_BY_ID['flux-schnell']!, { runnerOnly: true, family: 'replicate-image' })
-    const label = IMAGE_MODELS_BY_ID['flux-schnell']!.label
-    const prompt = { 1: { ...img('flux-schnell'), _meta: { title: 'Hero shot' } }, 2: card('1'), 3: { class_type: 'KSampler', inputs: {} } }
-    const off = blockedPromptRefusal(prompt)!
-    expect(off.error.message).toBe(`“Hero shot” uses ${label}, which only runs in Sailor. Its switch is off.`)
-    vi.stubEnv('NUXT_RUNNER_ENABLED', 'true')
-    vi.stubEnv('NUXT_RUNNER_FAMILIES', 'replicate-image')
-    const on = blockedPromptRefusal(prompt)!
-    expect(on.error.message).toBe(`“Hero shot” uses ${label}, which only runs in Sailor. Only the engine can run “Unnamed node”.`)
-    // Nothing blocked: the meter goes on as before.
-    const d = deps()
-    const ok = await meterGraphSubmit('u1', { prompt: { 1: img('flux-2-pro'), 2: card('1') } }, d as any)
-    expect(ok.status).toBe(200)
-    expect(d.hold).toHaveBeenCalledTimes(1)
-    expect(blockedPromptBody({ 1: img('flux-2-pro') })).toBeNull()
-  })
-})
 
 // --------------------------------------------------------------- the runner
 

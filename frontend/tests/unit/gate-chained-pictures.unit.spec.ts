@@ -25,7 +25,6 @@ import {
 import {
   ISOBMFF_HEAD_BYTES, MAX_HOPS, MAX_MEASURED_FILES, SEEDANCE_REFERENCE_READS, createGateReads, graphInputPixels, graphInputSizes, isobmffIspePixels, picturePixels, pictureRule, pictureSize, pyRound, tiffFirstIfdUnique,
 } from '~~/server/utils/graphInputPixels'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { GRAPH_FILE_READERS, extractFileRefs } from '~~/server/utils/engineFileSurface'
 import { INPUTS_TOO_LARGE, MEASURED_REF_UNRENAMABLE, SNAPSHOT_NAME, __resetSnapshotSweepForTests, createGateSnapshots, rewriteMeasuredInputs, sourcePath } from '~~/server/utils/gateSnapshots'
 import { seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
@@ -53,49 +52,7 @@ describe('the probe (final re-review finding 1)', () => {
     4: SINK,
   }
 
-  it('16 MP photo → Topaz 2× → Flux 2 Pro edit: sized at 64 MP and refused before any hold', async () => {
-    const read = files({ 'photo.jpg': 16 * MP })
-    expect(await graphInputPixels(probe, read)).toEqual({ 2: 16 * MP, 3: 64 * MP })
-    const held: number[] = []
-    const forwarded: unknown[] = []
-    const reads = createGateReads()
-    const res = await meterGraphSubmit('u', { prompt: probe }, {
-      priceGraph,
-      measureInputSizes: p => graphInputSizes(p, read, reads),
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async (_u: string, credits: number) => { held.push(credits); return { ok: true as const, holdId: 1 } },
-      getAvailable: async () => 0,
-      forward: async (b: unknown) => { forwarded.push(b); return { status: 200, body: { prompt_id: 'p' } } },
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }) as { status: number, body: any }
-    expect(res.status).toBe(400)
-    expect(res.body.error.message).toBe(FLUX_2_EDIT_TOO_LARGE)
-    expect(Object.keys(res.body.node_errors)).toEqual(['3'])
-    expect(held).toEqual([])
-    expect(forwarded).toHaveLength(0)
-  })
 
-  it('a picture the gate can\'t size (Recraft Crisp → Flux 2 Pro): refused before any hold', async () => {
-    const p: P = { 1: load('photo.jpg'), 2: upscale('1', { model: 'Recraft Crisp' }), 3: flux2Edit('2'), 4: SINK }
-    const read = files({ 'photo.jpg': MP })
-    const held: number[] = []
-    const reads = createGateReads()
-    const res = await meterGraphSubmit('u', { prompt: p }, {
-      priceGraph,
-      measureInputSizes: q => graphInputSizes(q, read, reads),
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async (_u: string, credits: number) => { held.push(credits); return { ok: true as const, holdId: 1 } },
-      getAvailable: async () => 0,
-      forward: async () => ({ status: 200, body: { prompt_id: 'p' } }),
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }) as { status: number, body: any }
-    expect(res.status).toBe(400)
-    expect(res.body.error.message).toBe(unsizedInputWords('EditImageNode'))
-    expect(held).toEqual([])
-    // Step 3, R10.9: the live hosted /prompt handler that wired this up is gone (hosted never reaches the engine).
-    const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
-    expect(src).not.toContain('measureInputPixels: prompt')
-  })
 
   it('a smaller photo through the same chain: the edit is charged at least what fal bills for the real size', async () => {
     // 4.5 MP → Topaz 2× = 18 MP, just under the cap.
@@ -525,46 +482,7 @@ describe('the hosted normalisation: what is priced is what ComfyUI runs (R2, R4)
     expect(w[1]!.inputs.width).toBe('4096')
   })
 
-  it('the gate forwards the normalised prompt, and prices it', async () => {
-    const forwarded: any[] = []
-    const held: number[] = []
-    const read = files({ 'p.jpg': MP })
-    const reads = createGateReads()
-    const prompt: P = { 1: load('p.jpg'), 2: { class_type: 'Compositor', inputs: { layer1: ['1', 0], width: '4096', height: { __value__: 4096 } } }, 3: flux2Edit('2'), 4: SINK }
-    const res = await meterGraphSubmit('u', { prompt, client_id: 'c' }, {
-      priceGraph,
-      normalizePrompt: p => normalizeHostedPrompt(p, CATALOG),
-      measureInputSizes: p => graphInputSizes(p, read, reads),
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async (_u: string, credits: number) => { held.push(credits); return { ok: true as const, holdId: 1 } },
-      getAvailable: async () => 0,
-      forward: async (b: unknown) => { forwarded.push(b); return { status: 200, body: { prompt_id: 'p' } } },
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    })
-    expect(res.status).toBe(200)
-    expect(forwarded[0].client_id).toBe('c')
-    expect(forwarded[0].prompt[2].inputs.width).toBe(4096)
-    expect(forwarded[0].prompt[2].inputs.height).toBe(4096)
-    const expected = priceGraph(forwarded[0].prompt, { inputPixels: { 3: 4096 * 4096 } }).credits
-    expect(held).toEqual([expected])
-    expect(expected).toBeGreaterThan(priceGraph(prompt, { inputPixels: { 3: 256 } }).credits)
-  })
 
-  it('a refused normalisation: 400 in ComfyUI\'s shape, nothing held or sent', async () => {
-    const forwarded: unknown[] = []
-    const res = await meterGraphSubmit('u', { prompt: frame({ width: '4096.5', height: 4096 }) }, {
-      priceGraph,
-      normalizePrompt: p => normalizeHostedPrompt(p, CATALOG),
-      spendGuard: async () => {}, validateFileRefs: async () => { throw new Error('not reached') }, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async () => { throw new Error('not reached') },
-      getAvailable: async () => 0,
-      forward: async (b: unknown) => { forwarded.push(b); return { status: 200, body: { prompt_id: 'p' } } },
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }) as { status: number, body: any }
-    expect(res.status).toBe(400)
-    expect(res.body.error.message).toBe(SETTING_UNREADABLE)
-    expect(forwarded).toHaveLength(0)
-  })
 })
 
 describe('a Nano Banana action whose deciding text is linked (R3)', () => {
@@ -629,26 +547,6 @@ describe('a wrapper inside a wrapper: refused, never unwrapped twice (fix round 
     expect('problems' in twice && twice.problems.map(x => [x.input, x.message])).toEqual([['image', SETTING_UNREADABLE]])
   })
 
-  it('every hosted check reads the normalised prompt: the file check, the sizing, the price, and what is sent', async () => {
-    const seen: Record<string, any> = {}
-    const read = files({ 'p.jpg': MP })
-    const prompt: P = { 1: load('p.jpg'), 2: { class_type: 'Load3D', inputs: { model_file: 'a.glb', image: { __value__: { image: 'x.png' } }, width: 1024, height: 1024 } }, 3: flux2Edit('1'), 4: SINK }
-    const res = await meterGraphSubmit('u', { prompt }, {
-      priceGraph: (p, o) => { seen.price = p; return priceGraph(p, o) },
-      normalizePrompt: p => normalizeHostedPrompt(p, CATALOG),
-      measureInputSizes: p => { seen.sizes = p; return graphInputSizes(p, read) },
-      spendGuard: async () => {}, validateFileRefs: async (p) => { seen.files = p }, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async () => ({ ok: true as const, holdId: 1 }),
-      getAvailable: async () => 0,
-      forward: async (b: any) => { seen.sent = b.prompt; return { status: 200, body: { prompt_id: 'p' } } },
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    })
-    expect(res.status).toBe(200)
-    for (const k of ['files', 'sizes', 'price', 'sent']) expect(seen[k]![2].inputs.image, k).toEqual({ image: 'x.png' })
-    // One object throughout: what is checked is what is sent.
-    expect(seen.files).toBe(seen.sent)
-    expect(prompt[2]!.inputs.image).toEqual({ __value__: { image: 'x.png' } })
-  })
 })
 
 describe('AVIF / HEIF sequences: refused, since the engine decodes the track (fix round 2, 2)', () => {
@@ -930,67 +828,13 @@ describe('the run reads exactly the bytes it was priced on (fix round 3, R3 + R4
     expect('problems' in r && r.problems.map(x => x.message)).toEqual([MEASURED_REF_UNRENAMABLE])
   })
 
-  it('the gate forwards the copies, prices them, and releases them only when the run ends', async () => {
-    const { root, folder } = setup()
-    writeFileSync(join(root, 'input', 'mine.png'), await png(1000, 1000))
-    const snaps = createGateSnapshots({ folder, token: 'run2' })
-    const released: string[] = []
-    const forwarded: any[] = []
-    let settle: (() => void) | undefined
-    const deps = {
-      priceGraph,
-      normalizePrompt: (p: unknown) => normalizeHostedPrompt(p, CATALOG),
-      measureInputSizes: (p: any) => graphInputSizes(p, async v => { const c = await snaps.take({ value: v, literalInput: false }); return c ? pictureSize(c.path) : null }),
-      finalizePrompt: (p: any) => rewriteMeasuredInputs(p, snaps),
-      releaseInputs: async () => { released.push('now'); await snaps.release() },
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async () => ({ ok: true as const, holdId: 1 }),
-      getAvailable: async () => 0,
-      forward: async (b: any) => { forwarded.push(b); return { status: 200, body: { prompt_id: 'p' } } },
-      registerRun: async () => {},
-      startSettle: () => { settle = () => { void snaps.release() } },
-      releaseHold: async () => {},
-    }
-    const prompt: P = { 1: { ...load('mine.png'), is_changed: 'pinned' } as any, 2: flux2Edit('1'), 3: SINK }
-    const res = await meterGraphSubmit('u', { prompt }, deps)
-    expect(res.status).toBe(200)
-    const sent = forwarded[0].prompt
-    expect(sent[1].inputs.image).toMatch(/^g1-run2-[0-9a-f]{64}\.png$/)
-    // is_changed never reaches the engine.
-    expect(Object.keys(sent[1]).sort()).toEqual(['class_type', 'inputs'])
-    // The copy is still there for the queued run; released when its watcher ends.
-    expect(released).toEqual([])
-    expect(existsSync(join(root, 'input', sent[1].inputs.image))).toBe(true)
-    settle!()
-    await new Promise(r => setTimeout(r, 20))
-    expect(existsSync(join(root, 'input', sent[1].inputs.image))).toBe(false)
-  })
 
-  it('a refused or unqueued run releases its copies at once', async () => {
-    for (const forward of [
-      async () => ({ status: 400, body: { error: 'x' } }),
-      async () => { throw new Error('engine down') },
-    ]) {
-      const released: string[] = []
-      await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: SINK } }, {
-        priceGraph, releaseInputs: async () => { released.push('now') },
-        spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-        hold: async () => ({ ok: true as const, holdId: 1 }), getAvailable: async () => 0,
-        forward, registerRun: async () => {}, startSettle: () => { throw new Error('not reached') }, releaseHold: async () => {},
-      }).catch(() => null)
-      expect(released).toEqual(['now'])
-    }
-  })
 
   it('is_changed and any other node-level key are dropped by the normalisation; _meta is kept', () => {
     const n = normalised({ 1: { class_type: 'LoadImage', inputs: { image: 'a.png' }, is_changed: 'pinned', _meta: { title: 'Photo' }, extra: 1 } as any })
     expect(n[1]).toEqual({ class_type: 'LoadImage', inputs: { image: 'a.png' }, _meta: { title: 'Photo' } })
   })
 
-  it('the live hosted handler that forwarded the copies to the engine is gone (step 3, R10.9)', () => {
-    const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
-    expect(src).not.toMatch(/handleMeteredPrompt|createGateSnapshots\(\)|\bfetch\(/)
-  })
 })
 
 // ── G1 follow-up (re-review 3) ────────────────────────────────────────────
@@ -1039,51 +883,7 @@ describe('what one request may copy (follow-up 1)', () => {
     expect(INPUTS_TOO_LARGE).toBe('This run uses more file data than Sailor can check at once. Run fewer or smaller files at a time.')
   })
 
-  it('the gate refuses an over-limit request with that message, before the hold, and releases the copies', async () => {
-    let held = false
-    let released = false
-    // The limit is passed while the pictures are measured (the copy of the next one isn't made).
-    let over = false
-    const res = await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: flux2Edit('1'), 3: SINK } }, {
-      priceGraph,
-      measureInputSizes: async () => { over = true; return { pixels: {}, problems: [{ nodeId: '2', classType: 'EditImageNode', input: 'input_image', message: unreadableInputWords('EditImageNode') }] } },
-      inputsRefusal: () => (over ? INPUTS_TOO_LARGE : null),
-      releaseInputs: async () => { released = true },
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async () => { held = true; return { ok: true as const, holdId: 1 } }, getAvailable: async () => 0,
-      forward: async () => ({ status: 200, body: { prompt_id: 'p' } }), registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }) as { status: number, body: any }
-    expect(res.status).toBe(400)
-    // The byte limit's own words, not the "can't read the size" the uncopied file would otherwise give.
-    expect(res.body.error.message).toBe(INPUTS_TOO_LARGE)
-    expect(held).toBe(false)
-    expect(released).toBe(true)
-  })
 
-  it('a caller with no credit is refused before anything is copied or measured; a free prompt isn\'t asked', async () => {
-    let measured = false
-    const deps = {
-      priceGraph,
-      availableBeforeMeasuring: async () => 0,
-      measureInputSizes: async () => { measured = true; return { pixels: {}, problems: [] } },
-      referenceSecondsProblems: async () => { measured = true; return [] },
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async () => ({ ok: true as const, holdId: 1 }), getAvailable: async () => 0,
-      forward: async () => ({ status: 200, body: { prompt_id: 'p' } }), registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }
-    const err = await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: flux2Edit('1'), 3: SINK } }, deps).then(() => null, e => e)
-    expect(err?.statusCode).toBe(402)
-    expect(measured).toBe(false)
-    // Nothing that costs anything (no output, no paid node): not asked, runs on.
-    let asked = false
-    const res = await meterGraphSubmit('u', { prompt: { 1: load('a.png') } }, { ...deps, availableBeforeMeasuring: async () => { asked = true; return 0 } })
-    expect(asked).toBe(false)
-    expect(res.status).toBe(200)
-    // A caller with credit goes on to measuring as before.
-    measured = false
-    await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: flux2Edit('1'), 3: SINK } }, { ...deps, availableBeforeMeasuring: async () => 500 })
-    expect(measured).toBe(true)
-  })
 })
 
 describe('the leftover sweep deletes only the copies\' own names (follow-up 2)', () => {

@@ -302,11 +302,11 @@ describe('blockedModelUses: runner-only while the family is on', () => {
     expect(blockedModelUses(p, { families: ON })).toEqual(use)
   })
 
-  it('the refusal names the node and the model; the reason is the node that needs the engine', () => {
+  it('the refusal names the node and the model; the reason is the node Sailor doesn’t run (C5)', () => {
     const withEngine: ApiPrompt = { 9: { class_type: 'Image', inputs: { image: 'first.png' } }, 1: { ...rotate(), inputs: { ...rotate().inputs, image: ['9', 0] } }, 2: { class_type: 'KSampler', inputs: {} } }
     const titles: Record<string, string> = { 1: 'Side view', 2: 'Old sampler', 9: 'Photo' }
     const r = blockedRunRefusal([{ prompt: withEngine, titleOf: id => titles[id] ?? 'Unnamed node' }], { runnerOn: true, families: ON })
-    expect(r).toEqual({ title: '“Side view” uses Qwen Image Edit 2511, which only runs in Sailor', description: 'Only the engine can run “Old sampler”.' })
+    expect(r).toEqual({ title: '“Side view” uses Qwen Image Edit 2511, which only runs in Sailor', description: '“Old sampler”: Sailor doesn’t run this node. Use Generate an image instead.' })
     // Its own setup is what stops it (no picture linked): said plainly, never "its switch is off".
     const alone = blockedRunRefusal([{ prompt: p, titleOf: () => 'Side view' }], { runnerOn: true, families: ON })
     expect(alone!.description).toBe(NOT_TAKEN_AS_SET_UP_REASON)

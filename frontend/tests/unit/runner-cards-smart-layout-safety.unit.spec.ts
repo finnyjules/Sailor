@@ -165,6 +165,10 @@ const gone = async (pid: number, ms: number) => {
 
 // ── 1. treatments ────────────────────────────────────────────────────────────
 
+
+/** Step 4, C5: the safe fetcher with the route's own port (3002 here) as the one loopback /view it reads by name. */
+const ownPort = (o: { maxBytes?: number } = {}) => safeImageFetcher({ hosted: false, viewPorts: [3002], ...o })
+
 describe('photo treatments on an image layer (a real render)', () => {
   const c = FX.execute.find(e => e.name.startsWith('the starter'))!
   const name = Object.keys(c.files)[0]!
@@ -256,33 +260,35 @@ describe('the image fetcher (route and runner)', () => {
     expect(hits).toEqual([])
   })
 
-  it('locally, a loopback /view on the engine’s port (or the route’s own) is read off disk, never fetched; any other port, or hosted, is refused', async () => {
+  it('locally, a loopback /view on the route’s own port is read off disk, never fetched; any other port (C5: the engine’s too), or hosted, is refused', async () => {
     await expect(safeImageFetcher({ hosted: false })(`${base}/view?filename=a.png&type=temp`)).rejects.toThrow(FETCH_REFUSED)
     const port = Number(new URL(base).port)
     const own = await safeImageFetcher({ hosted: false, viewPorts: [port] })(`${base}/view?filename=own.png`)
     expect(own.contentType).toBe('image/png')
     expect(Buffer.from(own.data).equals(viewPng)).toBe(true)
-    // R10.8: the engine's port needs nothing listening on it.
-    const got = await safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=a.png&type=temp')
+    // R10.8: read by name off disk, never connected to: the port needs nothing listening on it.
+    const got = await ownPort()('http://127.0.0.1:3002/view?filename=a.png&type=temp')
     expect(got.contentType).toBe('image/png')
     expect(Buffer.from(got.data).equals(viewPng)).toBe(true)
+    // Step 4, C5: the engine's port is no longer one Sailor reads by name.
+    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=a.png&type=temp')).rejects.toThrow(FETCH_REFUSED)
     // Read by name, under GET /view's own rules.
-    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=missing.png')).rejects.toThrow('image fetch failed (404)')
-    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=../a.png')).rejects.toThrow('image fetch failed (400)')
-    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=a.png&subfolder=..')).rejects.toThrow('image fetch failed (403)')
+    await expect(ownPort()('http://127.0.0.1:3002/view?filename=missing.png')).rejects.toThrow('image fetch failed (404)')
+    await expect(ownPort()('http://127.0.0.1:3002/view?filename=../a.png')).rejects.toThrow('image fetch failed (400)')
+    await expect(ownPort()('http://127.0.0.1:3002/view?filename=a.png&subfolder=..')).rejects.toThrow('image fetch failed (403)')
     await expect(safeImageFetcher({ hosted: true })(`${base}/view?filename=a.png`)).rejects.toThrow(FETCH_REFUSED)
     await expect(safeImageFetcher({ hosted: true })('http://127.0.0.1:8188/view?filename=a.png')).rejects.toThrow(FETCH_REFUSED)
     expect(hits).toEqual([])
   })
 
   it('a temp picture gone from disk is read from GET /view’s kept copy (fix round 1, M3)', async () => {
-    const got = await safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=gone.png&type=temp')
+    const got = await ownPort()('http://127.0.0.1:3002/view?filename=gone.png&type=temp')
     expect(Buffer.from(got.data).equals(viewPng)).toBe(true)
     expect(got.contentType).toBe('image/png')
     // The copy is keyed by type too: an output of that name has none.
-    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=gone.png')).rejects.toThrow('image fetch failed (404)')
+    await expect(ownPort()('http://127.0.0.1:3002/view?filename=gone.png')).rejects.toThrow('image fetch failed (404)')
     // A refused name never reaches the copy.
-    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=../gone.png&type=temp')).rejects.toThrow('image fetch failed (400)')
+    await expect(ownPort()('http://127.0.0.1:3002/view?filename=../gone.png&type=temp')).rejects.toThrow('image fetch failed (400)')
     expect(hits).toEqual([])
   })
 
@@ -308,7 +314,7 @@ describe('the image fetcher (route and runner)', () => {
   })
 
   it('stops at its byte cap (a file read off disk too)', async () => {
-    await expect(safeImageFetcher({ hosted: false, maxBytes: 1000 })('http://127.0.0.1:8188/view?filename=big.png')).rejects.toThrow(FETCH_TOO_LARGE)
+    await expect(ownPort({ maxBytes: 1000 })('http://127.0.0.1:3002/view?filename=big.png')).rejects.toThrow(FETCH_TOO_LARGE)
     expect(hits).toEqual([])
     // FETCH_TIMEOUT: a download's limit (no loopback answer is downloaded any more).
     expect(FETCH_TIMEOUT).toMatch(/20 seconds/)
@@ -633,7 +639,7 @@ describe('round 3', () => {
     const big = new ArrayBuffer(60 * 1024 * 1024)
     const tree = { type: 'div', props: { children: ['a', 'b'].map(x => ({ type: 'img', props: { src: `http://pic.test/${x}.png` } })) } }
     await expect(inlineTreeImages(tree, async () => ({ data: big, contentType: 'image/png' }))).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
-    await expect(safeImageFetcher({ hosted: false })('http://127.0.0.1:8188/view?filename=big.png', { budget: { left: 1000 } })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+    await expect(ownPort()('http://127.0.0.1:3002/view?filename=big.png', { budget: { left: 1000 } })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
   })
 
   it('at most 256 elements, for the route too; the route’s body is limited', async () => {
@@ -1012,7 +1018,7 @@ describe('round 5: no picture reaches the renderer by address', () => {
     await expect(routeWith({ template: v2({ background: { fill: `url(http://${hp}/view?r2)` } }), aspect: 'a' })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_STYLE_URL })
     expect(hits).toEqual([])
     // Still fine: a plain address through the safe fetcher, and embedded pictures in a fill.
-    const png = await renderTemplatePng({ template: v2({ elements: [image('http://127.0.0.1:8188/view?filename=plain.png')] }) as never, aspect: 'a' })
+    const png = await renderTemplatePng({ template: v2({ elements: [image('http://127.0.0.1:3002/view?filename=plain.png')] }) as never, aspect: 'a' }, { fetcher: ownPort() })
     expect(png.length).toBeGreaterThan(0)
     // R10.8: read off disk, nothing asked of any port.
     expect(hits).toEqual([])

@@ -38,16 +38,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -609,16 +599,13 @@ describe('LOCAL MODE — single user: no registry, no filter; projects served na
     expect(onDisk('p-theirs')).toBe(false)
   })
 
-  it('still raw-proxies the /sailor routes that are not native yet', async () => {
+  it('a /sailor route Sailor doesn’t serve is a plain 404, never proxied (step 4, C5: no engine)', async () => {
     mode = 'local'
-    for (const [p, target] of [
-      ['/sailor/render_timeline', 'http://127.0.0.1:8188/sailor/render_timeline'],
-      ['/sailor/spacetype_encode?x=2', 'http://127.0.0.1:8188/sailor/spacetype_encode?x=2'],
-    ] as const) {
+    for (const p of ['/sailor/render_timeline', '/sailor/spacetype_encode?x=2']) {
       proxyRequest.mockClear()
       const r = await via(p, 'GET', null)
-      expect(r.status, p).toBe('proxied')
-      expect(r.target, p).toBe(target)
+      expect(r.status, p).toBe(404)
+      expect(proxyRequest, p).not.toHaveBeenCalled()
     }
   })
 

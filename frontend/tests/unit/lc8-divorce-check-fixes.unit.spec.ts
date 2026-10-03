@@ -1,5 +1,7 @@
-// LC8: what the R11.10 divorce check found (B2, B3, F1, F2, F4), with the engine off.
-// B1 is in run-socket-waits-for-engine.unit.spec.ts; B5 in run-refusal-keeps-project.unit.spec.ts.
+// LC8: what the R11.10 divorce check found (B2, B3, F1, F2, F4), with the engine off. Step 4, C5: there is
+// no engine at all now; a stock class or a custom node is refused plainly, here and hosted alike.
+// B1 (no engine socket) is now the app-wide guard, server-engine-port-guard.unit.spec.ts; B5 in
+// run-refusal-keeps-project.unit.spec.ts.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
@@ -8,23 +10,24 @@ import { makeKit } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { EVERY_KNOWN_FAMILY, type RunnerFamily } from '#shared/runner/families'
 import {
-  NOTHING_TO_RUN_WORDS, CUSTOM_NODE_WORDS, blockedRunRefusal, cantTakeItWords, engineRoute, engineRunPrompt,
+  NOTHING_TO_RUN_WORDS, blockedRunRefusal, cantTakeItWords, engineRunPrompt, runRefusal,
   unknownClassRefusal, wireTypeMismatch,
 } from '#shared/runner/needsEngine'
 import { outputClassesOf, runnerTakesWorkflow, showsMadeResult } from '#shared/runner/validate'
 import { autoSinkSlotType } from '~/lib/canvas/autoSinkSlot'
+import { NOT_RUN_WORDS } from '#shared/runner/stockClasses'
 
 const CATALOG = JSON.parse(gunzipSync(readFileSync(join(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
 const ALL = EVERY_KNOWN_FAMILY
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const titles: Record<string, string> = {}
 const titleOf = (id: string) => titles[id] ?? id
-const route = (p: ApiPrompt, o: { hosted?: boolean; engineUp?: boolean; declined?: string | null } = {}) =>
-  engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: ALL, hosted: !!o.hosted, engineUp: !!o.engineUp, catalog: CATALOG, declined: o.declined ?? null })
+const route = (p: ApiPrompt, o: { declined?: string | null } = {}) =>
+  runRefusal([{ prompt: p, titleOf }], { runnerOn: true, families: ALL, catalog: CATALOG, declined: o.declined ?? null })
 
 // ── B2 ───────────────────────────────────────────────────────────────────────
 
-describe('B2: a stock checkpoint graph with the engine off is judged as local-only, not as failed settings', () => {
+describe('B2: a stock checkpoint graph is judged as stock (C5: Sailor doesn’t run it), not as failed settings', () => {
   // Load Checkpoint's model list is empty with the engine off: its setting fails the runner's checks.
   const sd = (): ApiPrompt => ({
     4: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: null } },
@@ -37,44 +40,33 @@ describe('B2: a stock checkpoint graph with the engine off is judged as local-on
   })
   Object.assign(titles, { 3: 'KSampler', 4: 'Load Checkpoint', 9: 'Save Image' })
 
-  it('engine off, locally: "This workflow needs the local engine", naming KSampler and Load Checkpoint', () => {
+  it('refused, naming KSampler and Load Checkpoint as nodes Sailor doesn’t run, with what to use instead', () => {
     const r = route(sd())
-    expect(r.to).toBe('refused')
-    expect(r).toMatchObject({ title: 'This workflow needs the local engine' })
-    const d = (r as { description: string }).description
+    expect(r.title).toBe('6 nodes can’t run')
+    const d = r.description
     expect(d).toContain('“KSampler”')
     expect(d).toContain('“Load Checkpoint”')
+    expect(d).toContain('Sailor doesn’t run these nodes.')
+    expect(d).toContain('Instead of “KSampler”, use Generate an image.')
     expect(d).not.toContain('missing or invalid setting')
-    // Save image reads VAE decode (local-only): it rides along, not named.
+    expect(d).not.toMatch(/engine/i)
+    // Save image reads VAE decode (stock): judged with a stand-in, not named.
     expect(d).not.toContain('Save Image')
   })
 
-  it('hosted: it runs only on the local engine', () => {
-    const r = route(sd(), { hosted: true })
-    expect(r).toMatchObject({ to: 'refused', title: 'This workflow can’t run here' })
-    expect((r as { description: string }).description).toMatch(/“KSampler”.* run only on the local engine/)
-  })
-
-  it('engine up, locally: the engine judges its own nodes (it goes there)', () => {
-    expect(route(sd(), { engineUp: true }).to).toBe('engine')
-  })
-
-  it('unwired local-only nodes nothing reads, engine off: still named as needing the engine, never "invalid setting"', () => {
+  it('unwired stock nodes nothing reads: still named, never "invalid setting"', () => {
     const p: ApiPrompt = {
       3: { class_type: 'KSampler', inputs: { seed: 0, steps: 20, cfg: 8, sampler_name: 'euler', scheduler: 'normal', denoise: 1 } },
       9: { class_type: 'SaveImage', inputs: { filename_prefix: 'ComfyUI' } },
     }
     const r = route(p)
-    expect(r).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
-    expect((r as { description: string }).description).toContain('“KSampler”')
-    // Round 2 (R10.2): their presence routes the run: with the engine up it goes there, named by the engine's own errors.
-    expect(route(p, { engineUp: true }).to).toBe('engine')
+    expect(r).toEqual({ title: '“KSampler” can’t run', description: `“KSampler”: ${NOT_RUN_WORDS} Use Generate an image instead.` })
   })
 })
 
 // ── Round 2: project 34249b7f's shape ────────────────────────────────────────
 
-describe('round 2: local-only nodes beside runnable chains are never left out (project 34249b7f)', () => {
+describe('round 2: stock nodes beside runnable chains are never left out (project 34249b7f)', () => {
   // Two copies of: stock nodes (unwired, as saved) and Load image + Image scale, with the auto Image cards
   // Run adds on VAE decode, Load image and Image scale. The Load image → Image chains alone would run.
   const shape = (): ApiPrompt => {
@@ -96,25 +88,17 @@ describe('round 2: local-only nodes beside runnable chains are never left out (p
   }
   Object.assign(titles, { aks: 'KSampler', ackpt: 'Load Checkpoint', avae: 'VAE Decode', ascale: 'Upscale Image' })
 
-  it('no runner hand-off: the pruning never leaves a local-only node out', () => {
+  it('no runner hand-off: the pruning never leaves a stock node out', () => {
     expect(runnerTakesWorkflow(shape(), ALL)).toBe(false)
     expect(engineRunPrompt(shape(), CATALOG)).toBeNull()
   })
 
-  it('engine off, locally: refused, "needs the local engine", naming the stock nodes', () => {
+  it('refused, naming the stock nodes (C5: no engine to send them to)', () => {
     const r = route(shape())
-    expect(r).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
-    expect((r as { description: string }).description).toContain('“KSampler”')
-  })
-
-  it('hosted: refused, they run only on the local engine', () => {
-    const r = route(shape(), { hosted: true })
-    expect(r).toMatchObject({ to: 'refused', title: 'This workflow can’t run here' })
-    expect((r as { description: string }).description).toMatch(/run only on the local engine/)
-  })
-
-  it('engine up, locally: the whole graph goes to the engine', () => {
-    expect(route(shape(), { engineUp: true }).to).toBe('engine')
+    expect(r.title).toMatch(/^\d+ nodes can’t run$/)
+    expect(r.description).toContain('“KSampler”')
+    expect(r.description).toContain('Sailor doesn’t run these nodes.')
+    expect(r.description).not.toMatch(/engine/i)
   })
 
   it('a custom node beside a runnable chain is never left out either; C4: a retired node nothing reads is, as ComfyUI leaves it out', () => {
@@ -125,8 +109,7 @@ describe('round 2: local-only nodes beside runnable chains are never left out (p
     const kept = engineRunPrompt(custom, CATALOG)
     expect(kept === null || 'x' in kept).toBe(true)
     expect(runnerTakesWorkflow(kept ?? custom, ALL)).toBe(false)
-    expect(route(custom)).toMatchObject({ to: 'refused', title: 'This workflow needs the local engine' })
-    expect(route(custom, { engineUp: true }).to).toBe('engine')
+    expect(route(custom)).toEqual({ title: '“If” can’t run', description: `“If”: ${NOT_RUN_WORDS}` })
     // Step 4, C4: Kinetic Typography is retired (it was on NEEDS_LOCAL_ENGINE): one nothing reads is left out
     // (retired.ts retiredNodeIds), the chain handed to the runner; one an output reads is refused as retired.
     const kinetic: ApiPrompt = { ...chain(), k: { class_type: 'KineticType', inputs: {} } }
@@ -139,7 +122,7 @@ describe('round 2: local-only nodes beside runnable chains are never left out (p
       .toEqual({ title: '“Kinetic” was retired', description: 'Use Vector Type instead.' })
   })
 
-  it('a wrong-type wire is still dropped (r119c): no local-engine node there', () => {
+  it('a wrong-type wire is still dropped (r119c): no stock node there', () => {
     const p: ApiPrompt = {
       3: { class_type: 'LoadVideoFrames', inputs: { file: 'clip.mp4', max_seconds: 10, max_frames: 1, max_size: 720, start_frame: 0, stride: 1 } },
       2: { class_type: 'SaveImage', inputs: { filename_prefix: 'x', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true, images: ['3', 0] } },
@@ -236,7 +219,7 @@ describe('F1: a canvas of cards alone', () => {
     expect(showsMadeResult(cardAlone())).toBe(false)
     expect(runnerTakesWorkflow(cardAlone(), ALL)).toBe(false)
     const r = route(cardAlone())
-    expect(r).toEqual({ to: 'refused', title: 'Nothing to run', description: NOTHING_TO_RUN_WORDS })
+    expect(r).toEqual({ title: 'Nothing to run', description: NOTHING_TO_RUN_WORDS })
     // The runner's generic decline gets the same words; its own particular words stand.
     expect(route(cardAlone(), { declined: 'Sailor can’t run this workflow yet.' })).toMatchObject({ title: 'Nothing to run' })
     expect(route(cardAlone(), { declined: 'Running workflows in Sailor is switched off on this server right now.' }))
@@ -268,17 +251,17 @@ describe('F2: Enhance a video → Save video', () => {
     expect(runnerTakesWorkflow(p(), fams)).toBe(false)
     const b = blockedRunRefusal([{ prompt: p(), titleOf }], { runnerOn: true, families: fams, isOutputClass: outputClassesOf(CATALOG) })!
     expect(b.title).toBe('“Enhance a video” uses Topaz Video Upscale, which only runs in Sailor')
-    // Save video's own family is off: said so, never "Only the engine can run".
+    // Save video's own family is off: said so, never the engine.
     expect(b.description).toBe('“Save video” is switched off right now.')
     expect(`${b.title} ${b.description}`).not.toMatch(/engine/i)
   })
 
-  it('a local-only node beside it: that one does need the engine, and is named so', () => {
+  it('a stock node beside it: named as one Sailor doesn’t run (C5)', () => {
     const fams = ALL
     const k: ApiPrompt = { ...p(), k: { class_type: 'KSampler', inputs: {} } }
     titles.k = 'Old sampler'
     const bk = blockedRunRefusal([{ prompt: k, titleOf }], { runnerOn: true, families: fams, isOutputClass: outputClassesOf(CATALOG) })!
-    expect(bk.description).toBe('Only the engine can run “Old sampler”.')
+    expect(bk.description).toBe(`“Old sampler”: ${NOT_RUN_WORDS} Use Generate an image instead.`)
   })
 
   it('cantTakeItWords says what to change', () => {
@@ -290,18 +273,13 @@ describe('F2: Enhance a video → Save video', () => {
 // ── F4 ───────────────────────────────────────────────────────────────────────
 
 describe('F4: a custom node the catalogue doesn\'t hold', () => {
-  it('engine off: the local-engine words, naming it; hosted: it runs only there; engine up: not installed', () => {
-    const off = unknownClassRefusal('LayerUtility: If ', 'If', { hosted: false, engineUp: false })!
-    expect(off.title).toBe('This workflow needs the local engine')
-    expect(off.description).toContain('“If”')
-    expect(off.description).toContain(CUSTOM_NODE_WORDS)
-    expect(unknownClassRefusal('LayerUtility: If ', 'If', { hosted: true, engineUp: false })).toEqual({ title: 'This workflow can’t run here', description: `“If”: ${CUSTOM_NODE_WORDS}` })
-    expect(unknownClassRefusal('LayerUtility: If ', 'If', { hosted: false, engineUp: true })!.title).toBe('“If” isn’t installed')
+  it('Sailor doesn’t run it, named, here and hosted alike (C5)', () => {
+    expect(unknownClassRefusal('LayerUtility: If ', 'If')).toEqual({ title: '“If” can’t run', description: `“If”: ${NOT_RUN_WORDS}` })
   })
 
   it('a class Sailor knows keeps the builder\'s own error', () => {
-    expect(unknownClassRefusal('KSampler', 'KSampler', { hosted: false, engineUp: false })).toBeNull()
-    expect(unknownClassRefusal('Image', 'Image', { hosted: false, engineUp: false })).toBeNull()
+    expect(unknownClassRefusal('KSampler', 'KSampler')).toBeNull()
+    expect(unknownClassRefusal('Image', 'Image')).toBeNull()
   })
 
   it('the layout judges an unknown node before showing a builder error', () => {

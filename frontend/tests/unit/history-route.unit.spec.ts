@@ -2,10 +2,9 @@
  * Step 3, R10.8: GET /history and GET /history/{promptId} are Sailor's own.
  *
  * They answer from the runner's run records (one entry per finished stage,
- * in ComfyUI's shape) and, locally, the disk cache; the engine is asked only
- * while its cached health says 'up' (its local-only runs), bounded by the
- * health timeout. With nothing on the engine's port every route still answers.
- * Hosted reads the caller's own runs only — never the engine or the shared cache.
+ * in ComfyUI's shape) and, locally, the disk cache of old engine runs. Step 4,
+ * C5: there is no engine to ask; nothing is ever requested. Hosted reads the
+ * caller's own runs only — never the shared cache.
  *
  * fs is mocked for the cache: the real .cache/history.json on disk is a live
  * dev cache and must never be touched by a test run. The run store is a fake.
@@ -24,12 +23,6 @@ vi.mock('node:fs/promises', async (orig) => ({
   mkdir: vi.fn(async () => {}),
 }))
 
-const engineHealthMock = vi.fn(async () => 'down' as 'up' | 'down')
-vi.mock('~~/server/native/engineHealth', () => ({
-  engineHealth: () => engineHealthMock(),
-  ENGINE_HEALTH_TIMEOUT_MS: 1500,
-  ENGINE_MAIN_PORT: 8188,
-}))
 
 const RUN_A = 'run_aaaaaaaa-0000-4000-8000-000000000001'
 const RUN_B = 'run_bbbbbbbb-0000-4000-8000-000000000002'
@@ -92,14 +85,12 @@ async function one(promptId: string, userId: string | null = null) {
 }
 
 /** Nothing listens on the engine's port: every request to it is refused. */
-const refused = () => vi.fn(async () => { throw new TypeError('fetch failed: connect ECONNREFUSED 127.0.0.1:8188') })
+const refused = () => vi.fn(async () => { throw new TypeError('fetch failed: connect ECONNREFUSED') })
 
 beforeEach(async () => {
   vi.resetModules()
   fsState.existing = null
   fsState.reads = 0
-  engineHealthMock.mockReset()
-  engineHealthMock.mockResolvedValue('down')
   vi.stubGlobal('fetch', refused())
   await setStore([LOCAL_RUN, OTHER_RUN])
 })
@@ -152,23 +143,14 @@ describe('the runner’s records as history entries', () => {
   })
 })
 
-describe('GET /history — nothing on the engine’s port', () => {
-  it('local, engine down: the cache and the runner’s records, without a request', async () => {
+describe('GET /history — no engine (C5)', () => {
+  it('local: the cache and the runner’s records, without a request', async () => {
     fsState.existing = JSON.stringify({ old: { outputs: {} } })
     const res = await list()
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(Object.keys(body).sort()).toEqual(['old', `${RUN_A}.0.t1`])
     expect(fetch).not.toHaveBeenCalled()
-  })
-
-  it('local, engine reported up but refusing: still answers, from the cache and the runner', async () => {
-    engineHealthMock.mockResolvedValue('up')
-    fsState.existing = JSON.stringify({ old: { outputs: {} } })
-    const res = await list()
-    expect(res.status).toBe(200)
-    expect(Object.keys(await res.json()).sort()).toEqual(['old', `${RUN_A}.0.t1`])
-    expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it('asks the store for the newest runs only (fix round 1, I1): the limit is passed through', async () => {
@@ -179,16 +161,14 @@ describe('GET /history — nothing on the engine’s port', () => {
     expect(HISTORY_RUN_LIMIT).toBe(200)
   })
 
-  it('local, engine up: its local-only runs are merged in, asked with a timeout', async () => {
-    engineHealthMock.mockResolvedValue('up')
+  it('local: an engine that would answer is never asked', async () => {
     fsState.existing = JSON.stringify({ a: 1 })
     ;(fetch as any).mockImplementation(async () => new Response(JSON.stringify({ b: 2 }), { status: 200 }))
-    const res = await list()
-    const body = await res.json()
-    expect(body).toMatchObject({ a: 1, b: 2 })
+    const body = await (await list()).json()
+    expect(body).toMatchObject({ a: 1 })
+    expect(body.b).toBeUndefined()
     expect(body[`${RUN_A}.0.t1`]).toBeTruthy()
-    expect((fetch as any).mock.calls[0][0]).toBe('http://127.0.0.1:8188/history')
-    expect((fetch as any).mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('local, the run store unreadable: the cache still answers', async () => {
@@ -200,15 +180,13 @@ describe('GET /history — nothing on the engine’s port', () => {
     expect(await res.json()).toEqual({ old: { outputs: {} } })
   })
 
-  it('hosted: the caller’s own runs only — never the engine (even up) or the shared cache', async () => {
+  it('hosted: the caller’s own runs only — never the shared cache', async () => {
     process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_x'
-    engineHealthMock.mockResolvedValue('up')
     fsState.existing = JSON.stringify({ old: { outputs: {} } })
     await setStore([MINE_HOSTED, OTHER_RUN])
     const res = await list('user_1')
     expect(Object.keys(await res.json())).toEqual([`${RUN_A}.0.t1`])
     expect(fetch).not.toHaveBeenCalled()
-    expect(engineHealthMock).not.toHaveBeenCalled()
     expect(fsState.reads).toBe(0)
   })
 
@@ -220,7 +198,7 @@ describe('GET /history — nothing on the engine’s port', () => {
   })
 })
 
-describe('GET /history/{promptId} — nothing on the engine’s port', () => {
+describe('GET /history/{promptId} — no engine (C5)', () => {
   it('a runner stage comes from its run record, without a request', async () => {
     const key = `${RUN_A}.0.t1`
     const res = await one(key)
@@ -229,17 +207,15 @@ describe('GET /history/{promptId} — nothing on the engine’s port', () => {
     expect(Object.keys(body)).toEqual([key])
     expect(body[key].outputs['3'].images[0].filename).toBe('flux_00001_.png')
     expect(fetch).not.toHaveBeenCalled()
-    expect(engineHealthMock).not.toHaveBeenCalled()
   })
 
-  it('a runner stage that isn’t there is a 404, and never asks the engine', async () => {
-    engineHealthMock.mockResolvedValue('up')
+  it('a runner stage that isn’t there is a 404, and nothing is asked', async () => {
     expect((await one(`${RUN_A}.7.t1`)).status).toBe(404)
     expect((await one(`${RUN_B}.0.t1`)).status).toBe(404) // someone else's run (local runs are userId null)
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('local, engine down: a local-only run from the cache, else a 404 — without a request', async () => {
+  it('local: an old engine run from the cache, else a 404 — without a request', async () => {
     fsState.existing = JSON.stringify({ p1: { outputs: {} } })
     const res = await one('p1')
     expect(res.status).toBe(200)
@@ -248,26 +224,14 @@ describe('GET /history/{promptId} — nothing on the engine’s port', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('local, engine reported up but refusing: the cache answers', async () => {
-    engineHealthMock.mockResolvedValue('up')
-    fsState.existing = JSON.stringify({ p1: { outputs: {} } })
-    const res = await one('p1')
-    expect(res.status).toBe(200)
-    expect(fetch).toHaveBeenCalledTimes(1)
-  })
-
-  it('local, engine up: a local-only run is asked of the engine with a timeout', async () => {
-    engineHealthMock.mockResolvedValue('up')
+  it('local: an engine that would answer is never asked', async () => {
     ;(fetch as any).mockImplementation(async () => new Response(JSON.stringify({ p1: { live: true } }), { status: 200 }))
-    const res = await one('p1')
-    expect(await res.json()).toEqual({ p1: { live: true } })
-    expect((fetch as any).mock.calls[0][0]).toBe('http://127.0.0.1:8188/history/p1')
-    expect((fetch as any).mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
+    expect((await one('p1')).status).toBe(404)
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('hosted: the caller’s own runner stage; anyone else’s, or an engine id, is a 404 — no engine, no cache', async () => {
     process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_x'
-    engineHealthMock.mockResolvedValue('up')
     fsState.existing = JSON.stringify({ p1: { outputs: {} } })
     await setStore([MINE_HOSTED, OTHER_RUN])
     expect((await one(`${RUN_A}.0.t1`, 'user_1')).status).toBe(200)
@@ -275,7 +239,6 @@ describe('GET /history/{promptId} — nothing on the engine’s port', () => {
     expect((await one('p1', 'user_1')).status).toBe(404)
     expect((await one(`${RUN_A}.0.t1`, null)).status).toBe(401)
     expect(fetch).not.toHaveBeenCalled()
-    expect(engineHealthMock).not.toHaveBeenCalled()
     expect(fsState.reads).toBe(0)
   })
 })

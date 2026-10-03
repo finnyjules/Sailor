@@ -447,41 +447,21 @@ describe('unpriced image models', () => {
   })
 })
 
-// ── 8. A local /prompt too large to parse (R11.4 fix round 1) ────────────
+// ── 8. A local /prompt too large to parse (R11.4 fix round 1); step 4, C5: no local /prompt ──
 
-describe('a local /prompt over the parse cap', () => {
+describe('local /prompt: a plain 404 (step 4, C5: no engine, nothing to check or forward)', () => {
   const g = globalThis as any
-  let middleware: (event: any) => Promise<any>
-  let capBytes = 0
   const proxyRequest = vi.fn(async (_event: any, url: string) => ({ proxiedTo: url }))
-  const ev = (body: unknown) => ({ path: '/prompt', method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
-  const big = (prompt: ApiPrompt) => {
-    const base = JSON.stringify({ prompt, pad: '' })
-    return Buffer.from(JSON.stringify({ prompt, pad: 'x'.repeat(capBytes + 1 - base.length) }))
-  }
-  it('still refuses an unpriced or a Recraft SVG model, plainly, never forwarded; a priced one goes through', async () => {
-    vi.doMock('~~/server/native/engineHealth', async orig => ({ ...(await orig() as object), engineHealth: async () => 'up' }))
+  it('is refused before anything is read, in every size; nothing is proxied', async () => {
     vi.doMock('~~/server/utils/deployMode', () => ({ deployMode: () => 'local', isHosted: () => false, engineMultiUser: () => false }))
     g.defineEventHandler = (fn: any) => fn
     g.createError = (opts: { statusCode: number, message?: string }) => Object.assign(new Error(opts.message), { statusCode: opts.statusCode })
     g.proxyRequest = proxyRequest
-    const mod = await import('~~/server/middleware/comfyui-proxy')
-    middleware = mod.default as any
-    capBytes = mod.PROMPT_CHECK_MAX_BYTES
-    const cases: [string, string][] = [
-      ['reve-create', 'This workflow uses Reve Create, which has no price yet. Pick another model.'],
-      ['seedream-5-pro', 'This workflow uses Seedream 5 Pro, which has no price yet. Pick another model.'],
-      ['recraft-v4-svg', 'This workflow uses Recraft V4 SVG, which only runs in Sailor.'],
-    ]
-    for (const [id, words] of cases) {
-      const e = ev(big({ 1: gen(id), 2: save(['1', 0]) }))
-      const res = await middleware(e)
-      expect(e.node.res.statusCode, id).toBe(400)
-      expect(res.error.message, id).toBe(words)
+    const middleware = (await import('~~/server/middleware/comfyui-proxy')).default as any
+    const ev = (body: unknown) => ({ path: '/prompt', method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
+    for (const body of [{ prompt: { 1: gen('recraft-v4-svg'), 2: save(['1', 0]) } }, Buffer.from(JSON.stringify({ prompt: { 1: gen('recraft-v4-svg'), 2: save(['1', 0]) }, pad: 'x'.repeat(9 * 1024 * 1024) }))]) {
+      await expect(middleware(ev(body))).rejects.toMatchObject({ statusCode: 404 })
     }
     expect(proxyRequest).not.toHaveBeenCalled()
-    // A priced model is forwarded as before.
-    await middleware(ev(big({ 1: gen('nano-banana-2'), 2: save(['1', 0]) })))
-    expect(proxyRequest).toHaveBeenCalledTimes(1)
   })
 })

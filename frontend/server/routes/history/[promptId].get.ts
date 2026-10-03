@@ -1,16 +1,15 @@
 /**
  * GET /history/{promptId} in ComfyUI's shape, answered by Sailor (step 3,
  * R10.8; see server/native/history.ts). A runner stage comes from the run's
- * record — the caller's own run only. Locally, any other id is a local-only
- * engine run: asked of the engine only while it is up, else read from the
- * disk cache. Hosted never asks the engine or reads the shared cache.
+ * record — the caller's own run only. Locally, any other id is an old engine
+ * run, read from the disk cache the engine-era history kept (step 4, C5: there
+ * is no engine to ask). Hosted never reads the shared cache.
  */
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createError, defineEventHandler, getRouterParam } from 'h3'
 import { deployMode } from '../../utils/deployMode'
-import { engineHealth, ENGINE_HEALTH_TIMEOUT_MS, ENGINE_MAIN_PORT } from '../../native/engineHealth'
 import { runnerHistoryEntry } from '../../native/history'
 import { getRunStore, runIdOf } from '../../runner/store'
 
@@ -33,27 +32,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, message: 'History entry not found' })
   }
 
-  // Hosted makes no engine runs; there is nothing else to read.
+  // Hosted never made engine runs; there is nothing else to read.
   if (hosted) throw createError({ statusCode: 404, message: 'Not found' })
 
-  // A local-only engine run: the engine only while it is up (cached health,
-  // bounded by the same timeout as GET /history).
-  if (await engineHealth() === 'up') {
-    try {
-      const res = await fetch(`http://127.0.0.1:${ENGINE_MAIN_PORT}/history/${encodeURIComponent(promptId)}`, { signal: AbortSignal.timeout(ENGINE_HEALTH_TIMEOUT_MS) })
-      if (res.ok) {
-        const data = await res.json() as Record<string, any>
-        // ComfyUI returns {} when the promptId doesn't exist — check it actually has data
-        if (data[promptId]) {
-          return data
-        }
-      }
-    }
-    catch {
-      // The engine went away — the cache below answers.
-    }
-  }
-
+  // An old engine run, from the disk cache.
   try {
     if (existsSync(CACHE_FILE)) {
       const raw = await readFile(CACHE_FILE, 'utf-8')

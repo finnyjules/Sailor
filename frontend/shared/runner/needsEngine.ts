@@ -1,15 +1,17 @@
 /**
- * Which nodes of a run need the local engine (ComfyUI). Sailor boots and runs
- * without it; only the workflows the runner can't take are refused, and the
- * refusal names those nodes by their titles. The rule is the runner's own
- * (`runnerTakesNode` / `isRunnerEligible`, shared/runner/eligibility.ts) —
- * this file only turns it into titles. Pure helpers, relative imports only:
- * layouts/default.vue (through app/lib/runner/needsEngine.ts) and the server
+ * Which nodes of a run the runner refuses, and the refusal built on it. Sailor
+ * runs every workflow on its runner; there is no local engine (step 4, C5).
+ * A workflow the runner can't take is refused, and the refusal names those
+ * nodes by their titles. The rule is the runner's own (`runnerTakesNode` /
+ * `isRunnerEligible`, shared/runner/eligibility.ts) — this file only turns it
+ * into titles. (The file keeps its old name: "needs the engine" meant "the
+ * runner refuses".) Pure helpers, relative imports only: layouts/default.vue
+ * (through app/lib/runner/needsEngine.ts) and the server
  * (server/utils/blockedModels.ts) share them, so there is one rule.
  */
 import { isLink, type ApiNode, type ApiPrompt } from './graph'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, RUNNER_SPECIAL_CLASSES, filmShotRefusalWords, filmShotTaken, isRunnerEligible, nodeValidationErrors, runnerTakesNode, svgReaderProblems } from './eligibility'
-import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_SHADER_CASES, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from './localOnly'
+import { NOT_RUN_WORDS, isStockClass, stockClassAdvice } from './stockClasses'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, prunedAny, pruneInvalidOutputs, readByOutputs, showsMadeResult } from './validate'
 import { EVERY_KNOWN_FAMILY, NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
@@ -82,7 +84,7 @@ export function needsEngineReasons(
 
 /**
  * What a refused node's output is replaced with when judging the nodes it
- * feeds (`engineRoute`): a runner source of the same type, so a node the runner
+ * feeds (`runRefusal`): a runner source of the same type, so a node the runner
  * refuses only because it reads a refused node (Save image after VAE decode,
  * or after a switched-off Blur) isn't counted as refused itself. Any other
  * type stands in as a picture: ComfyUI itself checks a wire's type.
@@ -198,11 +200,8 @@ function withStandIns(run: ApiPrompt, id: string, refused: ReadonlySet<string>, 
   return out
 }
 
-/** Where a run that isn't going to the runner goes: the local engine, or nowhere, with words. */
-export type EngineRoute =
-  /** `notice`: the local-engine toast naming the Sailor nodes that still need it (NEEDS_LOCAL_ENGINE), shown as it goes. */
-  | { to: 'engine'; notice?: { title: string; description: string } }
-  | { to: 'refused'; title: string; description: string }
+/** The refusal of a run the runner didn't take: a title and the words naming each node at fault. */
+export interface RunRefusal { title: string; description: string }
 
 /** A class the runner knows (a runner type, a rule row, or Film a shot), whatever its families. */
 const runnerKnowsClass = (ct: string) => RUNNER_NODE_TYPES.has(ct) || Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, ct) || RUNNER_SPECIAL_CLASSES.has(ct)
@@ -232,7 +231,7 @@ function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null, o: { wir
     let ok = !nodeValidationErrors(node.class_type, node.inputs ?? {}).length
       && requiredWires(catalog, node.class_type).every(name => node.inputs?.[name] !== undefined)
       // LC8 (B3): a wire of the wrong type, as ComfyUI's validate_inputs refuses it (the output is dropped, the
-      // rest runs). Only for the runner's hand-off (engineRunPrompt): engineRoute still names such a node.
+      // rest runs). Only for the runner's hand-off (engineRunPrompt): runRefusal still names such a node.
       // C4: so is a wire from an output its source doesn't have (wireFromMissingOutput).
       && !(o.wireTypes && (wireTypeMismatch(prompt, id, catalog) || wireFromMissingOutput(prompt, id, catalog)))
     for (const v of Object.values(node.inputs ?? {})) if (isLink(v) && !check(v[0], seen)) ok = false
@@ -256,17 +255,17 @@ function outputTest(catalog?: NodeCatalog | null): (ct: string) => boolean {
 }
 
 /**
- * LC8 (B2): a prompt whose every output fails validation, judged again for the
- * local engine: the outputs that read a local-only class (./localOnly.ts) and
- * what they read, or null when none does. The engine judges its own nodes'
- * settings (a Load Checkpoint's model list is empty with the engine off), so
- * these are judged as local-only nodes first, not as failed settings.
+ * LC8 (B2): a prompt whose every output fails validation, judged again: the
+ * outputs that read a stock class Sailor doesn't run (./stockClasses.ts) and
+ * what they read, or null when none does. A stock node's own settings can't be
+ * judged (a Load Checkpoint's model list is empty), so such a node is named as
+ * one Sailor doesn't run, not as a failed setting.
  */
-function localOnlyOutputsPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
+function stockOutputsPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
   const isOutput = outputTest(catalog)
   const ids = Object.keys(prompt)
   const outputs = ids.filter(id => isOutput(prompt[id]!.class_type))
-    .filter(o => [...readByOutputs(prompt, [o])].some(id => isLocalOnlyClass(prompt[id]!.class_type)))
+    .filter(o => [...readByOutputs(prompt, [o])].some(id => isStockClass(prompt[id]!.class_type)))
   if (!outputs.length) return null
   const keep = readByOutputs(prompt, outputs)
   return Object.fromEntries(ids.filter(id => keep.has(id)).map(id => [id, prompt[id]!]))
@@ -283,16 +282,15 @@ function localOnlyOutputsPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): 
 export function engineRunPrompt(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
   const part = engineRunPart(prompt, catalog, { wireTypes: true })
   if (typeof part === 'string') return null
-  // LC8 round 2 (R10.2): a node only the local engine runs is never left out: such a run is no runner hand-off
-  // (engineRoute takes it to the engine, named, or refuses it in the local-engine words).
-  if (Object.entries(prompt).some(([id, n]) => !(id in part) && needsTheLocalEngine(n.class_type))) return null
+  // LC8 round 2 (R10.2): a node Sailor doesn't run is never left out silently: such a run is no runner hand-off
+  // (runRefusal names it).
+  if (Object.entries(prompt).some(([id, n]) => !(id in part) && notRunBySailor(n.class_type))) return null
   return part
 }
 
-/** LC8 round 2: a class only the local engine runs: local-only, a Sailor node still on NEEDS_LOCAL_ENGINE, or a custom node. */
-export function needsTheLocalEngine(classType: string): boolean {
-  return isLocalOnlyClass(classType) || isCustomClass(classType)
-    || (classType !== 'ShaderEffect' && Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, classType))
+/** C5: a class Sailor doesn't run at all: a stock class (./stockClasses.ts) or a custom node. */
+export function notRunBySailor(classType: string): boolean {
+  return isStockClass(classType) || isCustomClass(classType)
 }
 
 /**
@@ -314,54 +312,41 @@ export function leftOutNotice(
 }
 
 /**
- * R10.2: whether a run the runner won't take (declined, or skipped because the
- * browser already knows it won't) may go to the local engine. Only when:
- *   - this is local, not hosted;
- *   - the engine is up;
- *   - every node the runner refuses, in what ComfyUI would run of it
- *     (engineRunPart: an empty Frame or a Save image with nothing wired in is
- *     dropped, as ComfyUI drops it), is one of:
- *       - decision 4's local-only classes (./localOnly.ts);
- *       - a class the committed node catalogue doesn't hold (a custom node
- *         installed locally; fix round 1 (b), round 3: isCustomClass), named;
- *       - a Sailor node that still needs the local engine (fix round 1 (a),
- *         (c): NEEDS_LOCAL_ENGINE, a Shader effect showing one of your own
- *         effects). The run then goes with the local-engine toast naming them.
- *   A node the runner refuses only because it reads a refused node (Save
- *   image after VAE decode) rides along: it is judged with a stand-in source
- *   in that node's place, so only the node at fault is named.
- * Otherwise the run is refused in the runner's words, naming each node:
+ * R10.2, step 4 C5: the refusal of a run the runner won't take (declined, or
+ * skipped because the browser already knows it won't), naming each node at
+ * fault by its title, here and hosted alike: there is no local engine. Judged
+ * on what ComfyUI would have run of it (engineRunPart: an empty Frame or a
+ * Save image with nothing wired in is dropped, as ComfyUI dropped it). A node
+ * the runner refuses only because it reads a refused node (Save image after
+ * VAE decode) is judged with a stand-in source in that node's place, so only
+ * the node at fault is named. The words:
+ *   - a stock class or a custom node: "Sailor doesn’t run this node.", with
+ *     what to use instead where Sailor has an equivalent (STOCK_CLASS_ADVICE);
  *   - a node refused for its own sake: its reason (a Shader effect's cause,
- *     "is switched off right now", or NOT_TAKEN_NODE_WORDS);
+ *     Film a shot's, "is switched off right now", or NOT_TAKEN_NODE_WORDS);
  *   - every result fails validation: NO_VALID_OUTPUTS_MESSAGE;
  *   - nothing refused here but the runner still declined (or is off): the
- *     runner's own words (`declined`: the server's message, or RUNNER_OFF_WORDS);
- *   - only nodes for the local engine, in hosted: they run only there;
- *   - only nodes for the local engine, locally with it off: "This workflow
- *     needs the local engine" (the old toast).
+ *     runner's own words (`declined`: the server's message, or RUNNER_OFF_WORDS).
  * `titleOf` names a take's nodes (workflowNodeTitles).
  */
-export function engineRoute(
+export function runRefusal(
   takes: { prompt: ApiPrompt | null | undefined; titleOf: (id: string) => string }[],
   opts: {
     runnerOn: boolean
     families?: ReadonlySet<RunnerFamily>
-    hosted: boolean
-    engineUp: boolean
-    /** The live node catalogue (/object_info): outputs, required wires, output types (never which classes are custom: isCustomClass). */
+    /** The node catalogue (/object_info): outputs, required wires, output types (never which classes are custom: isCustomClass). */
     catalog?: NodeCatalog | null
     /** The runner's words when it declined the run (the server's refusal message). */
     declined?: string | null
   },
-): EngineRoute {
+): RunRefusal {
   // With the runner off, nodes are judged as the runner would judge them with every family on: a
-  // local-only graph still goes to the engine, and anything else is refused in `declined`'s words.
+  // node Sailor doesn't run is still named, and anything else is refused in `declined`'s words.
   const families = opts.runnerOn ? (opts.families ?? NO_FAMILIES) : EVERY_KNOWN_FAMILY
   const lenient = { plainRefusals: true }
   const refused = new Map<string, string>()
-  const localOnly = new Set<string>()
-  /** Sailor nodes that still need the local engine (NEEDS_LOCAL_ENGINE), by title, with their words for elsewhere. */
-  const listed = new Map<string, string>()
+  /** Nodes Sailor doesn't run (a stock class or a custom node), by title, with their class. */
+  const notRun = new Map<string, string>()
   let allFailed = false
   let noOutputs = false
   /** LC8 (F1): a take of nodes the runner takes one by one, with nothing to do (no work, no output reading anything). */
@@ -369,20 +354,14 @@ export function engineRoute(
   for (const take of takes) {
     if (!take.prompt) continue
     let part = engineRunPart(take.prompt, opts.catalog)
-    // LC8 (B2): local-only classes are judged before setting validation: an output reading one is the
-    // local engine's to judge (it knows its own nodes' settings), and goes there named, or is refused
-    // where the engine can't be reached, in its words.
-    if (part === 'failed') part = localOnlyOutputsPart(take.prompt, opts.catalog) ?? 'failed'
-    // LC8 round 2 (R10.2): a node only the local engine runs (local-only, NEEDS_LOCAL_ENGINE, custom) is
-    // never left out: one the pruning dropped still takes the whole run the R10.2 way, named.
+    // LC8 (B2): stock classes are judged before setting validation: an output reading one is named as a node
+    // Sailor doesn't run, not as a failed setting.
+    if (part === 'failed') part = stockOutputsPart(take.prompt, opts.catalog) ?? 'failed'
+    // LC8 round 2 (R10.2): a node Sailor doesn't run is never left out: one the pruning dropped is still named.
     const judged = typeof part === 'string' ? null : part
     for (const [id, node] of Object.entries(take.prompt)) {
       if (judged && id in judged) continue
-      const ct = node.class_type
-      const title = take.titleOf(id)
-      if (isLocalOnlyClass(ct)) localOnly.add(title)
-      else if (isCustomClass(ct)) { if (!listed.has(title)) listed.set(title, CUSTOM_NODE_WORDS) }
-      else if (ct !== 'ShaderEffect' && Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, ct)) { if (!listed.has(title)) listed.set(title, NEEDS_LOCAL_ENGINE_WORDS) }
+      if (notRunBySailor(node.class_type)) { const title = take.titleOf(id); if (!notRun.has(title)) notRun.set(title, node.class_type) }
     }
     if (part === 'failed') { allFailed = true; continue }
     if (part === 'no-outputs') { noOutputs = true; continue }
@@ -390,66 +369,68 @@ export function engineRoute(
     if (!ids.length) continue
     // LC8 (F1): every node taken on its own, the whole still not: there is nothing to do.
     if (ids.length === Object.keys(run).length && ids.every(id => runnerTakesNode(run, id, families, lenient))) nothingToRun = true
-    const toEngine = (id: string) => isLocalOnlyClass(run[id]!.class_type)
-    for (const id of ids) if (toEngine(id)) localOnly.add(take.titleOf(id))
     const blocked = new Set(ids)
     const off = new Set(switchedOffNodes(run, families))
     for (const id of ids) {
-      if (toEngine(id)) continue
       const title = take.titleOf(id)
-      // Fix round 3 (I-1): a class Sailor doesn't know (a custom node) goes to the local engine, named.
-      if (isCustomClass(run[id]!.class_type)) { if (!listed.has(title)) listed.set(title, CUSTOM_NODE_WORDS); continue }
+      // C5: a stock class or a custom node: Sailor doesn't run it, named.
+      if (notRunBySailor(run[id]!.class_type)) { if (!notRun.has(title)) notRun.set(title, run[id]!.class_type); continue }
       if (runnerTakesNode(withStandIns(run, id, blocked, opts.catalog), id, families, lenient)) continue
-      if (refused.has(title) || listed.has(title)) continue
+      if (refused.has(title) || notRun.has(title)) continue
       const shaderWhy = shaderEngineReason(run, id, families)
-      // Fix round 3 (M-3): a Shader effect the browser didn't bake (it bakes only for a run the runner
-      // takes) with nothing wrong of its own rides along in a run bound for the local engine, as it ran before.
+      // Fix round 3 (M-3): a Shader effect the browser didn't bake (it bakes only for a run the runner takes)
+      // with nothing wrong of its own isn't named: the run's other nodes are why it can't run.
       if (!shaderWhy && isUnbakedShader(run[id]!)) continue
-      const needs = needsLocalEngineWords(run[id]!, shaderWhy, off.has(id))
-      if (needs) { listed.set(title, needs); continue }
       refused.set(title, shaderWhy ?? filmShotWhy(run[id]!, families, title) ?? missingOutputWhy(run, id, opts.catalog) ?? (off.has(id) ? switchedOffWords(title) : NOT_TAKEN_NODE_WORDS))
     }
   }
-  if (refused.size) {
-    const titles = [...refused.keys()]
-    return { to: 'refused', title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`, description: namedWords(refused) }
+  if (refused.size || notRun.size) {
+    const titles = [...notRun.keys(), ...[...refused.keys()].filter(t => !notRun.has(t))]
+    const description = [...(notRun.size ? [notRunWords(notRun)] : []), ...(refused.size ? [namedWords(refused)] : [])].join(' ')
+    return { title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`, description }
   }
-  if (!localOnly.size && !listed.size) {
-    if (allFailed) return { to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` }
-    if (noOutputs) return { to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE }
-    const declined = opts.declined?.trim()
-    // LC8 (F1): nothing refused and nothing to do: say so, unless the runner gave words of its own.
-    if (nothingToRun && (!declined || declined === WORKFLOW_CANT_RUN_WORDS)) return { to: 'refused', title: 'Nothing to run', description: NOTHING_TO_RUN_WORDS }
-    return { to: 'refused', title: 'This workflow can’t run', description: declined || WORKFLOW_CANT_RUN_WORDS }
+  if (allFailed) return { title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` }
+  if (noOutputs) return { title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE }
+  const declined = opts.declined?.trim()
+  // LC8 (F1): nothing refused and nothing to do: say so, unless the runner gave words of its own.
+  if (nothingToRun && (!declined || declined === WORKFLOW_CANT_RUN_WORDS)) return { title: 'Nothing to run', description: NOTHING_TO_RUN_WORDS }
+  return { title: 'This workflow can’t run', description: declined || WORKFLOW_CANT_RUN_WORDS }
+}
+
+/**
+ * C5: the words for nodes Sailor doesn't run (`classOf`: title → class), named,
+ * with what to use instead where Sailor has an equivalent:
+ * `“KSampler”: Sailor doesn’t run this node. Use Generate an image instead.`
+ * `“KSampler” and “Load Checkpoint”: Sailor doesn’t run these nodes. Instead of “KSampler”, use Generate an image.`
+ */
+export function notRunWords(classOf: ReadonlyMap<string, string>): string {
+  const titles = [...classOf.keys()]
+  if (titles.length === 1) {
+    const use = stockClassAdvice(classOf.get(titles[0]!))
+    return [`“${titles[0]}”: ${NOT_RUN_WORDS}`, ...(use ? [`Use ${use} instead.`] : [])].join(' ')
   }
-  const titles = [...localOnly, ...[...listed.keys()].filter(t => !localOnly.has(t))]
-  if (opts.hosted) {
-    const parts = [...(localOnly.size ? [localOnlyHostedWords([...localOnly])] : []), ...(listed.size ? [namedWords(listed)] : [])]
-    return { to: 'refused', title: 'This workflow can’t run here', description: parts.join(' ') }
-  }
-  if (!opts.engineUp) return { to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(titles) }
-  return listed.size
-    ? { to: 'engine', notice: { title: 'This workflow needs the local engine', description: needsEngineDescription([...listed.keys()]) } }
-    : { to: 'engine' }
+  const head = `${quotedList(titles)}: Sailor doesn’t run these nodes.`
+  // Every node with an equivalent (at most MAX_NAMED), whether or not the head named it.
+  const advice = titles.flatMap((t) => {
+    const use = stockClassAdvice(classOf.get(t))
+    return use ? [`Instead of “${t}”, use ${use}.`] : []
+  }).slice(0, MAX_NAMED)
+  return [head, ...advice].join(' ')
 }
 
 /**
  * Fix round 3 (I-1): a class the committed node catalogue
  * (server/native/objectInfo.baseline.json.gz) doesn't hold and Sailor doesn't
- * know: a custom node installed locally. Judged without the live /object_info
- * (which lists every installed custom node, and is empty until it loads):
- * every catalogue class is local-only, runner-known, retired, editor-only or
- * on NEEDS_LOCAL_ENGINE (held to the catalogue by
+ * know: a custom node (one a saved project holds from an old local install).
+ * Judged without the served /object_info: every catalogue class is a stock
+ * class, runner-known, retired or editor-only (held to the catalogue by
  * tests/unit/runner-no-silent-engine.unit.spec.ts), so a class that is none
  * of these isn't in it.
  */
 export function isCustomClass(classType: string): boolean {
-  return !isLocalOnlyClass(classType) && !runnerKnowsClass(classType) && !RETIRED_CLASSES.has(classType)
-    && !isEditorOnlyClass(classType) && !Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, classType)
+  return !isStockClass(classType) && !runnerKnowsClass(classType) && !RETIRED_CLASSES.has(classType)
+    && !isEditorOnlyClass(classType)
 }
-
-/** Where a custom node can't go (hosted, or the engine off). */
-export const CUSTOM_NODE_WORDS = 'This node isn’t part of Sailor. It runs only on the local engine, on your own computer.'
 
 /**
  * Step 4, C4: why a Film a shot isn't taken, by name: its family (or its
@@ -475,19 +456,6 @@ function isUnbakedShader(node: ApiNode): boolean {
   return node.class_type === 'ShaderEffect' && (node.inputs?.sailor_baked === undefined || node.inputs?.sailor_baked === '')
 }
 
-/**
- * Fix round 1 (a), (c): the words for a Sailor node that still needs the local
- * engine, used where it can't go (hosted, the engine off), or null when it
- * isn't one: its class is in NEEDS_LOCAL_ENGINE and nothing more particular
- * refuses it, or it is a Shader effect in one of NEEDS_LOCAL_ENGINE_SHADER_CASES
- * (fix round 2: its picture made in the same run; LC13: one of your own effects is no longer one).
- */
-function needsLocalEngineWords(node: ApiNode, shaderWhy: string | null, switchedOff: boolean): string | null {
-  if (node.class_type === 'ShaderEffect') return Object.values(NEEDS_LOCAL_ENGINE_SHADER_CASES).some(c => c.words === shaderWhy) ? shaderWhy : null
-  if (shaderWhy || switchedOff || !Object.prototype.hasOwnProperty.call(NEEDS_LOCAL_ENGINE, node.class_type)) return null
-  return NEEDS_LOCAL_ENGINE_WORDS
-}
-
 /** “A”: why. “B”: why. (at most MAX_NAMED, then "And N more."); a reason that already names its node stands as it is. */
 function namedWords(byTitle: ReadonlyMap<string, string>): string {
   const titles = [...byTitle.keys()]
@@ -509,23 +477,15 @@ export const WORKFLOW_CANT_RUN_WORDS = 'Sailor can’t run this workflow yet.'
 export const NOTHING_TO_RUN_WORDS = 'No node here makes or changes anything. Wire a node that makes a result into a card, then run.'
 
 /**
- * LC8 (F4): the refusal for a class neither the node catalogue the app holds
- * nor Sailor knows (the build can't read it), before anything is built or
- * sent, by its title: a custom node installed for the local engine. Hosted:
- * it runs only there. Locally with the engine off: the local-engine words.
- * With the engine up it isn't installed there either. Null for a class
- * Sailor knows (the builder's own error stands).
+ * LC8 (F4), C5: the refusal for a class neither the node catalogue the app
+ * holds nor Sailor knows (the build can't read it), before anything is built
+ * or sent, by its title: a custom node from an old local install. Sailor
+ * doesn't run it, here and hosted alike. Null for a class Sailor knows (the
+ * builder's own error stands).
  */
-export function unknownClassRefusal(classType: string, title: string, opts: { hosted: boolean; engineUp: boolean }): { title: string; description: string } | null {
+export function unknownClassRefusal(classType: string, title: string): RunRefusal | null {
   if (!isCustomClass(classType)) return null
-  if (opts.hosted) return { title: 'This workflow can’t run here', description: `“${title}”: ${CUSTOM_NODE_WORDS}` }
-  if (!opts.engineUp) return { title: 'This workflow needs the local engine', description: `${needsEngineDescription([title])} ${CUSTOM_NODE_WORDS}` }
-  return { title: `“${title}” isn’t installed`, description: 'This node isn’t part of Sailor, and the local engine doesn’t have it. Install it there, or remove it.' }
-}
-
-/** In hosted, a run whose only refused nodes are local-only: they run only on the local engine, on one's own computer. */
-export function localOnlyHostedWords(titles: string[]): string {
-  return `${quotedList(titles)} ${titles.length === 1 ? 'runs' : 'run'} only on the local engine, on your own computer.`
+  return { title: `“${title}” can’t run`, description: `“${title}”: ${NOT_RUN_WORDS}` }
 }
 
 interface WorkflowNodeLike { id: string | number; type?: string; title?: string }
@@ -569,15 +529,6 @@ export function workflowNodeTitles(
 const MAX_NAMED = 4
 
 /**
- * The refusal's description: the nodes by their own titles, quoted, then any
- * plain reasons (needsEngineReasons), each a sentence.
- * `Only the engine can run “Upscale” and “Blur image”.`
- */
-export function needsEngineDescription(titles: string[], reasons: readonly string[] = []): string {
-  return [`Only the engine can run ${quotedList(titles)}.`, ...reasons.map(r => (/[.!?]$/.test(r) ? r : `${r}.`))].join(' ')
-}
-
-/**
  * LC8 (F2): why a runner-only model's workflow wasn't taken, naming the other
  * nodes the runner refused: never the engine, which can't run that model.
  * `“Save video” can’t take this as it’s set up. Change what it’s wired to, or show the result in a card.`
@@ -589,10 +540,9 @@ export function cantTakeItWords(titles: string[]): string {
 /**
  * LC8 (F2): why a workflow with a runner-only model wasn't taken, by the
  * other nodes the runner refused (nodesNeedingEngine's), or null when none
- * is: a class only the local engine runs (local-only, or a custom node) is
- * named as needing the engine, since it does; a node whose family is off,
- * as switched off; any other Sailor node, in cantTakeItWords. A Sailor node
- * is never said to need the engine: the engine can't run the model either.
+ * is: a stock class or a custom node is named as one Sailor doesn't run
+ * (notRunWords); a node whose family is off, as switched off; any other
+ * Sailor node, in cantTakeItWords.
  */
 function notTakenReason(
   prompt: ApiPrompt,
@@ -601,19 +551,19 @@ function notTakenReason(
 ): string | null {
   const { run, ids } = opts.runnerOn ? blockedNodes(prompt, opts.families) : { run: prompt, ids: Object.keys(prompt) }
   const off = new Set(opts.runnerOn ? switchedOffNodes(run, opts.families) : [])
-  const engine: string[] = []
+  const notRun = new Map<string, string>()
   const switched: string[] = []
   const other: string[] = []
   for (const id of ids) {
     const title = opts.titleOf(id)
-    if (title === except || engine.includes(title) || switched.includes(title) || other.includes(title)) continue
+    if (title === except || notRun.has(title) || switched.includes(title) || other.includes(title)) continue
     const ct = run[id]?.class_type ?? ''
-    if (isLocalOnlyClass(ct) || isCustomClass(ct)) engine.push(title)
+    if (notRunBySailor(ct)) notRun.set(title, ct)
     else if (off.has(id)) switched.push(title)
     else other.push(title)
   }
   const parts = [
-    ...(engine.length ? [needsEngineDescription(engine)] : []),
+    ...(notRun.size ? [notRunWords(notRun)] : []),
     ...switched.map(t => switchedOffWords(t)),
     ...(other.length ? [cantTakeItWords(other)] : []),
   ]
@@ -631,14 +581,14 @@ function quotedList(titles: string[]): string {
 }
 
 /**
- * The refusal for a run about to go to ComfyUI (the runner declined or was
- * skipped) that holds a retired partner node (shared/runner/retired.ts),
- * uses a model ComfyUI can't run (a discontinued one, one with no price yet,
- * or a runner-only one), or wires a Recraft SVG model's SVG into a node that
- * needs a picture (R11.4, only with `recraft-svg` on). Null when every take is fine. Names the first such node
- * by its title. A runner-only model whose switch is on was left out because
- * other nodes need the engine: the reason names them (needsEngineDescription);
- * with its switch off, the reason says so.
+ * The refusal for a run the runner declined or skipped that holds a retired
+ * partner node (shared/runner/retired.ts), uses a model Sailor can't run here
+ * (a discontinued one, one with no price yet, or a runner-only one), or wires
+ * a Recraft SVG model's SVG into a node that needs a picture (R11.4, only with
+ * `recraft-svg` on). Null when every take is fine. Names the first such node
+ * by its title. A runner-only model whose switch is on was left out because of
+ * other nodes: the reason names them (notTakenReason); with its switch off,
+ * the reason says so.
  */
 export function blockedRunRefusal(
   takes: { prompt: ApiPrompt | null | undefined; titleOf: (id: string) => string }[],

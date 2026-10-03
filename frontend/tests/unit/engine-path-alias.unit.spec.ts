@@ -19,22 +19,13 @@
  * server/middleware/comfyui-proxy.ts) with fake events, so they fail against
  * the pre-fix tree rather than merely asserting a new helper's return value.
  *
- * Local mode is the other half of the contract: normalization runs but every
- * decision must still fall through to the raw proxy with a byte-identical
- * target, so a local install is untouched by any of this.
+ * Local mode is the other half of the contract. It used to fall through to the
+ * raw engine proxy with a byte-identical target; step 4, C5 removed the engine,
+ * so locally Sailor's own routes answer and every other engine path is a plain
+ * 404, never proxied, as hosted.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
 
 // Nitro auto-imports used at module scope / inside the handler.
 const g = globalThis as any
@@ -56,12 +47,6 @@ vi.mock('../../server/utils/deployMode', () => ({
   deployMode: () => mode,
   isHosted: () => mode === 'hosted',
   engineMultiUser: () => multiUser,
-}))
-
-const handleMeteredPrompt = vi.fn(async () => ({ handler: 'metered' }))
-vi.mock('../../server/utils/meterGraphRun', () => ({
-  isPromptPath: (p: string) => p === '/prompt' || p.startsWith('/prompt?'),
-  handleMeteredPrompt: (...a: any[]) => handleMeteredPrompt(...(a as [])),
 }))
 
 const handleHostedQueueGet = vi.fn(async () => ({ handler: 'queue' }))
@@ -94,7 +79,6 @@ beforeAll(async () => {
 
 beforeEach(() => {
   proxyRequest.mockClear()
-  handleMeteredPrompt.mockClear()
   handleHostedQueueGet.mockClear()
   handleHostedInterrupt.mockClear()
   handleHostedObjectInfo.mockClear()
@@ -246,7 +230,6 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
         expect(await status(p, m), `${m} ${p}`).toBe(404)
       }
     }
-    expect(handleMeteredPrompt).not.toHaveBeenCalled()
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
@@ -571,7 +554,6 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     for (const p of ['/api/wallet', '/api/billing/checkout', '/api/vibe', '/api/admin/x', '/api/pool/status']) {
       expect(await status(p, 'POST'), p).toBe('passthrough')
     }
-    expect(handleMeteredPrompt).not.toHaveBeenCalled()
     expect(handleHostedQueueGet).not.toHaveBeenCalled()
     expect(proxyRequest).not.toHaveBeenCalled()
   })
@@ -585,7 +567,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
 
 // --------------------------------------------------------------- local mode
 
-describe('local mode is byte-identical — no gate, no 403, same proxy target', () => {
+describe('local mode: no gate and no engine — every path the hosted gates intercept is a plain 404 (C5)', () => {
   const ALL = [
     ['/prompt', 'POST'], ['/api/prompt', 'POST'], ['/comfyui/prompt', 'POST'], ['/comfyui/api/prompt', 'POST'],
     ['/queue', 'GET'], ['/api/queue', 'GET'], ['/comfyui/queue', 'GET'], ['/comfyui/api/queue', 'GET'],
@@ -593,52 +575,28 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
     ['/interrupt', 'POST'], ['/api/interrupt', 'POST'], ['/comfyui/interrupt', 'POST'],
     ['/api/history', 'GET'], ['/comfyui/history', 'GET'], ['/api/view?filename=a.png', 'GET'],
     ['/comfyui/internal/files/output', 'GET'], ['/comfyui/settings', 'GET'],
-    // Round 2: the prefixes that stopped raw-proxying in HOSTED mode must
-    // still raw-proxy locally — no scrubber, no overwrite sniff, no 403.
-    // (`/upload/image` and `/upload/mask` are native since engine-free Phase A
-    // A4, and `/object_info` since A5: see the next describe.)
     ['/upload', 'POST'], ['/gate/resume', 'POST'],
     ['/extensions/../history', 'GET'],
-    // Stage 6 Task 2's projects gate and spend refusal are hosted-only; since
-    // engine-free Phase A those paths are answered natively in local mode (see
-    // the next describe), so they are no longer in this raw-proxy list.
-    // Stage 6 Task 2b: the /sailor routes Sailor does not serve itself still
-    // raw-proxy unchanged in local mode. (The DATA bucket and, since A3, the
-    // capability routes and the lora/motion/space-preset writes are answered
-    // natively since engine-free Phase A: see below.)
     ['/sailor/render_timeline', 'POST'], ['/sailor/spacetype_encode', 'POST'],
+    ['/system_stats', 'GET'], ['/api/ws?clientId=x', 'GET'], ['/comfyui/ws', 'GET'], ['/comfyui', 'GET'],
   ] as const
 
-  it('proxies every path the hosted gates intercept', async () => {
-    for (const [p, m] of ALL) {
-      proxyRequest.mockClear()
-      await middleware(ev(p, m))
-      expect(proxyRequest, `${m} ${p} must raw-proxy in local mode`).toHaveBeenCalledTimes(1)
+  it('answers each with a plain 404, never proxied, never entering a hosted gate', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    try {
+      for (const [p, m] of ALL) {
+        proxyRequest.mockClear()
+        const err = await middleware(ev(p, m)).then(() => null, (e: any) => e)
+        expect(err?.statusCode, `${m} ${p}`).toBe(404)
+        expect(proxyRequest, `${m} ${p} must never be proxied`).not.toHaveBeenCalled()
+      }
+      expect(fetchSpy).not.toHaveBeenCalled()
     }
-    expect(handleMeteredPrompt).not.toHaveBeenCalled()
+    finally { vi.unstubAllGlobals() }
     expect(handleHostedQueueGet).not.toHaveBeenCalled()
     expect(handleHostedInterrupt).not.toHaveBeenCalled()
     expect(handleHostedSailor, 'local mode must never enter the projects gate').not.toHaveBeenCalled()
-  })
-
-  it('sends the pre-Stage-5 target URL for each alias (normalization must not reach the proxy)', async () => {
-    const expected: [string, string][] = [
-      ['/api/prompt', 'http://127.0.0.1:8188/api/prompt'],
-      ['/api/queue', 'http://127.0.0.1:8188/api/queue'],
-      ['/api/history', 'http://127.0.0.1:8188/api/history'],
-      ['/comfyui/history', 'http://127.0.0.1:8188/history'],
-      ['/comfyui/api/queue', 'http://127.0.0.1:8188/api/queue'],
-      ['/comfyui/internal/files/output', 'http://127.0.0.1:8188/internal/files/output'],
-      ['/comfyui/settings', 'http://127.0.0.1:8188/settings'],
-      ['/comfyui/sailor/render_timeline', 'http://127.0.0.1:8188/sailor/render_timeline'],
-      ['/queue?a=2', 'http://127.0.0.1:8188/queue?a=2'],
-      ['/comfyui', 'http://127.0.0.1:8188/'],
-    ]
-    for (const [p, url] of expected) {
-      proxyRequest.mockClear()
-      await middleware(ev(p, 'GET'))
-      expect(proxyRequest.mock.calls[0]?.[1], p).toBe(url)
-    }
   })
 })
 
@@ -650,10 +608,8 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
     const { join } = await import('node:path')
     root = mkdtempSync(join(tmpdir(), 'engine-path-alias-'))
     ;(await import('../../server/utils/inputUploads')).__setInputUploadsEngineRootForTests(root)
-    // These routes are native now — a test that leaks past the router into
-    // `forwardToEngine`'s real `fetch` would otherwise try to reach the real
-    // :8188. Stubbed to fail fast, same as "engine unreachable", so any such
-    // leak fails loudly here instead of silently hitting a live port.
+    // These routes are native: nothing should fetch. Stubbed to fail fast so
+    // any leak fails loudly here.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
   })
   afterEach(async () => {
@@ -717,7 +673,7 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
   })
 
   it('answers /object_info natively (A5), under any spelling, never entering the hosted scrubber', async () => {
-    // fetch is stubbed to fail (engine down), so the committed baseline answers.
+    // fetch is stubbed to fail; the committed baseline answers (C5: no engine).
     for (const p of ['/object_info', '/api/object_info', '/comfyui/object_info', '/comfyui/api/object_info/KSampler', '/object_info?x=2']) {
       proxyRequest.mockClear()
       const res = await middleware({ ...ev(p, 'GET'), node: { req: {}, res: { setHeader() {} } } }) as any
@@ -738,17 +694,11 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
 })
 
 /**
- * Final-review I2 (spec ruling 4): an engine-only route asked for while the
- * cached health check says the main engine is down answers 503
- * {error:'This needs the local engine'} — never h3's 502 from a refused proxy
- * — in local and hosted mode alike; the socket and pool workers are left alone.
+ * Final-review I2 (spec ruling 4) made an engine-only route answer 503 while
+ * the engine was down, locally. Step 4, C5: there is no engine; such a route is
+ * a plain 404 in local and hosted mode alike, never proxied.
  */
-describe('engine down: engine-only routes answer 503, not a failed proxy', () => {
-  function evWithRes(path: string, method = 'GET') {
-    const res: { statusCode?: number, setHeader(): void } = { setHeader() {} }
-    return { event: { ...ev(path, method), node: { req: {}, res } }, res }
-  }
-
+describe('no engine: engine-only routes answer a plain 404, never a failed proxy', () => {
   const engineOnly: Array<[string, string]> = [
     ['/prompt', 'POST'],
     ['/api/prompt', 'POST'],
@@ -759,45 +709,20 @@ describe('engine down: engine-only routes answer 503, not a failed proxy', () =>
     ['/queue', 'GET'],
   ]
 
-  it('local mode: each answers 503 with the plain message and is never proxied', async () => {
+  it('local mode: each is a plain 404 and is never proxied', async () => {
     mode = 'local'
-    engineHealthState.value = 'down'
     for (const [p, m] of engineOnly) {
       proxyRequest.mockClear()
-      const { event, res } = evWithRes(p, m)
-      expect(await middleware(event), `${m} ${p}`).toEqual({ error: 'This needs the local engine' })
-      expect(res.statusCode, `${m} ${p}`).toBe(503)
+      const err = await middleware(ev(p, m)).then(() => null, (e: any) => e)
+      expect(err?.statusCode, `${m} ${p}`).toBe(404)
       expect(proxyRequest, `${m} ${p}`).not.toHaveBeenCalled()
     }
   })
 
-  it('local mode: with the engine up the same routes are proxied as before', async () => {
-    mode = 'local'
-    engineHealthState.value = 'up'
-    for (const [p, m] of engineOnly) {
-      proxyRequest.mockClear()
-      await middleware(ev(p, m))
-      expect(proxyRequest, `${m} ${p}`).toHaveBeenCalledTimes(1)
-    }
-  })
-
-  it('hosted mode: an engine route is a plain 404 whether the engine is up or down (R10.9); a refused /sailor route stays 403', async () => {
+  it('hosted mode: an engine route is a plain 404 (R10.9); a refused /sailor route stays 403', async () => {
     mode = 'hosted'
-    for (const state of ['down', 'up'] as const) {
-      engineHealthState.value = state
-      expect(await status('/system_stats', 'GET'), state).toBe(404)
-      expect(await status('/sailor/render_timeline', 'POST'), state).toBe(403)
-    }
+    expect(await status('/system_stats', 'GET')).toBe(404)
+    expect(await status('/sailor/render_timeline', 'POST')).toBe(403)
     expect(proxyRequest).not.toHaveBeenCalled()
-  })
-
-  it('the socket (/api/ws, /comfyui/ws) is left to its own handling, not answered 503', async () => {
-    mode = 'local'
-    engineHealthState.value = 'down'
-    for (const p of ['/api/ws?clientId=x', '/comfyui/ws']) {
-      proxyRequest.mockClear()
-      await middleware(ev(p, 'GET'))
-      expect(proxyRequest, p).toHaveBeenCalledTimes(1)
-    }
   })
 })

@@ -1,9 +1,8 @@
-// Maps ComfyUI WebSocket messages ({ type, data }) to the bridge-shaped event
-// objects `default.vue`'s `handleBridgeEvent`-style switch already consumes
-// (see custom_nodes/sailor_bridge/js/bridge.js, api.addEventListener
-// blocks around lines 1316-1383). Task 8 will pipe useDirectExecution's
-// events straight into that same handler, so field names here must match the
-// bridge verbatim — NOT the Task 7 brief where the two disagree.
+// Maps run messages ({ type, data }, ComfyUI's socket shapes, which the
+// runner sends too) to the bridge-shaped event objects `default.vue`'s
+// `handleBridgeEvent`-style switch already consumes. The runner's event stream
+// (useRunnerEvents) pipes them into that handler, so field names here must
+// match the old bridge verbatim. (Step 4, C5: the engine's own socket is gone.)
 //
 // Pure function: no I/O, no state. Unknown/ignored types return null so the
 // caller can simply skip dispatch.

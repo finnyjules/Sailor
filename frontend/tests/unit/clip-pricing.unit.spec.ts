@@ -29,6 +29,7 @@ import { SHARED_PRICED_CLASS_SET, priceNode } from '#shared/pricing/nodePrice'
 import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceCredits, clipPriceLabel, clipPriceUsd, clipRequest, clipSeconds } from '~/data/clip-models'
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes } from '~/lib/costEstimate'
+import { isRetiredClass } from '#shared/runner/retired'
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const PY = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
@@ -86,7 +87,8 @@ describe('clip rate cards', () => {
       for (const inputs of [{}, { engine: 'sync' }, { engine: 'fabric' }, { engine: 'sync-3' }]) for (const c of remoteVideoCalls(ct, inputs) as any[]) reached.add(c.endpoint)
     }
     for (const e of reached) expect(clipRate(e), e).not.toBeNull()
-    expect([...reached].sort()).toEqual(['bytedance/seedance-2.0', 'fal-ai/sync-lipsync/v3', 'google/veo-3', 'kwaivgi/kling-lip-sync', 'kwaivgi/kling-v2.1', 'sync/lipsync-2-pro', 'veed/fabric-1.0'])
+    // Step 4, C5: Veo 3, Kling 2.1 and Seedance 2.0's own nodes left with the engine path (retired in C4).
+    expect([...reached].sort()).toEqual(['fal-ai/sync-lipsync/v3', 'kwaivgi/kling-lip-sync', 'sync/lipsync-2-pro', 'veed/fabric-1.0'])
   })
   it('prototype names are not endpoints', () => {
     for (const k of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
@@ -300,59 +302,15 @@ describe('the meter holds and charges the request’s own price', () => {
 
 // ── The older one-model video nodes ───────────────────────────────────────
 
-describe('older video nodes: priced on what Python sends', () => {
-  it('the Python builders read as the price assumes', () => {
-    const veo = pyClass('Veo3RemoteNode')
-    expect(veo).toContain('"google/veo-3"')
-    expect(veo).not.toMatch(/"duration"|"generate_audio"|"resolution"/)          // schema defaults: 8 s, sound on
-    const kling = pyClass('KlingVideoRemoteNode')
-    expect(kling).toContain('"kwaivgi/kling-v2.1"')
-    expect(kling).toContain('"duration": int(duration)')
-    expect(kling).not.toMatch(/"mode"/)                                          // schema default: standard, 720p
-    expect(comboOptions(kling, 'duration')).toEqual(['5', '10'])
-    const sd = pyClass('Seedance2RemoteNode')
-    expect(sd).toContain('"bytedance/seedance-2.0"')
-    expect(sd).toContain('"duration": int(duration)')
-    expect(sd).toContain('"resolution": resolution')
-    expect(sd).not.toMatch(/"video"|"reference_video/)                           // no video in: the non_video_in tiers
-    expect(comboOptions(sd, 'duration')).toEqual(['5', '10'])
-    expect(comboOptions(sd, 'resolution')).toEqual(['480p', '720p', '1080p'])
-  })
-
-  const DURATIONS: unknown[] = ['5', '10', 5, 10, ' 10 ', '15', '7', '-1', '0', 'x', '', 7.9, null, undefined, LINK]
-  const SEC = (v: unknown, max: number): number => {
-    const n = typeof v === 'number' ? Math.trunc(v) : typeof v === 'string' && /^\s*-?\d+\s*$/.test(v) ? Number.parseInt(v, 10) : Number.NaN
-    return n >= 1 && n <= max ? n : max
-  }
-
-  it('Veo 3: 8 s with sound at $0.40/s, whatever else is set', () => {
-    for (const inputs of [{}, { aspect_ratio: '9:16', seed: 3 }, { image: LINK }]) {
-      expect(priceNode('Veo3RemoteNode', inputs)).toEqual({ usd: 3.2, credits: 480 })
-      expect(charge('Veo3RemoteNode', inputs)).toBe(481)
+describe('older video nodes: retired, never priced (step 4, C5)', () => {
+  it('Veo 3, Kling 2.1 and Seedance 2.0\'s own nodes (retired in C4) are refused before any price, so they carry none', () => {
+    for (const ct of ['Veo3RemoteNode', 'KlingVideoRemoteNode', 'Seedance2RemoteNode']) {
+      expect(isRetiredClass(ct), ct).toBe(true)
+      expect(REMOTE_VIDEO_NODE_CLASSES, ct).not.toContain(ct)
+      expect(remoteVideoCalls(ct, {}), ct).toBeNull()
     }
-  })
-  it('Kling 2.1: int(duration) × $0.05/s (standard, 720p); unreadable or out of range → 10 s', () => {
-    for (const d of DURATIONS) {
-      const want = usd(SEC(d, 10) * 0.05)
-      expect(priceNode('KlingVideoRemoteNode', { duration: d }), String(d)).toEqual({ usd: want, credits: creditsForUsd(want) })
-    }
-    expect(priceNode('KlingVideoRemoteNode', { duration: '5' })).toEqual({ usd: 0.25, credits: 38 })
-    expect(priceNode('KlingVideoRemoteNode', { duration: '10' })).toEqual({ usd: 0.5, credits: 75 })
-  })
-  it('Seedance 2.0 (Replicate): int(duration) × the resolution’s rate; unlisted or linked → 4k', () => {
-    const RATE: Record<string, number> = { '480p': 0.08, '720p': 0.18, '1080p': 0.45, '4k': 1 }
-    for (const d of DURATIONS) {
-      for (const r of ['480p', '720p', '1080p', '4k', '1080P', '', 7, undefined, LINK]) {
-        const rate = typeof r === 'string' && r in RATE ? RATE[r]! : 1
-        const want = usd(SEC(d, 15) * rate)
-        expect(priceNode('Seedance2RemoteNode', { duration: d, resolution: r }), `${String(d)} ${String(r)}`).toEqual({ usd: want, credits: creditsForUsd(want) })
-      }
-    }
-    expect(priceNode('Seedance2RemoteNode', { duration: '5', resolution: '1080p' })).toEqual({ usd: 2.25, credits: 338 })   // the node's defaults
   })
 })
-
-// ── Lip-sync ──────────────────────────────────────────────────────────────
 
 describe('lip-sync: unmeasured, the 60 s cap', () => {
   it('every lip-sync node caps the sound clip at 60 s (the length the price assumes)', () => {
@@ -417,9 +375,6 @@ describe('lip-sync: unmeasured, the 60 s cap', () => {
 
 describe('badge, run estimate and charge agree for every node priced here', () => {
   const GRID: Record<string, Array<Record<string, unknown>>> = {
-    Veo3RemoteNode: [{ aspect_ratio: '16:9' }],
-    KlingVideoRemoteNode: ['5', '10', LINK].map(duration => ({ duration })),
-    Seedance2RemoteNode: ['480p', '720p', '1080p', LINK].flatMap(resolution => ['5', '10', LINK].map(duration => ({ resolution, duration }))),
     LipsyncRemoteNode: [{ sync_mode: 'cut_off' }],
     LipsyncNode: [{ model: 'sync.so 2-pro' }],
     LipSyncNode: ['auto', 'fabric', 'sync', LINK].flatMap(engine => ['480p', '720p', '1080p', LINK].map(resolution => ({ engine, resolution, model_options: '{}' }))),
@@ -452,15 +407,12 @@ describe('badge, run estimate and charge agree for every node priced here', () =
 })
 
 describe('loss table: every call is charged at or above what it costs', () => {
-  it('Animate, the older nodes and lip-sync at their dearest settings', () => {
+  it('Animate and lip-sync at their dearest settings', () => {
     const rows: Array<[string, number, number]> = [
       ['Animate Seedance 12 s', clipPriceCredits('seedance-2.0', 12)!, 12 * 0.3034],
       ['Animate H3 Max 15 s (list price)', clipPriceCredits('hailuo-h3-max', 15)!, 15 * 0.08],
       ['Animate Kling 10 s', clipPriceCredits('kling-v3-pro', 10)!, 10 * 0.112],
       ['Animate FLUX 3 draft 15 s', clipPriceCredits('flux-3-draft', 15)!, 15 * 0.06],
-      ['Veo 3 8 s with sound', (priceNode('Veo3RemoteNode', {}) as any).credits, 8 * 0.4],
-      ['Kling 2.1 10 s', (priceNode('KlingVideoRemoteNode', { duration: '10' }) as any).credits, 10 * 0.05],
-      ['Seedance 2.0 10 s 1080p', (priceNode('Seedance2RemoteNode', { duration: '10', resolution: '1080p' }) as any).credits, 10 * 0.45],
       ['Fabric 60 s 720p', (priceNode('LipSyncNode', {}) as any).credits, 60 * 0.15],
       ['sync.so 2-pro 60 s', (priceNode('LipsyncNode', {}) as any).credits, 60 * 0.08325],
       ['Kling lip-sync 60 s', (priceNode('LipSyncNode', { engine: 'sync' }) as any).credits, 60 * 0.014],

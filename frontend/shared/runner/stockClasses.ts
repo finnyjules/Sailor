@@ -1,24 +1,31 @@
 /**
- * R10.2: decision 4's local-only classes, the only classes a run may send to
- * the local engine (ComfyUI). They are the stock ComfyUI classes in the
- * committed node catalogue (server/native/objectInfo.baseline.json.gz) that
- * the runner doesn't take, with every family on, and that aren't retired
- * (./retired.ts): the local diffusion stack (loaders, samplers, latents,
- * conditioning, model patches), training and datasets, and the few stock
- * utilities nothing in Sailor replaces. "Stock" means the class is in
- * upstream ComfyUI under the same name (checked against Comfy-Org/ComfyUI
- * master of 2026-09-20; WanSCAILToVideo and SaveGLB moved file upstream).
+ * Step 4, C5: the stock ComfyUI classes Sailor doesn't run. Sailor has no
+ * local engine any more (USER, 2026-10-03: an online product, no local
+ * generation), so a run holding one is refused plainly, here and hosted alike,
+ * by the node's title ("Sailor doesn’t run this node."), with what to use
+ * instead where Sailor has an equivalent (STOCK_CLASS_ADVICE). Saved projects
+ * holding one still load: the node draws as a plain card from the node
+ * catalogue. Node search, the toolbox and the menus never offer one
+ * (./offer.ts).
  *
- * Sailor's own classes are never here: one the runner refuses is refused in
- * plain words, never sent to the engine (./needsEngine.ts `engineRunRefusal`).
+ * They are the stock ComfyUI classes in the committed node catalogue
+ * (server/native/objectInfo.baseline.json.gz) that the runner doesn't take,
+ * with every family on, and that aren't retired (./retired.ts): the local
+ * diffusion stack (loaders, samplers, latents, conditioning, model patches),
+ * training and datasets, and the few stock utilities nothing in Sailor
+ * replaces. "Stock" means the class is in upstream ComfyUI under the same
+ * name (checked against Comfy-Org/ComfyUI master of 2026-09-20; WanSCAILToVideo
+ * and SaveGLB moved file upstream). Until C5 they were decision 4's
+ * "local-only" classes, the only ones a run could send to the local engine.
+ *
  * Held to the catalogue by tests/unit/runner-no-silent-engine.unit.spec.ts:
  * a class added to the catalogue that the runner doesn't take must be listed
  * here or named there as Sailor's own.
  *
  * Pure; relative imports only.
  */
-/** Every local-only class, by its ComfyUI class name, grouped by its Python file. */
-export const LOCAL_ONLY_CLASSES: ReadonlySet<string> = new Set([
+/** Every stock class Sailor doesn’t run, by its ComfyUI class name, grouped by its Python file. */
+export const STOCK_CLASSES: ReadonlySet<string> = new Set([
   // nodes_ace.py (5)
   'EmptyAceStep1.5LatentAudio', 'EmptyAceStepLatentAudio', 'ReferenceTimbreAudio', 'TextEncodeAceStepAudio',
   'TextEncodeAceStepAudio1.5',
@@ -263,54 +270,37 @@ export const LOCAL_ONLY_CLASSES: ReadonlySet<string> = new Set([
   'VAEEncode', 'VAEEncodeForInpaint', 'VAEEncodeTiled', 'VAELoader', 'unCLIPCheckpointLoader', 'unCLIPConditioning',
 ])
 
-/** Whether a class may go to the local engine (decision 4). */
-export function isLocalOnlyClass(classType: unknown): boolean {
-  return typeof classType === 'string' && LOCAL_ONLY_CLASSES.has(classType)
+/** Whether a class is a stock ComfyUI class Sailor doesn't run (STOCK_CLASSES). */
+export function isStockClass(classType: unknown): boolean {
+  return typeof classType === 'string' && STOCK_CLASSES.has(classType)
 }
 
-/** What becomes of a Sailor class that still needs the local engine (R11.10 judges each). */
-export type NeedsLocalEnginePlan = 'port' | 'retire' | 'keep local'
+/** What a run holding a node Sailor doesn't run says about it: a stock class or a custom node. */
+export const NOT_RUN_WORDS = 'Sailor doesn’t run this node.'
 
 /**
- * Fix round 1 (a): Sailor's own classes the runner didn't run yet that ran on
- * the local engine before R10.2, on an explicit, named list until each was
- * ported or retired ("switching a family on never makes a working graph
- * fail"). Locally with the engine up, a run holding one went there with the
- * local-engine toast naming it; in hosted, or with the engine off, it was
- * refused in plain words (NEEDS_LOCAL_ENGINE_WORDS).
- *
- * EMPTY since step 4, C4 (2026-10-03): every entry is ported or retired.
- *   - Ported: Smart Layout (LC9: the runner hands its pictures to an Image
- *     card too, eligibility.ts LIST_PASSERS); Preview video (C4: a temporary
- *     Save video, media/videoNodes.ts planPreviewVideo); Film a shot (C4: the
- *     runner films every model and setting Python does but a Shot Director
- *     shot on a model Shot Director doesn't offer, a wired setting, or a model
- *     Python no longer lists, each refused by name, eligibility.ts
- *     filmShotRefusalWords); the Text card showing a LoRA node's log (C4: the
- *     LoRA nodes no longer have that output, so ComfyUI drops the card as it
- *     validates and runs the rest; the canvas hands the runner the same, the
- *     card keeping its saved text, ./needsEngine.ts wireFromMissingOutput).
- *   - Retired (./retired.ts C4_RETIRED_CLASSES, each naming its replacement):
- *     Font Playground and Kinetic Typography (Vector Type), and the seven
- *     hidden per-model Replicate nodes (Generate an image, Edit an image,
- *     Upscale an image, Generate a video).
+ * C5: what to use instead of a stock class, where Sailor has an equivalent,
+ * by the name the person sees on the node Sailor offers.
  */
-export const NEEDS_LOCAL_ENGINE: Readonly<Record<string, { plan: NeedsLocalEnginePlan; savedGraphs: number; why: string }>> = {}
+export const STOCK_CLASS_ADVICE: Readonly<Record<string, string>> = {
+  KSampler: 'Generate an image',
+  KSamplerAdvanced: 'Generate an image',
+  SamplerCustom: 'Generate an image',
+  SamplerCustomAdvanced: 'Generate an image',
+  InpaintModelConditioning: 'Edit an image',
+  VAEEncodeForInpaint: 'Edit an image',
+  ImageUpscaleWithModel: 'Upscale an image',
+  LatentUpscale: 'Upscale an image',
+  LatentUpscaleBy: 'Upscale an image',
+  WanImageToVideo: 'Generate a video',
+  WanFirstLastFrameToVideo: 'Generate a video',
+  SVD_img2vid_Conditioning: 'Generate a video',
+  SaveImageWebsocket: 'Save image',
+  LoadImageOutput: 'Load image',
+  LoadImageMask: 'Load image',
+}
 
-/** Where a node on NEEDS_LOCAL_ENGINE can't go (hosted, or the engine off). */
-export const NEEDS_LOCAL_ENGINE_WORDS = 'Sailor can’t run this node yet. It runs only on the local engine, on your own computer.'
-
-/**
- * Fix round 1 (c), fix round 2: the Shader effect cases that still needed the
- * local engine, by cause, each with its words for where it couldn't go.
- *
- * EMPTY since step 4, C4 (2026-10-03):
- *   - one of your own effects was ported (LC13: the browser draws a My effect
- *     as the canvas does, and the server checks the bake against the person's
- *     own My effects store);
- *   - a picture made in the same run is refused plainly everywhere, never
- *     sent (SHADER_NEEDS_PICTURE_FIRST, ./shaderBakeKey.ts): the browser bakes
- *     before the run, and a mid-run bake would mean pausing the run for the
- *     browser. 2 saved graphs (one project and its backup copy) hold one.
- */
-export const NEEDS_LOCAL_ENGINE_SHADER_CASES: Readonly<Record<string, { words: string; plan: NeedsLocalEnginePlan; savedNodes: number; why: string }>> = {}
+/** The node to use instead of `classType`, or null when Sailor has none to name. */
+export function stockClassAdvice(classType: unknown): string | null {
+  return typeof classType === 'string' && Object.prototype.hasOwnProperty.call(STOCK_CLASS_ADVICE, classType) ? STOCK_CLASS_ADVICE[classType]! : null
+}

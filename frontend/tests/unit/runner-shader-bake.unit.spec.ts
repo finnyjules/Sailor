@@ -16,7 +16,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { IMAGE_OUTPUT_CLASSES, LOCAL_RENDER_TYPES, PICTURE_OUTPUTS, PROVIDER_TYPES, RUNNER_NODE_RULES, SWITCHED_CLASSES, isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { RUNNER_OUTPUT_CLASSES, runnerTakesWorkflow } from '#shared/runner/validate'
-import { needsEngineDescription, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
+import { needsEngineReasons, nodesNeedingEngine, runRefusal } from '#shared/runner/needsEngine'
 import {
   SHADER_ASPECTS, SHADER_CATALOG_VERSION, bakedFileHash, shaderSeedUniform, SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, SHADER_LEGACY_EFFECT_IDS, SHADER_NEEDS_PICTURE_FIRST,
   aspectSize, canonicalJson, framePlan, parseShaderBaked, sha256HexSync, shaderBakeKey, shaderBakeKeySync, shaderBakeKeyText, shaderBakedText,
@@ -318,7 +318,7 @@ describe('eligibility (shader-bake and cards on)', () => {
     const reasons = needsEngineReasons(p, { runnerOn: true, families: SHADER })
     expect(reasons).toEqual([SHADER_NEEDS_PICTURE_FIRST])
     expect(SHADER_NEEDS_PICTURE_FIRST).toBe('This shader needs its picture before the run. Put the picture in an Image card first.')
-    expect(needsEngineDescription(['Shader effect'], reasons)).toBe(`Only the engine can run “Shader effect”. ${SHADER_NEEDS_PICTURE_FIRST}`)
+    expect(runRefusal([{ prompt: p, titleOf }], { runnerOn: true, families: SHADER })).toEqual({ title: '“Shader effect” can’t run', description: `“Shader effect”: ${SHADER_NEEDS_PICTURE_FIRST}` })
     // With the family off, no reason: nothing of the runner's is said about it (it isn't taken with every family on either).
     expect(needsEngineReasons(p, { runnerOn: true, families: new Set(['cards']) })).toEqual([])
     expect(needsEngineReasons(p, { runnerOn: false, families: SHADER })).toEqual([])
@@ -326,8 +326,6 @@ describe('eligibility (shader-bake and cards on)', () => {
     const empty: ApiPrompt = { 0: card(''), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } }, s: saveImage(['fx', 0]) }
     expect(runnerTakesNode(empty, 'fx', SHADER)).toBe(false)
     expect(needsEngineReasons(empty, { runnerOn: true, families: SHADER })).toEqual([])
-    // The description without reasons is as before.
-    expect(needsEngineDescription(['A', 'B'])).toBe('Only the engine can run “A” and “B”.')
   })
 
   it('its picture reads downstream as a picture (Save image, Edit an image, a Frame) only while the family is on', () => {

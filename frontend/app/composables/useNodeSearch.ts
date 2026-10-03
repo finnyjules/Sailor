@@ -2,7 +2,7 @@ import { NODE_DESCRIPTIONS } from '~/lib/nodeDescriptions'
 import { NODE_KEYWORDS, NODE_BOOST } from '~/lib/nodeKeywords'
 import { searchNodes } from '~/lib/nodeMatch'
 import { isRetiredClass } from '#shared/runner/retired'
-import { hostedOffersClass } from '#shared/runner/hostedOffer'
+import { sailorOffersClass } from '#shared/runner/offer'
 
 type NodeSource = 'core' | 'essentials' | 'partner' | 'extensions'
 
@@ -32,12 +32,6 @@ function classifySource(pythonModule: string): NodeSource {
 }
 
 const SOURCE_FILTERS = ['essentials', 'partner', 'core', 'extensions']
-
-/** Hosted (no local engine): search offers only the classes the runner takes, plus the cards (step 3, R10.6). */
-function isHostedPage(): boolean {
-  try { return useRuntimeConfig().public?.hostedMode === true }
-  catch { return false }
-}
 
 export interface SyntheticNodeEntry {
   name: string
@@ -97,10 +91,10 @@ export function useNodeSearch() {
     try {
       const data = await $fetch<Record<string, any>>('/object_info')
       const types: NodeType[] = []
-      const hosted = isHostedPage()
       for (const [name, info] of Object.entries(data)) {
-        // Hosted: no local-only class, custom node or class only the local engine runs.
-        if (hosted && !hostedOffersClass(name)) continue
+        // Only the classes Sailor runs: never a stock class, a custom node or a retired one
+        // (step 3, R10.6; step 4, C5: the same rule here and hosted).
+        if (!sailorOffersClass(name)) continue
         // Retired partner nodes can't be added any more (a saved one still opens).
         if (isRetiredClass(name)) continue
         const inputs: { name: string; type: string }[] = []

@@ -30,7 +30,7 @@ import { MOODBOARD_FOLDER_RE, MOODBOARD_ID_RE, MOODBOARD_MAX_REFS } from '../../
 import { moodboardInputDir, safeImageFile } from '../../utils/moodboardImages'
 import { canonicalUploadKey, recordUpload, uploadOwner } from '../../utils/inputUploads'
 import { isHosted } from '../../utils/deployMode'
-import { shortUserHash } from '../../utils/meterGraphRun'
+import { shortUserHash } from '../../utils/userHash'
 
 /**
  * LC11 fix round 1: the flat copy's name. Hosted puts the person's hash in it

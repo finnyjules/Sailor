@@ -18,8 +18,9 @@
  * removed when the remainder matches a known engine route — anything else is
  * returned untouched and continues to Nitro exactly as before.
  *
- * Pure and side-effect free: no env reads, no h3. Local mode calls it too, but
- * every local decision ignores the result (see comfyui-proxy.ts).
+ * Pure and side-effect free: no env reads, no h3. Hosted's gates decide on its
+ * result; locally the native routes answer and anything else is a 404 (step 4,
+ * C5: there is no engine behind these paths; see comfyui-proxy.ts).
  */
 
 /**
@@ -126,16 +127,6 @@ export type EngineDecision =
   | { kind: 'proxy' }
   | { kind: 'notFound' }
   | { kind: 'forbid', message: string }
-
-/**
- * A POST to `/prompt` in any spelling (`/api/prompt`, `/comfyui/prompt`, …),
- * taken on the NORMALIZED path: the local proxy's model check (local only —
- * hosted answers every `/prompt` 404, step 3 R10.9).
- */
-export function isEnginePromptPost(enginePath: string, method: string): boolean {
-  const [p] = splitQuery(enginePath)
-  return match(p, '/prompt') && (method || 'GET').toUpperCase() === 'POST'
-}
 
 /**
  * Step 3, R10.9 — hosted never reaches the engine. Each of these is an engine

@@ -23,7 +23,6 @@ import { measuredInputPixels } from '~~/server/runner/metering'
 import {
   ENHANCE_DETAIL_TOO_LARGE, FLUX_2_EDIT_TOO_LARGE, ROTATE_CAMERA_TOO_LARGE, UPSCALE_TOO_LARGE, measuredInputProblem, measuredInputProblems,
 } from '~~/server/runner/requestRules'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { makeKit, ofType } from './__runner__/kit'
@@ -81,43 +80,6 @@ describe('the rule: every size-priced node, above the cap', () => {
   })
 })
 
-describe('the hosted /prompt gate', () => {
-  const prompt = {
-    1: { class_type: 'LoadImage', inputs: { image: 'a.jpg' } },
-    2: { class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: ['1', 0], prompt: 'warmer' } },
-    3: SINK,
-  }
-  const setup = (px: number) => {
-    const held: number[] = []
-    const forwarded: unknown[] = []
-    const deps = {
-      priceGraph, measureInputPixels: async () => ({ 2: px }),
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async (_u: string, credits: number) => { held.push(credits); return { ok: true as const, holdId: 1 } },
-      getAvailable: async () => 0,
-      forward: async (b: unknown) => { forwarded.push(b); return { status: 200, body: { prompt_id: 'p' } } },
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }
-    return { held, forwarded, deps }
-  }
-
-  it('a 48 MP camera photo into Flux 2 Pro: refused in ComfyUI\'s 400 shape, before any hold or forward', async () => {
-    const { held, forwarded, deps } = setup(48 * MP)
-    const res = await meterGraphSubmit('u', { prompt }, deps) as { status: number, body: any }
-    expect(res.status).toBe(400)
-    expect(res.body.error.message).toBe(FLUX_2_EDIT_TOO_LARGE)
-    expect(Object.keys(res.body.node_errors)).toEqual(['2'])
-    expect(held).toEqual([])
-    expect(forwarded).toHaveLength(0)
-  })
-
-  it('at the cap: held and sent as before', async () => {
-    const { held, forwarded, deps } = setup(LARGEST_INPUT_PIXELS)
-    await meterGraphSubmit('u', { prompt }, deps)
-    expect(held).toHaveLength(1)
-    expect(forwarded).toHaveLength(1)
-  })
-})
 
 describe('the runner engine', () => {
   const png = (w: number, h: number) => sharp({ create: { width: w, height: h, channels: 3, background: '#808080' } }).png({ compressionLevel: 9 }).toBuffer()

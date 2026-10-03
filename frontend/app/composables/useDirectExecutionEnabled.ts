@@ -21,11 +21,9 @@ export function directExecutionDefault(stored: string | null): boolean {
 }
 
 /**
- * The setting as actually applied. Hosted overrides the stored value: there is
- * no reachable engine origin for a hosted browser (the bridge/worker iframes
- * are not mounted), so a bridge run would await a bridge that never becomes
- * ready — and mounting one is the hole that let the iframe post to :8188
- * unmetered. Local mode keeps the default-OFF beta behavior byte-for-byte.
+ * The setting as actually applied: always on. The in-app prompt build is the
+ * only dispatch path (the bridge iframe and, since step 4 C5, the local engine
+ * are gone); every run goes to the runner.
  */
 export function directExecutionResolved(stored: string | null, hosted: boolean): boolean {
   // Tier 1 (bridge retirement): direct execution is now the ONLY dispatch path

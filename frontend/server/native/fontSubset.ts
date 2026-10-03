@@ -24,9 +24,8 @@
  * equals `after`. fontkit still parses the font, so bytes that are not a font
  * get the same 400 the Python gives.
  *
- * So the route (smallRoutes.ts) runs these checks, then hands a good font to
- * the local engine while it is running — real subsetting, exactly as before —
- * and answers with this whole font only when the engine is not there.
+ * So the route (smallRoutes.ts) runs these checks and answers with this whole
+ * font (step 4, C5: there is no engine to subset it).
  */
 /// <reference path="../../app/lib/vectortype/fontkit.d.ts" />
 import * as fontkit from 'fontkit'

@@ -29,11 +29,9 @@ import { inflateSync } from 'node:zlib'
 import { renderFrameInWorker } from '~~/server/runner/compositor/worker'
 import { decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from '~~/server/runner/compositor/decode'
 import { onlySavesRead } from '~~/server/runner/cards/utilities'
-import { chargePlanOf } from '~~/server/utils/meterGraphRun'
-import { partialCharge } from '~~/server/utils/settleWatcher'
+import { shortUserHash } from '~~/server/utils/userHash'
 import { SAVE_TOO_LARGE } from '~~/server/runner/cards/saveImage'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
-import { shortUserHash } from '~~/server/utils/meterGraphRun'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 
@@ -508,7 +506,7 @@ describe('the engine (cards on)', () => {
     expect((await k.store.get(runId))!.takes[0]!.nodes.s!.error).toBe(SAVE_FAILED)
   })
 
-  it('a failed take where only a Save image finished charges no render credit, as the ComfyUI path', async () => {
+  it('a failed take where only a Save image finished charges no render credit', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => CARDS } })
     const p: ApiPrompt = { e: emptyImage(), s: saveImage(['e', 0]), bad: saveImage(['e', 0], { filename_prefix: '../x' }) }
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
@@ -519,21 +517,8 @@ describe('the engine (cards on)', () => {
     // The runner: the hold of one render credit is let go, nothing charged.
     expect(k.ledger.hold).toHaveBeenCalledTimes(1)
     expect(k.ledger.settle.mock.calls.filter(([, actual]) => actual > 0)).toEqual([])
-    // The ComfyUI path, the same graph failing the same way: no render credit either.
-    const plan = chargePlanOf(p, {}, BASE_RENDER_CREDITS)
-    const failed = { status: { messages: [
-      ['execution_start', {}], ['execution_cached', { nodes: [] }],
-      ['execution_error', { executed: ['e', 's'], node_id: 'bad' }],
-    ] } }
-    expect(partialCharge(failed as never, plan, BASE_RENDER_CREDITS)).toMatchObject({ credits: 0 })
   })
 
-  it('a failed take where a Frame finished still charges the render credit, on both paths', () => {
-    const p = { f: { class_type: 'Compositor', inputs: {} }, s: saveImage(['f', 0]) }
-    const plan = chargePlanOf(p, {}, BASE_RENDER_CREDITS)
-    const failed = { status: { messages: [['execution_error', { executed: ['f'], node_id: 's' }]] } }
-    expect(partialCharge(failed as never, plan, BASE_RENDER_CREDITS)).toMatchObject({ credits: BASE_RENDER_CREDITS })
-  })
 
   it('Preview image writes to temp and is not an output', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => CARDS } })

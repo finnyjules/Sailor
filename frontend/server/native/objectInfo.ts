@@ -1,13 +1,13 @@
 /**
  * `/object_info` — the node definitions — served by Sailor itself.
  *
- * While ComfyUI answers (within 3 s) its body is passed through and
- * a copy of the full catalog — file lists blanked — is kept at
- * `<storeDir('data')>/object_info.json`. While it does not (a failure is
- * remembered for 3 s), the saved copy is served — or, before one exists, the
+ * Step 4, C5: there is no engine to ask. The saved copy of the engine's last
+ * full catalog (`<storeDir('data')>/object_info.json`, file lists blanked,
+ * written while the engine still ran) is served — or, where none exists, the
  * committed baseline `objectInfo.baseline.json.gz`, blanked the same way —
  * with every file-list combo it knows how to rebuild refreshed from disk, the
- * way ComfyUI builds them on each request:
+ * way ComfyUI built them on each request (C6 makes the catalogue Sailor's own
+ * data file):
  *
  *   - the input-derived combos (`UPLOAD_INPUT_LISTS`): each node's own listing
  *     of `input/`, ported from its `INPUT_TYPES` / `define_schema`;
@@ -18,7 +18,6 @@
  * Every other byte of the served catalog is left as it was saved, except
  * Sailor's model menus, laid over every body served (`withModelOverlay`).
  */
-import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -27,20 +26,13 @@ import { resolveEngineRoot } from '../utils/inputUploads'
 import { storeDir } from '../utils/dataDir'
 import { PY_ENCODING_SUFFIXES, PY_MIME_TOP, PY_SUFFIX_MAP } from './pyMimeTypes'
 import { isDir, isFile } from './paths'
-import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
-import { isHosted } from '../utils/deployMode'
 import { applyModelOverlay } from '../../shared/runner/modelMenus'
 import { runnerFamilies } from '../runner/config'
 
 type Catalog = Record<string, any>
 
-/** How long ComfyUI gets to answer before the stored copy is served. */
-export const OBJECT_INFO_ENGINE_TIMEOUT_MS = 3_000
-
 /** The paths served here (boundary-matched by the router). */
 export const OBJECT_INFO_PREFIXES = ['/object_info']
-
-const MAIN_ENGINE_PORT = ENGINE_MAIN_PORT
 
 // ------------------------------------------------------------ Python helpers
 
@@ -658,7 +650,7 @@ export function __setObjectInfoCacheFileForTests(file: string | undefined): void
 /** Tests: point the committed baseline elsewhere. */
 export function __setObjectInfoBaselineFileForTests(file: string | undefined): void { baselineFileOverride = file }
 
-/** Where the live copy is saved. Null inside a test run that has not redirected it. */
+/** Where the engine's last catalog was saved. Null inside a test run that has not redirected it. */
 export function objectInfoCacheFile(): string | null {
   if (cacheFileOverride !== undefined) return cacheFileOverride
   if (process.env.VITEST) return null
@@ -693,8 +685,6 @@ export function objectInfoBaselineFile(): string | null {
 
 let savedMemo: { file: string, mtimeMs: number, size: number, value: Catalog } | null = null
 let baselineMemo: { file: string, value: Catalog } | null = null
-let lastWritten: { file: string, text: string } | null = null
-let pendingSave: Promise<void> = Promise.resolve()
 
 function isCatalog(v: unknown): v is Catalog {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
@@ -747,37 +737,6 @@ export function objectInfoDisplayName(classType: string): string | null {
   return null
 }
 
-/**
- * Keep the engine's full catalog, lists blanked, for the next time it is down
- * (atomic; skipped when unchanged). Runs after the response, never before it.
- */
-async function saveCopy(body: Catalog): Promise<void> {
-  const file = objectInfoCacheFile()
-  if (!file) return
-  const text = JSON.stringify(blankFileLists(structuredClone(body)))
-  if (lastWritten && lastWritten.file === file && lastWritten.text === text && fs.existsSync(file)) return
-  await fs.promises.mkdir(path.dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
-  try {
-    await fs.promises.writeFile(tmp, text)
-    await fs.promises.rename(tmp, file)
-    lastWritten = { file, text }
-  }
-  catch (e) {
-    await fs.promises.rm(tmp, { force: true }).catch(() => {})
-    throw e
-  }
-}
-
-function saveCopyInBackground(body: Catalog): void {
-  pendingSave = pendingSave
-    .then(() => saveCopy(body))
-    .catch((e) => { console.warn('[native] object_info: could not save a copy', e) })
-}
-
-/** Tests: wait for the background save to land. */
-export function __objectInfoSaveSettledForTests(): Promise<void> { return pendingSave }
-
 // ------------------------------------------------------------ the route
 
 export type ObjectInfoMatch =
@@ -795,58 +754,7 @@ export function matchObjectInfoRoute(p: string, method: string, decode: (seg: st
   return verb === 'GET' ? { kind: 'route', node } : { kind: 'badMethod' }
 }
 
-export type ObjectInfoBody =
-  /** The engine's answer: its exact text, and the parsed catalog when it is plain JSON. */
-  | { source: 'engine', text: string, body: Catalog | null }
-  | { source: 'saved' | 'baseline', body: Catalog }
-
-/** Ports that just failed to answer, and until when they are taken as down. */
-const engineDownUntil = new Map<number, number>()
-
-/** Tests: forget which engines were seen down. */
-export function __resetObjectInfoEngineStateForTests(): void { engineDownUntil.clear() }
-
-/**
- * Ask the engine for the catalog; null when it does not answer in time or
- * answers an error. The engine is first checked against the shared cached
- * health check (engineHealth.ts) — known down means no fetch. A failure here
- * is also remembered for 3 s: that covers an engine that answers
- * /system_stats but hangs or errors on /object_info, so a hung engine costs
- * one timeout, not one per request.
- */
-async function fromEngine(rawPath: string, canonicalPath: string): Promise<{ text: string, body: Catalog | null, port: number } | null> {
-  // Hosted never reaches the engine (step 3, R10.9): the stored catalog only.
-  if (isHosted()) return null
-  const port = MAIN_ENGINE_PORT
-  if ((engineDownUntil.get(port) ?? 0) > Date.now()) return null
-  if (await engineHealth() === 'down') return null
-  const q = rawPath.indexOf('?')
-  const query = q === -1 ? '' : rawPath.slice(q)
-  const target = `http://127.0.0.1:${port}`
-  let text: string
-  try {
-    const res = await fetch(`${target}${canonicalPath}${query}`, {
-      headers: { origin: target },
-      signal: AbortSignal.timeout(OBJECT_INFO_ENGINE_TIMEOUT_MS),
-    })
-    if (!res.ok) throw new Error(`engine answered ${res.status}`)
-    text = await res.text()
-  }
-  catch {
-    engineDownUntil.set(port, Date.now() + OBJECT_INFO_ENGINE_TIMEOUT_MS)
-    return null
-  }
-  engineDownUntil.delete(port)
-  // Python's json may write NaN/Infinity, which JSON.parse refuses: the engine
-  // still answered, so its text is still the answer — just not a parsed one.
-  let body: Catalog | null = null
-  try {
-    const parsed = JSON.parse(text)
-    if (isCatalog(parsed)) body = parsed
-  }
-  catch {}
-  return { text, body, port }
-}
+export type ObjectInfoBody = { source: 'saved' | 'baseline', body: Catalog }
 
 /**
  * The stored catalog for `node` (all of it when null), refreshed from disk.
@@ -874,24 +782,9 @@ export function storedNodeCatalog(): Readonly<Catalog> | null {
   return readSaved() ?? readBaseline()
 }
 
-/**
- * The body for `canonicalPath` (`/object_info` or `/object_info/{node}`):
- * locally the engine's own while it answers (hosted never asks it, R10.9), else the stored catalog refreshed from
- * disk. Null only when there is no engine and no stored catalog at all.
- */
-export async function objectInfoBody(rawPath: string, canonicalPath: string, node: string | null): Promise<ObjectInfoBody | null> {
-  const live = await fromEngine(rawPath, canonicalPath)
-  if (live) {
-    // The full catalog only.
-    if (live.body && node === null) saveCopyInBackground(live.body)
-    return { source: 'engine', text: live.text, body: live.body }
-  }
-  return storedObjectInfoBody(node)
-}
-
 export const NO_NODE_DEFINITIONS = {
   status: 503,
-  body: { error: 'Sailor can\'t load the node list: the engine is not answering and no saved copy was found.' },
+  body: { error: 'Sailor can\'t load the node list: no saved copy was found.' },
 }
 
 /**
@@ -905,19 +798,11 @@ export function withModelOverlay(body: Catalog): Catalog {
 }
 
 /**
- * The local route: the engine's catalog (parsed, overlaid, re-serialised),
- * else the stored catalog (overlaid), else 503. An engine answer JSON.parse
- * refuses (Python's NaN/Infinity) can't be overlaid, so the stored catalog is
- * served instead, overlaid, as hosted does; the engine's own bytes pass
- * through only when nothing is stored.
+ * The local route: the stored catalog, refreshed from disk and overlaid, else
+ * 503 (step 4, C5: no engine to ask).
  */
-export async function runObjectInfo(rawPath: string, canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown, headers?: Record<string, string> }> {
-  const got = await objectInfoBody(rawPath, canonicalPath, node)
+export async function runObjectInfo(_rawPath: string, _canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown, headers?: Record<string, string> }> {
+  const got = storedObjectInfoBody(node)
   if (!got) return NO_NODE_DEFINITIONS
-  if (got.source !== 'engine') return { status: 200, body: withModelOverlay(got.body) }
-  const json = { 'content-type': 'application/json; charset=utf-8' }
-  if (got.body) return { status: 200, body: JSON.stringify(withModelOverlay(got.body)), headers: json }
-  const stored = storedObjectInfoBody(node)
-  if (stored?.body) return { status: 200, body: withModelOverlay(stored.body) }
-  return { status: 200, body: got.text, headers: json }
+  return { status: 200, body: withModelOverlay(got.body) }
 }

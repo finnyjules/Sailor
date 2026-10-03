@@ -360,8 +360,8 @@ describe('GET /sailor/input_thumbnail', () => {
 
   it('a video goes to the engine; without it the answer is 503 — unless the engine already cached it', async () => {
     touch(path.join(input, 'clip.mp4'), 1_700_000_000)
-    expect(await M.inputThumbnailRoute(user, input, 'clip.mp4', noEngine)).toEqual(M.NEEDS_ENGINE)
-    expect(M.NEEDS_ENGINE).toEqual({ status: 503, body: { error: 'This needs the local engine' } })
+    expect(await M.inputThumbnailRoute(user, input, 'clip.mp4', noEngine)).toEqual(M.MEDIA_UNAVAILABLE)
+    expect(M.MEDIA_UNAVAILABLE).toEqual({ status: 503, body: { error: 'Sailor can’t read this file right now. Try again in a moment.' } })
 
     const engine = vi.fn(async () => ({ status: 200, body: Buffer.from('engine-png'), headers: { 'content-type': 'image/png' } }))
     expect(String((await M.inputThumbnailRoute(user, input, 'clip.mp4', engine)).body)).toBe('engine-png')
@@ -412,7 +412,7 @@ describe('GET /sailor/asset_thumbnails', () => {
   it('missing asset_id is 400, an unknown asset 404, a video without the engine 503', async () => {
     expect(await M.assetThumbnailsRoute(user, q(''), noEngine)).toEqual({ status: 400, body: { error: 'missing asset_id' } })
     expect(await M.assetThumbnailsRoute(user, q('asset_id=ghost'), noEngine)).toEqual({ status: 404, body: { error: 'asset not found' } })
-    expect(await M.assetThumbnailsRoute(user, q('asset_id=vid'), noEngine)).toEqual(M.NEEDS_ENGINE)
+    expect(await M.assetThumbnailsRoute(user, q('asset_id=vid'), noEngine)).toEqual(M.MEDIA_UNAVAILABLE)
   })
 
   it('an asset id that would climb out of the cache folder never reads or writes a file there', async () => {
@@ -448,66 +448,13 @@ describe('GET /sailor/asset_waveform', () => {
   it('400 without an id, 404 for an unknown asset, otherwise the engine or 503', async () => {
     expect(await M.assetWaveformRoute(user, q(''), noEngine)).toEqual({ status: 400, body: { error: 'missing asset_id' } })
     expect(await M.assetWaveformRoute(user, q('asset_id=ghost'), noEngine)).toEqual({ status: 404, body: { error: 'asset not found' } })
-    expect(await M.assetWaveformRoute(user, q('asset_id=aud'), noEngine)).toEqual(M.NEEDS_ENGINE)
+    expect(await M.assetWaveformRoute(user, q('asset_id=aud'), noEngine)).toEqual(M.MEDIA_UNAVAILABLE)
     const engine = async () => ({ status: 200, body: { peaks: [1], asset_id: 'aud', buckets: 256 } })
     expect((await M.assetWaveformRoute(user, q('asset_id=aud'), engine)).body).toEqual({ peaks: [1], asset_id: 'aud', buckets: 256 })
   })
 })
 
-// -------------------------------------------------------------- the engine
-
-describe('forwardToEngine (item 1: a timed-out/aborted engine call is "engine down")', () => {
-  const fetchMock = vi.fn()
-  const event = { path: '/sailor/asset_thumbnails?asset_id=vid', method: 'GET' } as any
-
-  beforeEach(() => {
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-  })
-  afterEach(() => { vi.unstubAllGlobals() })
-
-  it('exposes the timeouts the brief calls for: 30s for thumbnails/waveforms, 120s for asset_import', () => {
-    expect(M.ENGINE_FORWARD_TIMEOUT_MS).toBe(30_000)
-    expect(M.ENGINE_ASSET_IMPORT_TIMEOUT_MS).toBe(120_000)
-  })
-
-  it('passes an AbortSignal built from the given timeout', async () => {
-    fetchMock.mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
-    const spy = vi.spyOn(AbortSignal, 'timeout')
-    await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)
-    expect(spy).toHaveBeenCalledWith(30_000)
-    const [, init] = fetchMock.mock.calls[0]!
-    expect(init.signal).toBeInstanceOf(AbortSignal)
-    spy.mockRestore()
-  })
-
-  it('a plain network failure is treated as "engine not reachable" (null)', async () => {
-    fetchMock.mockRejectedValue(new TypeError('fetch failed'))
-    expect(await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)).toBeNull()
-  })
-
-  it('an aborted (timed-out) call is also null, not an unhandled rejection', async () => {
-    fetchMock.mockRejectedValue(new DOMException('The operation was aborted', 'TimeoutError'))
-    expect(await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)).toBeNull()
-  })
-
-  it('an abort while reading the body (not just connecting) is also null', async () => {
-    // arrayBuffer() itself rejects — the abort landed mid-stream.
-    fetchMock.mockResolvedValue({
-      headers: { get: () => 'application/json' },
-      status: 200,
-      arrayBuffer: () => Promise.reject(new DOMException('The operation was aborted', 'TimeoutError')),
-    })
-    expect(await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)).toBeNull()
-  })
-
-  it('omitting the timeout omits the signal entirely (no behaviour change for untouched callers)', async () => {
-    fetchMock.mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
-    await M.forwardToEngine(event, '/sailor/asset_thumbnails')
-    const [, init] = fetchMock.mock.calls[0]!
-    expect(init.signal).toBeUndefined()
-  })
-})
+// Step 4, C5: forwardToEngine is gone (no engine to ask); the routes' stand-in answers null.
 
 describe('Python-isms', () => {
   it('pyExt follows os.path.splitext', () => {

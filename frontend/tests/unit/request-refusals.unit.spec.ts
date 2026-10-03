@@ -24,7 +24,6 @@ import {
 } from '~~/server/runner/requestRules'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { makeKit } from './__runner__/kit'
 
@@ -77,20 +76,12 @@ describe('Nano Banana: a prompt under 3 characters, as sent', () => {
     expect(blockedPromptRefusal(img({ prompt: 'abc' }))).toBeNull()
   })
 
-  it('the runner refuses the run before any hold; the hosted meter before pricing or hold', async () => {
+  it('the runner refuses the run before any hold', async () => {
     const k = makeKit({ hosted: true })
     await expect(k.engine.startRun({ userId: k.userId, takes: [img({ prompt: 'p' })], workflow: null, canvasId: null, projectUuid: null, projectName: null }))
       .rejects.toMatchObject({ statusCode: 400, message: NANO_BANANA_SHORT_PROMPT })
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.fal.client.submit).not.toHaveBeenCalled()
-
-    const d = meterDeps()
-    const r = await meterGraphSubmit('u1', { prompt: img({ prompt: 'p' }) }, d as any)
-    expect(r.status).toBe(400)
-    expect((r.body as any).error.message).toBe(NANO_BANANA_SHORT_PROMPT)
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-    expect(d.forward).not.toHaveBeenCalled()
   })
 })
 
@@ -159,30 +150,8 @@ describe('Seedance 2.0 references: at most 15 s of video and 15 s of sound in al
     expect(read).not.toHaveBeenCalled()
   })
 
-  it('the hosted meter refuses it before pricing or any hold', async () => {
-    const d = { ...meterDeps(), referenceSecondsProblems: (p: any) => seedanceReferenceSeconds(p, read) }
-    const r = await meterGraphSubmit('u1', { prompt: seed({ video_urls: [view('a.mp4'), view('b.mp4')] }) }, d as any)
-    expect(r.status).toBe(400)
-    expect((r.body as any).error.message).toBe(SEEDANCE_TOO_MUCH_VIDEO)
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-  })
 })
 
-function meterDeps() {
-  return {
-    priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-    spendGuard: vi.fn(async () => {}),
-    validateFileRefs: vi.fn(async () => {}),
-    moderatePrompt: vi.fn(async () => ({ ok: true as const })),
-    hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-    getAvailable: vi.fn(async () => 3),
-    forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-    registerRun: vi.fn(async () => {}),
-    startSettle: vi.fn(),
-    releaseHold: vi.fn(async () => {}),
-  }
-}
 
 // ── S1b fix round 2 ─────────────────────────────────────────────────────
 

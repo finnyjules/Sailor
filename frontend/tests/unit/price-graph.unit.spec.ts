@@ -13,8 +13,8 @@
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
-import { executedPart, pruneInvalidOutputs } from '#shared/runner/validate'
-import { outputClassesOf } from '../../server/utils/meterGraphRun'
+import { executedPart, outputClassesOf, pruneInvalidOutputs } from '#shared/runner/validate'
+import { isRetiredClass } from '#shared/runner/retired'
 import { stageEstimate } from '../../server/runner/metering'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -82,7 +82,9 @@ function comfyExtrasProviderClasses(): string[] {
 const EXTRAS_CLASSES = comfyExtrasProviderClasses()
 const ALL_PROVIDER_CLASSES = [...REPLICATE_CLASSES, ...EXTRAS_CLASSES]
 
-function classify(c: string): 'flat' | 'model' | 'settings' | 'per-second' | 'paid' | 'exempt' | 'UNCLASSIFIED' {
+function classify(c: string): 'flat' | 'model' | 'settings' | 'per-second' | 'paid' | 'exempt' | 'retired' | 'UNCLASSIFIED' {
+  // Step 4, C5: a retired class (C4) is refused before any price, so its engine-path price rows went.
+  if (isRetiredClass(c)) return 'retired'
   if (c in GRAPH_NODE_CREDITS) return 'flat'
   // Step 3, R3: priced by the calls its settings make (shared/pricing/paidSettings.ts).
   if (PAID_NODE_CLASSES.includes(c)) return 'paid'
@@ -99,7 +101,7 @@ describe('graph price book coverage', () => {
     expect(EXTRAS_CLASSES.length).toBeGreaterThan(5)
   })
 
-  it('every provider node class is priced, model-priced, setting-priced, or exempt with a reason', () => {
+  it('every provider node class is priced, model-priced, setting-priced, exempt with a reason, or retired', () => {
     const unclassified = ALL_PROVIDER_CLASSES.filter(c => classify(c) === 'UNCLASSIFIED')
     expect(unclassified).toEqual([])
     // One price per class: no class sits in two tables.
@@ -133,7 +135,8 @@ describe('graph price book coverage', () => {
     expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: { ...front, back_reference: ['0', 0] } } }).credits).toBe(456)
     expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: { ...front, right_reference: ['0', 0], left_reference: ['0', 0] } } }).credits).toBe(684)
     expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: { ...front, right_reference: ['0', 0], back_reference: ['0', 0], left_reference: ['0', 0] } } }).credits).toBe(912)
-    expect(priceGraph({ 1: { class_type: 'IdeogramV3TurboRemoteNode', inputs: {} } }).credits).toBe(6)
+    // Step 4, C5: a retired class (C4) has no price any more: refused, never priced at base.
+    expect(() => priceGraph({ 1: { class_type: 'IdeogramV3TurboRemoteNode', inputs: {} } })).toThrow(UnpricedGraphError)
   })
 
   it('every exempt class carries a non-empty reason', () => {
@@ -215,13 +218,12 @@ describe('graph price book coverage', () => {
   // same call. Review ruling (2026-08-17): price at range top so the
   // expensive setting is never underpriced — badge divergence ($0.10/$0.50
   // vs range-top $0.20/$0.60) flagged for the pre-launch invoice sweep.
-  it('prices Clarity/Kling/Seedance2 off their multi-line price_badge USD', () => {
-    expect(GRAPH_NODE_CREDITS.ClarityUpscaleRemoteNode).toBe(creditsForUsdServer(0.20))
-    expect(GRAPH_NODE_CREDITS.ClarityUpscaleRemoteNode).toBe(30)
-    // Kling 2.1 and Seedance 2.0 are priced per second of what they send since
-    // Task P5 (clip-pricing.unit.spec.ts).
-    expect(GRAPH_NODE_CREDITS.KlingVideoRemoteNode).toBeUndefined()
-    expect(GRAPH_NODE_CREDITS.Seedance2RemoteNode).toBeUndefined()
+  it('step 4, C5: the retired per-model nodes (C4) carry no price: Clarity, Kling, Seedance 2, Veo 3, Flux Pro, Kontext, Ideogram', () => {
+    for (const ct of ['ClarityUpscaleRemoteNode', 'KlingVideoRemoteNode', 'Seedance2RemoteNode', 'Veo3RemoteNode', 'FluxProRemoteNode', 'FluxKontextRemoteNode', 'IdeogramV3TurboRemoteNode']) {
+      expect(isRetiredClass(ct), ct).toBe(true)
+      expect(GRAPH_NODE_CREDITS[ct], ct).toBeUndefined()
+      expect(REMOTE_VIDEO_NODE_CLASSES, ct).not.toContain(ct)
+    }
   })
 })
 
@@ -392,7 +394,8 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     // Task P4 moved the edit classes from the flat table to their settings.
     // Task P5 moved the older video and lip-sync nodes to a per-second price.
     // Step 3, R3 moved the paid classes to their calls (shared/pricing/paidSettings.ts).
-    expect(Object.keys(golden.flat).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, ...PAID_NODE_CLASSES].sort())
+    // Step 4, C5: the retired classes (C4) left the tables; the recorded table keeps them as history.
+    expect(Object.keys(golden.flat).filter(ct => !isRetiredClass(ct)).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, ...PAID_NODE_CLASSES].sort())
     // Both outcomes are present, so a pricer that refused (or priced) everything would fail.
     const cells = Object.values(golden.modelPriced).flatMap(row => Object.values(row))
     expect(cells.filter(c => c === 'refused').length).toBeGreaterThan(50)
@@ -430,6 +433,7 @@ describe('golden price table (no price changed by the shared pricing move)', () 
   it('every flat class prices exactly as recorded', () => {
     const drift: string[] = []
     for (const [ct, want] of Object.entries(golden.flat)) {
+      if (isRetiredClass(ct)) continue
       const got = priceOrRefused(ct, {})
       // A setting-priced edit class keeps only its shape: it still prices.
       // So does a per-second class (Task P5).

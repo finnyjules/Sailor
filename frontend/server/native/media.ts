@@ -21,10 +21,10 @@
  * media tools are ready (`mediaTools()`), server/media/thumbnails.ts reads them
  * as PyAV does, and the engine is never asked; a file the tools can't read
  * gives Python's own failure answer ([] or nulls). Without the tools, those
- * requests go to ComfyUI when it is reachable, and otherwise answer 503
- * `This needs the local engine` (an import still records the asset, without
- * duration or size). A thumbnail or waveform already cached is served from
- * the cache either way.
+ * requests answer 503 in plain words (MEDIA_UNAVAILABLE; an import still
+ * records the asset, without duration or size), here and hosted alike: there
+ * is no engine to ask (step 4, C5). A thumbnail or waveform already cached is
+ * served from the cache either way.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -37,7 +37,6 @@ import type { NativeMedia } from '../media/thumbnails'
 import { isHosted } from '../utils/deployMode'
 import { engineFolder, listdirEntries, pySafeResolve, resolveInside, writeFileAtomic } from './paths'
 import { pyDumps } from './pyJson'
-import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
 import { truthy } from './projects'
 
 type Json = any
@@ -62,12 +61,12 @@ export const MEDIA_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS, ...AUDIO_EXTS])
 export const THUMB_HEIGHT_PX = 48
 export type { NativeMedia }
 
-export const NEEDS_ENGINE: MediaResult = { status: 503, body: { error: 'This needs the local engine' } }
 /**
- * Hosted, where the engine is never asked (step 3, R10.9): a video or sound
- * Sailor's own media tools can't read right now is refused in plain words.
+ * A video or sound Sailor's own media tools can't read right now, refused in
+ * plain words (step 3, R10.9 for hosted; step 4, C5 everywhere: there is no
+ * engine to ask).
  */
-export const HOSTED_MEDIA_UNAVAILABLE: MediaResult = { status: 503, body: { error: 'Sailor can’t read this file right now. Try again in a moment.' } }
+export const MEDIA_UNAVAILABLE: MediaResult = { status: 503, body: { error: 'Sailor can’t read this file right now. Try again in a moment.' } }
 
 // --------------------------------------------------------------- Python-isms
 
@@ -338,9 +337,9 @@ export function assetsListRoute(userDirectory: string): MediaResult {
 
 /**
  * `_asset_import_route`. With the media tools (`native`) a video/audio file is
- * probed here. Without them `engine` is called for it (PyAV probing); it
- * returns the engine's own answer, or null when the engine is not reachable —
- * then the asset is recorded without duration or size.
+ * probed here. Without them `engine` is called for it (a stand-in answer; since
+ * C5 the route passes one that answers null) — on null the asset is recorded
+ * without duration or size.
  */
 export async function assetImportRoute(
   userDirectory: string,
@@ -529,7 +528,7 @@ export async function inputThumbnailRoute(
   const st = fs.statSync(p, { bigint: true })
   const cachePng = path.join(thumbCacheDir(userDirectory), inputThumbName(filename, pyMtime(st)))
   if (!fs.existsSync(cachePng)) {
-    if (!isImageFile(p) && !native) return (await engine()) ?? NEEDS_ENGINE
+    if (!isImageFile(p) && !native) return (await engine()) ?? MEDIA_UNAVAILABLE
     const png = isImageFile(p) ? await imageThumbnailPng(p) : (await native!.thumbnails(p, 1)).pngs[0] ?? null
     if (!png) return EMPTY_404
     try { writeFileAtomic(cachePng, png) }
@@ -574,7 +573,7 @@ export async function assetThumbnailsRoute(
     pngs = r.pngs
     keep = r.cache
   }
-  else return (await engine()) ?? NEEDS_ENGINE
+  else return (await engine()) ?? MEDIA_UNAVAILABLE
   const thumbs = pngs.map(png => `data:image/png;base64,${png.toString('base64')}`)
   const payload = { thumbnails: thumbs, asset_id: assetId, count }
   if (file && keep) {
@@ -614,7 +613,7 @@ export async function assetWaveformRoute(
 
   const asset = findAsset(loadAssets(userDirectory), assetId)
   if (!asset) return { status: 404, body: { error: 'asset not found' } }
-  if (!native) return (await engine()) ?? NEEDS_ENGINE
+  if (!native) return (await engine()) ?? MEDIA_UNAVAILABLE
   await probeMarkedAgain(userDirectory, asset, native)
   const r = await native.waveform(String(field(asset, 'path')), buckets)
   const payload = { peaks: r.peaks, asset_id: assetId, buckets }
@@ -623,62 +622,6 @@ export async function assetWaveformRoute(
     catch {}
   }
   return { status: 200, body: payload }
-}
-
-// ---------------------------------------------------------------- the engine
-
-/** Thumbnails and waveforms are interactive UI calls; asset_import can transcode a whole file. */
-export const ENGINE_FORWARD_TIMEOUT_MS = 30_000
-export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
-
-/**
- * Hand the request to the local engine, exactly as the proxy would (same
- * path and query, same body). Local only: hosted gets null without a request
- * (R10.9). Null when the
- * engine is not reachable OR does not answer within `timeoutMs` — a timed-out
- * abort is a network failure from this route's point of view, so it takes the
- * same "engine down" path as a connection refusal (the caller's existing 503
- * / null-field handling), never an unhandled rejection. JSON answers come
- * back parsed, anything else as bytes with its content type.
- */
-export async function forwardToEngine(event: H3Event, canonicalPath: string, rawBody?: Buffer, timeoutMs?: number): Promise<MediaResult | null> {
-  // Hosted never reaches the engine (step 3, R10.9): local only from here on.
-  if (isHosted()) return null
-  // The engine already known down (cached health check): don't wait out a doomed fetch.
-  if (await engineHealth() === 'down') return null
-  const q = event.path.indexOf('?')
-  const query = q === -1 ? '' : event.path.slice(q)
-  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
-  const method = (event.method || 'GET').toUpperCase()
-  const headers: Record<string, string> = { origin: target }
-  if (rawBody) headers['content-type'] = 'application/json'
-  let res: Response
-  let bytes: Buffer
-  try {
-    res = await fetch(`${target}${canonicalPath}${query}`, {
-      method,
-      headers,
-      body: rawBody as any,
-      ...(timeoutMs !== undefined ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-    })
-    // Reading the body can itself abort mid-stream once the timeout fires, so
-    // it stays inside the same try as the fetch rather than getting its own
-    // (uncaught) await below.
-    bytes = Buffer.from(await res.arrayBuffer())
-  }
-  catch {
-    return null
-  }
-  const type = res.headers.get('content-type') ?? ''
-  if (type.includes('json')) {
-    try { return { status: res.status, body: JSON.parse(bytes.toString('utf8')) } }
-    catch {}
-  }
-  const out: Record<string, string> = {}
-  if (type) out['content-type'] = type
-  const cc = res.headers.get('cache-control')
-  if (cc) out['cache-control'] = cc
-  return { status: res.status, body: bytes, headers: out }
 }
 
 // ------------------------------------------------------------------ the table
@@ -742,16 +685,13 @@ export function mediaContext(): MediaContext | null {
 }
 
 /** Serve one matched media route. `body` is the request body, parsed and as sent (asset_import only). */
-export async function runMediaRoute(ctx: MediaContext, h: MediaHandler, event: H3Event, canonicalPath: string, body?: { value: unknown, raw: Buffer }): Promise<MediaResult> {
+export async function runMediaRoute(ctx: MediaContext, h: MediaHandler, event: H3Event, _canonicalPath: string, body?: { value: unknown, raw: Buffer }): Promise<MediaResult> {
   const q = event.path.indexOf('?')
   const query = new URLSearchParams(q === -1 ? '' : event.path.slice(q + 1))
-  // Thumbnails/waveforms are a UI call waiting on the response; asset_import
-  // can be probing/transcoding a whole media file, so it gets a longer leash.
-  // Hosted never reaches the engine (R10.9): a thumbnail or waveform the media tools can't make is refused in
-  // plain words; an import is recorded without its length and size, as with the engine down.
-  const hosted = isHosted()
-  const engine = hosted ? async () => HOSTED_MEDIA_UNAVAILABLE : () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_FORWARD_TIMEOUT_MS)
-  const engineForImport = hosted ? async () => null : () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_ASSET_IMPORT_TIMEOUT_MS)
+  // No engine to ask (R10.9 for hosted; step 4, C5 everywhere): a thumbnail or waveform the media tools can't
+  // make is refused in plain words; an import is recorded without its length and size.
+  const engine = async () => MEDIA_UNAVAILABLE
+  const engineForImport = async () => null
   // R5.6 (no family, ruling l): the four video/sound routes read with Sailor's own tools once they're ready.
   const reads = h.name === 'assetImport' || h.name === 'inputThumbnail' || h.name === 'assetThumbnails' || h.name === 'assetWaveform'
   const native = reads ? await nativeMediaFor(ctx, event) : null
@@ -783,7 +723,7 @@ async function nativeMediaFor(ctx: MediaContext, event: H3Event): Promise<Native
     ({ nativeMedia } = await import('../media/thumbnails'))
   }
   catch (e) {
-    // As without the tools: the engine, or 503 (R5.6 fix round 1).
+    // As without the tools: 503 in plain words (R5.6 fix round 1).
     console.error('[media] media.route.unavailable: the media module failed to load', e)
     return null
   }

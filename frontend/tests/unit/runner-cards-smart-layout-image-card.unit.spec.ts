@@ -20,9 +20,8 @@ import type { RunnerFamily } from '#shared/runner/families'
 import { EVERY_KNOWN_FAMILY } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
-import { NEEDS_LOCAL_ENGINE } from '#shared/runner/localOnly'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { MISSING_OUTPUT_WORDS, engineRoute, engineRunPrompt, leftOutNotice } from '~/lib/runner/needsEngine'
+import { MISSING_OUTPUT_WORDS, engineRunPrompt, leftOutNotice, runRefusal } from '~/lib/runner/needsEngine'
 import type { OutputFile } from '~~/server/runner/types'
 import { SAVE_OUTSIDE } from '~~/server/runner/results'
 import { IMAGE_EXPORT_TOO_MUCH, imageExportKeptBytes } from '~~/server/runner/cards/imageExport'
@@ -49,10 +48,6 @@ async function rgb(path: string): Promise<Buffer> {
 }
 
 describe('eligibility', () => {
-  it('Smart Layout is off the needs-the-local-engine list', () => {
-    expect(NEEDS_LOCAL_ENGINE.SmartLayout).toBeUndefined()
-  })
-
   it('Smart Layout → Image card runs on the runner (cards on), with every family on too', () => {
     const p: ApiPrompt = { l: smartLayout(), i: card(['l', 0]) }
     expect(isRunnerEligible(p, CARDS)).toBe(true)
@@ -291,18 +286,14 @@ describe('fix round 1: the Text card showing a LoRA node’s log', () => {
     const p: ApiPrompt = { m: multiLora(), mi: card(['m', 0]), t: logCard(), l: smartLayout(), i: card(['l', 0]) }
     expect(pruneInvalidOutputs(p, EVERY_KNOWN_FAMILY).dropped).toEqual([])
     expect(runnerTakesWorkflow(p, EVERY_KNOWN_FAMILY)).toBe(false)
-    expect(NEEDS_LOCAL_ENGINE).toEqual({})
     // ComfyUI's validate_inputs reads RETURN_TYPES[1] of a one-output class, which raises: the card's output
     // fails validation and the rest runs. The canvas hands the runner the same (engineRunPrompt).
     const pruned = engineRunPrompt(p, CATALOG as never)!
     expect(Object.keys(pruned).sort()).toEqual(['i', 'l', 'm', 'mi'])
     expect(runnerTakesWorkflow(pruned, EVERY_KNOWN_FAMILY)).toBe(true)
     expect(leftOutNotice([{ prompt: p, pruned, titleOf }])).toMatchObject({ title: 'Some nodes were left out' })
-    // Judged whole (were the runner to decline the rest), the card is named in plain words, never sent to the engine.
-    const route = (o: Partial<Parameters<typeof engineRoute>[1]>) =>
-      engineRoute([{ prompt: p, titleOf }], { runnerOn: true, families: EVERY_KNOWN_FAMILY, hosted: false, engineUp: true, catalog: CATALOG, ...o })
-    for (const o of [{}, { engineUp: false }, { hosted: true }]) {
-      expect(route(o)).toEqual({ to: 'refused', title: '“LoRA log” can’t run', description: `“LoRA log”: ${MISSING_OUTPUT_WORDS}` })
-    }
+    // Judged whole (were the runner to decline the rest), the card is named in plain words.
+    expect(runRefusal([{ prompt: p, titleOf }], { runnerOn: true, families: EVERY_KNOWN_FAMILY, catalog: CATALOG }))
+      .toEqual({ title: '“LoRA log” can’t run', description: `“LoRA log”: ${MISSING_OUTPUT_WORDS}` })
   })
 })

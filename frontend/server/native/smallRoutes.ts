@@ -24,8 +24,6 @@ import {
 } from './spacePresets'
 import { fontSubsetRoute } from './fontSubset'
 import { cleanupFramesRoute, clearDatasetRoute, saveCaptionsRoute } from './inputHousekeeping'
-import { ENGINE_FORWARD_TIMEOUT_MS, forwardToEngine } from './media'
-import { isHosted } from '../utils/deployMode'
 
 export interface SmallResult {
   status: number
@@ -129,17 +127,12 @@ export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyR
       return spaceThumbnailSaveRoute(bridge, h.effectId, read.bytes)
     }
     case 'fontSubset': {
-      // Checked natively first (the Python's own 400s). A font that passes is
-      // subset by the engine while it runs — fontTools keeps every table and
-      // layout feature, which nothing in Node does (see fontSubset.ts) — and
-      // comes back whole when it does not.
+      // Checked natively (the Python's own 400s). A font that passes comes back
+      // whole: the engine's fontTools subsetting is gone (step 3, R10.9 for
+      // hosted; step 4, C5 everywhere; see fontSubset.ts).
       const parsed = await read.json()
       if (!parsed.ok) return parsed.result
-      const native = fontSubsetRoute(parsed.value)
-      if (native.status !== 200) return native
-      // Hosted never reaches the engine (step 3, R10.9): the font comes back whole.
-      if (isHosted()) return native
-      return (await forwardToEngine(event, '/sailor/font_subset', parsed.raw, ENGINE_FORWARD_TIMEOUT_MS)) ?? native
+      return fontSubsetRoute(parsed.value)
     }
     case 'saveCaptions':
     case 'clearDataset':

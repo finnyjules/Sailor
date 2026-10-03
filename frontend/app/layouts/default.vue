@@ -68,21 +68,19 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { workflowNodeTitles, blockedRunRefusal, engineRoute, engineRunPrompt, leftOutNotice, unknownClassRefusal, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
+import { workflowNodeTitles, blockedRunRefusal, runRefusal, engineRunPrompt, leftOutNotice, unknownClassRefusal, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
 import { outputClassesOf } from '#shared/runner/validate'
 import { bakeShaderEffectsForRun, stopShaderBakes, takeWantsShaderBake } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { RUNNER_STAGE_STALL_MS } from '#shared/runner/timeouts'
-import { useDirectExecution, engineSocketAllowed } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
 import { useVueNodes } from '~/composables/useVueNodes'
 
 const { tabs, activeTabId, activeTab, setActiveTab, closeTab, openTab, updateTabStatus, renameTab, runningCount } = useTabs()
 const { vueNodesEnabled } = useVueNodesEnabled()
 const { directExecutionEnabled } = useDirectExecutionEnabled()
-const direct = useDirectExecution()
 const { objectInfo } = useVueNodes()
 const route = useRoute()
 const router = useRouter()
@@ -474,29 +472,14 @@ function toggleMinimap() {
   minimapActive.value = !minimapActive.value
 }
 
-// Surface a ComfyUI node_errors validation map the same way the bridge
-// 'queue_error' postMessage does — per-node summary toast + clear run state so
-// spinners never hang. Shared by the bridge handler and the direct-execution
-// path (whose queue() resolves with { node_errors } on a /prompt 400).
+// Surface a node_errors validation map the same way the 'queue_error' event
+// does — per-node summary toast + clear run state so spinners never hang.
 //
-// `refusal`/`statusCode` (direct-exec path only — QueueResult.refusal) route
-// through the SAME describeQueueRefusal() the bridge's queue_error handler
-// uses (VueNodeCanvas.vue), so a metering refusal (moderation/credits/
-// ownership/paused) gets the server's own sentence + the moderation
-// policy-link action here too, instead of the generic "Couldn't start run"
-// fallback (Stage 8 fix — direct execution is the ONLY path hosted mode
-// actually takes, per useDirectExecutionEnabled.ts).
-// Announce a refused /prompt POST on the same window pipe run events travel on
-// (see the direct.onEvent re-post in onMounted). Two listeners pick it up: this
-// layout's 'queue_error' branch → surfaceQueueError (toast + state cleanup), and
-// VueNodeCanvas → red rings on the offending nodes. Calling surfaceQueueError
-// directly instead would show the toast but never paint the rings.
-function postQueueError(res: { node_errors?: any; error?: string; refusal?: boolean; statusCode?: number }) {
-  window.postMessage({
-    type: 'sailor-bridge', v: 2, direct: true, event: 'queue_error',
-    node_errors: res.node_errors ?? null, message: res.error, refusal: res.refusal, statusCode: res.statusCode,
-  }, window.location.origin)
-}
+// `refusal`/`statusCode` route through the SAME describeQueueRefusal() the
+// queue_error handler uses (VueNodeCanvas.vue), so a metering refusal
+// (moderation/credits/ownership/paused) gets the server's own sentence + the
+// moderation policy-link action here too, instead of the generic "Couldn't
+// start run" fallback.
 
 function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { silent?: boolean; refusal?: boolean; statusCode?: number }) {
   if (!opts?.silent) {
@@ -521,7 +504,7 @@ function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { s
   currentRunSilent.value = false
 }
 
-// Run workflow from Vue canvas — builds the prompt and queues it directly on /prompt.
+// Run workflow from Vue canvas — builds the prompt and starts it on the runner.
 // When `targetIds` is provided, runs only that subset (plus upstream deps).
 // Forgiving filtering happens via buildFilteredWorkflow which mutes everything
 // outside the keep set; LiteGraph already honors mode=2 at queue time.
@@ -539,7 +522,7 @@ type RunVueWorkflowOpts = {
 
 // LC8 (B5): a refused Run must not change or save the project. The Image cards a Run adds to show its
 // results (materializeAutoImageSinks) are kept only once the run is accepted (a runner run started, or the
-// local engine queued it); a refused run takes them back. While a run is being judged, the autosave waits,
+// runner took it); a refused run takes them back. While a run is being judged, the autosave waits,
 // so a refused run never saves them in between.
 async function runVueWorkflow(targetIds?: string[], opts: RunVueWorkflowOpts = {}): Promise<boolean> {
   const sinks = beginRunSinks(opts.autoSinks)
@@ -588,7 +571,7 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
   // byte-identical to before.
   const takeCount = (useDirect && (opts.takes ?? 1) > 1) ? Math.floor(opts.takes as number) : 1
 
-  // R10.3: one local engine (worker 0); runner runs register as RUNNER_WORKER.
+  // Runner runs register as RUNNER_WORKER; worker 0 is the canvas's own run slot (R10.3, C5: no local engine).
   const runTabId = activeTab.value?.id || ''
   const workerIdx = 0
   // Runs are always queued from the displayed canvas of the run tab.
@@ -827,11 +810,9 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
     const activeCount = (plainWorkflow.nodes as any[]).filter((n: any) => (n.mode ?? 0) !== 2).length
     console.log('[Run] sending workflow with', plainWorkflow.nodes.length, 'nodes to worker', workerIdx,
       targetIds?.length ? `(filtered: ${activeCount} active, ${targetIds.length} targets)` : '')
-    // Direct-execution branch (Settings › "Direct execution (beta)", default OFF).
-    // When ON we build the ComfyUI API prompt in-app and POST it straight to
-    // /prompt via the native WS channel, bypassing the bridge iframe's queuePrompt.
-    // The builder can throw (UnknownNodeTypeError, subgraph guards) — surface that
-    // and abort BEFORE any dispatch so no spinner is left hanging.
+    // Build the API prompt in-app: the runner takes it. The builder can throw
+    // (UnknownNodeTypeError, subgraph guards) — surface that and abort BEFORE any
+    // dispatch so no spinner is left hanging.
     let directPrompt: import('~/lib/graph/graphToPrompt').ApiPrompt | null = null
     if (useDirect) {
       try {
@@ -841,16 +822,13 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
           ? err.message
           : String((err as any)?.message || err)
         console.error('[Run] direct prompt build failed', err)
-        // LC8 (F4): a custom node the app's catalogue doesn't hold (the engine off, or hosted) is refused in
-        // the local-engine words, by its title, before anything is built or sent; never a builder error.
+        // LC8 (F4), C5: a custom node the app's catalogue doesn't hold is refused plainly (Sailor doesn't
+        // run it), by its title, before anything is built or sent; never a builder error.
         const unknownNode = err instanceof UnknownNodeTypeError
           ? (plainWorkflow.nodes as any[]).find((n: any) => n?.type === err.classType)
           : undefined
         const custom = err instanceof UnknownNodeTypeError
-          ? unknownClassRefusal(err.classType, unknownNode ? workflowNodeTitles(plainWorkflow, objectInfo.value)(String(unknownNode.id)) : err.classType, {
-              hosted: hostedShell,
-              engineUp: engineUp.value || direct.isMainSocketOpen(),
-            })
+          ? unknownClassRefusal(err.classType, unknownNode ? workflowNodeTitles(plainWorkflow, objectInfo.value)(String(unknownNode.id)) : err.classType)
           : null
         if (custom) toast.error(custom.title, { description: custom.description })
         else toast.error("Couldn't build workflow", { description: msg.slice(0, 200) })
@@ -873,8 +851,8 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
   //
   // SCOPE: this lock covers ONLY assembly — producing firstTake + extraTakes
   // (plainWorkflow + directPrompt) plus the once-only cost-confirm gate. It
-  // does NOT cover dispatch. The DISPATCH (the runner, or the local engine's
-  // /prompt) operates on the already-assembled artifacts and runs AFTER the
+  // does NOT cover dispatch. The DISPATCH (to the runner) operates on the
+  // already-assembled artifacts and runs AFTER the
   // lock releases, so a slow dispatch never serializes other runs' assembly.
   type Assembled = { firstTake: AssembledTake; extraTakes: AssembledTake[] }
   const assembled = await withKeyedLock('assemble-run', async (): Promise<Assembled | 'abort'> => {
@@ -917,7 +895,7 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
     }).finally(() => { if (drawing !== undefined) toast.dismiss(drawing) })
     // R11.9c: Stop while the shader frames were being drawn or uploaded: nothing is sent (the server deletes them).
     // Fix round 1 (I3): a failure of the graph itself (over the caps, a source that can't be read) stops the run
-    // in plain words. R10.2: so does one of this browser or machine, everywhere: never the local engine.
+    // in plain words. R10.2: so does one of this browser or machine, everywhere.
     const graphFailure = bake.failed.find(f => f.cause === 'graph')
     const envFailure = bake.failed.find(f => f.cause === 'environment')
     const refusal = graphFailure ?? envFailure
@@ -931,16 +909,13 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
     }
   }
 
-  // Tier 1 (bridge retirement): the bridge dispatch path — load the graph into a
-  // worker iframe, then postMessage queuePrompt against it — has been removed.
-  // Every run now dispatches directly to ComfyUI's /prompt below (the same path
-  // hosted has always used).
+  // Every run goes to the runner (step 4, C5: there is no local engine); one it
+  // doesn't take is refused below, naming each node.
 
   if (useDirect) {
     try {
-      // Register a returned run + arm its per-run watchdog. A runner run
-      // carries RUNNER_WORKER in res.worker; a local-engine run, worker 0.
-      const registerResult = (res: import('~/composables/useDirectExecution').QueueResult) => {
+      // Register a started runner run + arm its per-run watchdog.
+      const registerResult = (res: { prompt_id?: string; worker?: number }) => {
         if (!res.prompt_id) return
         // canvasId (Part B) lets per-run event routing find this run's canvas
         // even on terminal events.
@@ -966,7 +941,7 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
         ? pruned
         : asBuilt
       let sentToRunner = false
-      // R10.2: the runner's words when it declined the run (the engine route below names the nodes).
+      // R10.2: the runner’s words when it declined the run (runRefusal below names the nodes).
       let declinedWords: string | null = runnerEnabled ? null : RUNNER_OFF_WORDS
       if (shouldUseRunner(runnerEnabled, runnerPrompts, runnerFamilies)) {
         // One run for all takes: with a Gate they pause once and you pick;
@@ -994,16 +969,16 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
           if (leftOut) toast.warning(leftOut.title, { description: leftOut.description })
         }
         catch (err) {
-          // 404 (runner off) or a not-eligible 400 (a family off, a class the runner doesn't run): R10.2's
-          // engine route below decides, and refuses unless every node the runner refuses is local-only.
+          // 404 (runner off) or a not-eligible 400 (a family off, a class the runner doesn't run): refused
+          // below, naming each node (R10.2's runRefusal).
           if (!isRunnerDeclined(err)) throw err
           const said = (err as { data?: { message?: unknown } } | null)?.data?.message
           declinedWords = isRunnerNotFound(err) ? RUNNER_OFF_WORDS : (typeof said === 'string' && said.trim() ? said : null)
           console.warn('[Run] the Sailor runner declined this workflow')
         }
       }
-      // Going to ComfyUI: a discontinued or runner-only model is refused here,
-      // naming the node, before any /prompt (shared/runner/blockedModels.ts).
+      // Not taken: a retired node, a discontinued or runner-only model is refused here,
+      // naming the node (shared/runner/blockedModels.ts).
       const blocked = sentToRunner ? null : blockedRunRefusal(
         [firstTake, ...extraTakes].map(tk => ({ prompt: tk.directPrompt, titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })),
         { runnerOn: runnerEnabled, families: runnerFamilies, isOutputClass: outputClassesOf(objectInfo.value) },
@@ -1014,68 +989,28 @@ async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueW
         currentRunSilent.value = false
         return false
       }
-      // R10.2: the canvas never falls back silently. A run the runner didn't take goes to the local engine
-      // only locally, with the engine up, when every node the runner refuses is local-only
-      // (#shared/runner/localOnly.ts); otherwise it is refused here, naming each node, before any /prompt.
-      // An open run socket means the engine is plainly there, whatever the last health poll said.
-      const route = sentToRunner ? null : engineRoute(
-        [firstTake, ...extraTakes].map(tk => ({ prompt: tk.directPrompt, titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })),
-        {
-          runnerOn: runnerEnabled,
-          families: runnerFamilies,
-          hosted: hostedShell,
-          engineUp: engineUp.value || direct.isMainSocketOpen(),
-          catalog: objectInfo.value,
-          declined: declinedWords,
-        },
-      )
-      if (route?.to === 'refused') {
-        toast.error(route.title, { description: route.description })
+      // R10.2, C5: a run the runner didn't take is refused here, naming each node (a stock class or a
+      // custom node: Sailor doesn't run it).
+      if (!sentToRunner) {
+        const refusal = runRefusal(
+          [firstTake, ...extraTakes].map(tk => ({ prompt: tk.directPrompt, titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })),
+          {
+            runnerOn: runnerEnabled,
+            families: runnerFamilies,
+            catalog: objectInfo.value,
+            declined: declinedWords,
+          },
+        )
+        toast.error(refusal.title, { description: refusal.description })
         if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
         currentRunSilent.value = false
         return false
       }
-      // Fix round 1: Sailor nodes that still need the local engine (NEEDS_LOCAL_ENGINE, your own shader
-      // effects) go there named, never silently.
-      if (route?.to === 'engine' && route.notice) toast.info(route.notice.title, { description: route.notice.description })
-      // LC8 round 2 (B5′): on the local engine, the takes as built are what is sent.
-      if (!sentToRunner) sinks.ran = new Set([firstTake, ...extraTakes].flatMap(tk => Object.keys(tk.directPrompt ?? {})))
-      if (sentToRunner) {
-        // Registered as the POST returned (sendRunnerPost), before its early events were replayed.
-      } else if (takeCount > 1) {
-        // Several takes on the local engine: queued one after another, in order
-        // (R10.3: no worker pool). Register each success; surface the first
-        // failure once (aggregated).
-        console.log(`[Run] queueing ${takeCount} takes on the local engine`)
-        const results: import('~/composables/useDirectExecution').QueueResult[] = []
-        for (const tk of [firstTake, ...extraTakes]) results.push(await direct.queue(tk.directPrompt!, tk.plainWorkflow))
-        const failed = results.find((r) => (r.node_errors && Object.keys(r.node_errors).length) || r.error)
-        if (failed) postQueueError(failed)
-        for (const res of results) {
-          if ((res.node_errors && Object.keys(res.node_errors).length) || res.error) continue
-          registerResult(res)
-        }
-      } else {
-        console.log('[Run] queueing prompt on the local engine')
-        const res = await direct.queue(directPrompt!, plainWorkflow)
-        const hasNodeErrors = res.node_errors && Object.keys(res.node_errors).length
-        if (hasNodeErrors || res.error) {
-          // Any failure (structured node_errors OR a plain error message from a
-          // 400/5xx/network drop) surfaces immediately — red rings + toast — and
-          // clears run state, instead of resolving silently and only tripping
-          // the stall watchdog.
-          postQueueError(res)
-        } else {
-          registerResult(res)
-        }
-      }
     } catch (err) {
-      console.error('[Run] direct queue failed', err)
-      // Backstop for a throw that escapes queue()'s own
-      // internal catch (queue()'s /prompt POST failure normally resolves as a
-      // QueueResult, handled above) — route it through the same
-      // surfaceQueueError() so a metering refusal shape here ALSO gets the
-      // server's message + policy-link instead of a generic ofetch summary.
+      console.error('[Run] the run could not start', err)
+      // A throw from the runner's start — route it through surfaceQueueError()
+      // so a metering refusal shape here gets the server's message +
+      // policy-link instead of a generic ofetch summary.
       // isH3RefusalBody checks the TYPE of `error` (object = ComfyUI
       // validation, boolean `true` = Nitro-serialized h3 refusal) rather than
       // its truthiness — a plain `!body.error` check is truthy for both
@@ -1118,7 +1053,7 @@ async function handleRunFiltered(e: Event) {
   // through the rest of the graph). Default/undefined = the upstream walk.
   const direction = detail?.direction as 'downstream' | undefined
   // Takes gesture: 'Re-roll ×4' passes takes:4 so the dispatch site makes N
-  // fresh-seeded takes (one runner run, or queued in order on the local engine).
+  // fresh-seeded takes (one runner run).
   const takes = detail?.takes as number | undefined
   // `live` runs are auto-previews (e.g. saving a Smart Layout): scope the run to
   // just these nodes (+ cached upstream), and skip the cost confirm / watchdog /
@@ -1415,21 +1350,11 @@ function handleStopVariations(e: Event) {
   if (ids.length) void stopPromptIds(ids)
 }
 
-/** Stop these runs only: ComfyUI's pending ones leave the queue, a running one
- *  is interrupted (ComfyUI ignores an id that isn't the one running), and the
- *  runner's are cancelled at the provider. */
+/** Stop these runs only: the runner's are cancelled at the provider. */
 async function stopPromptIds(promptIds: string[]) {
-  const comfyIds = promptIds.filter(id => !isRunnerPromptId(id))
   const runnerRunIds = [...new Set(promptIds.map(runIdOfPrompt).filter((x): x is string => !!x))]
-  const json = { 'Content-Type': 'application/json' }
   try {
-    await Promise.all([
-      ...(comfyIds.length && (engineUp.value || direct.isMainSocketOpen()) ? [
-        fetch('/queue', { method: 'POST', headers: json, body: JSON.stringify({ delete: comfyIds }) }),
-        ...comfyIds.map(id => fetch('/interrupt', { method: 'POST', headers: json, body: JSON.stringify({ prompt_id: id }) })),
-      ] : []),
-      ...(runnerRunIds.length ? [stopRunnerRuns(runnerRunIds)] : []),
-    ])
+    if (runnerRunIds.length) await stopRunnerRuns(runnerRunIds)
   }
   catch (err) {
     console.error('[Variations] Failed to stop runs:', err)
@@ -1530,7 +1455,7 @@ async function handleRunnerGateAction(e: Event) {
   }
 }
 
-// Stop/interrupt the current ComfyUI execution and clear the queue
+// Stop the active tab's runs
 async function stopVueWorkflow() {
   // R11.9c: a shader bake still drawing or uploading its frames for this tab ends, and its run is not sent.
   stopShaderBakes(activeTab.value?.id || '')
@@ -1538,15 +1463,8 @@ async function stopVueWorkflow() {
   const stopTabId = activeTab.value?.id || ''
   const runnerRunIds = runnerEnabled ? runnerRunIdsForTab(inFlight({ tabId: stopTabId }), stopTabId) : []
   try {
-    await Promise.all([
-      // Engine off: nothing queued there to stop (and no failed requests to log).
-      ...(engineUp.value || direct.isMainSocketOpen() ? [
-        fetch('/interrupt', { method: 'POST' }),
-        fetch('/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clear: true }) }),
-      ] : []),
-      // Cancelled at fal; holds for unfinished stages dropped.
-      ...(runnerRunIds.length ? [stopRunnerRuns(runnerRunIds)] : []),
-    ])
+    // Cancelled at fal; holds for unfinished stages dropped.
+    if (runnerRunIds.length) await stopRunnerRuns(runnerRunIds)
   }
   catch (err) {
     console.error('[VueNodes] Failed to interrupt:', err)
@@ -2170,9 +2088,8 @@ const pendingLiveRuns = ref(0)
 const currentRunSilent = ref(false)
 let pendingLiveRunsResetTimer: ReturnType<typeof setTimeout> | null = null
 
-// Per-run STALL watchdogs for DIRECT-mode runs, keyed by prompt_id. In direct
-// mode the resolved /prompt POST IS the server's acknowledgment (queue()
-// awaits it), so there is no separate handshake to time out — a slow model is
+// Per-run STALL watchdogs for registered runs, keyed by prompt_id. The
+// runner's start IS the server's acknowledgment (the POST awaits it), so there is no separate handshake to time out — a slow model is
 // NOT a failure. What we guard against instead is a live run that goes SILENT:
 // the server stops emitting any WS event for it (worker died mid-render, socket
 // wedged) and the run would otherwise hang 'running' forever.
@@ -2356,28 +2273,18 @@ function forceReloadCanvas() {
   void vueCanvasRef.value?.refreshSchema?.(true)
 }
 
-// Backend boot/ready loader. Polls the backend; on a genuine restart recovery,
-// refresh the (now possibly stale) node schema against the fresh backend.
-// Guard: while a generation is running, a heavy node can block ComfyUI's event
-// loop long enough that the probe times out — a *false* down→up that must NOT
-// reload the canvas (that mid-run reload was the cause of the flickering).
-// Probes Sailor's own same-origin `/api/engine/health` (local and hosted
-// alike): `backendUp` = Sailor answers; `engineUp` = the local engine does.
-// onRecovered fires when the engine comes (back) up.
-const { backendUp, engineUp, engineKnown, start: startHealthPoll, stop: stopHealthPoll } =
+// Backend boot/ready loader. Polls Sailor's own same-origin `/api/health`
+// (local and hosted alike): `backendUp` = Sailor answers. On a genuine restart
+// recovery, refresh the (now possibly stale) node schema against the fresh
+// backend — but not while a run is going (a false down→up mid-run must not
+// reload the canvas).
+const { backendUp, start: startHealthPoll, stop: stopHealthPoll } =
   useBackendHealth('', {
     onRecovered: () => forceReloadCanvas(),
     suppressRecovery: () => runningCount.value > 0,
   })
-// The run socket opens only after a health poll says the engine is up, and
-// never in hosted (LC8 B1). Engine off: it stops retrying; it reconnects when
-// the engine answers.
-watch([engineUp, engineKnown], ([up, known]) => direct.setEngineAvailable(
-  engineSocketAllowed({ engineKnown: known, engineUp: up, hosted: hostedShell }),
-), { immediate: true })
 
-// Ready = Sailor answers. The engine is optional: without it only the runs
-// that need it are refused (runVueWorkflow).
+// Ready = Sailor answers.
 const canvasReady = computed(() => backendUp.value)
 const hasBeenReady = ref(false)
 watch(canvasReady, (v) => { if (v) hasBeenReady.value = true })
@@ -2439,8 +2346,8 @@ if (import.meta.client) (globalThis as any).__reloadCanvas = forceReloadCanvas
 // canvas component scope run events/animations to the right canvas — node ids
 // collide across a project's canvases, so worker alone isn't enough.
 const runningCanvasByWorker = reactive<Record<number, string | null>>({})
-// The worker the *currently viewed* canvas runs on: always the one local
-// engine (R10.3 retired the worker pool).
+// The worker slot the *currently viewed* canvas's runs register under (R10.3
+// retired the worker pool; runner runs carry RUNNER_WORKER).
 const activeWorker = 0
 
 async function fetchWorkflowFromHistory(promptId: string): Promise<any> {
@@ -3066,8 +2973,8 @@ function toggleQueue() {
 
 async function fetchQueueAndHistory() {
   const [queueRes, historyRes] = await Promise.allSettled([
-    // Engine off: its queue is empty, so don't ask (a failed request every 2 s).
-    engineUp.value || direct.isMainSocketOpen() ? fetch('/queue').then(r => r.json()) : Promise.resolve({ queue_running: [], queue_pending: [] }),
+    // No engine queue any more (C5): the runner's runs show on their nodes.
+    Promise.resolve({ queue_running: [], queue_pending: [] }),
     fetch('/history').then(r => r.json()),
   ])
 
@@ -3160,12 +3067,6 @@ const groupedHistory = computed(() => {
   return groups
 })
 
-// Listen for bridge messages from ComfyUI iframes
-// Guard so the direct-execution onEvent callback registers only once even if
-// the layout remounts (onEvent's Set dedupes identity, but each remount would
-// otherwise add a fresh closure).
-let directEventListenerRegistered = false
-
 onMounted(async () => {
   // Vue mode: load workflow for the active project tab immediately (no iframe needed)
   if (vueNodesEnabled.value && activeTab.value.type === 'project') {
@@ -3176,29 +3077,8 @@ onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('sailor:loadTabWorkflow', handleLoadTabWorkflow)
 
-  // Direct-execution WS events must flow through the SAME window postMessage
-  // pipe the bridge iframe uses (mapWsEvent already shapes them identically),
-  // so BOTH this layout's own `handleBridgeMessage` listener AND
-  // VueNodeCanvas's separate `window.addEventListener('message', ...)` (which
-  // filters on the 'sailor-bridge' envelope) receive them. Re-dispatching as
-  // a self-posted message — rather than calling handleBridgeEvent directly —
-  // means node glow, take/output landing, red rings and gate_paused all light
-  // up in direct mode, and the event flows exactly ONCE (no double-handling).
-  // The `direct: true` marker lets handleBridgeMessage accept a same-window
-  // source; VueNodeCanvas's eventWorker() maps the (non-iframe) source to
-  // worker 0 / the active tab, which is correct for the single direct channel.
-  if (!directEventListenerRegistered) {
-    directEventListenerRegistered = true
-    direct.onEvent((e) => {
-      window.postMessage({ type: 'sailor-bridge', v: 2, direct: true, ...e }, window.location.origin)
-    })
-  }
-  if (directExecutionEnabled.value) direct.connect()
-  // The runner's event stream opens lazily (ensureRunnerEvents), on first use.
-  watch(directExecutionEnabled, (on) => {
-    if (on) direct.connect()
-    else direct.disconnect()
-  })
+  // The runner's event stream opens lazily (ensureRunnerEvents), on first use;
+  // its events travel on the same window 'sailor-bridge' pipe (useRunnerEvents).
 
   // Persistent training queue: poll for status (badge + toasts) regardless of
   // whether the Queue panel is open, and refresh immediately when a job is
@@ -3216,7 +3096,6 @@ onUnmounted(() => {
   window.removeEventListener('sailor:trainingQueueUpdated', fetchTrainingJobs)
   if (queuePollTimer) { clearInterval(queuePollTimer); queuePollTimer = null }
   if (trainingPollTimer) { clearInterval(trainingPollTimer); trainingPollTimer = null }
-  direct.disconnect()
   runnerEvents.disconnect()
 })
 
@@ -3280,13 +3159,12 @@ function handleOpenBilling() {
 }
 
 // Thin wrapper over the postMessage listener: unwrap the bridge envelope and
-// hand the payload to handleBridgeEvent. Direct-execution WS events are routed
-// through the SAME handleBridgeEvent (via direct.onEvent) so both channels share
-// one code path — see the onEvent registration in onMounted.
+// hand the payload to handleBridgeEvent. The runner's events are re-posted on
+// this pipe (useRunnerEvents).
 function handleBridgeMessage(event: MessageEvent) {
   if (!event.data || event.data.type !== 'sailor-bridge') return
-  // The only legitimate producer is this window re-posting direct-execution
-  // events (see onMounted). There is no engine iframe any more, so a message
+  // The only legitimate producer is this window re-posting the runner's
+  // events (useRunnerEvents). There is no engine iframe any more, so a message
   // from any other window or origin is not ours — drop it.
   if (event.source !== window || event.origin !== window.location.origin) return
   handleBridgeEvent(event.data)
@@ -3355,7 +3233,7 @@ function handleBridgeEvent(data: any) {
     return
   }
 
-  // The /prompt POST was refused before anything ran (validation: type
+  // The run was refused before anything ran (validation: type
   // mismatches, missing inputs, bad combo values; or a metering refusal). The
   // run flow posts this onto the pipe rather than calling surfaceQueueError
   // itself so that VueNodeCanvas — which listens to the same pipe — paints the

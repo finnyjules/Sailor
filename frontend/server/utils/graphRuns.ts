@@ -42,10 +42,9 @@ export function savedInputKey(o: { filename: string; subfolder?: string }): stri
 }
 
 /**
- * `target` (review I4) is the engine base URL that actually ran the prompt
- * (the local engine, ENGINE_ORIGIN). The /view race-window harvest polls it.
- * Nullable so pre-existing rows (and any caller that doesn't know) fall back
- * to the main engine.
+ * `target` (review I4) was the engine base URL that ran the prompt, for the
+ * engine-era /view race-window harvest. Nullable: nothing writes one any more
+ * (step 4, C5: no engine); the column stays for the rows that have one.
  */
 export async function createGraphRun(r: { promptId: string; userId: string; credits: number; holdId: number | null; target?: string | null }): Promise<void> {
   await db().query(

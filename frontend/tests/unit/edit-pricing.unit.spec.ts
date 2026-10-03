@@ -18,7 +18,6 @@ import { ENHANCE_DETAIL_TOO_LARGE, FLUX_2_EDIT_TOO_LARGE, measuredInputProblems 
 import {
   MAX_MEASURED_FILES, bmpPixels, graphInputPixels, graphInputSizes, isMeasurableRaster, isobmffIspePixels, picturePixels, sniffPictureFormat,
 } from '~~/server/utils/graphInputPixels'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
 import { GRAPH_NODE_CREDITS, UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
@@ -786,21 +785,6 @@ describe('priced on the size of the picture sent in', () => {
     expect(sized.problems.map(p => p.nodeId)).toEqual(['2', '3'])
   })
 
-  it('meterGraphSubmit prices and holds on the measured size', async () => {
-    const prompt = { 1: { class_type: 'LoadImage', inputs: { image: 'a.png' } }, 2: { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: ['1', 0] } }, 3: SINK }
-    const held: number[] = []
-    const deps = {
-      priceGraph, measureInputPixels: async () => ({ 2: MP1 }),
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async (_u: string, credits: number) => { held.push(credits); return { ok: true as const, holdId: 1 } },
-      getAvailable: async () => 0, forward: async () => ({ status: 200, body: { prompt_id: 'p' } }),
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }
-    await meterGraphSubmit('u', { prompt }, deps)
-    expect(held).toEqual([10 + 1]) // Crystal 2× of 1 MP: $0.05
-    await meterGraphSubmit('u', { prompt }, { ...deps, measureInputPixels: undefined })
-    expect(held[1]).toBe(240 + 1) // unmeasured: the cap
-  })
 
   it('the runner measures the FLUX.2 picture before it submits and charges on that size', async () => {
     const bytes = new Uint8Array(await png(1024, 1024))

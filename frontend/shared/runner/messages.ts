@@ -9,11 +9,9 @@ export const RUNNER_WORKER = -1
 /**
  * `data.reason` on the server's refusal of a workflow it does not take (its
  * families are off, or a node is not one the runner runs). The browser treats
- * it like the runner being off (a 404). R10.2: the canvas then sends the run
- * to the local engine only when every node the runner refuses is one of
- * decision 4's local-only classes (./localOnly.ts), locally, with the engine
- * up; otherwise it refuses the run in plain words (./needsEngine.ts
- * `engineRoute`), naming each node.
+ * it like the runner being off (a 404). R10.2, step 4 C5: the canvas then
+ * refuses the run in plain words (./needsEngine.ts `runRefusal`), naming each
+ * node; there is no local engine to send it to.
  * R11.9a: only eligibility declines now (a family off, a class the runner
  * doesn't run: `data.code` `switched-off` or `not-taken`); every start pass
  * refuses plainly instead, with a `data.code` (RunnerReasonCode).
@@ -34,14 +32,13 @@ export const RUNNER_SOUND_TOO_LONG = 'sound-too-long'
  * Why a workflow, or one node of it, doesn't run here: the `code` a refusal's
  * data carries (R11.9a). Every exit that once left a workflow to the engine
  * carries one. Only `switched-off` and `not-taken` are declines (with
- * RUNNER_NOT_ELIGIBLE), which the canvas turns into a refusal unless every
- * refused node is local-only (R10.2); every other code is a plain refusal,
- * before anything is held.
+ * RUNNER_NOT_ELIGIBLE), which the canvas turns into a refusal naming each
+ * node (R10.2); every other code is a plain refusal, before anything is held.
  */
 export type RunnerReasonCode =
   /** Row 25: the node's family is off (refused on the canvas, R10.2). */
   | 'switched-off'
-  /** A class the runner doesn't run at all: to the local engine only for R10.2's local-only set, locally; otherwise refused. */
+  /** A class the runner doesn't run at all: refused, named (a stock class or a custom node: Sailor doesn't run it). */
   | 'not-taken'
   /** Row 24: what the node needs (the video tools, the depth model, the bundled font) isn't on this server. */
   | 'not-installed'

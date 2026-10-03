@@ -22,7 +22,7 @@ import path from 'node:path'
 import { __setDataRootForTests } from '../../server/utils/dataRoot'
 import { createApp, eventHandler, toWebHandler } from 'h3'
 import { __setInputUploadsDbForTests, canonicalUploadKey } from '../../server/utils/inputUploads'
-import { shortUserHash } from '../../server/utils/meterGraphRun'
+import { shortUserHash } from '../../server/utils/userHash'
 
 const g = globalThis as any
 g.defineEventHandler = (fn: any) => fn

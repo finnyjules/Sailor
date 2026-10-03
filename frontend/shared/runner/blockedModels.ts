@@ -1,10 +1,10 @@
 /**
  * The models a run may not use where it is going (model line-up spec,
  * Rulings 2 and 6). One check, used in three places:
- *   - the browser, after the runner declined or was skipped and before any
- *     `/prompt` (layouts/default.vue `runVueWorkflow`);
- *   - the server, wherever `/prompt` goes to ComfyUI: the hosted meter
- *     (`meterGraphSubmit`, before pricing and any hold) and the local proxy;
+ *   - the browser, after the runner declined or was skipped
+ *     (layouts/default.vue `runVueWorkflow`);
+ *   - the server's engine gates (the hosted meter and the local proxy),
+ *     until they went with the engine (step 4, C5);
  *   - the runner (`startRun`), before any hold: only discontinued and
  *     unpriced models.
  *
@@ -87,7 +87,7 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
 const GENERATE_IMAGE_IN_JSON = /"class_type"\s*:\s*"GenerateImageNode"/
 
 /**
- * A prompt too large to parse (the local `/prompt` proxy's cap, R11.4 fix
+ * A prompt too large to parse (the old local engine proxy's cap, R11.4 fix
  * round 1): the first Generate an image model in its text that never runs on
  * ComfyUI, one with no price yet or a Recraft SVG model (runner-only), read
  * without parsing. Only when the text also names Generate an image as a class;

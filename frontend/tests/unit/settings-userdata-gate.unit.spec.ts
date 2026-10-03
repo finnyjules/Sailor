@@ -11,20 +11,9 @@
  *      switch says — the engine is never asked (the old per-user forward,
  *      handleHostedUserScoped, is deleted).
  *
- *   3. Local: raw-proxied to the local engine exactly as before.
+ *   3. Local: step 4, C5 — there is no engine; a plain 404, as hosted.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
 
 const rawBody = vi.fn(async () => undefined as Buffer | undefined)
 const requestHeader = vi.fn((_e: any, _n: string) => undefined as string | undefined)
@@ -193,17 +182,15 @@ describe('hosted: settings + userdata answer 404 and never reach the engine', ()
 
 // -------------------------------------------------------- local byte-identity
 
-describe('LOCAL: settings + userdata raw-proxy exactly as before', () => {
-  it('proxies /comfyui/settings to the backend unchanged (never the hosted gate)', async () => {
+describe('LOCAL: settings + userdata are a plain 404 too (step 4, C5: no engine)', () => {
+  it('/comfyui/settings, /userdata and /v2/userdata: 404, never proxied or forwarded', async () => {
     mode = 'local'
-    const r = await via('/comfyui/settings', 'GET', 'u1')
-    expect(r.proxied?.[1]).toBe('http://127.0.0.1:8188/settings')
-    expect(fetchMock, 'the hosted userScoped forward must not run in local').not.toHaveBeenCalled()
-  })
-
-  it('proxies /userdata and /v2/userdata unchanged', async () => {
-    mode = 'local'
-    const a = await via('/comfyui/userdata/a.json', 'GET', 'u1')
-    expect(a.proxied?.[1]).toBe('http://127.0.0.1:8188/userdata/a.json')
+    for (const p of ['/comfyui/settings', '/comfyui/userdata/a.json', '/comfyui/api/v2/userdata']) {
+      proxyRequest.mockClear()
+      const r = await via(p, 'GET', 'u1')
+      expect(r.status, p).toBe(404)
+      expect(r.proxied, p).toBeUndefined()
+    }
+    expect(fetchMock, 'nothing is forwarded').not.toHaveBeenCalled()
   })
 })

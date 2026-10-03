@@ -18,7 +18,6 @@ import { blockedRunRefusal, workflowNodeTitles } from '#shared/runner/needsEngin
 import { outputClassesOf } from '#shared/runner/validate'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { createFakeLedger, makeKit } from './__runner__/kit'
 
 const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
@@ -74,25 +73,6 @@ describe('refused before any charge, in ComfyUI\'s 400 shape', () => {
     expect(blockedPromptRefusal(timelineGraph(), { isOutputClass: IS_OUTPUT })!.error.message).toBe(WORDS)
   })
 
-  it('hosted meter: 400 before moderation, pricing, the hold and the engine', async () => {
-    const d = {
-      priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-      spendGuard: vi.fn(async () => {}),
-      validateFileRefs: vi.fn(async () => {}),
-      moderatePrompt: vi.fn(async () => ({ ok: true as const })),
-      hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-      getAvailable: vi.fn(async () => 3),
-      forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-      registerRun: vi.fn(async () => {}),
-      startSettle: vi.fn(),
-      releaseHold: vi.fn(async () => {}),
-      isOutputClass: IS_OUTPUT,
-    }
-    const r = await meterGraphSubmit('u1', { prompt: timelineGraph(), client_id: 'c1' }, d as any)
-    expect(r.status).toBe(400)
-    expect((r.body as any).error.message).toBe(WORDS)
-    for (const f of [d.moderatePrompt, d.priceGraph, d.hold, d.forward, d.validateFileRefs]) expect(f).not.toHaveBeenCalled()
-  })
 
   it('the browser refuses it before sending anything, naming the node by its title', () => {
     const r = blockedRunRefusal([{ prompt: timelineGraph(), titleOf: id => (id === '2' ? 'Launch cut' : 'Other') }], { runnerOn: true, isOutputClass: IS_OUTPUT })
@@ -108,32 +88,19 @@ describe('refused before any charge, in ComfyUI\'s 400 shape', () => {
   })
 })
 
-describe('local /prompt proxy', () => {
+describe('local /prompt: a plain 404 (step 4, C5: no engine, nothing to check or forward)', () => {
   const g = globalThis as any
-  let middleware: (event: any) => Promise<any>
   const proxyRequest = vi.fn(async (_event: any, url: string) => ({ proxiedTo: url }))
-  beforeAll(async () => {
-    vi.doMock('~~/server/native/engineHealth', async orig => ({ ...(await orig() as object), engineHealth: async () => 'up' }))
+  it('is refused before anything is read, in every size; nothing is proxied', async () => {
     vi.doMock('~~/server/utils/deployMode', () => ({ deployMode: () => 'local', isHosted: () => false, engineMultiUser: () => false }))
     g.defineEventHandler = (fn: any) => fn
     g.createError = (opts: { statusCode: number, message?: string }) => Object.assign(new Error(opts.message), { statusCode: opts.statusCode })
     g.proxyRequest = proxyRequest
-    middleware = (await import('~~/server/middleware/comfyui-proxy')).default as any
-  })
-  afterEach(() => proxyRequest.mockClear())
-  const ev = (path: string, body: unknown) => ({ path, method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
-
-  it('refuses it, 400, never forwarded — over the parse cap too, in the same words', async () => {
-    const { PROMPT_CHECK_MAX_BYTES } = await import('~~/server/middleware/comfyui-proxy')
-    const small = ev('/prompt', { prompt: timelineGraph() })
-    const res = await middleware(small)
-    expect(small.node.res.statusCode).toBe(400)
-    expect(res.error.message).toBe(WORDS)
-    const base = JSON.stringify({ prompt: timelineGraph(), pad: '' })
-    const big = ev('/prompt', Buffer.from(JSON.stringify({ prompt: timelineGraph(), pad: 'x'.repeat(PROMPT_CHECK_MAX_BYTES + 1 - base.length) })))
-    const bigRes = await middleware(big)
-    expect(big.node.res.statusCode).toBe(400)
-    expect(bigRes.error.message).toBe(WORDS)
+    const middleware = (await import('~~/server/middleware/comfyui-proxy')).default as any
+    const ev = (body: unknown) => ({ path: '/prompt', method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
+    for (const body of [{ prompt: timelineGraph() }, Buffer.from(JSON.stringify({ prompt: timelineGraph(), pad: 'x'.repeat(9 * 1024 * 1024) }))]) {
+      await expect(middleware(ev(body))).rejects.toMatchObject({ statusCode: 404 })
+    }
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 })

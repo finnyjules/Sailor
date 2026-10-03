@@ -48,7 +48,6 @@ import { hostedRequestProblems, requestProblems } from '~~/server/runner/request
 import { pyInt16, pythonWav, pythonWavOf, silenceWav, type PythonWav } from '~~/server/runner/soundWav'
 import { decodeAudio } from '~~/server/media/decode'
 import { probeMedia } from '~~/server/media/probe'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 
 // ── The fixture ──────────────────────────────────────────────────────────────
 
@@ -543,16 +542,6 @@ describe('refusals before the hold, in plain words', () => {
     expect(k.replicate.client.submit).not.toHaveBeenCalled()
   }, 60_000)
 
-  it('the hosted /prompt meter (the ComfyUI path) refuses a real-person preset before pricing or any hold', async () => {
-    const d = meterDeps()
-    const r = await meterGraphSubmit('u1', { prompt: { n: node(byName('clone · preset Obama')) } }, d as any)
-    expect(r.status).toBe(400)
-    expect((r.body as any).error.message).toBe(RVC_VOICE_NOT_OFFERED)
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-    const ok = await meterGraphSubmit('u1', { prompt: { n: node(byName('clone · preset Guitar')) } }, d as any)
-    expect(ok.status).toBe(200)
-  })
 })
 
 describe('moderation', () => {

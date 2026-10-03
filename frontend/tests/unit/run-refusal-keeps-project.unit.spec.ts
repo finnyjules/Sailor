@@ -23,7 +23,7 @@ describe('a refused Run leaves the project as it was', () => {
     expect(fn).toMatch(/try \{\s*return await runVueWorkflowBody\(targetIds, opts, sinks\)\s*\} finally \{\s*await settleRunSinks\(sinks\)/)
   })
 
-  it('a run is accepted only when it is registered (a runner run started, or the engine queued it)', () => {
+  it('a run is accepted only when it is registered (a runner run started)', () => {
     const fn = body('async function runVueWorkflowBody(')
     expect(fn).toMatch(/registerRun\(\{[^\n]*\}\)\n\s*\/\/ LC8 \(B5\)[^\n]*\n\s*sinks\.accepted = true/)
     expect((fn.match(/sinks\.accepted = true/g) ?? []).length).toBe(1)
@@ -46,9 +46,9 @@ describe('a refused Run leaves the project as it was', () => {
 
   it('LC8 round 2 (B5′): an accepted run keeps only the auto-sinks it sent (outputs that run)', () => {
     const fn = body('async function runVueWorkflowBody(')
-    // The runner: the takes it is sent (pruned or as built); the local engine: the takes as built.
+    // The runner: the takes it is sent (pruned or as built). Step 4, C5: there is no local engine to send them to.
     expect(fn).toMatch(/sinks\.ran = new Set\(runnerPrompts\.flatMap\(p => Object\.keys\(p \?\? \{\}\)\)\)\s*try \{\s*await sendRunnerPost\(/)
-    expect(fn).toMatch(/if \(!sentToRunner\) sinks\.ran = new Set\(\[firstTake, \.\.\.extraTakes\]\.flatMap\(tk => Object\.keys\(tk\.directPrompt \?\? \{\}\)\)\)/)
+    expect(fn).not.toMatch(/direct\.queue\(/)
   })
 
   it('the autosave waits while a run that added sinks is judged, and saves once it is settled', () => {

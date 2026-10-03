@@ -33,7 +33,6 @@ import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/run
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { hunyuan3dGlbUrl, hunyuan3dInput, multiViewInput, trellisGlbUrl } from '~~/server/runner/generators/gen3d'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { requestProblems } from '~~/server/runner/requestRules'
 import { ANSWER_MAX_BYTES, ANSWER_NOT_GLB, answerTooLarge } from '~~/server/runner/answerDownload'
@@ -517,34 +516,6 @@ describe('Hunyuan3D 2\'s `{mesh}` answer (R3.9 fix round 1, controller ruling)',
     expect(GENERATE_3D_RUNNER_ONLY).not.toMatch(/Node|_|\bid\b|Hunyuan|gen-3d/)
   })
 
-  it('the hosted /prompt meter refuses it before pricing or any hold; Multi-View goes through', async () => {
-    const meterDeps = () => ({
-      priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-      spendGuard: vi.fn(async () => {}),
-      validateFileRefs: vi.fn(async () => {}),
-      moderatePrompt: vi.fn(async () => ({ ok: true as const })),
-      hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-      getAvailable: vi.fn(async () => 3),
-      forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-      registerRun: vi.fn(async () => {}),
-      startSettle: vi.fn(),
-      releaseHold: vi.fn(async () => {}),
-    })
-    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode'] as const) {
-      const d = meterDeps()
-      const r = await meterGraphSubmit('u1', { prompt: withPictures(sample(ct)) }, d as any)
-      expect(r.status, ct).toBe(400)
-      expect((r.body as any).error.message).toBe(GENERATE_3D_RUNNER_ONLY)
-      expect(Object.values((r.body as any).node_errors).map((e: any) => e.class_type)).toEqual([ct])
-      expect(d.priceGraph).not.toHaveBeenCalled()
-      expect(d.hold).not.toHaveBeenCalled()
-      expect(d.forward).not.toHaveBeenCalled()
-    }
-    const d = meterDeps()
-    const ok = await meterGraphSubmit('u1', { prompt: withPictures(sample('Hunyuan3DMultiViewNode')) }, d as any)
-    expect(ok.status).toBe(200)
-    expect(d.forward).toHaveBeenCalled()
-  })
 })
 
 describe('refusals and moderation', () => {

@@ -784,17 +784,6 @@ describe('the hosted ComfyUI gate reads a saved pose before pricing it free (fix
     ...(savedPoses ? { measureSavedPoses: vi.fn(async () => savedPoses) } : {}),
   })
 
-  it('a saved pose the gate found loading: nothing held; one it didn\'t (gone, unreadable, not read): held as the call', async () => {
-    const { meterGraphSubmit } = await import('~~/server/utils/meterGraphRun')
-    const free = deps({ n: true })
-    expect((await meterGraphSubmit('u1', { prompt: baked() }, free as any)).status).toBe(200)
-    expect(free.measureSavedPoses).toHaveBeenCalled()
-    expect(free.hold).not.toHaveBeenCalled()
-    for (const d of [deps({ n: false }), deps({}), deps()]) {
-      expect((await meterGraphSubmit('u1', { prompt: baked() }, d as any)).status).toBe(200)
-      expect(d.hold).toHaveBeenCalledWith('u1', 14)
-    }
-  })
 
   it('ComfyUI reads the very copy the gate read: the saved pose is renamed to it in the forwarded prompt', async () => {
     const { rewriteMeasuredInputs } = await import('~~/server/utils/gateSnapshots')
@@ -837,29 +826,6 @@ describe('ruling 1: a saved pose "loads" only if it decodes fully and strictly (
     expect(await decodesStrictly(tmpFile('truncated.png', TRUNCATED))).toBe(false)
   })
 
-  it('the hosted ComfyUI gate: both broken saved poses priced 14 (Python falls through to the call); a good one 0', async () => {
-    const { savedPosesLoading } = await import('~~/server/utils/meterGraphRun')
-    const L = ['p', 0]
-    const prompt = (result: string): ApiPrompt => ({ n: { class_type: 'PoseMannequin', inputs: { character: L, result_image: result, mannequin_image: 'pose_mannequin.png', pose_source: 'mannequin' } } })
-    const copies: Record<string, string> = {
-      'corrupt.png': tmpFile('gate_corrupt.png', CORRUPT),
-      'truncated.png': tmpFile('gate_truncated.png', TRUNCATED),
-      'good.png': tmpFile('gate_good.png', BAKED['pose_result.png']!),
-    }
-    for (const [name, want] of [['corrupt.png', 14], ['truncated.png', 14], ['good.png', 0], ['gone.png', 14]] as const) {
-      const p = prompt(name)
-      const savedPoses = await savedPosesLoading(p, async v => copies[v] ?? null)
-      expect(savedPoses, name).toEqual({ n: want === 0 })
-      expect(priceGraph(p, { savedPoses }).nodes!.n, name).toBe(want)
-    }
-    // A copy that can't be read is a call too.
-    expect(await savedPosesLoading(prompt('x.png'), async () => { throw new Error('gone') })).toEqual({ n: false })
-    // Python itself: both broken files fall through to the call (the fixture).
-    for (const f of ['pose_result_corrupt.png', 'pose_result_truncated.png']) {
-      expect(caseNamed(`pose · mannequin · saved pose ${f}, the mannequin render`).calls.length, f).toBe(1)
-      expect(caseNamed(`pose · mannequin · saved pose ${f}, nothing else`).calls.length, f).toBe(0)
-    }
-  })
 
   it('the runner: never hands a broken saved pose on; hosted refuses the call it would make; with nothing else, the character passes', async () => {
     for (const f of ['pose_result_corrupt.png', 'pose_result_truncated.png']) {

@@ -91,21 +91,13 @@ describe('workflowNodeTitles', () => {
   })
 })
 
-describe('the run socket with the engine off', () => {
-  it('waits for the engine instead of retrying', async () => {
-    const { mayReconnect } = await import('~/composables/useDirectExecution')
-    expect(mayReconnect(true)).toBe(true)
-    expect(mayReconnect(false)).toBe(false)
-  })
-})
-
-describe('needsEngineDescription', () => {
+describe('notRunWords (step 4, C5: the words for nodes Sailor doesn’t run)', () => {
   it('quotes the titles in plain words and shortens a long list', async () => {
-    const { needsEngineDescription } = await import('~/lib/runner/needsEngine')
-    expect(needsEngineDescription(['Upscale'])).toBe('Only the engine can run “Upscale”.')
-    expect(needsEngineDescription(['Upscale', 'Blur image'])).toBe('Only the engine can run “Upscale” and “Blur image”.')
-    expect(needsEngineDescription(['A', 'B', 'C'])).toBe('Only the engine can run “A”, “B” and “C”.')
-    expect(needsEngineDescription(['A', 'B', 'C', 'D', 'E', 'F'])).toBe('Only the engine can run “A”, “B”, “C”, “D” and 2 more.')
-    expect(needsEngineDescription([])).toBe('Only the engine can run this workflow.')
+    const { notRunWords } = await import('~/lib/runner/needsEngine')
+    const m = (...t: string[]) => new Map(t.map(x => [x, 'VAEDecode']))
+    expect(notRunWords(m('Decode'))).toBe('“Decode”: Sailor doesn’t run this node.')
+    expect(notRunWords(m('Decode', 'Blur image'))).toBe('“Decode” and “Blur image”: Sailor doesn’t run these nodes.')
+    expect(notRunWords(m('A', 'B', 'C'))).toBe('“A”, “B” and “C”: Sailor doesn’t run these nodes.')
+    expect(notRunWords(m('A', 'B', 'C', 'D', 'E', 'F'))).toBe('“A”, “B”, “C”, “D” and 2 more: Sailor doesn’t run these nodes.')
   })
 })

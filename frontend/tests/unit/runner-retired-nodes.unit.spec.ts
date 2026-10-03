@@ -36,7 +36,6 @@ import { START_AI, startHandTiles } from '~/data/start-modal'
 import { TOOLBOX_SECTIONS } from '~/data/toolbox-items'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { createFakeLedger, makeKit } from './__runner__/kit'
 
 const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
@@ -235,24 +234,6 @@ describe('refused before any charge, in ComfyUI\'s 400 shape', () => {
     expect(blockedPromptRefusal(retiredGraph())).toEqual(retiredNodesResponse(retiredGraph()))
   })
 
-  it('hosted meter: 400 before moderation, pricing, the hold and the engine', async () => {
-    const d = {
-      priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-      spendGuard: vi.fn(async () => {}),
-      validateFileRefs: vi.fn(async () => {}),
-      moderatePrompt: vi.fn(async () => ({ ok: true as const })),
-      hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-      getAvailable: vi.fn(async () => 3),
-      forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-      registerRun: vi.fn(async () => {}),
-      startSettle: vi.fn(),
-      releaseHold: vi.fn(async () => {}),
-    }
-    const r = await meterGraphSubmit('u1', { prompt: retiredGraph(), client_id: 'c1' }, d as any)
-    expect(r.status).toBe(400)
-    expect(r.body).toEqual(retiredNodesResponse(retiredGraph()))
-    for (const f of [d.moderatePrompt, d.priceGraph, d.hold, d.forward, d.validateFileRefs]) expect(f).not.toHaveBeenCalled()
-  })
 
   it('the browser refuses it before sending anything, naming the node by its title', () => {
     const r = blockedRunRefusal([{ prompt: retiredGraph(), titleOf: id => (id === '2' ? 'Fox clip' : 'Other') }], { runnerOn: true, isOutputClass: IS_OUTPUT })
@@ -261,32 +242,19 @@ describe('refused before any charge, in ComfyUI\'s 400 shape', () => {
   })
 })
 
-describe('local /prompt proxy', () => {
+describe('local /prompt: a plain 404 (step 4, C5: no engine, nothing to check or forward)', () => {
   const g = globalThis as any
-  let middleware: (event: any) => Promise<any>
   const proxyRequest = vi.fn(async (_event: any, url: string) => ({ proxiedTo: url }))
-  beforeAll(async () => {
-    vi.doMock('~~/server/native/engineHealth', async orig => ({ ...(await orig() as object), engineHealth: async () => 'up' }))
+  it('is refused before anything is read, in every size; nothing is proxied', async () => {
     vi.doMock('~~/server/utils/deployMode', () => ({ deployMode: () => 'local', isHosted: () => false, engineMultiUser: () => false }))
     g.defineEventHandler = (fn: any) => fn
     g.createError = (opts: { statusCode: number, message?: string }) => Object.assign(new Error(opts.message), { statusCode: opts.statusCode })
     g.proxyRequest = proxyRequest
-    middleware = (await import('~~/server/middleware/comfyui-proxy')).default as any
-  })
-  afterEach(() => proxyRequest.mockClear())
-  const ev = (path: string, body: unknown) => ({ path, method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
-
-  it('refuses it, 400, never forwarded — over the parse cap too', async () => {
-    const { PROMPT_CHECK_MAX_BYTES } = await import('~~/server/middleware/comfyui-proxy')
-    const small = ev('/prompt', { prompt: retiredGraph() })
-    const res = await middleware(small)
-    expect(small.node.res.statusCode).toBe(400)
-    expect(res).toEqual(retiredNodesResponse(retiredGraph()))
-    const base = JSON.stringify({ prompt: retiredGraph(), pad: '' })
-    const big = ev('/prompt', Buffer.from(JSON.stringify({ prompt: retiredGraph(), pad: 'x'.repeat(PROMPT_CHECK_MAX_BYTES + 1 - base.length) })))
-    const bigRes = await middleware(big)
-    expect(big.node.res.statusCode).toBe(400)
-    expect(bigRes.error.message).toBe(RETIRED_NODE_MESSAGE)
+    const middleware = (await import('~~/server/middleware/comfyui-proxy')).default as any
+    const ev = (body: unknown) => ({ path: '/prompt', method: 'POST', context: {}, _requestBody: body, node: { req: { headers: {} }, res: {} as any } })
+    for (const body of [{ prompt: retiredGraph() }, Buffer.from(JSON.stringify({ prompt: retiredGraph(), pad: 'x'.repeat(9 * 1024 * 1024) }))]) {
+      await expect(middleware(ev(body))).rejects.toMatchObject({ statusCode: 404 })
+    }
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 })
@@ -336,22 +304,6 @@ describe('only a retired node that runs is refused (R4.1 fix round 1: pruned as 
     expect(blockedPromptRefusal(outputGraph())).toEqual(retiredNodesResponse(outputGraph()))
   })
 
-  it('hosted meter: the unread node is priced out and the rest is held and sent; a retired output node is refused before anything', async () => {
-    for (const graph of [unreadGraph(), unreadHelperGraph()]) {
-      const d = meterDeps()
-      const r = await meterGraphSubmit('u1', { prompt: graph, client_id: 'c1' }, d as any)
-      expect(r.status).toBe(200)
-      expect(d.hold).toHaveBeenCalled()
-      expect(d.forward).toHaveBeenCalled()
-      // Priced on the part that runs: the retired node is not in it.
-      const priced = (d.priceGraph.mock.calls as unknown as [ApiPrompt][]).map(c => Object.keys(c[0]))
-      expect(priced.every(ids => !ids.includes('2'))).toBe(true)
-    }
-    const d = meterDeps()
-    const r = await meterGraphSubmit('u1', { prompt: outputGraph(), client_id: 'c1' }, d as any)
-    expect([r.status, r.body]).toEqual([400, retiredNodesResponse(outputGraph())])
-    for (const f of [d.moderatePrompt, d.priceGraph, d.hold, d.forward]) expect(f).not.toHaveBeenCalled()
-  })
 
   it('the runner: an unread one is declined with the marker (the ComfyUI path prunes it and runs the rest); a retired output node is refused, no hold', async () => {
     for (const graph of [unreadGraph(), unreadHelperGraph()]) {

@@ -39,16 +39,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
 // R5.6: most tests here describe the video/sound routes WITHOUT Sailor's media tools (the engine or 503), so the
 // tools are pinned missing whatever this machine has built. The "with the media tools" block switches the real
 // build on (R5.6 fix round 1, Minor 5); native-media-video.unit.spec.ts covers the rest.

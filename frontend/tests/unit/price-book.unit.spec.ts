@@ -13,10 +13,10 @@ describe('price book: graph pricer (unchanged spike behavior)', () => {
   it('base render + premium node', () => {
     const p = priceGraph({
       1: { class_type: 'SaveImage' },
-      2: { class_type: 'Veo3RemoteNode' },
+      2: { class_type: 'EnhanceVideoNode' },
     })
-    // Task P5: Veo 3 is 8 s with sound at $0.40/s ($3.20 → 480), plus the render.
-    expect(p.credits).toBe(481)
+    // Step 4, C5: Veo 3's own node is retired (no price); Enhance a video stays flat at 150, plus the render.
+    expect(p.credits).toBe(151)
     expect(p.version).toBe(PRICE_BOOK_VERSION)
   })
 

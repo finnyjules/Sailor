@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { mapWsEvent } from '~/lib/graph/wsEventMap'
-import { reconnectDelayMs, buildWsUrl } from '~/composables/useDirectExecution'
 
 const CID = 'client-abc'
 
@@ -197,43 +196,5 @@ describe('mapWsEvent', () => {
   it('keeps the runner’s charge on a failure', () => {
     expect(mapWsEvent({ type: 'execution_error', data: { prompt_id: 'run_a.0.t0', node_id: '1', node_type: 'GenerateImageNode', exception_message: 'x', exception_type: 'RunnerError', traceback: [], run_id: 'run_a', credits: 0, recorded: true } }, CID))
       .toMatchObject({ event: 'execution_error', prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 0, recorded: true })
-  })
-})
-
-describe('reconnectDelayMs', () => {
-  it('starts at 1s for the first attempt', () => {
-    expect(reconnectDelayMs(0)).toBe(1000)
-  })
-
-  it('doubles with each attempt', () => {
-    expect(reconnectDelayMs(1)).toBe(2000)
-    expect(reconnectDelayMs(2)).toBe(4000)
-  })
-
-  it('caps at 5s', () => {
-    expect(reconnectDelayMs(3)).toBe(5000)
-    expect(reconnectDelayMs(10)).toBe(5000)
-  })
-
-  it('never goes below 1s for negative/zero attempts', () => {
-    expect(reconnectDelayMs(-5)).toBe(1000)
-  })
-})
-
-describe('buildWsUrl', () => {
-  it('converts an http origin to ws and appends the clientId', () => {
-    expect(buildWsUrl('http://127.0.0.1:8188', CID)).toBe('ws://127.0.0.1:8188/ws?clientId=client-abc')
-  })
-
-  it('converts an https origin to wss', () => {
-    expect(buildWsUrl('https://sailor.fly.dev:8188', CID)).toBe(
-      'wss://sailor.fly.dev:8188/ws?clientId=client-abc',
-    )
-  })
-
-  it('builds a same-origin ws URL from a browser location origin (the dev path)', () => {
-    // wsUrl() passes window.location.origin so the /ws upgrade goes to the Nuxt
-    // proxy on the SAME port the page loaded from, never :8188 directly.
-    expect(buildWsUrl('http://localhost:3002', CID)).toBe('ws://localhost:3002/ws?clientId=client-abc')
   })
 })

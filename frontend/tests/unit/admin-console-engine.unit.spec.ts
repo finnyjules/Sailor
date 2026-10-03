@@ -1,12 +1,10 @@
 /**
- * Step 3, R10.8: the operator console shows the local engine's link only
- * while the engine is up, and answers either way.
+ * Step 3, R10.8: the operator console showed the local engine's link only
+ * while the engine was up. Step 4, C5: there is no engine, so the console
+ * never shows one, and answers without asking anything.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createError } from 'h3'
-
-const health = vi.hoisted(() => ({ state: 'down' as 'up' | 'down' }))
-vi.mock('~~/server/native/engineHealth', () => ({ engineHealth: async () => health.state, ENGINE_MAIN_PORT: 8188 }))
 
 async function handler() {
   vi.stubGlobal('defineEventHandler', (h: unknown) => h)
@@ -14,28 +12,24 @@ async function handler() {
   return (await import('~~/server/api/admin/console.get')).default as unknown as () => Promise<{ sections: { title: string; cards: { name: string; primary?: { href: string } }[] }[] }>
 }
 
-const engineLinks = (body: Awaited<ReturnType<Awaited<ReturnType<typeof handler>>>>) =>
-  body.sections.flatMap(s => s.cards).filter(c => c.primary?.href.includes(':8188'))
-
-beforeEach(() => { vi.resetModules() })
+const fetchSpy = vi.fn()
+beforeEach(() => {
+  vi.resetModules()
+  fetchSpy.mockReset()
+  vi.stubGlobal('fetch', fetchSpy)
+})
 afterEach(() => {
   vi.unstubAllGlobals()
   delete process.env.NUXT_CLERK_SECRET_KEY
 })
 
-describe('GET /api/admin/console — the engine link', () => {
-  it('engine down (nothing on its port): no engine card; the rest stands', async () => {
-    health.state = 'down'
+describe('GET /api/admin/console — no engine card (C5)', () => {
+  it('no engine card; the rest stands, and nothing is asked', async () => {
     const body = await (await handler())()
-    expect(engineLinks(body)).toEqual([])
+    expect(body.sections.flatMap(s => s.cards).map(c => c.name)).not.toContain('Local engine')
+    expect(body.sections.flatMap(s => s.cards).filter(c => /127\.0\.0\.1|localhost/.test(c.primary?.href ?? ''))).toEqual([])
     expect(body.sections.find(s => s.title === 'Code & deploy')!.cards.map(c => c.name)).toEqual(['GitHub', 'Fly.io', 'Build dashboard'])
-  })
-
-  it('engine up: one card, under Code & deploy', async () => {
-    health.state = 'up'
-    const body = await (await handler())()
-    expect(engineLinks(body).map(c => c.name)).toEqual(['Local engine'])
-    expect(body.sections.find(s => s.title === 'Code & deploy')!.cards.at(-1)!.name).toBe('Local engine')
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('hosted: still a 404', async () => {

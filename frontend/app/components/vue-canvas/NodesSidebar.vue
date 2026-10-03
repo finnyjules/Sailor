@@ -8,12 +8,10 @@ const {
   categories, fetchNodeTypes, addNode,
 } = useNodeSearch()
 
-// Blueprints are built from classes only the local engine runs, so hosted
-// offers none: no fetch, no tab, no section (step 3, R10.6).
-const hosted = (() => {
-  try { return useRuntimeConfig().public?.hostedMode === true }
-  catch { return false }
-})()
+// Blueprints are built from stock classes Sailor doesn't run, so none is
+// offered, here or hosted: no fetch, no tab, no section (step 3, R10.6; step 4,
+// C5 made it the only rule). C6 keeps only the ones whose classes Sailor runs.
+const hosted = true
 
 // Blueprints data
 interface BlueprintEntry {

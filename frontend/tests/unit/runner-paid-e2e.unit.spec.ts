@@ -38,8 +38,8 @@
  *    is added, edited or removed, the pins no longer match: look at the
  *    difference, then re-pin with
  *    `R318_PIN=1 npx vitest run tests/unit/runner-paid-e2e.unit.spec.ts -t "every R3 family off"`.
- * 4. The hosted refusals end to end, on the runner's route and the hosted
- *    ComfyUI meter (meterGraphSubmit, the /prompt gate).
+ * 4. The hosted refusals end to end, on the runner's route (step 4, C5: the
+ *    hosted ComfyUI meter, the /prompt gate, went with the engine).
  */
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -54,12 +54,12 @@ import sharp from 'sharp'
 import { __setEngineForTests } from '~~/server/runner/index'
 import { runnerFamilies } from '~~/server/runner/config'
 import { _resetRateLimits } from '~~/server/lib/rateLimit'
+import { C4_RETIRED_CLASSES } from '#shared/runner/retired'
 import { BASE_RENDER_CREDITS, priceGraph } from '~~/server/utils/priceBook'
 import { createFileKeptBytes, type KeptBytes } from '~~/server/runner/keptBytes'
 import { __setInputUploadsEngineRootForTests } from '~~/server/utils/inputUploads'
 import { __setHuggingFaceLookupForTests, __setMultiLoraRotationForTests, multiLoraHfRef, multiLoraRotation } from '~~/server/runner/generators/lora'
 import { answerUsage } from '~~/server/runner/generators/llm'
-import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { MODERATION_BLOCKED_MESSAGE } from '~~/server/utils/moderation'
 import startRoute from '~~/server/api/runs/index.post'
 import eventsRoute from '~~/server/api/runs/events.get'
@@ -74,8 +74,6 @@ import { onlyLc9SmartLayoutsMoved } from './__runner__/lc9SmartLayoutCard'
 import { parsePyJson, pyJsonDumps, type PyJson } from '#shared/runner/pyJson'
 import { LORA_BY_NAME_HOSTED } from '#shared/runner/lora'
 import { SPEECH_VOICE_NOT_OFFERED } from '#shared/runner/audioGen'
-import { DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS } from '#shared/runner/describe'
-import { GENERATE_3D_RUNNER_ONLY } from '#shared/runner/gen3d'
 import { NANO_EXTRAS_CLASSES } from '#shared/runner/nanoExtras'
 import { priceNode, type NodeInputs } from '#shared/pricing/nodePrice'
 import { PAID_NODE_CLASSES, paidCalls, restyleLoraCalls } from '#shared/pricing/paidSettings'
@@ -1061,7 +1059,11 @@ describe('R3.18 · every R3 family off', () => {
     // Every saved graph, node by node, as the ComfyUI path prices it (no families).
     let graphs = 0
     const refusals: string[] = []
+    // Step 4, C5: the seven per-model nodes C4 retired left the price book; they are refused before any price,
+    // so a graph or a class that is one is left out of the comparison.
+    const unpriced = (ct: string) => C4_RETIRED_CLASSES.includes(ct) && ct.endsWith('RemoteNode')
     for (const g of await savedGraphs()) {
+      if (Object.values(g.prompt).some(n => unpriced(n.class_type))) continue
       graphs++
       const a = priceOr(() => old.priceGraph(g.prompt))
       const b = priceOr(() => priceGraph(g.prompt))
@@ -1074,6 +1076,7 @@ describe('R3.18 · every R3 family off', () => {
     // Every class of the node catalogue, alone, at its default settings (its pictures unwired).
     const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { input?: Record<string, Record<string, [unknown, Record<string, unknown>?]>> }>
     for (const [ct, def] of Object.entries(catalog)) {
+      if (unpriced(ct)) continue
       const inputs: Record<string, unknown> = {}
       for (const part of ['required', 'optional'] as const) {
         for (const [name, spec] of Object.entries(def.input?.[part] ?? {})) {
@@ -1116,42 +1119,8 @@ describe('R3.18 · every R3 family off', () => {
 
 // ── 4. The hosted refusals, end to end ────────────────────────────────────
 
-describe('R3.18 · the hosted refusals, on the runner\'s route and the hosted ComfyUI meter', () => {
+describe('R3.18 · the hosted refusals, on the runner\'s route', () => {
   const blockWord = (word: string) => vi.fn(async (text: string) => (text.includes(word) ? { ok: false as const, categories: ['violence'] } : { ok: true as const }))
-  /** The hosted /prompt meter's own path (meterGraphSubmit) with the real price book behind it and nothing forwarded. */
-  const meterDeps = (moderatePrompt = vi.fn(async (_t: string) => ({ ok: true as const }))) => ({
-    priceGraph: vi.fn((p: ApiPrompt) => priceGraph(p)),
-    spendGuard: vi.fn(async () => {}),
-    validateFileRefs: vi.fn(async () => {}),
-    moderatePrompt,
-    hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-    getAvailable: vi.fn(async () => 1000),
-    forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-    registerRun: vi.fn(async () => {}),
-    startSettle: vi.fn(),
-    releaseHold: vi.fn(async () => {}),
-  })
-  async function meterRefuses(prompt: ApiPrompt, message: string, classType: string, moderate?: ReturnType<typeof blockWord>) {
-    const d = meterDeps(moderate)
-    let status = 0
-    let msg = ''
-    let body: any = null
-    try {
-      const r = await meterGraphSubmit(USER, { prompt }, d as never)
-      status = r.status
-      body = r.body
-      msg = r.body?.error?.message ?? ''
-    }
-    catch (e) {
-      status = (e as { statusCode?: number }).statusCode ?? 500
-      msg = (e as Error).message
-    }
-    expect([status, msg], 'the hosted ComfyUI meter refuses it').toEqual([400, message])
-    if (body) expect(Object.values(body.node_errors).map((x: any) => x.class_type)).toEqual([classType])
-    expect(d.priceGraph, 'before pricing').not.toHaveBeenCalled()
-    expect(d.hold, 'before any hold').not.toHaveBeenCalled()
-    expect(d.forward, 'never forwarded to ComfyUI').not.toHaveBeenCalled()
-  }
   async function runnerRefuses(prompt: ApiPrompt, message: string, moderate?: ReturnType<typeof blockWord>) {
     const k = kit({ script: { answers: [], files: {} }, moderate })
     const res = await startRun([prompt])
@@ -1163,38 +1132,22 @@ describe('R3.18 · the hosted refusals, on the runner\'s route and the hosted Co
     return k
   }
 
-  it('a picked LoRA (ruling (i)): refused on both paths before any hold', async () => {
+  it('a picked LoRA (ruling (i)): refused before any hold', async () => {
     const p: ApiPrompt = {
       n: { class_type: 'FluxLoRARemoteNode', inputs: { prompt: 'a portrait of TOK', lora_name: 'trained.safetensors', lora_url: '', lora_scale: 1, aspect_ratio: '1:1', megapixels: '1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8 } },
       o: outImage('n'),
     }
     await runnerRefuses(p, LORA_BY_NAME_HOSTED)
-    await meterRefuses(p, LORA_BY_NAME_HOSTED, 'FluxLoRARemoteNode')
   })
 
-  it('a cloned voice (ruling (j)): refused on both paths before any hold', async () => {
+  it('a cloned voice (ruling (j)): refused before any hold', async () => {
     const speech = caseOf('runner-paid-audio-gen.json', 'speech · cloned voice')
     const p: ApiPrompt = { n: { class_type: speech.class_type, inputs: { ...speech.widgets } }, a: audioCard('n') }
     expect(String(speech.widgets.voice_id)).toMatch(/clone/)
     await runnerRefuses(p, SPEECH_VOICE_NOT_OFFERED)
-    await meterRefuses(p, SPEECH_VOICE_NOT_OFFERED, speech.class_type)
   })
 
-  it('a /view video on Describe a video\'s ComfyUI path: refused before pricing (the runner takes an upload)', async () => {
-    const p: ApiPrompt = { n: { class_type: 'DescribeVideoNode', inputs: { model: 'Gemini 2.5 Flash', video_url: '/view?filename=clip.mp4&type=input', prompt: 'What happens?' } }, t: textCard('n') }
-    await meterRefuses(p, DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS, 'DescribeVideoNode')
-  })
-
-  it('Generate a 3D model on the ComfyUI path: refused before pricing (runner only)', async () => {
-    const p: ApiPrompt = {
-      l: loadImage('image.png'),
-      n: { class_type: GEN3D.class_type, inputs: { ...GEN3D.widgets, image: ['l', 0] } },
-      m: { class_type: 'Model3D', inputs: { glb_url: ['n', 0] } },
-    }
-    await meterRefuses(p, GENERATE_3D_RUNNER_ONLY, GEN3D.class_type)
-  })
-
-  it('a blocked negative prompt (inside a preset Film a shot\'s model options): refused on both paths before any hold', async () => {
+  it('a blocked negative prompt (inside a preset Film a shot\'s model options): refused before any hold', async () => {
     const p: ApiPrompt = {
       n: { class_type: 'FilmShotNode', inputs: { model: 'hailuo-h3', prompt: 'the fox runs', aspect_ratio: '16:9', duration: '6', seed: 3, preset: 'orbit', model_options: JSON.stringify({ negative_prompt: 'NEGWORDS' }) } },
       v: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: ['n', 0] } },
@@ -1203,12 +1156,6 @@ describe('R3.18 · the hosted refusals, on the runner\'s route and the hosted Co
     const runner = blockWord('NEGWORDS')
     await runnerRefuses(p, MODERATION_BLOCKED_MESSAGE, runner)
     expect(runner.mock.calls.map(c => c[0])).toContain('NEGWORDS')
-    const comfy = blockWord('NEGWORDS')
-    const d = meterDeps(comfy)
-    await expect(meterGraphSubmit(USER, { prompt: p }, d as never)).rejects.toThrow(MODERATION_BLOCKED_MESSAGE)
-    expect(comfy.mock.calls.map(c => c[0])).toContain('NEGWORDS')
-    expect(d.priceGraph).not.toHaveBeenCalled()
-    expect(d.hold).not.toHaveBeenCalled()
-    expect(d.forward).not.toHaveBeenCalled()
   })
+
 })

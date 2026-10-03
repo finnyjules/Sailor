@@ -1,138 +1,124 @@
 /**
- * Step 3, R10.8 guard: the server stops calling the engine's port.
+ * Step 4, C5 guard: there is no local engine, anywhere. (Step 3, R10.8 made the
+ * server stop calling the engine's port except on a few local-only paths;
+ * C5 removed those, and this guard now covers the whole app.)
  *
- *   1. No server file names the engine's address (`127.0.0.1:8188`,
- *      `localhost:8188`, `[::1]:8188`) or `SAILOR_COMFY_ORIGIN`, except the
- *      one place that defines it (server/native/engineHealth.ts) and the
- *      local-only proxy (server/middleware/comfyui-proxy.ts).
- *   2. The engine's port reaches a file only through engineHealth.ts, and only
- *      the files listed here import it — each a local-only engine path (decision
- *      4); since R10.9 none of them is reachable from hosted (each returns
- *      before asking the engine there — tests/unit/hosted-never-reaches-engine
- *      .unit.spec.ts drives every one). A new importer must be added here,
- *      with its reason, on purpose.
- *   3. The routes R10.8 moved off the engine never ask it for anything but a
- *      local-only run (the history routes, behind engineHealth).
+ * Nothing in frontend/app, frontend/server or frontend/shared names:
+ *   - the engine's port (8188) or its address, `ENGINE_MAIN_PORT`,
+ *     `ENGINE_ORIGIN`, `SAILOR_COMFY_ORIGIN`, `comfyOrigin`;
+ *   - the engine's health check (`engineHealth`, `/api/engine/health`);
+ *   - `/prompt`, `/queue` or `/interrupt` as a route to call;
+ *   - the Gate's engine resume (`/gate/resume`, `gateResumeRoute`);
+ *   - the engine queue or socket (`queueSmart`, `engineSocketAllowed`, a `/ws` URL).
+ *
+ * One allow-list, each entry with its reason: the two path classifiers that
+ * name the engine's routes in order to answer them with a plain 404.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const FRONTEND = join(__dirname, '..', '..')
-const SERVER = join(FRONTEND, 'server')
+const ROOTS = ['app', 'server', 'shared']
+const SKIP_DIRS = new Set(['node_modules', '.nuxt', '.output'])
 
 function walk(dir: string): string[] {
   const out: string[] = []
   for (const name of readdirSync(dir)) {
+    if (SKIP_DIRS.has(name)) continue
     const p = join(dir, name)
     if (statSync(p).isDirectory()) out.push(...walk(p))
-    else if (/\.(ts|js|mjs|cjs)$/.test(name)) out.push(p)
+    else if (/\.(ts|vue|js|mjs|cjs)$/.test(name)) out.push(p)
   }
   return out
 }
 
-const files = walk(SERVER).map(p => ({ rel: relative(FRONTEND, p).split('\\').join('/'), text: readFileSync(p, 'utf8') }))
+const files = [...ROOTS.flatMap(r => walk(join(FRONTEND, r))), join(FRONTEND, 'nuxt.config.ts')]
+  .map(p => ({ rel: relative(FRONTEND, p).split('\\').join('/'), text: readFileSync(p, 'utf8') }))
 
-const NAMES_ENGINE = /(127\.0\.0\.1|localhost|\[::1\]):8188|SAILOR_COMFY_ORIGIN/
-
-/** May name the engine's address. */
-const ADDRESS_OK = new Set([
-  'server/native/engineHealth.ts', // defines ENGINE_MAIN_PORT / ENGINE_ORIGIN, its health probe
-  'server/middleware/comfyui-proxy.ts', // the local-only proxy
-])
-
-/** May import the engine's port or origin, and why. */
-const PORT_IMPORTERS: Record<string, string> = {
-  'server/middleware/comfyui-proxy.ts': 'the local-only proxy (/prompt, /ws for decision 4’s classes)',
-  // R10.8 fix round 1 (M1) named these hosted-reachable; R10.9 made both local only.
-  'server/native/media.ts': 'local only: forwardToEngine returns null in hosted before any request (R10.9)',
-  'server/native/objectInfo.ts': 'local only: fromEngine returns null in hosted before any request; hosted serves the saved copy (R10.9)',
-  'server/routes/history/index.get.ts': 'local only: the engine’s local-only runs, while it is up',
-  'server/routes/history/[promptId].get.ts': 'local only: one local-only run, while it is up',
-  'server/api/admin/console.get.ts': 'a link to the engine, shown only while it is up (never fetched)',
-  'server/templates/safeFetch.ts': 'the port number Python’s /view URLs carry; the file is read off disk, never fetched',
+/** What names the engine, each with what it catches. */
+const FORBIDDEN: Record<string, RegExp> = {
+  'the engine’s port': /\b8188\b/,
+  'the engine’s port or origin constant': /\b(ENGINE_MAIN_PORT|ENGINE_ORIGIN|SAILOR_COMFY_ORIGIN|comfyOrigin)\b/,
+  'the engine health check': /\bengineHealth\b|\/api\/engine\/health/,
+  'the engine’s run, queue or Stop route': /['"`](?:\/api|\/comfyui)?\/(?:prompt|queue|interrupt)(?:['"`?/])/,
+  'the Gate’s engine resume': /\/gate\/resume|\bgateResumeRoute\b/,
+  'the engine queue or socket': /\b(queueSmart|engineSocketAllowed|setEngineAvailable|isMainSocketOpen)\b|\/ws\?clientId|['"`](?:\/api|\/comfyui)?\/ws(?:['"`?/])/,
 }
 
-describe('the server stops calling the engine’s port (R10.8)', () => {
-  it('reads the server tree', () => {
-    expect(files.length).toBeGreaterThan(100)
-    expect(files.some(f => f.rel === 'server/native/engineHealth.ts')).toBe(true)
-  })
+/** Files allowed to name an engine route, and why. */
+const ALLOWED: Record<string, { patterns: string[]; why: string }> = {
+  'server/utils/enginePath.ts': {
+    patterns: ['the engine’s run, queue or Stop route', 'the engine queue or socket'],
+    why: 'the path classifier: lists the engine’s routes (every spelling) so they answer a plain 404',
+  },
+  'server/utils/authGuard.ts': {
+    patterns: ['the engine’s run, queue or Stop route'],
+    why: 'PROXY_PREFIXES: the engine-style paths the middleware answers itself (a 404 for these)',
+  },
+}
 
-  it('no server file outside engineHealth and the local-only proxy names the engine’s address or SAILOR_COMFY_ORIGIN', () => {
-    const offenders = files.filter(f => !ADDRESS_OK.has(f.rel) && NAMES_ENGINE.test(f.text)).map(f => f.rel)
-    expect(offenders).toEqual([])
-  })
+function offences(text: string): string[] {
+  return Object.entries(FORBIDDEN).filter(([, re]) => re.test(text)).map(([name]) => name)
+}
 
-  it('no server file writes the port as a literal next to an address', () => {
-    const offenders = files
-      .filter(f => f.rel !== 'server/native/engineHealth.ts')
-      .filter(f => /['"`]https?:\/\/[^'"`]*:8188/.test(f.text))
-      .map(f => f.rel)
-    expect(offenders).toEqual([])
-  })
-
-  it('only the listed local-only paths import the engine’s port or origin', () => {
-    const importers = files
-      .filter(f => f.rel !== 'server/native/engineHealth.ts')
-      .filter(f => /import\s*\{[^}]*\b(ENGINE_MAIN_PORT|ENGINE_ORIGIN)\b[^}]*\}\s*from\s*['"][^'"]*engineHealth['"]/.test(f.text))
-      .map(f => f.rel)
-      .sort()
-    expect(importers).toEqual(Object.keys(PORT_IMPORTERS).sort())
-  })
-
-  it('only the listed files forward to the engine through media.ts (local only since R10.9)', () => {
-    const FORWARDERS: Record<string, string> = {
-      'server/native/smallRoutes.ts': 'local only: the font subset forward is skipped in hosted (the font comes back whole, R10.9)',
+describe('there is no local engine, anywhere (step 4, C5)', () => {
+  it('reads the app, the server and shared', () => {
+    expect(files.length).toBeGreaterThan(500)
+    for (const rel of ['app/layouts/default.vue', 'server/middleware/comfyui-proxy.ts', 'shared/runner/needsEngine.ts', 'nuxt.config.ts']) {
+      expect(files.some(f => f.rel === rel), rel).toBe(true)
     }
-    const importers = files
-      .filter(f => f.rel !== 'server/native/media.ts')
-      .filter(f => /import\s*\{[^}]*\bforwardToEngine\b[^}]*\}\s*from/.test(f.text))
-      .map(f => f.rel)
-      .sort()
-    expect(importers).toEqual(Object.keys(FORWARDERS).sort())
   })
 
-  it('the routes R10.8 moved off the engine never use its port', () => {
-    for (const rel of ['server/api/image-fetch.post.ts', 'server/api/scene3d/gen-3d.post.ts', 'server/native/viewRead.ts', 'server/native/viewGate.ts', 'server/native/history.ts']) {
+  it('positive control: the patterns catch the old engine code', () => {
+    expect(offences("const target = `http://127.0.0.1:${8188}`")).toEqual(['the engine’s port'])
+    expect(offences("import { ENGINE_MAIN_PORT, engineHealth } from '../native/engineHealth'")).toEqual(expect.arrayContaining(['the engine’s port or origin constant', 'the engine health check']))
+    expect(offences("const res = await $fetch('/prompt', { method: 'POST' })")).toEqual(['the engine’s run, queue or Stop route'])
+    expect(offences("fetch('/queue', { method: 'POST' })")).toEqual(['the engine’s run, queue or Stop route'])
+    expect(offences("fetch('/interrupt', { method: 'POST' })")).toEqual(['the engine’s run, queue or Stop route'])
+    expect(offences("fetch(`/api/prompt?x=1`)")).toEqual(['the engine’s run, queue or Stop route'])
+    expect(offences("await $fetch<{ prompt_id?: string }>('/gate/resume', {")).toEqual(['the Gate’s engine resume'])
+    expect(offences('const route = gateResumeRoute(id, o)')).toEqual(['the Gate’s engine resume'])
+    expect(offences('return `${origin}/ws?clientId=${id}`')).toEqual(['the engine queue or socket'])
+    expect(offences("if (!req.url?.startsWith('/ws')) {")).toEqual(['the engine queue or socket'])
+    expect(offences('direct.setEngineAvailable(engineSocketAllowed(s))')).toEqual(['the engine queue or socket'])
+    expect(offences("fetch('/api/engine/health')")).toEqual(['the engine health check'])
+    expect(offences('comfyOrigin: ""')).toEqual(['the engine’s port or origin constant'])
+    // …and not Sailor's own words or routes.
+    expect(offences("'/api/prompt-route' '/api/runs' 'prompt' '/queue-panel' const node = 1783717818842")).toEqual([])
+    expect(offences(' * the prompt the person typed; a queue of runs')).toEqual([])
+  })
+
+  it('nothing outside the allow-list names the engine', () => {
+    const bad: string[] = []
+    for (const f of files) {
+      const allowed = ALLOWED[f.rel]?.patterns ?? []
+      const hits = offences(f.text).filter(h => !allowed.includes(h))
+      if (hits.length) bad.push(`${f.rel}: ${hits.join(', ')}`)
+    }
+    expect(bad).toEqual([])
+  })
+
+  it('every allow-list entry still holds what it is allowed for, and gives its reason', () => {
+    for (const [rel, a] of Object.entries(ALLOWED)) {
       const f = files.find(x => x.rel === rel)
       expect(f, rel).toBeTruthy()
-      expect(f!.text, rel).not.toMatch(/ENGINE_MAIN_PORT|ENGINE_ORIGIN|8188/)
-    }
-    // safeFetch's loopback /view is read off disk, never requested.
-    const safe = files.find(f => f.rel === 'server/templates/safeFetch.ts')!.text
-    expect(safe).toMatch(/readLoopbackView\(u,/)
-    expect(safe).not.toMatch(/requestOnce\(u,\s*(true|loopbackOk)/)
-  })
-
-  it('the history routes ask the engine only behind its health check', () => {
-    for (const rel of ['server/routes/history/index.get.ts', 'server/routes/history/[promptId].get.ts']) {
-      const text = files.find(f => f.rel === rel)!.text
-      const fetchAt = text.indexOf('ENGINE_MAIN_PORT}/history')
-      const gateAt = text.lastIndexOf("engineHealth() === 'up'", fetchAt)
-      expect(fetchAt, rel).toBeGreaterThan(0)
-      expect(gateAt, rel).toBeGreaterThan(0)
-      // Hosted returns before the engine is ever asked.
-      expect(text.indexOf("deployMode() === 'hosted'"), rel).toBeLessThan(gateAt)
+      expect(a.why.length, rel).toBeGreaterThan(20)
+      for (const p of a.patterns) expect(FORBIDDEN[p]!.test(f!.text), `${rel}: ${p}`).toBe(true)
     }
   })
 
-  it('hosted returns before every engine forward that is left (R10.9)', () => {
-    const text = (rel: string) => files.find(f => f.rel === rel)!.text
-    const before = (rel: string, guard: RegExp, fetchAt: string) => {
-      const t = text(rel)
-      const g = t.search(guard)
-      const f = t.indexOf(fetchAt, g)
-      expect(g, `${rel}: hosted guard`).toBeGreaterThan(0)
-      expect(f, `${rel}: the engine request after the guard`).toBeGreaterThan(g)
+  it('the engine’s modules are gone', () => {
+    for (const rel of ['server/native/engineHealth.ts', 'server/api/engine/health.get.ts', 'server/utils/meterGraphRun.ts', 'app/composables/useDirectExecution.ts', 'shared/runner/localOnly.ts', 'shared/runner/hostedOffer.ts']) {
+      expect(files.some(f => f.rel === rel), rel).toBe(false)
     }
-    before('server/native/media.ts', /export async function forwardToEngine[^]*?if \(isHosted\(\)\) return null/, 'await fetch(')
-    before('server/native/objectInfo.ts', /async function fromEngine[^]*?if \(isHosted\(\)\) return null/, 'await fetch(')
-    before('server/native/smallRoutes.ts', /if \(isHosted\(\)\) return native/, 'forwardToEngine(event')
-    // The hosted engine handlers are gone, not just unreached.
-    expect(text('server/utils/engineGate.ts')).not.toMatch(/\bfetch\(|ENGINE_MAIN_PORT|8188/)
-    expect(text('server/utils/meterGraphRun.ts')).not.toMatch(/\bfetch\(|ENGINE_MAIN_PORT|8188|handleMeteredPrompt/)
-    // engineHealth answers down in hosted before probing.
-    expect(text('server/native/engineHealth.ts')).toMatch(/if \(hosted\(\)\) return Promise\.resolve\('down'\)/)
+  })
+
+  it('the server makes no request to a loopback engine address', () => {
+    const offenders = files
+      .filter(f => f.rel.startsWith('server/'))
+      .filter(f => /['"`]https?:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d{4}/.test(f.text))
+      .map(f => f.rel)
+    expect(offenders).toEqual([])
   })
 })

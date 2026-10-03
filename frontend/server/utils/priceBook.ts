@@ -422,9 +422,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // Product shot, Fix faces, Rotate camera, Relight, Lens reframe and the
   // Nano Banana actions are priced by their settings since lineup-p4: see
   // SETTING_PRICED_NODE_CLASSES below.)
-  FluxProRemoteNode: 8,            // badge $0.04
-  FluxKontextRemoteNode: 8,        // badge $0.04
-  IdeogramV3TurboRemoteNode: 6,    // badge $0.03 (Python class IdeogramV3TurboNode; node_id below)
+  // (FluxProRemoteNode 8, FluxKontextRemoteNode 8 and IdeogramV3TurboRemoteNode 6
+  // left with the engine path, step 4 C5: retired in C4, refused before any price.)
   // (Text effect, Sketch to image and Generate face references are priced by
   // their calls since R3.12: shared/pricing/paidSettings.ts, on both paths.)
   // (Separate text from image, Layerize an image and Expand / outpaint are
@@ -432,20 +431,15 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // since R3.7: shared/pricing/paidSettings.ts, on both paths.)
   // (Restore an old photo and Remove background, and their hidden twins, are
   // priced by their calls since R3.5: shared/pricing/paidSettings.ts, on both paths.)
-  // Clarity is RANGE-priced (own description: ~$0.05–0.20/image by
-  // scale_factor) and the same slug is priced at range-top 30cr via the
-  // UpscaleImageNode "Clarity" engine row — a badge-bottom price here would
-  // underprice the exact same call at its expensive setting. Review ruling
-  // (2026-08-17): keep the CONSERVATIVE range-top figure. badge $0.10 vs
-  // range-top $0.20 (nodes_replicate.py:1423) — badge divergence flagged for
-  // the pre-launch invoice sweep.
-  ClarityUpscaleRemoteNode: 30,
+  // (ClarityUpscaleRemoteNode 30 left with the engine path, step 4 C5: retired
+  // in C4; Clarity is still priced through UpscaleImageNode's "Clarity" row.)
 
   // — video —
-  // (Veo3RemoteNode 900, KlingVideoRemoteNode 53 and Seedance2RemoteNode 90
-  // flat, and the lip-sync nodes LipSyncNode, LipsyncNode and LipsyncRemoteNode
-  // 150 flat, are priced per second since lineup-p5: see
-  // REMOTE_VIDEO_NODE_CLASSES, shared/pricing/clipSettings.ts.)
+  // (The lip-sync nodes LipSyncNode, LipsyncNode and LipsyncRemoteNode, 150
+  // flat, are priced per second since lineup-p5: see REMOTE_VIDEO_NODE_CLASSES,
+  // shared/pricing/clipSettings.ts. Veo3RemoteNode, KlingVideoRemoteNode and
+  // Seedance2RemoteNode, priced there too, left with the engine path, step 4
+  // C5: retired in C4, refused before any price.)
   // EnhanceVideoNode stays flat (P5) on ComfyUI: topazlabs/video-upscale bills
   // by the source video's length, a URL the gate can't measure, and neither
   // the node nor the service caps it, so there is no "longest clip" to charge.

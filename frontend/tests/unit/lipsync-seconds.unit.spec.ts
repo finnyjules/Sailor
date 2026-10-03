@@ -19,7 +19,6 @@ import * as PriceBook from '~~/server/utils/priceBook'
 import { UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
 import { MAX_MEASURED_FILES, createGateReads, graphInputPixels } from '~~/server/utils/graphInputPixels'
 import { graphInputSeconds, mediaSeconds, type MediaFile, type MediaKind } from '~~/server/utils/graphInputSeconds'
-import { meterGraphSubmit, validateGraphFileRefs } from '~~/server/utils/meterGraphRun'
 import { GRAPH_FILE_READERS, extractFileRefs } from '~~/server/utils/engineFileSurface'
 import { RUNNER_NODE_RULES } from '#shared/runner/eligibility'
 import { CLIP_RATES } from '#shared/pricing/clipRates'
@@ -259,42 +258,7 @@ describe('the /prompt gate measures lip-sync media', () => {
     expect([...allotMediaFiles(['x', 'y', 'x', 'z'], 2)]).toEqual(['x', 'y'])
   })
 
-  it('meterGraphSubmit holds on the measured length, and on 60 s without it', async () => {
-    const prompt = { 1: { class_type: 'LoadAudio', inputs: { audio: 'voice.wav' } }, 2: { class_type: 'LipSyncNode', inputs: { audio: ['1', 0] } }, 3: SINK }
-    const held: number[] = []
-    const deps = {
-      priceGraph, measureInputSeconds: async () => ({ 2: { audio: 7.3 } }),
-      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
-      hold: async (_u: string, credits: number) => { held.push(credits); return { ok: true as const, holdId: 1 } },
-      getAvailable: async () => 0, forward: async () => ({ status: 200, body: { prompt_id: 'p' } }),
-      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
-    }
-    await meterGraphSubmit('u', { prompt }, deps)
-    await meterGraphSubmit('u', { prompt }, { ...deps, measureInputSeconds: undefined })
-    await meterGraphSubmit('u', { prompt }, { ...deps, measureInputSeconds: async () => { throw new Error('boom') } })
-    expect(held).toEqual([180 + 1, 1350 + 1, 1350 + 1])
-    // Step 3, R10.9: the live hosted /prompt wiring (handleMeteredPrompt) is gone — hosted never reaches
-    // the engine — so there is no live wiring left to pin here; the runner measures its own inputs.
-    const src = readFileSync(`${REPO}frontend/server/utils/meterGraphRun.ts`, 'utf8')
-    expect(src).not.toContain('handleMeteredPrompt')
-  })
 
-  it('the Studio’s /view links are ownership-checked before anything is read or priced', async () => {
-    const spec = GRAPH_FILE_READERS.LipSyncNode![0]!
-    const mo = JSON.stringify({ audio: '/view?filename=voice.mp3&type=input', face_video: '/view?filename=v.mp4&type=input', face_image: 'https://x/y.png' })
-    expect(extractFileRefs(spec, mo)).toEqual(['v.mp4', 'voice.mp3'])   // face_video, audio; the https image is not a file
-    expect(extractFileRefs(spec, '{}')).toEqual([])
-    expect(extractFileRefs(spec, '[1]')).toEqual([])
-    expect(extractFileRefs(spec, '{nope')).toBeNull()      // unreadable: refused
-    const ctx = (owned: string[]) => ({
-      uploadFlagged: new Set<string>(), callerHash: 'h',
-      ownsInput: async (n: string) => owned.includes(n), ownsOutput: async () => false,
-    })
-    const prompt = { 1: { class_type: 'LipSyncNode', inputs: { model_options: mo } } }
-    await expect(validateGraphFileRefs(prompt, ctx(['voice.mp3']))).rejects.toThrow(/input file you do not own \(LipSyncNode\.model_options\)/)
-    await expect(validateGraphFileRefs(prompt, ctx(['voice.mp3', 'v.mp4']))).resolves.toBeUndefined()
-    await expect(validateGraphFileRefs({ 1: { class_type: 'LipSyncNode', inputs: { model_options: LINK } } }, ctx([]))).rejects.toThrow(/unexpected shape/)
-  })
 })
 
 // ── The badge ─────────────────────────────────────────────────────────────
@@ -530,22 +494,4 @@ describe('the /view? link parser reads links exactly as the engine does', () => 
     expect(got).toEqual(CASES.map(c => c.python))
   })
 
-  it('the gate refuses a refused link with a plain 403 — no hold, nothing read', async () => {
-    const ctx = { uploadFlagged: new Set<string>(), callerHash: 'h', ownsInput: async () => true, ownsOutput: async () => false }
-    const bad = '/view?type=input&filename=mine.mp3&filename=secret.mp3'
-    for (const [ct, mo] of [['LipSyncNode', { audio: bad }], ['LipSyncNode', { face_video: bad }]] as const) {
-      const err = await validateGraphFileRefs({ 1: { class_type: ct, inputs: { model_options: JSON.stringify(mo) } } }, ctx).catch(e => e)
-      expect(err, ct).toBeInstanceOf(ViewRefRefusedError)
-      expect(err.statusCode).toBe(403)
-      expect(err.message).toBe(VIEW_REF_REFUSED)
-      expect((err.constructor as any).__h3_error__).toBe(true)
-    }
-    // The shared price never measures a refused link.
-    expect(secondsPricedMedia('LipSyncNode', { model_options: JSON.stringify({ audio: bad }) })).toEqual({ audio: null, video: null })
-    // Every /view parser the gate, the measurer and the price use is this one.
-    for (const f of ['server/utils/engineFileSurface.ts', 'server/utils/graphInputSeconds.ts', 'server/utils/graphInputPixels.ts', 'shared/pricing/clipSettings.ts']) {
-      const src = readFileSync(`${REPO}frontend/${f}`, 'utf8')
-      expect(src, f).not.toMatch(/new URLSearchParams/)
-    }
-  })
 })

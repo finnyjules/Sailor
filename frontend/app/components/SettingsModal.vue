@@ -145,12 +145,13 @@ const settingsByCategory: Record<string, SettingDef[]> = {
   ],
 }
 
-// Fetch all settings from ComfyUI
+// Fetch the engine-stored settings. Step 4, C5: there is no engine any more, so
+// this answers 404 (as hosted always did) and the list starts empty.
 async function fetchSettings() {
   loading.value = true
   try {
     const res = await fetch(`${COMFY_API}/settings`)
-    settings.value = await res.json()
+    settings.value = res.ok ? await res.json() : {}
   } catch {
     settings.value = {}
   } finally {

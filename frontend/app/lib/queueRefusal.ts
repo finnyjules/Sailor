@@ -1,12 +1,12 @@
 /** True iff `body` is a Nuxt/h3 error body (a metering refusal — moderation,
- * insufficient credits, file ownership, paused) rather than a ComfyUI
- * `/prompt` validation body.
+ * insufficient credits, file ownership, paused) rather than a ComfyUI-shaped
+ * validation body (the runner's refusals keep that shape).
  *
  * Nitro serializes thrown h3 errors with a top-level **boolean** `error: true`
  * (e.g. `{ error: true, statusCode: 401, message: "Sign in required", ... }`
  * from the auth middleware, or the same shape with `message: "Sailor is
- * temporarily paused"` from a `/prompt` refusal). ComfyUI's own `/prompt`
- * validation body instead carries `error` as an OBJECT
+ * temporarily paused"` from a run's refusal). ComfyUI's validation body
+ * (the shape the runner's node refusals keep) instead carries `error` as an OBJECT
  * (`{ error: { message, ... }, node_errors: {...} }`). A prior version of
  * this check used `!body.error`, which is false for BOTH shapes (a truthy
  * object and a truthy boolean `true` are both truthy) — so a real hosted

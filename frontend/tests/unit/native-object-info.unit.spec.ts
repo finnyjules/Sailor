@@ -2,26 +2,14 @@
  * GET /object_info served by Sailor (server/native/objectInfo.ts), driven
  * through the native dispatcher in a real h3 app against a temp engine root.
  *
- *   engine up   → its body passes through untouched, and the full catalog is
- *                 saved (to a temp file here — never the real `.data/`);
- *   engine down → the saved copy, else the committed baseline, with the
- *                 upload-widget and model-picker lists rebuilt from disk;
- *   hosted      → the tenant scrub still applies to whichever body is served.
+ *   the saved copy (the engine's last full catalog, written while it still
+ *   ran), else the committed baseline, with the upload-widget and model-picker
+ *   lists rebuilt from disk — step 4, C5: there is no engine to ask;
+ *   hosted → the tenant scrub still applies to whichever body is served.
  *
- * `fetch` is stubbed in every test, so nothing here can reach a real engine.
+ * `fetch` is stubbed in every test, so nothing here can reach anything.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
-// its 3 s process-wide cache would otherwise carry one test's engine state
-// into the next, and a real probe would reach whatever is on :8188. 'up'
-// (the default) defers to each test's own fetch stub, as before the check.
-const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
-vi.mock('../../server/native/engineHealth', async orig => ({
-  ...(await orig() as object),
-  engineHealth: async () => engineHealthState.value,
-}))
-beforeEach(() => { engineHealthState.value = 'up' })
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,7 +19,6 @@ import { __setInputUploadsDbForTests, __setInputUploadsEngineRootForTests } from
 import { nativeEngineRoute } from '../../server/native/router'
 import {
   MODEL_INPUT_LISTS,
-  __objectInfoSaveSettledForTests,
   blankFileLists,
   inputSubfolders,
   objectInfoBaselineFile,
@@ -140,7 +127,7 @@ function populateDisk() {
 
 // ---------------------------------------------------------------- engine down
 
-describe('engine down: the baseline, refreshed from disk', () => {
+describe('the baseline, refreshed from disk (C5: no engine)', () => {
   it('rebuilds upload and model lists and leaves everything else alone', async () => {
     writeBaseline(staleCatalog())
     populateDisk()
@@ -208,101 +195,22 @@ describe('engine down: the baseline, refreshed from disk', () => {
     expect(await call('GET', '/object_info/')).toEqual({ status: 404, body: '404: Not Found' })
   })
 
-  it('503 when there is neither an engine nor any stored catalog', async () => {
+  it('503 when there is no stored catalog at all', async () => {
     __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
     const r = await call('GET', '/object_info')
     expect(r.status).toBe(503)
     expect(r.body.error).toMatch(/node list/)
   })
 
-  it('a non-2xx engine answer counts as down', async () => {
+  it('never asks an engine, even one that would answer (step 4, C5)', async () => {
     writeBaseline(staleCatalog())
-    engineFetch.mockImplementation(async () => new Response('boom', { status: 500 }))
-    const b = (await call('GET', '/object_info')).body
-    expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
-  })
-})
-
-// ------------------------------------------------------------------ engine up
-
-describe('engine up: pass-through and a saved copy', () => {
-  it('passes the engine body through untouched and saves the full catalog', async () => {
-    writeBaseline({ Stale: {} })
-    populateDisk()
-    const live = staleCatalog()
-    engineAnswers(live)
-    const r = await call('GET', '/object_info')
-    expect(r.body).toEqual(live) // stale lists and all: the engine's answer is the answer
-    expect(engineFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info')
-    expect(engineFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
-    await __objectInfoSaveSettledForTests()
-    const savedFile = path.join(tmp, 'data', 'object_info.json')
-    const saved = JSON.parse(fs.readFileSync(savedFile, 'utf8'))
-    // Stored blanked, like the baseline: no file or folder names on disk.
-    expect(saved).toEqual(blankFileLists(staleCatalog()))
-    expect(JSON.stringify(saved)).not.toMatch(/gone\.|old\.|old_dataset/)
-    expect(fs.readdirSync(path.join(tmp, 'data'))).toEqual(['object_info.json']) // no temp file left
-
-    // Down again: the saved copy (not the baseline) is served, refreshed.
-    engineFetch.mockReset()
-    engineFetch.mockRejectedValue(new TypeError('fetch failed'))
-    const down = (await call('GET', '/object_info')).body
-    expect(Object.keys(down)).toEqual(Object.keys(live))
-    expect(down.LoadImage.input.required.image[0]).toEqual(['a.jpg', 'b.png'])
-  })
-
-  it('does not save a single node\'s catalog', async () => {
-    engineAnswers({ LoadImage: staleCatalog().LoadImage })
-    await call('GET', '/object_info/LoadImage')
-    expect(engineFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info/LoadImage')
-    await __objectInfoSaveSettledForTests()
-    expect(fs.existsSync(path.join(tmp, 'data', 'object_info.json'))).toBe(false)
-  })
-})
-
-describe('engine up: exact bytes, Python JSON, and a remembered outage', () => {
-  it('passes the engine\'s exact text through as JSON, NaN and all, when nothing is stored', async () => {
-    __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
-    const text = '{"KSampler": {"input": {"required": {"cfg": ["FLOAT", {"default": NaN}]}}}}'
-    engineFetch.mockImplementation(async () => new Response(text, { status: 200, headers: { 'content-type': 'application/json' } }))
-    const res = await handler(new Request('http://x/object_info'))
-    expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toMatch(/application\/json/)
-    expect(await res.text()).toBe(text)
-    await __objectInfoSaveSettledForTests()
-    expect(fs.existsSync(path.join(tmp, 'data', 'object_info.json'))).toBe(false) // nothing parseable to save
-  })
-
-  it('an unparseable engine answer with a stored catalog: the stored one is served (overlaid), as hosted does', async () => {
-    writeBaseline(staleCatalog())
-    engineFetch.mockImplementation(async () => new Response('{"KSampler": NaN}', { status: 200 }))
-    const b = (await call('GET', '/object_info')).body
-    expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
-  })
-
-  it('remembers a failed engine for 3 s, then asks again', async () => {
-    writeBaseline(staleCatalog())
-    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
-    try {
-      await call('GET', '/object_info')
-      await call('GET', '/object_info/KSampler')
-      expect(engineFetch).toHaveBeenCalledTimes(1)
-      now.mockReturnValue(1_000_000 + 3_001)
-      engineAnswers({ Live: {} })
-      expect((await call('GET', '/object_info')).body).toEqual({ Live: {} })
-      expect(engineFetch).toHaveBeenCalledTimes(2)
-    }
-    finally {
-      now.mockRestore()
-    }
-  })
-
-  it('the engine already known down (cached health): the stored catalog, no fetch', async () => {
-    writeBaseline(staleCatalog())
-    engineHealthState.value = 'down'
     engineAnswers({ Live: {} })
-    expect((await call('GET', '/object_info')).body).not.toEqual({ Live: {} })
+    const b = (await call('GET', '/object_info')).body
+    expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
+    expect((await call('GET', '/object_info/KSampler')).body).toEqual({ KSampler: staleCatalog().KSampler })
     expect(engineFetch).not.toHaveBeenCalled()
+    // Nothing is saved any more.
+    expect(fs.existsSync(path.join(tmp, 'data', 'object_info.json'))).toBe(false)
   })
 })
 
