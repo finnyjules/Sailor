@@ -46,3 +46,34 @@ export function dataUrlBytes(dataUrl: string): Buffer {
   }
   return bytes
 }
+
+// ── LC10: what one Animate attempt may keep, judged before the paid call ─────
+
+const MIB = 1024 * 1024
+/** The model's clip, downloaded: far above any catalog model's few-MB output. */
+export const ANIMATE_VIDEO_MAX_BYTES = 512 * MIB
+/** The rate the room is planned for (every catalog model renders 24–30 fps). */
+export const ANIMATE_PLANNED_FPS = 30
+/** The most frames a clip may decode to, per second asked for (twice the plan: never hit by a catalog model). */
+export const ANIMATE_MAX_FPS = 60
+/** Pixels a model renders at, by its catalog resolution, with 10 % to spare for other aspects. */
+const MODEL_PIXELS: Record<string, number> = { '720p': 1280 * 720, '768p': 1366 * 768, '1080p': 1920 * 1080 }
+
+/** The most frames the keyer reads from an attempt of `seconds`. */
+export function animateMaxFrames(seconds: number): number {
+  return Math.ceil(seconds * ANIMATE_MAX_FPS) + 2
+}
+
+/**
+ * The bytes an attempt keeps at most, as planned: every frame as raw RGBA
+ * (a PNG of a keyed frame is far smaller) at the size the keyer writes
+ * (the model's pixels, never above the still's longest edge squared), at
+ * ANIMATE_PLANNED_FPS, plus the source clip and clip.json.
+ */
+export function animateKeptBound(resolution: string, seconds: number, still: { w: number; h: number }): number {
+  const model = Math.ceil((MODEL_PIXELS[resolution] ?? 1920 * 1080) * 1.1)
+  const edge = Math.max(still.w, still.h)
+  const pixels = Math.min(model, edge * edge)
+  const frames = Math.ceil(seconds * ANIMATE_PLANNED_FPS) + 2
+  return frames * pixels * 4 + ANIMATE_VIDEO_MAX_BYTES + 64 * 1024
+}

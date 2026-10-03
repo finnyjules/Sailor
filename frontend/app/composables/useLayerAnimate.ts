@@ -9,7 +9,7 @@ import { clipModel, clipPrice, clipSeconds } from '~/data/clip-models'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { requestCostConfirm } from '~/lib/costConfirmRequest'
 
-/** Thrown when the person cancels at the cost confirm: nothing was sent, and there is no error to show. */
+/** Thrown when the person cancels at the cost confirm (nothing was sent) or stops the attempt: there is no error to show. */
 export class AnimateCancelled extends Error {
   constructor() { super('cancelled'); this.name = 'AnimateCancelled' }
 }
@@ -49,27 +49,39 @@ export function useLayerAnimate() {
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
   const busy = ref(false)
   const error = ref('')
-  // Hosted has no Python to key the clip with (LC7): the route refuses, and the
-  // panel hides its Generate controls on this flag.
-  const available = !hosted
+  // Stop (LC10): aborting the request closes it, and the route stops the model's
+  // call (its hold released), the download and the keying, and leaves no folder.
+  let inflight: AbortController | null = null
+  let stopped = false
+
+  function stop(): void {
+    if (!inflight) return
+    stopped = true
+    inflight.abort()
+  }
 
   async function animate(layer: ImageLayer, opts: { prompt: string; model: string; seconds: number }): Promise<ImageClip> {
     busy.value = true; error.value = ''
+    const ctl = new AbortController()
+    inflight = ctl; stopped = false
     try {
-      if (!available) throw new Error('Animate only works when Sailor runs on your own computer for now.')
       if (!(await confirmAnimateCost(opts.model, opts.seconds, hosted))) throw new AnimateCancelled()
       const image = await stillAsDataUrl(layer)
+      if (stopped) throw new AnimateCancelled()
       const res = await $fetch<{ dir: string; frames: number; fps: number; model: string; prompt: string }>('/api/frame/animate', {
-        method: 'POST', body: { image, prompt: opts.prompt, model: opts.model, seconds: opts.seconds },
+        method: 'POST', body: { image, prompt: opts.prompt, model: opts.model, seconds: opts.seconds }, signal: ctl.signal,
       })
       return { dir: res.dir, frames: res.frames, fps: res.fps, speed: 1, prompt: res.prompt, model: res.model }
     } catch (err: any) {
+      // Stopped by the person: nothing to show, the layer is untouched.
+      if (stopped || ctl.signal.aborted) throw new AnimateCancelled()
       if (!(err instanceof AnimateCancelled)) error.value = err?.data?.message || err?.message || 'Animate failed'
       throw err
     } finally {
+      if (inflight === ctl) inflight = null
       busy.value = false
     }
   }
 
-  return { busy, error, available, animate }
+  return { busy, error, animate, stop }
 }

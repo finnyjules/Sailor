@@ -1,77 +1,69 @@
 /**
  * Animate a Frame image layer: make a looping, transparent clip from a still.
  *
- *   1. flatten the RGBA still onto a key colour (scripts/clip_key.py flatten)
+ *   1. flatten the RGBA still onto a key colour (server/frame/clipKeyRun.ts)
  *   2. call the video model with the still as first AND last frame
- *   3. key every returned frame back to transparency (scripts/clip_key.py key)
+ *   3. key every returned frame back to transparency (server/frame/clipKey.ts,
+ *      decoded with Sailor's own ffmpeg)
  *   4. write input/sailor_clips/<id>/000000.png … + clip.json
  *
- * The model call goes through runFal so the ledger hold, prompt
- * moderation, polling and release-on-failure are the shared ones. The Python steps
- * are execFile'd from the repo venv, like voice-clone/from-youtube.
+ * Step 3, LC10: the keyer is a port of scripts/clip_key.py in Sailor's own
+ * server code, so Animate needs no Python and runs in hosted too (LC7's
+ * refusal is gone). The model call goes through runFal, so the ledger hold,
+ * prompt moderation, polling and release-on-failure are the shared ones.
  *
- * Hosted has no Python (step 3, R10.10), so there the route refuses first, before
- * the body is read, the rate limit counts or any hold is taken (LC7). The keyer
- * (scripts/clip_key.py: Lab keying, guard matte, erode/soften over every frame)
- * is too large for a cheap Node port; the Animate controls are hidden in hosted.
+ * Everything that could make the attempt fail for a reason knowable in
+ * advance is judged BEFORE the paid call: the body, the still (a real PNG
+ * that decodes, within the hosted picture cap), the video tools, the clip
+ * folder (resolved, its staging folder made), the room the clip may keep
+ * (hosted), the rate limit and, in hosted, the sign-in and the clip's name
+ * (claimed for the person before anything is on disk). Frames go into a
+ * staging folder that becomes the clip folder only once complete.
+ *
+ * Stop: the client aborts its request; the response's close aborts the
+ * model's polling (fal is asked to cancel, the hold is released), the
+ * download and the decode (ffmpeg is killed by runMedia), and the staging
+ * folder is removed: nothing is left.
  */
-import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import os from 'node:os'
+import { randomBytes } from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { MEDIA_CAPS } from '#shared/runner/media'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { isHosted } from '../../utils/deployMode'
 import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
-import { dataUrlBytes } from '../../utils/frameAnimate'
-import { engineDirForType } from '../../utils/inputUploads'
+import { animateKeptBound, animateMaxFrames, ANIMATE_VIDEO_MAX_BYTES, dataUrlBytes } from '../../utils/frameAnimate'
+import { canonicalUploadKey, engineDirForType, recordUpload } from '../../utils/inputUploads'
+import { downloadResult } from '../../runner/falQueue'
+import { safeAnswerFetch } from '../../runner/answerDownload'
+import { MediaError, mediaTempDir, removeMediaTempDir } from '../../media/run'
+import { MEDIA_TOOLS_MISSING, mediaTools } from '../../media/tools'
+import { flattenStill, keyClip, readStill, stillSize } from '../../frame/clipKeyRun'
 import { clipModel, clipRequest, clipSeconds } from '~~/app/data/clip-models'
 
 interface Body { image?: string; prompt?: string; model?: string; seconds?: number }
 
-// PYTHON/SCRIPT are REPO files (the venv and scripts/ ship with the checkout), so the
-// cwd-relative guess is right for them. The clip folder is ENGINE DATA — it has to land
-// in the same `input/` the engine serves `/view` from, which `engineDirForType` resolves
-// (SAILOR_ENGINE_ROOT, else a marker walk up from cwd) and which is NOT necessarily
-// `<cwd>/../input`: a Nitro process started anywhere but `frontend/` wrote frames into a
-// directory nothing ever reads, and every clip came back as a broken folder.
-const ROOT = path.resolve(process.cwd(), '..')
-const PYTHON = path.join(ROOT, '.venv', 'bin', 'python')
-const SCRIPT = path.join(ROOT, 'scripts', 'clip_key.py')
 /** Resolved per request — the engine root is env/cwd-derived, not a module constant. */
 function clipsDir(): string | null {
   const input = engineDirForType('input')
   return input ? path.join(input, 'sailor_clips') : null
 }
-/** The hosted refusal, exported so its spec and the client say the same words. */
-export const ANIMATE_HOSTED_REFUSAL = 'Animate only works when Sailor runs on your own computer for now. Nothing was charged.'
+
+export const ANIMATE_TOO_LARGE = 'This picture is too large to animate here. Nothing was charged.'
+export const ANIMATE_TOO_MUCH = 'This clip would be too large to keep here. Try a shorter length or a smaller picture. Nothing was charged.'
 
 const PROMPT_SUFFIX = (key: 'green' | 'blue') =>
   `, on a solid ${key} screen background (uniform flat ${key === 'green' ? '#00FF00' : '#0000FF'} chroma key), evenly lit, no shadows, no gradient, camera locked, gentle motion`
 
-function py(args: string[], timeoutMs: number): Promise<string> {
-  if (isHosted()) return Promise.reject(new Error(ANIMATE_HOSTED_REFUSAL))
-  return new Promise((resolve, reject) => {
-    execFile(PYTHON, [SCRIPT, ...args], { timeout: timeoutMs, maxBuffer: 1 << 22 }, (err, out, stderr) => {
-      if (err) return reject(new Error((stderr || '').trim().split('\n').pop() || err.message))
-      resolve(out || '')
-    })
-  })
-}
-
 export default defineEventHandler(async (event) => {
-  // Hosted: no Python to flatten or key with. Refuse before anything else, so no
-  // hold is taken and nothing is charged for a clip that could never be keyed.
-  if (isHosted()) throw createError({ statusCode: 501, message: ANIMATE_HOSTED_REFUSAL })
+  const hosted = isHosted()
+  const userId = typeof event.context?.userId === 'string' && event.context.userId ? event.context.userId as string : null
+  if (hosted && !userId) throw createError({ statusCode: 401, message: 'Sign in required' })
 
-  // Validate BEFORE rate-limiting (review fix): assertRateLimit used to run
-  // first, so six malformed requests (bad image, unknown model, junk PNG)
-  // burned the whole 6-per-10-min budget and locked the user out for real
-  // attempts. dataUrlBytes lives in server/utils/frameAnimate.ts —
-  // h3-free pure helpers, unit-tested directly in
-  // tests/unit/frame-animate-validation.unit.spec.ts — and throw PLAIN Error
-  // objects carrying a `statusCode`, so re-wrap via createError here to keep
-  // the client-facing status + message (see that file's header comment).
+  // Validate BEFORE rate-limiting (review fix): six malformed requests must not
+  // burn the 6-per-10-min budget. dataUrlBytes (server/utils/frameAnimate.ts)
+  // throws plain Errors carrying a `statusCode`, re-wrapped here.
   const body = await readBody<Body>(event)
   if (!body?.image) throw createError({ statusCode: 400, message: 'image is required' })
   const spec = clipModel(body?.model ?? '')
@@ -79,73 +71,101 @@ export default defineEventHandler(async (event) => {
   let imageBytes: Buffer
   try {
     imageBytes = dataUrlBytes(body.image)
-  } catch (e) {
+  }
+  catch (e) {
     const err = e as { statusCode?: number; message?: string }
     throw createError({ statusCode: err.statusCode ?? 400, message: err.message ?? 'invalid image' })
   }
-
-  // Resolve the destination BEFORE spending money: an unresolvable engine root used to
-  // surface only after the model had run and been paid for, as a write to a path that
-  // did not exist.
-  const clipsRoot = clipsDir()
-  if (!clipsRoot) throw createError({ statusCode: 500, message: 'Could not find the engine input folder' })
-
-  assertRateLimit(event, 'frame-animate', 6, 600_000)
-
   const seconds = clipSeconds(spec, body.seconds)
   const prompt = (body.prompt ?? '').trim()
 
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'sailor-clip-'))
+  // The still: its size from the header first (a huge picture is refused before it is decoded).
+  const size = await stillSize(imageBytes)
+  if (!size) throw createError({ statusCode: 400, message: 'image must be a PNG data URL' })
+  const caps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  if (size.w * size.h > caps.framePixels) throw createError({ statusCode: 413, message: ANIMATE_TOO_LARGE })
+  // What the clip may keep, planned from the model's size and the length asked for.
+  if (animateKeptBound(spec.resolution, seconds, size) > caps.keptBytesPerRun) throw createError({ statusCode: 413, message: ANIMATE_TOO_MUCH })
+
+  // Resolve the destination and the tools BEFORE spending money.
+  const clipsRoot = clipsDir()
+  if (!clipsRoot) throw createError({ statusCode: 500, message: 'Could not find the engine input folder' })
+  if (!(await mediaTools())) throw createError({ statusCode: 503, message: `${MEDIA_TOOLS_MISSING}. Nothing was charged.` })
+
+  assertRateLimit(event, 'frame-animate', 6, 600_000)
+
+  // Stop: the client going away aborts everything below.
+  const gone = new AbortController()
+  const res = event.node?.res
+  const onClose = () => { if (!res?.writableEnded) gone.abort() }
+  res?.once?.('close', onClose)
+  const signal = gone.signal
+
+  // The clip's name, decided (and in hosted claimed for this person) before anything is on disk.
+  const id = `clip_${Date.now()}_${randomBytes(6).toString('hex')}`
+  const outDir = path.join(clipsRoot, id)
+  const staging = path.join(clipsRoot, `.${id}.partial`)
+  let tmp: string | null = null
   try {
-    // 1. flatten onto the key colour
-    const stillPath = path.join(tmp, 'still.png')
-    const flatPath = path.join(tmp, 'flat.png')
-    await writeFile(stillPath, imageBytes)
-    const keyLine = (await py(['flatten', stillPath, flatPath], 60_000)).split('\n').find(l => l.startsWith('KEY:'))
-    if (!keyLine) throw createError({ statusCode: 500, message: 'Could not prepare the still' })
-    const keyHex = keyLine.slice(4).trim()
+    if (hosted) await recordUpload(userId!, canonicalUploadKey('input', `sailor_clips/${id}`, 'clip.json'))
+    await mkdir(staging, { recursive: true })
+    tmp = await mediaTempDir()
+
+    // 1. the still, flattened onto the key colour
+    let still: Awaited<ReturnType<typeof readStill>>
+    let keyHex: string
+    let flat: Buffer
+    try {
+      still = await readStill(imageBytes)
+      ;({ keyHex, flat } = await flattenStill(still))
+    }
+    catch {
+      throw createError({ statusCode: 400, message: 'Could not read the picture. Nothing was charged.' })
+    }
     const keyName = keyHex === '#0000ff' ? 'blue' : 'green'
     const fullPrompt = (prompt || 'the subject moves gently') + PROMPT_SUFFIX(keyName)
-
-    const flatBytes = await readFile(flatPath)
+    if (signal.aborted) throw new MediaError('stopped')
     // fal needs a URL it can fetch, so the flattened still goes to fal storage.
-    const stillUrl = await uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png')
+    const stillUrl = await uploadToFalStorage(new Uint8Array(flat), 'still.png', 'image/png')
 
-    // 2. the model
-    //
-    // The request is clipRequest's (app/data/clip-models.ts): the same request the
-    // Animate button prices. runFal holds and charges it per second of what it asks for
-    // (shared/pricing/clipSettings.ts requestPrice), ahead of the endpoint's flat
-    // MODEL_COSTS row, so a 12 s clip is held for 12 s, and the hold equals the price
-    // the button showed.
+    // 2. the model — clipRequest's request, the one the Animate button prices; runFal
+    // holds and charges it per second of what it asks for.
     const req = clipRequest(spec.id, seconds, fullPrompt, stillUrl)
-    const out = await runFal(req.endpoint, req.input, { pollDeadlineMs: 900_000 })
+    const out = await runFal(req.endpoint, req.input, { pollDeadlineMs: 900_000, signal })
     const videoUrl = firstFalVideoUrl(out)
     if (!videoUrl) throw createError({ statusCode: 502, message: 'The model returned no video' })
 
     // 3. key it back to transparency
+    const { bytes } = await downloadResult(videoUrl, {
+      fetchOnce: safeAnswerFetch({ hosted, kind: 'video' }), maxBytes: ANIMATE_VIDEO_MAX_BYTES, signal,
+    })
     const mp4Path = path.join(tmp, 'clip.mp4')
-    const res = await fetch(videoUrl)
-    if (!res.ok) throw createError({ statusCode: 502, message: `Could not download the clip (${res.status})` })
-    await writeFile(mp4Path, Buffer.from(await res.arrayBuffer()))
-    const id = `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const outDir = path.join(clipsRoot, id)
-    const metaLine = (await py(['key', mp4Path, stillPath, keyHex, outDir, '1' /* first == last frame on both models: drop the returning frame */], 300_000))
-      .split('\n').map(l => l.trim()).filter(Boolean).pop()
-    const meta = JSON.parse(metaLine || '{}') as { frames?: number; fps?: number }
+    await writeFile(mp4Path, bytes)
+    const meta = await keyClip({
+      video: mp4Path, roots: [tmp], still, key: keyHex, outDir: staging,
+      trimLast: true, /* first == last frame on every model: drop the returning frame */
+      userId, signal, maxFrames: animateMaxFrames(seconds), maxBytes: caps.keptBytesPerRun,
+    })
     if (!meta.frames || !meta.fps) throw createError({ statusCode: 500, message: 'Keying produced no frames' })
 
-    // clip_key.py knows the frame geometry, not what made it. Fold the model and prompt
-    // into the folder's own clip.json so a clip found on disk (or re-imported into another
-    // project) still says where it came from, instead of that only living in the layer.
-    const metaPath = path.join(outDir, 'clip.json')
-    try {
-      const onDisk = JSON.parse(await readFile(metaPath, 'utf8')) as Record<string, unknown>
-      await writeFile(metaPath, JSON.stringify({ ...onDisk, model: spec.id, prompt }, null, 2))
-    } catch { /* the frames are what matter; a missing/odd clip.json is not worth failing on */ }
+    // The keyer knows the frame geometry, not what made it: fold the model and prompt
+    // into the folder's own clip.json so a clip found on disk still says where it came from.
+    const metaPath = path.join(staging, 'clip.json')
+    const onDisk = JSON.parse(await readFile(metaPath, 'utf8')) as Record<string, unknown>
+    await writeFile(metaPath, JSON.stringify({ ...onDisk, model: spec.id, prompt }, null, 2))
 
+    if (signal.aborted) throw new MediaError('stopped')
+    await rename(staging, outDir)
     return { dir: `sailor_clips/${id}`, frames: meta.frames, fps: meta.fps, model: spec.id, prompt }
-  } finally {
-    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+  }
+  catch (e) {
+    await rm(staging, { recursive: true, force: true }).catch(() => {})
+    if (signal.aborted) throw createError({ statusCode: 499, message: 'Stopped' })
+    if (e instanceof MediaError) throw createError({ statusCode: e.word === 'toolsMissing' ? 503 : 502, message: e.message })
+    throw e
+  }
+  finally {
+    res?.off?.('close', onClose)
+    if (tmp) await removeMediaTempDir(tmp).catch(() => {})
   }
 })

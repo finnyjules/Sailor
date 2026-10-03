@@ -5,6 +5,10 @@
  * script is one of the known, hosted-guarded routes, and each child-process
  * call in those files sits right behind an `isHosted()` refusal. A new Python
  * call anywhere else fails here until it is ported or guarded the same way.
+ *
+ * LC10: Frame Animate's keyer is ported (server/frame/clipKey.ts), so the
+ * Animate route is no longer a guarded Python route; YouTube voice capture
+ * (yt-dlp) remains the only one.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -12,9 +16,8 @@ import { describe, expect, it } from 'vitest'
 
 const SERVER = resolve(__dirname, '../../server')
 
-/** Routes allowed to run a venv script, locally only (both refuse in hosted). */
+/** Routes allowed to run a venv script, locally only (they refuse in hosted). */
 const GUARDED = new Set([
-  'api/frame/animate.post.ts',
   'api/voice-clone/from-youtube.post.ts',
 ])
 
@@ -48,6 +51,16 @@ describe('no Python in hosted', () => {
     const lora = files.find(f => f.rel === 'utils/loraFalWeights.ts')!
     expect(lora.src).not.toMatch(/child_process|execFile|spawn\(/)
     expect(lora.src).toMatch(/extractTarMember/)
+  })
+
+  it('Frame Animate keys in Node: no child process, no Python, no hosted refusal', () => {
+    for (const rel of ['api/frame/animate.post.ts', 'frame/clipKey.ts', 'frame/clipKeyRun.ts']) {
+      const src = files.find(f => f.rel === rel)!.src
+      expect(src, rel).not.toMatch(/child_process|execFile|spawn\(|\.venv|python|\.py['"`]/)
+    }
+    const route = files.find(f => f.rel === 'api/frame/animate.post.ts')!.src
+    expect(route).toMatch(/keyClip\(/)
+    expect(route).not.toMatch(/if \(isHosted\(\)\) throw createError\(\{ statusCode: 501/)
   })
 
   for (const rel of GUARDED) {

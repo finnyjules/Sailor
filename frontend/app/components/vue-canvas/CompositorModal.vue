@@ -11072,7 +11072,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             :layer="selectedLocal as any"
             :busy="layerAnimate.busy.value"
             :error="layerAnimate.error.value"
-            :can-generate="layerAnimate.available"
+            @stop="layerAnimate.stop()"
             @generate="(o) => animateLayer(selectedLocal, o)"
             @speed="(v) => setClipSpeed(selectedLocal, v)"
             @remove="removeClip(selectedLocal)"

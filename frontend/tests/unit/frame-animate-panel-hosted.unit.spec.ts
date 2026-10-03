@@ -1,38 +1,30 @@
 // @vitest-environment happy-dom
-// Step 3, LC7: hosted has no Python to key an Animate clip with, so the route
-// refuses there and the panel hides its Generate controls (`canGenerate` false,
-// from useLayerAnimate().available). A layer that already has a clip keeps its
-// takes, Speed and Remove clip.
+// Step 3, LC10: Animate keys its clips in Sailor's own server code, so it runs in
+// hosted too: LC7's `canGenerate` gate is gone and the panel always offers Generate.
+// While a clip is being made it offers Stop, which the modal wires to
+// useLayerAnimate().stop (the route then leaves nothing behind).
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import Panel from '~/components/vue-canvas/compositor/CompositorAnimatePanel.vue'
 import { createImageLayer, type ImageLayer } from '~/composables/useCompositorLayers'
 
 const still = (): ImageLayer => createImageLayer('rose.png', 1)
-const living = (): ImageLayer => ({
-  ...still(),
-  clip: { dir: 'sailor_clips/c', frames: 24, fps: 24, speed: 1, prompt: 'petals sway', model: 'seedance-2.0' },
-})
-const mountP = (layer: ImageLayer, canGenerate?: boolean) =>
-  mount(Panel, { props: { layer, busy: false, error: '', ...(canGenerate === undefined ? {} : { canGenerate }) } })
+const mountP = (busy: boolean, extra: Record<string, unknown> = {}) =>
+  mount(Panel, { props: { layer: still(), busy, error: '', ...extra } })
 
-describe('CompositorAnimatePanel when Animate cannot run (hosted)', () => {
-  it('offers Generate by default', () => {
-    expect(mountP(still()).find('button[data-role="generate"]').exists()).toBe(true)
+describe('CompositorAnimatePanel, hosted and local alike', () => {
+  it('offers Generate, with no way to hide it', () => {
+    const w = mountP(false, { canGenerate: false })
+    expect(w.find('button[data-role="generate"]').exists()).toBe(true)
+    expect(w.find('textarea').exists()).toBe(true)
   })
 
-  it('shows nothing for a still', () => {
-    const w = mountP(still(), false)
-    expect(w.find('button[data-role="generate"]').exists()).toBe(false)
-    expect(w.find('textarea').exists()).toBe(false)
-    expect(w.text()).not.toContain('Animate')
-  })
-
-  it('keeps Speed and Remove clip for a layer that already moves', () => {
-    const w = mountP(living(), false)
-    expect(w.find('button[data-role="generate"]').exists()).toBe(false)
-    expect(w.find('select[data-role="model"]').exists()).toBe(false)
-    expect(w.find('[data-role="speed"]').exists()).toBe(true)
-    expect(w.find('button[data-role="remove"]').exists()).toBe(true)
+  it('offers Stop only while generating, and says so', async () => {
+    expect(mountP(false).find('button[data-role="stop"]').exists()).toBe(false)
+    const w = mountP(true)
+    const stop = w.find('button[data-role="stop"]')
+    expect(stop.text()).toBe('Stop')
+    await stop.trigger('click')
+    expect(w.emitted('stop')).toHaveLength(1)
   })
 })

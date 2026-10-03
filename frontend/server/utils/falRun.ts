@@ -16,11 +16,32 @@ import { costForModel } from './priceBook'
 import { requestPrice } from '../../shared/pricing/clipSettings'
 import { moderatePrompt, moderationRefusal } from './moderation'
 import { extractProviderPromptText } from './graphPromptText'
-import { falSubmit, falStatus, falResult } from '../runner/falQueue'
+import { falSubmit, falStatus, falResult, falCancel } from '../runner/falQueue'
 
 export interface FalRunOptions {
   pollDeadlineMs?: number
   pollIntervalMs?: number
+  /**
+   * Stop (LC10, Frame Animate): before the submit nothing is sent; while the
+   * job runs, fal is asked to cancel it (best effort, not awaited) and the
+   * call fails with 'Stopped', so the hold is released (the user saw nothing:
+   * an unconfirmed cancel is Sailor's to absorb, as the runner's policy).
+   * Once the result is in hand the call has succeeded and is charged.
+   */
+  signal?: AbortSignal
+}
+
+/** The Stop error runFal throws. */
+export const FAL_RUN_STOPPED = 'Stopped'
+
+/** Waits `ms`, or less when `signal` aborts. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve()
+    const done = () => { clearTimeout(t); signal?.removeEventListener('abort', done); resolve() }
+    const t = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
 }
 
 /**
@@ -68,6 +89,7 @@ async function dispatch<T>(
   ticket: Awaited<ReturnType<typeof preflightMeter>>,
   requestUsd: number | null,
 ): Promise<T> {
+  if (opts.signal?.aborted) throw new Error(FAL_RUN_STOPPED)
   const submit = await falSubmit(app, input)
   const startedAt = Date.now()
   const rid = submit.requestId
@@ -75,7 +97,12 @@ async function dispatch<T>(
   const deadline = Date.now() + (opts.pollDeadlineMs ?? 120_000)
   const interval = opts.pollIntervalMs ?? 1500
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, interval))
+    await pause(interval, opts.signal)
+    if (opts.signal?.aborted) {
+      void falCancel(submit.cancelUrl).catch((e) => { console.warn('[falRun] cancel after Stop failed', rid, e) })
+      logSpend({ provider: 'fal', model: app, ok: false, ms: Date.now() - startedAt })
+      throw new Error(FAL_RUN_STOPPED)
+    }
     // 4xx throws (unrecoverable: bad rid / revoked key); 5xx comes back transient.
     const status = await falStatus(submit.statusUrl)
     if (status.transient) continue
