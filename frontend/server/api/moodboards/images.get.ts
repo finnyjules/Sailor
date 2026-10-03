@@ -8,8 +8,9 @@
  *
  * Stage 6 (Task 4): hosted read-guards by input-upload ownership (the images
  * were recorded against their owner on upload). List mode hides files the
- * caller can't read; serve mode 404s an unreadable file. Unowned files (no
- * upload row — curated/legacy) stay readable by all. Local: unchanged.
+ * caller doesn't own; serve mode 404s it. LC12 (USER ruling 2026-10-03): every
+ * hosted moodboard picture must have an owner, so a file with NO owner row is
+ * refused like another person's (no shared "curated" reads). Local: unchanged.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -32,7 +33,7 @@ export default defineEventHandler(async (event) => {
   const canRead = async (name: string): Promise<boolean> => {
     if (!hosted) return true
     const owner = await uploadOwner(canonicalUploadKey('input', folder, name))
-    return owner === null || owner === userId
+    return owner !== null && owner === userId
   }
 
   // List mode: image files in the folder, sorted (filtered to readable in hosted).

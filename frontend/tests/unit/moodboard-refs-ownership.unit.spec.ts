@@ -7,8 +7,8 @@
  * read that launders ownership (the source files belong to another tenant).
  * `POST /api/moodboards/images` accepted an arbitrary existing folder and wrote
  * into it — a cross-tenant write. Both are now gated in hosted mode by the SAME
- * per-file ownership read `images.get.ts` already enforces (own-or-curated via
- * uploadOwner): a folder whose files belong to another tenant → 404, nothing
+ * per-file ownership read `images.get.ts` already enforces (caller-owned via
+ * uploadOwner; LC12: unowned files are refused too): a folder whose files belong to another tenant → 404, nothing
  * copied/written/recorded. Local mode is byte-identical (no registry at all).
  *
  * refs.post is driven as a plain event (global readBody); images.post rides a
@@ -124,11 +124,20 @@ describe('refs.post — cross-tenant folder read is refused', () => {
     expect(uploads.get(canonicalUploadKey('input', '', `mb_${h}_mine_0.png`))).toBe('u1')
   })
 
-  it('hosted: curated folder (no owner rows) → still copyable (own-or-curated read)', async () => {
+  it('hosted (LC12): a folder whose files have NO owner row → 404, nothing copied or recorded', async () => {
     setHosted()
     await seedFolder('moodboard_333', ['a.png'], null)
-    const res = await refsHandler(ev({ body: { folder: 'moodboard_333', slug: 'curated' }, userId: 'u1' }))
-    expect(res.files).toEqual([`mb_${shortUserHash('u1')}_curated_0.png`])
+    expect(await statusOf(refsHandler(ev({ body: { folder: 'moodboard_333', slug: 'curated' }, userId: 'u1' })))).toBe(404)
+    expect((await fs.readdir(inputDir)).filter(n => n.startsWith('mb_'))).toEqual([])
+    expect([...uploads.values()]).toEqual([])
+  })
+
+  it('hosted (LC12): a mixed folder (one owned by me, one unowned) is refused wholesale', async () => {
+    setHosted()
+    await seedFolder('moodboard_334', ['a.png'], 'u1')
+    await seedFolder('moodboard_334', ['b.png'], null)
+    expect(await statusOf(refsHandler(ev({ body: { folder: 'moodboard_334', slug: 'mixed' }, userId: 'u1' })))).toBe(404)
+    expect((await fs.readdir(inputDir)).filter(n => n.startsWith('mb_'))).toEqual([])
   })
 
   it('local mode: unchanged — copies regardless of ownership, no registry read', async () => {
@@ -227,5 +236,45 @@ describe('LC11 fix round 1: a flat copy never overwrites another person\'s file 
     expect(b.files[0]).toBe(`mb_${shortUserHash('uB')}_old_0.png`)
     expect(await fs.readFile(path.join(inputDir, 'mb_old_0.png'), 'utf8')).toBe('A-old')
     expect(uploads.get(canonicalUploadKey('input', '', 'mb_old_0.png'))).toBe('uA')
+  })
+})
+
+describe('LC12: images.get — hosted pictures need an owner (two accounts)', () => {
+  let getHandler: any
+  beforeAll(async () => { getHandler = (await import('../../server/api/moodboards/images.get')).default })
+  const gev = (query: any, userId: string | null) => ({ query, context: { userId }, node: { res: { setHeader() {} } } })
+  beforeAll(() => { g.setResponseHeader = () => {} })
+
+  it('A lists and serves A\'s files; B sees none of them and gets 404', async () => {
+    setHosted()
+    await seedFolder('moodboard_901', ['a.png'], 'uA')
+    expect((await getHandler(gev({ folder: 'moodboard_901' }, 'uA'))).files).toEqual(['a.png'])
+    expect(Buffer.isBuffer(await getHandler(gev({ folder: 'moodboard_901', file: 'a.png' }, 'uA')))).toBe(true)
+    expect((await getHandler(gev({ folder: 'moodboard_901' }, 'uB'))).files).toEqual([])
+    expect(await statusOf(getHandler(gev({ folder: 'moodboard_901', file: 'a.png' }, 'uB')))).toBe(404)
+  })
+
+  it('an unowned file is hidden from everyone and 404s, like a missing one', async () => {
+    setHosted()
+    await seedFolder('moodboard_902', ['u.png'], null)
+    for (const who of ['uA', 'uB']) {
+      expect((await getHandler(gev({ folder: 'moodboard_902' }, who))).files).toEqual([])
+      expect(await statusOf(getHandler(gev({ folder: 'moodboard_902', file: 'u.png' }, who)))).toBe(404)
+    }
+    expect(await statusOf(getHandler(gev({ folder: 'moodboard_902', file: 'nope.png' }, 'uA')))).toBe(404)
+  })
+
+  it('hosted refs: B cannot copy A\'s folder; A can copy A\'s', async () => {
+    setHosted()
+    await seedFolder('moodboard_903', ['a.png'], 'uA')
+    expect(await statusOf(refsHandler(ev({ body: { folder: 'moodboard_903', slug: 'x' }, userId: 'uB' })))).toBe(404)
+    expect((await refsHandler(ev({ body: { folder: 'moodboard_903', slug: 'x' }, userId: 'uA' }))).files.length).toBe(1)
+  })
+
+  it('local mode: unowned files are served as before', async () => {
+    setLocal()
+    await seedFolder('moodboard_904', ['l.png'], null)
+    expect((await getHandler(gev({ folder: 'moodboard_904' }, null))).files).toEqual(['l.png'])
+    expect(query).not.toHaveBeenCalled()
   })
 })

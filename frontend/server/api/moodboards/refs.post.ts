@@ -61,18 +61,16 @@ export default defineEventHandler(async (event) => {
   if (hosted && !userId) throw createError({ statusCode: 401, statusMessage: 'Sign in required' })
   const sources = names.filter(safeImageFile).sort().slice(0, MOODBOARD_MAX_REFS)
 
-  // I1 — this route reads files OUT of `folder` and re-records the copies as the
-  // caller's owned inputs, so a cross-tenant read here launders ownership. Gate
-  // it in hosted with the SAME own-or-curated per-file read images.get.ts
-  // enforces (uploadOwner === caller or unowned/curated). A folder whose images
-  // belong to another tenant is refused wholesale — 404, no copy, no record, no
-  // existence disclosure — the moodboard-folder name (moodboard_<ms>) is
-  // guessable, so this is the actual containment. Curated folders (no upload
-  // rows) stay copyable; the caller's own folder passes.
+  // I1 + LC12 — this route reads files OUT of `folder` and re-records the copies
+  // as the caller's owned inputs, so a read of a file the caller doesn't own
+  // launders ownership. Hosted requires the SAME per-file rule images.get.ts
+  // enforces: the caller owns the file's owner row. Another person's file AND a
+  // file with no owner row (no shared "curated" content any more) refuse the
+  // whole folder with 404 before any copy or record, never confirming existence.
   if (hosted) {
     for (const src of sources) {
       const owner = await uploadOwner(canonicalUploadKey('input', folder, src))
-      if (owner !== null && owner !== userId) throw createError({ statusCode: 404, statusMessage: 'not found' })
+      if (owner !== userId) throw createError({ statusCode: 404, statusMessage: 'not found' })
     }
   }
 
