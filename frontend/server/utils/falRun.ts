@@ -29,6 +29,12 @@ export interface FalRunOptions {
    * Once the result is in hand the call has succeeded and is charged.
    */
   signal?: AbortSignal
+  /**
+   * LC10 fix round 1: called instead of the fire-and-forget cancel when Stop
+   * lands while the job runs, with what a caller needs to cancel it and watch
+   * that the cancel is believed (server/frame/animateCancels.ts).
+   */
+  onStopped?(req: { requestId: string; cancelUrl: string; statusUrl: string }): void
 }
 
 /** The Stop error runFal throws. */
@@ -99,7 +105,8 @@ async function dispatch<T>(
   while (Date.now() < deadline) {
     await pause(interval, opts.signal)
     if (opts.signal?.aborted) {
-      void falCancel(submit.cancelUrl).catch((e) => { console.warn('[falRun] cancel after Stop failed', rid, e) })
+      if (opts.onStopped) opts.onStopped({ requestId: rid, cancelUrl: submit.cancelUrl, statusUrl: submit.statusUrl })
+      else void falCancel(submit.cancelUrl).catch((e) => { console.warn('[falRun] cancel after Stop failed', rid, e) })
       logSpend({ provider: 'fal', model: app, ok: false, ms: Date.now() - startedAt })
       throw new Error(FAL_RUN_STOPPED)
     }

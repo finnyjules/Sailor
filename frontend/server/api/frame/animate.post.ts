@@ -20,29 +20,41 @@
  * (claimed for the person before anything is on disk). Frames go into a
  * staging folder that becomes the clip folder only once complete.
  *
- * Stop: the client aborts its request; the response's close aborts the
- * model's polling (fal is asked to cancel, the hold is released), the
- * download and the decode (ffmpeg is killed by runMedia), and the staging
- * folder is removed: nothing is left.
+ * Stop: the client aborts its request. Before the model's call has settled,
+ * the response's close stops everything (the poll wakes, the hold is
+ * released, the job goes to the cancel watch, animateCancels.ts) and the
+ * staging folder is removed: nothing is left, nothing is charged.
+ *
+ * LC10 fix round 1: once the call has settled the person has paid, so Stop
+ * and a lost connection no longer discard anything. The download and the
+ * keying run to the end under the server's own limits, the clip is kept,
+ * and the attempt (animateAttempts.ts, named by the client and kept on the
+ * layer) says so: the layer picks the clip up as a take on its next look at
+ * GET /api/frame/animate/<attempt>. Also judged before the call now: the
+ * planned keying against the media batch caps, free disk space, and the
+ * person's unconfirmed Stops (hosted). A claimed name is released when the
+ * attempt fails. The pixel work runs on a keying worker (clipKeyWorker.ts).
  */
-import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { MEDIA_CAPS } from '#shared/runner/media'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { isHosted } from '../../utils/deployMode'
 import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
-import { animateKeptBound, animateMaxFrames, ANIMATE_VIDEO_MAX_BYTES, dataUrlBytes } from '../../utils/frameAnimate'
-import { canonicalUploadKey, engineDirForType, recordUpload } from '../../utils/inputUploads'
+import { animateKeptBound, animateMaxFrames, animatePlannedWork, ANIMATE_VIDEO_MAX_BYTES, dataUrlBytes } from '../../utils/frameAnimate'
+import { canonicalUploadKey, engineDirForType, recordUpload, releaseUpload } from '../../utils/inputUploads'
 import { downloadResult } from '../../runner/falQueue'
 import { safeAnswerFetch } from '../../runner/answerDownload'
 import { MediaError, mediaTempDir, removeMediaTempDir } from '../../media/run'
 import { MEDIA_TOOLS_MISSING, mediaTools } from '../../media/tools'
 import { flattenStill, keyClip, readStill, stillSize } from '../../frame/clipKeyRun'
+import { ATTEMPT_RE, AttemptExists, createAttempt, updateAttempt, type AnimateAttempt } from '../../frame/animateAttempts'
+import { animateStopsRefusal, watchAnimateCancel } from '../../frame/animateCancels'
 import { clipModel, clipRequest, clipSeconds } from '~~/app/data/clip-models'
 
-interface Body { image?: string; prompt?: string; model?: string; seconds?: number }
+interface Body { image?: string; prompt?: string; model?: string; seconds?: number; attempt?: string }
 
 /** Resolved per request — the engine root is env/cwd-derived, not a module constant. */
 function clipsDir(): string | null {
@@ -51,6 +63,16 @@ function clipsDir(): string | null {
 }
 
 export const ANIMATE_TOO_LARGE = 'This picture is too large to animate here. Nothing was charged.'
+export const ANIMATE_NO_DISK = 'There isn’t enough free disk space to keep this clip. Nothing was charged.'
+
+/** Free space on the clips' disk covers `bytes` (statfs; an unreadable answer is not a refusal). */
+async function roomFor(dir: string, bytes: number): Promise<boolean> {
+  try {
+    const s = await statfs(path.dirname(dir))
+    return s.bavail * s.bsize >= bytes
+  }
+  catch { return true }
+}
 export const ANIMATE_TOO_MUCH = 'This clip would be too large to keep here. Try a shorter length or a smaller picture. Nothing was charged.'
 
 const PROMPT_SUFFIX = (key: 'green' | 'blue') =>
@@ -87,39 +109,61 @@ export default defineEventHandler(async (event) => {
   // What the clip may keep, planned from the model's size and the length asked for.
   if (animateKeptBound(spec.resolution, seconds, size) > caps.keptBytesPerRun) throw createError({ statusCode: 413, message: ANIMATE_TOO_MUCH })
 
-  // Resolve the destination and the tools BEFORE spending money.
+  // The keying it plans fits the media batch caps, so it can't fail on them after the call.
+  const work = animatePlannedWork(spec.resolution, seconds, size)
+  if (work.frames > caps.batchFrames || work.frames * work.pixels > caps.batchPixels) throw createError({ statusCode: 413, message: ANIMATE_TOO_MUCH })
+  // The attempt's name: the client's (so it can find the clip after a Stop or a closed tab), else ours.
+  const attempt = body.attempt === undefined ? randomUUID() : String(body.attempt)
+  if (!ATTEMPT_RE.test(attempt)) throw createError({ statusCode: 400, message: 'bad attempt' })
+
+  // Resolve the destination, the tools and the room BEFORE spending money.
   const clipsRoot = clipsDir()
   if (!clipsRoot) throw createError({ statusCode: 500, message: 'Could not find the engine input folder' })
   if (!(await mediaTools())) throw createError({ statusCode: 503, message: `${MEDIA_TOOLS_MISSING}. Nothing was charged.` })
+  if (!(await roomFor(clipsRoot, animateKeptBound(spec.resolution, seconds, size)))) throw createError({ statusCode: 507, message: ANIMATE_NO_DISK })
+  // Too many Stops whose cancel fal hasn't confirmed (Important 2): a pause, in plain words.
+  const stops = hosted ? animateStopsRefusal(userId) : null
+  if (stops) throw createError({ statusCode: 429, message: stops })
 
   assertRateLimit(event, 'frame-animate', 6, 600_000)
 
-  // Stop: the client going away aborts everything below.
+  // Stop: the client going away aborts everything up to the model's settled call.
+  // After that the attempt is paid for: nothing the client does stops it (Important 1).
   const gone = new AbortController()
   const res = event.node?.res
   const onClose = () => { if (!res?.writableEnded) gone.abort() }
   res?.once?.('close', onClose)
   const signal = gone.signal
+  let paid = false
 
   // The clip's name, decided (and in hosted claimed for this person) before anything is on disk.
   const id = `clip_${Date.now()}_${randomBytes(6).toString('hex')}`
+  const ownKey = canonicalUploadKey('input', `sailor_clips/${id}`, 'clip.json')
   const outDir = path.join(clipsRoot, id)
   const staging = path.join(clipsRoot, `.${id}.partial`)
   let tmp: string | null = null
+  let rec: AnimateAttempt | null = null
+  let claimed = false
   try {
-    if (hosted) await recordUpload(userId!, canonicalUploadKey('input', `sailor_clips/${id}`, 'clip.json'))
+    try { rec = await createAttempt(attempt, userId) }
+    catch (e) {
+      if (e instanceof AttemptExists) throw createError({ statusCode: 409, message: 'This attempt was already sent' })
+      throw e
+    }
+    if (hosted) { await recordUpload(userId!, ownKey); claimed = true }
     await mkdir(staging, { recursive: true })
     tmp = await mediaTempDir()
 
-    // 1. the still, flattened onto the key colour
+    // 1. the still, flattened onto the key colour (on a keying worker)
     let still: Awaited<ReturnType<typeof readStill>>
     let keyHex: string
     let flat: Buffer
     try {
       still = await readStill(imageBytes)
-      ;({ keyHex, flat } = await flattenStill(still))
+      ;({ keyHex, flat } = await flattenStill(still, signal))
     }
-    catch {
+    catch (e) {
+      if (signal.aborted) throw e
       throw createError({ statusCode: 400, message: 'Could not read the picture. Nothing was charged.' })
     }
     const keyName = keyHex === '#0000ff' ? 'blue' : 'green'
@@ -129,22 +173,30 @@ export default defineEventHandler(async (event) => {
     const stillUrl = await uploadToFalStorage(new Uint8Array(flat), 'still.png', 'image/png')
 
     // 2. the model — clipRequest's request, the one the Animate button prices; runFal
-    // holds and charges it per second of what it asks for.
+    // holds and charges it per second of what it asks for. A Stop while it runs releases
+    // the hold and hands the job to the cancel watch (animateCancels.ts).
     const req = clipRequest(spec.id, seconds, fullPrompt, stillUrl)
-    const out = await runFal(req.endpoint, req.input, { pollDeadlineMs: 900_000, signal })
+    const out = await runFal(req.endpoint, req.input, {
+      pollDeadlineMs: 900_000, signal,
+      onStopped: job => void watchAnimateCancel({ userId, endpoint: req.endpoint, ...job }),
+    })
+    // Settled: the person has paid. From here on, only the server's own limits stop the work.
+    paid = true
+    rec = await updateAttempt(rec, { state: 'keying', paid: true })
+    res?.off?.('close', onClose)
     const videoUrl = firstFalVideoUrl(out)
     if (!videoUrl) throw createError({ statusCode: 502, message: 'The model returned no video' })
 
     // 3. key it back to transparency
     const { bytes } = await downloadResult(videoUrl, {
-      fetchOnce: safeAnswerFetch({ hosted, kind: 'video' }), maxBytes: ANIMATE_VIDEO_MAX_BYTES, signal,
+      fetchOnce: safeAnswerFetch({ hosted, kind: 'video' }), maxBytes: ANIMATE_VIDEO_MAX_BYTES,
     })
     const mp4Path = path.join(tmp, 'clip.mp4')
     await writeFile(mp4Path, bytes)
     const meta = await keyClip({
       video: mp4Path, roots: [tmp], still, key: keyHex, outDir: staging,
       trimLast: true, /* first == last frame on every model: drop the returning frame */
-      userId, signal, maxFrames: animateMaxFrames(seconds), maxBytes: caps.keptBytesPerRun,
+      userId, maxFrames: animateMaxFrames(seconds), maxBytes: caps.keptBytesPerRun,
     })
     if (!meta.frames || !meta.fps) throw createError({ statusCode: 500, message: 'Keying produced no frames' })
 
@@ -154,15 +206,26 @@ export default defineEventHandler(async (event) => {
     const onDisk = JSON.parse(await readFile(metaPath, 'utf8')) as Record<string, unknown>
     await writeFile(metaPath, JSON.stringify({ ...onDisk, model: spec.id, prompt }, null, 2))
 
-    if (signal.aborted) throw new MediaError('stopped')
     await rename(staging, outDir)
-    return { dir: `sailor_clips/${id}`, frames: meta.frames, fps: meta.fps, model: spec.id, prompt }
+    const clip = { dir: `sailor_clips/${id}`, frames: meta.frames, fps: meta.fps, model: spec.id, prompt }
+    rec = await updateAttempt(rec, { state: 'done', clip })
+    return clip
   }
   catch (e) {
     await rm(staging, { recursive: true, force: true }).catch(() => {})
-    if (signal.aborted) throw createError({ statusCode: 499, message: 'Stopped' })
-    if (e instanceof MediaError) throw createError({ statusCode: e.word === 'toolsMissing' ? 503 : 502, message: e.message })
-    throw e
+    if (claimed) await releaseUpload(ownKey).catch(() => {})
+    const stopped = !paid && signal.aborted
+    const err = stopped
+      ? createError({ statusCode: 499, message: 'Stopped' })
+      : e instanceof MediaError
+        ? createError({ statusCode: e.word === 'toolsMissing' ? 503 : 502, message: e.message })
+        : e
+    if (rec) {
+      const message = (err as { message?: string }).message || 'Animate failed'
+      await updateAttempt(rec, stopped ? { state: 'stopped' } : { state: 'failed', message }).catch(() => {})
+    }
+    if (paid) console.error('[frame-animate] a paid clip could not be finished', { attempt, userId, error: e })
+    throw err
   }
   finally {
     res?.off?.('close', onClose)

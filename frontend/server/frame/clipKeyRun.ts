@@ -12,14 +12,21 @@
  *     frame is dropped when `trimLast` (first = last on the loop models), so
  *     one frame is held back until the next arrives. Stop (`signal`) kills the
  *     decode (runMedia) and fails; the caller removes `outDir`.
+ *
+ * LC10 fix round 1: the pixel work (flatten, keyer set-up, every frame) runs
+ * on a worker thread (./clipKeyWorker.ts), and the decode runs in a media
+ * lease (server/media/run.ts `mediaLease`), whose clock counts only the time
+ * ffmpeg itself owes frames, never the time a frame waits to be keyed: the
+ * keying can't run the decode into its job time limit.
  */
 import { copyFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import sharp from 'sharp'
 import { decodeFrames } from '../media/decode'
-import { MediaError } from '../media/run'
+import { MediaError, mediaLease } from '../media/run'
 import { probeMedia } from '../media/probe'
-import { ClipKeyer, flattenOnto, fromHex, hexOf, pickKeyColour, type RGB } from './clipKey'
+import { fromHex, hexOf, type RGB } from './clipKey'
+import { withKeyWorker } from './clipKeyWorker'
 
 export interface Still { rgba: Uint8Array; w: number; h: number }
 
@@ -40,9 +47,8 @@ export async function readStill(png: Uint8Array): Promise<Still> {
 }
 
 /** The key colour for this still and the still flattened onto it (PNG bytes). */
-export async function flattenStill(still: Still): Promise<{ keyHex: string; flat: Buffer }> {
-  const keyHex = pickKeyColour(still.rgba)
-  const rgb = flattenOnto(still.rgba, fromHex(keyHex))
+export async function flattenStill(still: Still, signal?: AbortSignal): Promise<{ keyHex: string; flat: Buffer }> {
+  const { keyHex, rgb } = await withKeyWorker(signal, w => w.flatten(still.rgba))
   const flat = await sharp(rgb, { raw: { width: still.w, height: still.h, channels: 3 } }).png().toBuffer()
   return { keyHex, flat }
 }
@@ -87,33 +93,37 @@ export async function keyClip(o: KeyClipOptions): Promise<ClipMeta> {
   // imageio's meta "fps": the stream's average rate, 24 when it doesn't say.
   const fps = v.averageRate && v.averageRate.den ? v.averageRate.num / v.averageRate.den : 24.0
 
-  let keyer: ClipKeyer | null = null
+  let size: { ow: number; oh: number } | null = null
   let held: Uint8Array | null = null
   let written = 0
-  const writeFrame = async (rgb: Uint8Array) => {
-    if (o.signal?.aborted) throw new MediaError('stopped')
-    keyer ??= new ClipKeyer(o.still.rgba, o.still.w, o.still.h, key, v.w, v.h)
-    const rgba = keyer.keyFrame(rgb)
-    const png = await sharp(rgba, { raw: { width: keyer.ow, height: keyer.oh, channels: 4 } }).png().toBuffer()
-    budget.add(png.length)
-    if (o.signal?.aborted) throw new MediaError('stopped')
-    await writeFile(path.join(o.outDir, frameName(written)), png, { flag: 'wx' })
-    written++
-  }
-
-  const { count } = await decodeFrames(probe.path, {
-    userId: o.userId, signal: o.signal, roots: o.roots, probe, maxFrames: o.maxFrames,
-    onFrame: async (rgb) => {
-      if (held) await writeFrame(held)
-      held = rgb
-    },
+  let count = 0
+  await withKeyWorker(o.signal, async (kw) => {
+    const writeFrame = async (rgb: Uint8Array) => {
+      if (o.signal?.aborted) throw new MediaError('stopped')
+      size ??= await kw.init(o.still.rgba, o.still.w, o.still.h, key, v.w, v.h)
+      const rgba = await kw.key(rgb)
+      const png = await sharp(rgba, { raw: { width: size.ow, height: size.oh, channels: 4 } }).png().toBuffer()
+      budget.add(png.length)
+      if (o.signal?.aborted) throw new MediaError('stopped')
+      await writeFile(path.join(o.outDir, frameName(written)), png, { flag: 'wx' })
+      written++
+    }
+    await mediaLease({ userId: o.userId, signal: o.signal }, async (lease) => {
+      ;({ count } = await decodeFrames(probe.path, {
+        userId: o.userId, signal: lease.signal, roots: o.roots, probe, maxFrames: o.maxFrames, lease,
+        onFrame: async (rgb) => {
+          if (held) await writeFrame(held)
+          held = rgb
+        },
+      }))
+    })
+    if (!count || !held) throw new MediaError('noVideo')
+    // first == last on a first/last-frame model: don't hold it twice.
+    if (!(o.trimLast && count > 1)) await writeFrame(held)
+    held = null
   })
-  if (!count || !held) throw new MediaError('noVideo')
-  // first == last on a first/last-frame model: don't hold it twice.
-  if (!(o.trimLast && count > 1)) await writeFrame(held)
-  held = null
 
-  const k = keyer as ClipKeyer | null
+  const k = size as { ow: number; oh: number } | null
   if (!k) throw new MediaError('noVideo')
   const meta: ClipMeta = { frames: written, fps, width: k.ow, height: k.oh }
   budget.add(probe.bytes)

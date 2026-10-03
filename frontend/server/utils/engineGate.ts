@@ -31,6 +31,22 @@ export type ViewGate =
   | { kind: 'ungated' }
   | { kind: 'reject', status: number, message: string }
   | { kind: 'check', key: string }
+  /** LC10 fix round 1: an input file whose folder has an owner row (a Frame Animate clip): the row's owner only. */
+  | { kind: 'owner', key: string }
+
+/**
+ * The Frame Animate clip folder a /view input read lands in, by the path the
+ * resolver will use (`path.resolve` of the subfolder inside input/), or null.
+ * Any read under `sailor_clips` answers to the clip's one owner row
+ * (`input:sailor_clips/<id>:clip.json`, recorded before the clip is made);
+ * a read of `sailor_clips` itself has no clip and gets an impossible key.
+ */
+export function clipOwnerKey(subfolder: string): string | null {
+  const rel = path.posix.resolve('/', subfolder.replace(/\\/g, '/')).slice(1)
+  const seg = rel.split('/').filter(Boolean)
+  if (seg[0] !== 'sailor_clips') return null
+  return seg[1] ? canonicalUploadKey('input', `sailor_clips/${seg[1]}`, 'clip.json') : 'input:sailor_clips:'
+}
 
 /**
  * The hosted /view decision, resolved the way the engine resolves it:
@@ -46,7 +62,12 @@ export function viewGateDecision(q: { filename: string, type?: string, subfolder
   }
   const { name, type: annotated } = annotatedFilepath(q.filename)
   const effective = annotated ?? (q.type || 'output')
-  // type=temp / type=input stay ungated this stage (documented gap) — but
+  // A Frame Animate clip (LC10 fix round 1): its owner only.
+  if (effective === 'input') {
+    const key = clipOwnerKey(q.subfolder || '')
+    if (key) return { kind: 'owner', key }
+  }
+  // Other type=temp / type=input reads stay ungated this stage (documented gap) — but
   // only when that is what the engine will ACTUALLY read.
   if (effective !== 'output') return { kind: 'ungated' }
   // The native resolver's own basename rule (POSIX: `/` only), so the key

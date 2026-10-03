@@ -727,7 +727,13 @@ export interface ImageLayer extends LayerCommon {
   /** Every clip generated for this layer, oldest first (see lib/compositor/clip withTake).
    *  `clip` is the active one; Remove clip keeps the takes so a take can be restored. */
   takes?: ImageClip[]
+  /** An Animate attempt sent but not yet back (LC10 fix round 1): after a Stop, a closed
+   *  tab or a lost connection, its clip (once paid for, it is always finished) is picked
+   *  up as a take by useLayerAnimate().resume. */
+  pendingAnimate?: PendingAnimate
 }
+
+export interface PendingAnimate { attempt: string; model: string; prompt: string; at: number }
 
 /**
  * A graph-input image, expressed as an ordinary layer. The pixels come from an

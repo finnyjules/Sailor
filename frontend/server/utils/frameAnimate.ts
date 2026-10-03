@@ -77,3 +77,15 @@ export function animateKeptBound(resolution: string, seconds: number, still: { w
   const frames = Math.ceil(seconds * ANIMATE_PLANNED_FPS) + 2
   return frames * pixels * 4 + ANIMATE_VIDEO_MAX_BYTES + 64 * 1024
 }
+
+/**
+ * LC10 fix round 1 (Important 3): the keying an attempt plans, judged before
+ * the paid call against the media batch caps (MEDIA_CAPS batchFrames and
+ * batchPixels): frames at ANIMATE_PLANNED_FPS, each at the size the keyer
+ * writes (as animateKeptBound).
+ */
+export function animatePlannedWork(resolution: string, seconds: number, still: { w: number; h: number }): { frames: number; pixels: number } {
+  const model = Math.ceil((MODEL_PIXELS[resolution] ?? 1920 * 1080) * 1.1)
+  const edge = Math.max(still.w, still.h)
+  return { frames: Math.ceil(seconds * ANIMATE_PLANNED_FPS) + 2, pixels: Math.min(model, edge * edge) }
+}

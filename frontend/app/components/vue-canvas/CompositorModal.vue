@@ -935,13 +935,27 @@ const layerAnimate = useLayerAnimate()
 async function animateLayer(layer: any, opts: { prompt: string; model: string; seconds: number }) {
   if (!layer || layer.kind !== 'image' || layerAnimate.busy.value) return
   try {
-    const clip = await layerAnimate.animate(layer, opts)
+    // The attempt rides on the layer until it is back (LC10 fix round 1): a clip paid for
+    // and finished after a Stop or a closed tab comes back as a take (resumeAnimate).
+    const clip = await layerAnimate.animate(layer, opts, p => setLocal(layer.id, { pendingAnimate: p } as any))
+    const now = localLayers.value.find(l => l.id === layer.id) as any
     // Keep every generation: a re-roll appends a take instead of orphaning the last one.
-    setLocal(layer.id, { clip, takes: withTake(layer.takes, clip) } as any)
+    setLocal(layer.id, { clip, takes: withTake(now?.takes ?? layer.takes, clip), pendingAnimate: undefined } as any)
     await ensureLayerImages(localLayers.value as LocalLayer[])
     renderStack()
-  } catch { /* error text is on layerAnimate.error; the layer is untouched */ }
+  } catch { /* error text is on layerAnimate.error; the layer is untouched. A sent attempt is looked up below. */ }
+  resumeAnimate()
 }
+/** Layers whose Animate attempt isn't back yet: their clip, once finished, joins the takes. */
+function resumeAnimate() {
+  layerAnimate.resume(localLayers.value as any[], (layerId, attempt, clip) => {
+    const l = localLayers.value.find(x => x.id === layerId) as any
+    if (!l || l.pendingAnimate?.attempt !== attempt) return
+    setLocal(layerId, (clip ? { takes: withTake(l.takes, clip), pendingAnimate: undefined } : { pendingAnimate: undefined }) as any)
+  })
+}
+watch(() => localLayers.value.map(l => (l as any).pendingAnimate?.attempt ?? '').join(','), (ids) => { if (ids.replace(/,/g, '') && !layerAnimate.busy.value) resumeAnimate() }, { immediate: true })
+onBeforeUnmount(() => layerAnimate.dispose())
 function setClipSpeed(layer: any, speed: number) {
   if (!layer?.clip) return
   // Clamp to the SAME constants the Speed slider's min/max come from (lib/compositor/clip)

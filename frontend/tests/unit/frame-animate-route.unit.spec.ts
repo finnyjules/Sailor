@@ -22,16 +22,21 @@ vi.mock('node:child_process', async (importOriginal) => {
 type FalMode = 'video' | 'none' | 'wait'
 const fal = vi.hoisted(() => ({
   mode: 'video' as FalMode, runs: [] as Array<{ endpoint: string; input: Record<string, unknown>; signal?: AbortSignal }>,
-  uploads: 0, clip: '', order: [] as string[],
+  uploads: 0, clip: '', order: [] as string[], charges: 0, afterSettle: null as null | (() => void),
 }))
 vi.mock('../../server/utils/falRun', () => ({
-  runFal: async (endpoint: string, input: Record<string, unknown>, opts: { signal?: AbortSignal }) => {
+  runFal: async (endpoint: string, input: Record<string, unknown>, opts: { signal?: AbortSignal; onStopped?: (r: { requestId: string; cancelUrl: string; statusUrl: string }) => void }) => {
     fal.order.push('runFal')
     fal.runs.push({ endpoint, input, signal: opts?.signal })
     if (fal.mode === 'wait') {
       await new Promise<void>((resolve) => { if (opts.signal?.aborted) resolve(); else opts.signal?.addEventListener('abort', () => resolve(), { once: true }) })
+      // As runFal does on a Stop while the job runs: hand it over, release, throw.
+      const n = fal.runs.length
+      opts.onStopped?.({ requestId: `req${n}`, cancelUrl: `https://queue.fal.run/x/requests/req${n}/cancel`, statusUrl: `https://queue.fal.run/x/requests/req${n}/status` })
       throw new Error('Stopped')
     }
+    // Settled (charged) from here: one charge per settled call.
+    fal.charges++
     return fal.mode === 'none' ? {} : { video: { url: 'https://fal.media/files/clip.mp4' } }
   },
   firstFalVideoUrl: (r: { video?: { url?: string } }) => r?.video?.url ?? null,
@@ -41,7 +46,7 @@ vi.mock('../../server/utils/falStorage', () => ({
 }))
 vi.mock('../../server/runner/falQueue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../server/runner/falQueue')>()),
-  downloadResult: async () => ({ bytes: new Uint8Array(readFileSync(fal.clip)), contentType: 'video/mp4' }),
+  downloadResult: async () => { fal.afterSettle?.(); return { bytes: new Uint8Array(readFileSync(fal.clip)), contentType: 'video/mp4' } },
 }))
 const tools = vi.hoisted(() => ({ missing: false }))
 vi.mock('../../server/media/tools', async (importOriginal) => {
@@ -49,7 +54,14 @@ vi.mock('../../server/media/tools', async (importOriginal) => {
   return { ...real, mediaTools: async () => (tools.missing ? null : real.mediaTools()) }
 })
 
+const disk = vi.hoisted(() => ({ free: Number.POSITIVE_INFINITY }))
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...real, statfs: async (p: string) => (Number.isFinite(disk.free) ? { bavail: Math.floor(disk.free / 4096), bsize: 4096 } : real.statfs(p)) }
+})
+
 const g = globalThis as any
+g.getRouterParam = (event: any, name: string) => event.context?.params?.[name]
 g.createError = (opts: { statusCode: number; message?: string }) => Object.assign(new Error(opts.message), { statusCode: opts.statusCode })
 g.defineEventHandler = (fn: any) => fn
 g.readBody = async (event: any) => { event.__bodyRead = true; return event.__body }
@@ -60,16 +72,24 @@ import { mediaLimiter } from '../../server/media/run'
 import { _resetRateLimits } from '../../server/lib/rateLimit'
 import { animateKeptBound } from '../../server/utils/frameAnimate'
 import { MEDIA_CAPS } from '#shared/runner/media'
+import { __setAnimateAttemptsDirForTests, readAttempt } from '../../server/frame/animateAttempts'
+import { __setAnimateCancelDepsForTests, ANIMATE_STOPS_REFUSED } from '../../server/frame/animateCancels'
+import { animatePlannedWork } from '../../server/utils/frameAnimate'
+import { keyWorkers } from '../../server/frame/clipKeyWorker'
 import { CLIP_MODELS } from '~~/app/data/clip-models'
 
-let route: { default: (e: any) => Promise<any>; ANIMATE_TOO_LARGE: string }
+let route: { default: (e: any) => Promise<any>; ANIMATE_TOO_LARGE: string; ANIMATE_NO_DISK: string }
+let status: { default: (e: any) => Promise<any> }
+const cancels = { calls: [] as string[] }
 const scratch = mkdtempSync(join(tmpdir(), 'animate-route-'))
 let root = ''
 const CLERK = 'NUXT_CLERK_SECRET_KEY'
 const savedClerk = process.env[CLERK]
-const db = { rows: [] as Array<[string, string]>, query: async (sql: string, params?: unknown[]) => {
+const db = { rows: [] as Array<[string, string]>, deletes: 0, query: async (sql: string, params?: unknown[]) => {
   fal.order.push('recordUpload')
   if (/INSERT INTO input_uploads/.test(sql)) db.rows.push([String(params![0]), String(params![1])])
+  if (/DELETE FROM input_uploads/.test(sql)) db.rows = db.rows.filter(r => r[0] !== String(params![0]))
+  if (/SELECT user_id FROM input_uploads/.test(sql)) return { rows: db.rows.filter(r => r[0] === String(params![0])).map(r => ({ user_id: r[1] })) }
   return { rows: [] }
 } }
 
@@ -118,10 +138,13 @@ let small = ''
 let long = ''
 beforeAll(async () => {
   route = await import('../../server/api/frame/animate.post') as any
+  status = await import('../../server/api/frame/animate/[attempt].get') as any
   small = await makeClip('small.mp4', 6, 64)
   long = await makeClip('long.mp4', 60, 320)
 }, 60_000)
 afterAll(() => {
+  __setAnimateAttemptsDirForTests(null)
+  __setAnimateCancelDepsForTests(null)
   rmSync(scratch, { recursive: true, force: true })
   if (savedClerk === undefined) delete process.env[CLERK]; else process.env[CLERK] = savedClerk
   __setInputUploadsDbForTests(null)
@@ -134,8 +157,17 @@ beforeEach(() => {
   db.rows.length = 0
   fal.mode = 'video'; fal.runs.length = 0; fal.uploads = 0; fal.clip = small; fal.order.length = 0
   tools.missing = false
+  disk.free = Number.POSITIVE_INFINITY
+  fal.charges = 0; fal.afterSettle = null
   spawned.calls.length = 0
   _resetRateLimits()
+  __setAnimateAttemptsDirForTests(join(root, 'attempts'))
+  cancels.calls.length = 0
+  // fal never confirms these cancels: each Stop counts against the person.
+  __setAnimateCancelDepsForTests({
+    client: { cancel: async (u: string) => { cancels.calls.push(u); return 'requested' }, status: async () => ({ status: 'IN_PROGRESS', queuePosition: null, logs: [], error: null, transient: false }) } as any,
+    sleep: () => new Promise(() => {}), report: () => {},
+  })
 })
 afterEach(() => { delete process.env[CLERK] })
 
@@ -171,37 +203,72 @@ for (const mode of ['local', 'hosted'] as const) {
 
     it('Stop during the model call leaves nothing', async () => {
       fal.mode = 'wait'
-      const ev = event({ image: await stillDataUrl(), model: 'hailuo-h3', seconds: 5 })
+      const attempt = '2b0c6a1e-2f4d-4c8a-9e1b-3a5d7f9b1c2d'
+      const ev = event({ image: await stillDataUrl(), model: 'hailuo-h3', seconds: 5, attempt })
       const run = route.default(ev)
       while (!fal.runs.length) await new Promise(r => setTimeout(r, 2))
       ev.node.res.emit('close')
       const err = await refusal(run)
       expect(err.statusCode).toBe(499)
       expect(fal.runs[0]!.signal!.aborted).toBe(true)
+      expect(fal.charges).toBe(0)
       expect(leftovers()).toEqual([])
+      // The job went to the cancel watch, and the attempt says nothing was paid.
+      expect(cancels.calls).toEqual(['https://queue.fal.run/x/requests/req1/cancel'])
+      expect(await readAttempt(attempt)).toMatchObject({ state: 'stopped', paid: false })
+      // The claimed name is given back.
+      expect(db.rows).toEqual([])
     })
 
-    it('Stop during the keying kills ffmpeg and leaves nothing', async () => {
+    it('a Stop or a dropped connection after the call has settled still keeps the clip, charged once', async () => {
       fal.clip = long
-      const ev = event({ image: await stillDataUrl(320), model: 'seedance-2.0', seconds: 5 })
-      const run = route.default(ev)
-      const t0 = Date.now()
-      const pngs = () => leftovers().flatMap(d => (d.startsWith('.') ? readdirSync(join(clipsDir(), d)) : [])).filter(f => f.endsWith('.png'))
-      while (pngs().length < 2 && Date.now() - t0 < 30_000) await new Promise(r => setTimeout(r, 2))
-      expect(pngs().length).toBeGreaterThan(0)
-      ev.node.res.emit('close')
-      const err = await refusal(run)
-      expect(err.statusCode).toBe(499)
-      expect(leftovers()).toEqual([])
+      const attempt = '7b0c6a1e-2f4d-4c8a-9e1b-3a5d7f9b1c2d'
+      const ev = event({ image: await stillDataUrl(320), model: 'seedance-2.0', seconds: 5, attempt })
+      // The connection drops right after the model's call settled (the download starts).
+      fal.afterSettle = () => ev.node.res.emit('close')
+      const res = await route.default(ev)
+      expect(fal.charges).toBe(1)
+      expect(res.frames).toBe(59)
+      const dir = join(root, 'input', res.dir)
+      expect(readdirSync(dir).filter(f => f.endsWith('.png'))).toHaveLength(59)
+      expect(leftovers()).toEqual([res.dir.split('/')[1]])
+      // The layer picks it up later as a take.
+      const rec = await readAttempt(attempt)
+      expect(rec).toMatchObject({ state: 'done', paid: true, clip: { dir: res.dir, frames: 59 } })
+      const seen = await status.default({ context: { userId: 'user_lc10', params: { attempt } } })
+      expect(seen).toMatchObject({ state: 'done', paid: true, clip: { dir: res.dir } })
+      if (mode === 'hosted') {
+        await expect(status.default({ context: { userId: 'someone_else', params: { attempt } } })).rejects.toMatchObject({ statusCode: 404 })
+        expect(db.rows).toEqual([[`input:${res.dir}:clip.json`, 'user_lc10']])
+      }
       expect(mediaLimiter().pending('user_lc10')).toBe(0)
-      expect(mediaLimiter().pending(null)).toBe(0)
+      expect(keyWorkers()).toEqual({ running: 0, waiting: 0 })
     }, 60_000)
+
+    it('refuses a second send of the same attempt', async () => {
+      const attempt = '1b0c6a1e-2f4d-4c8a-9e1b-3a5d7f9b1c2d'
+      await route.default(event({ image: await stillDataUrl(), model: 'seedance-2.0', seconds: 5, attempt }))
+      const err = await refusal(route.default(event({ image: await stillDataUrl(), model: 'seedance-2.0', seconds: 5, attempt })))
+      expect(err.statusCode).toBe(409)
+      expect(fal.runs).toHaveLength(1)
+    })
+
+    it('refuses before the paid call when the disk has no room', async () => {
+      disk.free = 1024 * 1024
+      const err = await refusal(route.default(event({ image: await stillDataUrl(), model: 'seedance-2.0', seconds: 5 })))
+      expect(err.statusCode).toBe(507)
+      expect(err.message).toBe(route.ANIMATE_NO_DISK)
+      expect(fal.runs).toHaveLength(0)
+    })
 
     it('a model with no video fails and leaves nothing', async () => {
       fal.mode = 'none'
-      const err = await refusal(route.default(event({ image: await stillDataUrl(), model: 'kling-v3-pro', seconds: 5 })))
+      const attempt = '3b0c6a1e-2f4d-4c8a-9e1b-3a5d7f9b1c2d'
+      const err = await refusal(route.default(event({ image: await stillDataUrl(), model: 'kling-v3-pro', seconds: 5, attempt })))
       expect(err.statusCode).toBe(502)
       expect(leftovers()).toEqual([])
+      expect(db.rows).toEqual([])
+      expect(await readAttempt(attempt)).toMatchObject({ state: 'failed', paid: true, message: 'The model returned no video' })
     })
 
     it('refuses before the paid call when the video tools are missing', async () => {
@@ -226,6 +293,25 @@ for (const mode of ['local', 'hosted'] as const) {
 describe('Animate hosted only', () => {
   beforeEach(() => { process.env[CLERK] = 'sk_test_lc10' })
 
+  it('after three Stops fal has not confirmed, refuses for a while, before the paid call', async () => {
+    fal.mode = 'wait'
+    for (let i = 0; i < 3; i++) {
+      const ev = event({ image: await stillDataUrl(), model: 'hailuo-h3', seconds: 5 })
+      const run = route.default(ev)
+      while (fal.runs.length < i + 1) await new Promise(r => setTimeout(r, 2))
+      ev.node.res.emit('close')
+      expect((await refusal(run)).statusCode).toBe(499)
+      await new Promise(r => setTimeout(r, 5))
+    }
+    const err = await refusal(route.default(event({ image: await stillDataUrl(), model: 'hailuo-h3', seconds: 5 })))
+    expect(err.statusCode).toBe(429)
+    expect(err.message).toBe(ANIMATE_STOPS_REFUSED)
+    expect(fal.runs).toHaveLength(3)
+    // Someone else is not held back.
+    fal.mode = 'video'
+    await expect(route.default(event({ image: await stillDataUrl(), model: 'hailuo-h3', seconds: 5 }, 'user_other'))).resolves.toMatchObject({ frames: 5 })
+  })
+
   it('refuses a signed-out caller before reading the body', async () => {
     const ev = event({ image: 'x', model: 'seedance-2.0' }, null)
     const err = await refusal(route.default(ev))
@@ -247,6 +333,13 @@ describe('the room an attempt may keep', () => {
   it('every catalog model at every length fits hosted, even from the largest picture', () => {
     for (const m of CLIP_MODELS) for (const s of m.durations) {
       expect(animateKeptBound(m.resolution, s, { w: 4096, h: 4096 }), `${m.id} ${s}s`).toBeLessThanOrEqual(MEDIA_CAPS.hosted.keptBytesPerRun)
+    }
+  })
+  it('every catalog model\'s planned keying fits the hosted batch caps', () => {
+    for (const m of CLIP_MODELS) for (const s of m.durations) {
+      const w = animatePlannedWork(m.resolution, s, { w: 4096, h: 4096 })
+      expect(w.frames, `${m.id} ${s}s`).toBeLessThanOrEqual(MEDIA_CAPS.hosted.batchFrames)
+      expect(w.frames * w.pixels, `${m.id} ${s}s`).toBeLessThanOrEqual(MEDIA_CAPS.hosted.batchPixels)
     }
   })
   it('a 1080p minute would not', () => {
