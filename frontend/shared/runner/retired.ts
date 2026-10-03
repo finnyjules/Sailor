@@ -7,7 +7,7 @@
  * the partner nodes ComfyUI bills through Comfy's own account
  * (api.comfy.org, comfy_api_nodes/util/_helpers.py `default_base_url`),
  * 182 of them in the committed catalogue
- * (server/native/objectInfo.baseline.json.gz; guarded by
+ * (server/assets/nodeCatalog.json.gz; guarded by
  * tests/unit/runner-retired-nodes.unit.spec.ts). The Python files stay; Sailor
  * stops offering and running them:
  *   - hidden from the Actions panel (app/data/action-catalog.ts

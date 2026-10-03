@@ -593,7 +593,7 @@ const short = (s: string) => createHash('sha256').update(s).digest('hex').slice(
 interface SavedGraph { key: string; prompt: ApiPrompt }
 async function savedGraphs(): Promise<SavedGraph[]> {
   const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-  const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+  const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
   const out: SavedGraph[] = []
   for (const uuid of readdirSync(PROJECTS).sort()) {
     let wf: { canvases?: { workflow: unknown }[] } | undefined

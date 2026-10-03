@@ -17,7 +17,7 @@ import { outputClassesOf, runnerTakesWorkflow, showsMadeResult } from '#shared/r
 import { autoSinkSlotType } from '~/lib/canvas/autoSinkSlot'
 import { NOT_RUN_WORDS } from '#shared/runner/stockClasses'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
 const ALL = EVERY_KNOWN_FAMILY
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const titles: Record<string, string> = {}
@@ -277,9 +277,10 @@ describe('F4: a custom node the catalogue doesn\'t hold', () => {
     expect(unknownClassRefusal('LayerUtility: If ', 'If')).toEqual({ title: '“If” can’t run', description: `“If”: ${NOT_RUN_WORDS}` })
   })
 
-  it('a class Sailor knows keeps the builder\'s own error', () => {
-    expect(unknownClassRefusal('KSampler', 'KSampler')).toBeNull()
+  it('a class Sailor runs keeps the builder\'s own error; a stock one the catalogue dropped is refused (C6)', () => {
     expect(unknownClassRefusal('Image', 'Image')).toBeNull()
+    expect(unknownClassRefusal('SaveImage', 'Save')).toBeNull()
+    expect(unknownClassRefusal('KSampler', 'KSampler')).toEqual({ title: '“KSampler” can’t run', description: `“KSampler”: ${NOT_RUN_WORDS} Use Generate an image instead.` })
   })
 
   it('the layout judges an unknown node before showing a builder error', () => {

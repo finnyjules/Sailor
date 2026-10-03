@@ -407,7 +407,20 @@ describe('switched off: the ComfyUI path runs no runner family', () => {
 // ── G1 fix round 1 ────────────────────────────────────────────────────────
 
 /** The committed node catalog (what the gate falls back to), for the normalisation. */
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
+/**
+ * Sailor's node catalogue, plus Load3D's old definition: step 4, C6 dropped
+ * that stock class from the catalogue, and the gate's picture-dict unwrapping
+ * is still checked on it.
+ */
+const CATALOG = {
+  ...JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')),
+  Load3D: { input: { required: {
+    model_file: ['COMBO', { multiselect: false, options: [], file_upload: true }],
+    image: ['LOAD_3D', {}],
+    width: ['INT', { default: 1024, min: 1, max: 4096, step: 1 }],
+    height: ['INT', { default: 1024, min: 1, max: 4096, step: 1 }],
+  } } },
+} as Record<string, any>
 const normalised = (p: P) => {
   const n = normalizeHostedPrompt(p, CATALOG)
   if ('problems' in n) throw new Error(`refused: ${JSON.stringify(n.problems)}`)

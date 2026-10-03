@@ -67,13 +67,10 @@ export default defineEventHandler(async (event) => {
   // LOCAL MODE returned above (the native routes, else a 404).
   {
     const decision = hostedEngineDecision(normalizeEnginePath(path), event.method)
-    // F2: the canvas needs the node schemas — served from the saved copy (or
-    // the committed baseline) with the shared input-directory listings
-    // scrubbed; ComfyUI is never asked (step 3, R10.9).
+    // F2: the canvas needs the node schemas — Sailor's node catalogue, with
+    // the shared input-directory listings scrubbed; ComfyUI is never asked
+    // (step 3, R10.9; step 4, C6).
     if (decision.kind === 'objectInfo') return handleHostedObjectInfo(event)
-    // Step 3, R10.6: hosted offers no blueprint (they are built from local-only
-    // classes) — the list is empty, answered here without the engine.
-    if (decision.kind === 'emptySubgraphs') return {}
     // F4: refuses an `overwrite` field, then writes the identical bytes natively.
     if (decision.kind === 'upload') return handleHostedUpload(event)
     // Stage 6 Task 7: LoadImageOutput's remote picker — the caller's OWN

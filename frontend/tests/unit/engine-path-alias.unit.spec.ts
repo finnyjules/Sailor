@@ -335,20 +335,15 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     }
   })
 
-  // Step 3, R10.6 (decision 4): /global_subgraphs left the raw allowlist. Blueprints are built from
-  // local-only classes, so hosted answers an empty list itself, in every spelling, and refuses one
-  // blueprint by id; ComfyUI is never asked.
-  it('R10.6: the blueprint list is empty in every spelling, and one blueprint is refused, never proxied', async () => {
-    for (const p of ['/global_subgraphs', '/api/global_subgraphs', '/comfyui/global_subgraphs', '/comfyui/api/global_subgraphs', '/global_subgraphs?x=1']) {
+  // Step 3, R10.6 (decision 4): /global_subgraphs left the raw allowlist. Step 4, C6: every blueprint holds
+  // a class Sailor doesn't run, so the list is gone: a plain 404 in every spelling and verb, here and hosted;
+  // ComfyUI is never asked.
+  it('C6: the blueprint list is gone: a plain 404 in every spelling and verb, never proxied', async () => {
+    for (const [p, m] of [['/global_subgraphs', 'GET'], ['/api/global_subgraphs', 'GET'], ['/comfyui/global_subgraphs', 'GET'], ['/comfyui/api/global_subgraphs', 'GET'], ['/global_subgraphs?x=1', 'GET'], ['/global_subgraphs/abc', 'GET'], ['/api/global_subgraphs/abc', 'GET'], ['/global_subgraphs', 'POST'], ['/global_subgraphs/../global_subgraphs/abc', 'GET']] as const) {
       proxyRequest.mockClear()
-      expect(await middleware(ev(p, 'GET')), p).toEqual({})
-      expect(proxyRequest, p).not.toHaveBeenCalled()
-      expect(hostedEngineDecision(normalizeEnginePath(p), 'GET'), p).toEqual({ kind: 'emptySubgraphs' })
-    }
-    for (const [p, m] of [['/global_subgraphs/abc', 'GET'], ['/api/global_subgraphs/abc', 'GET'], ['/global_subgraphs', 'POST'], ['/global_subgraphs/../global_subgraphs/abc', 'GET']] as const) {
-      proxyRequest.mockClear()
-      expect(await status(p, m), `${m} ${p}`).toBe(403)
+      expect(await status(p, m), `${m} ${p}`).toBe(404)
       expect(proxyRequest, `${m} ${p}`).not.toHaveBeenCalled()
+      expect(hostedEngineDecision(normalizeEnginePath(p), m), `${m} ${p}`).toEqual({ kind: 'notFound' })
     }
   })
 
@@ -579,6 +574,8 @@ describe('local mode: no gate and no engine — every path the hosted gates inte
     ['/extensions/../history', 'GET'],
     ['/sailor/render_timeline', 'POST'], ['/sailor/spacetype_encode', 'POST'],
     ['/system_stats', 'GET'], ['/api/ws?clientId=x', 'GET'], ['/comfyui/ws', 'GET'], ['/comfyui', 'GET'],
+    // C6: the blueprint list is gone.
+    ['/global_subgraphs', 'GET'], ['/api/global_subgraphs', 'GET'], ['/global_subgraphs/abc', 'GET'],
   ] as const
 
   it('answers each with a plain 404, never proxied, never entering a hosted gate', async () => {

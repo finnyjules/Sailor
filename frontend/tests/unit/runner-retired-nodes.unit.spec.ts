@@ -38,7 +38,7 @@ import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { createFakeLedger, makeKit } from './__runner__/kit'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, any>
 const moduleOf = (name: string) => String(CATALOG[name]?.python_module ?? '')
 /** The mechanical rule: a partner-node file other than nodes_replicate.py. */
 const comfyBilled = (name: string) => /^comfy_api_nodes\.nodes_/.test(moduleOf(name)) && moduleOf(name) !== 'comfy_api_nodes.nodes_replicate'

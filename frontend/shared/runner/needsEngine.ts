@@ -419,13 +419,10 @@ export function notRunWords(classOf: ReadonlyMap<string, string>): string {
 }
 
 /**
- * Fix round 3 (I-1): a class the committed node catalogue
- * (server/native/objectInfo.baseline.json.gz) doesn't hold and Sailor doesn't
- * know: a custom node (one a saved project holds from an old local install).
- * Judged without the served /object_info: every catalogue class is a stock
- * class, runner-known, retired or editor-only (held to the catalogue by
- * tests/unit/runner-no-silent-engine.unit.spec.ts), so a class that is none
- * of these isn't in it.
+ * Fix round 3 (I-1): a class Sailor doesn't know at all: not stock, not one
+ * the runner takes, not retired, not editor-only — a custom node (one a saved
+ * project holds from an old local install). Judged without the served
+ * /object_info, so a catalogue that happens to list it changes nothing.
  */
 export function isCustomClass(classType: string): boolean {
   return !isStockClass(classType) && !runnerKnowsClass(classType) && !RETIRED_CLASSES.has(classType)
@@ -477,15 +474,17 @@ export const WORKFLOW_CANT_RUN_WORDS = 'Sailor can’t run this workflow yet.'
 export const NOTHING_TO_RUN_WORDS = 'No node here makes or changes anything. Wire a node that makes a result into a card, then run.'
 
 /**
- * LC8 (F4), C5: the refusal for a class neither the node catalogue the app
- * holds nor Sailor knows (the build can't read it), before anything is built
- * or sent, by its title: a custom node from an old local install. Sailor
- * doesn't run it, here and hosted alike. Null for a class Sailor knows (the
- * builder's own error stands).
+ * LC8 (F4), C5, C6: the refusal for a class the node catalogue the app holds
+ * doesn't list (the build can't read it), before anything is built or sent,
+ * by its title: a custom node from an old local install, or a stock class
+ * Sailor's catalogue no longer lists (C6 kept only the ones saved projects
+ * hold), with what to use instead where Sailor has it. Sailor doesn't run
+ * either, here and hosted alike. Null for a class Sailor runs, retired or
+ * editor-only (the builder's own error stands).
  */
 export function unknownClassRefusal(classType: string, title: string): RunRefusal | null {
-  if (!isCustomClass(classType)) return null
-  return { title: `“${title}” can’t run`, description: `“${title}”: ${NOT_RUN_WORDS}` }
+  if (!isCustomClass(classType) && !isStockClass(classType)) return null
+  return { title: `“${title}” can’t run`, description: notRunWords(new Map([[title, classType]])) }
 }
 
 interface WorkflowNodeLike { id: string | number; type?: string; title?: string }

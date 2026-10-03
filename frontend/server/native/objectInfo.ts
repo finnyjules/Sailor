@@ -1,29 +1,35 @@
 /**
- * `/object_info` — the node definitions — served by Sailor itself.
+ * `/object_info` — the node definitions — served by Sailor itself, from
+ * Sailor's own node catalogue (`server/assets/nodeCatalog.json.gz`). Step 4,
+ * C6: there is no engine and no saved engine copy; the catalogue file is the
+ * only source. It holds:
  *
- * Step 4, C5: there is no engine to ask. The saved copy of the engine's last
- * full catalog (`<storeDir('data')>/object_info.json`, file lists blanked,
- * written while the engine still ran) is served — or, where none exists, the
- * committed baseline `objectInfo.baseline.json.gz`, blanked the same way —
- * with every file-list combo it knows how to rebuild refreshed from disk, the
- * way ComfyUI built them on each request (C6 makes the catalogue Sailor's own
- * data file):
+ *   - every class the runner takes (shared/runner/eligibility.ts) and the
+ *     cards made in their own editor (the Timeline);
+ *   - every retired class (shared/runner/retired.ts), so an old project draws
+ *     its retired card and is refused by name;
+ *   - the few stock classes saved projects hold
+ *     (shared/runner/stockClasses.ts `CATALOGUED_STOCK_CLASSES`), so their
+ *     cards keep their names and settings and a run is refused naming them.
+ *
+ * Each entry keeps ComfyUI's `/object_info` shape, so the canvas reads it
+ * unchanged. Every file-list combo it knows how to rebuild is refreshed from
+ * disk on each request:
  *
  *   - the input-derived combos (`UPLOAD_INPUT_LISTS`): each node's own listing
- *     of `input/`, ported from its `INPUT_TYPES` / `define_schema`;
- *   - the model pickers (`MODEL_INPUT_LISTS`): `folder_paths.get_filename_list`
- *     over `models/*` plus `extra_model_paths.yaml`, with the same extensions,
- *     the legacy folder names, the recursive walk and the sort.
+ *     of `input/`;
+ *   - the LoRA pickers (`MODEL_INPUT_LISTS`): `models/loras` plus
+ *     `extra_model_paths.yaml`, with the same extensions, the recursive walk
+ *     and the sort as `folder_paths.get_filename_list`.
  *
- * Every other byte of the served catalog is left as it was saved, except
- * Sailor's model menus, laid over every body served (`withModelOverlay`).
+ * Every other byte of the served catalogue is left as it is in the file,
+ * except Sailor's model menus, laid over every body served (`withModelOverlay`).
  */
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { resolveEngineRoot } from '../utils/inputUploads'
-import { storeDir } from '../utils/dataDir'
 import { PY_ENCODING_SUFFIXES, PY_MIME_TOP, PY_SUFFIX_MAP } from './pyMimeTypes'
 import { isDir, isFile } from './paths'
 import { applyModelOverlay } from '../../shared/runner/modelMenus'
@@ -377,88 +383,16 @@ export function getFilenameList(t: FolderTable, folderName: string): string[] {
   return pySorted(out)
 }
 
-/** `VAELoader.vae_list` (nodes.py). */
-function vaeList(t: FolderTable): string[] {
-  const videoTaes = ['taehv', 'lighttaew2_2', 'lighttaew2_1', 'lighttaehy1_5', 'taeltx_2']
-  const vaes = getFilenameList(t, 'vae')
-  const approx = getFilenameList(t, 'vae_approx')
-  const seen = { sd1e: false, sd1d: false, sdxle: false, sdxld: false, sd3e: false, sd3d: false, f1e: false, f1d: false }
-  for (const v of approx) {
-    if (v.startsWith('taesd_decoder.')) seen.sd1d = true
-    else if (v.startsWith('taesd_encoder.')) seen.sd1e = true
-    else if (v.startsWith('taesdxl_decoder.')) seen.sdxld = true
-    else if (v.startsWith('taesdxl_encoder.')) seen.sdxle = true
-    else if (v.startsWith('taesd3_decoder.')) seen.sd3d = true
-    else if (v.startsWith('taesd3_encoder.')) seen.sd3e = true
-    // Crossed on purpose: nodes.py sets f1 "dec" on the encoder file and vice versa.
-    else if (v.startsWith('taef1_encoder.')) seen.f1d = true
-    else if (v.startsWith('taef1_decoder.')) seen.f1e = true
-    else {
-      for (const tae of videoTaes) {
-        if (v.startsWith(tae)) vaes.push(v)
-      }
-    }
-  }
-  if (seen.sd1d && seen.sd1e) vaes.push('taesd')
-  if (seen.sdxld && seen.sdxle) vaes.push('taesdxl')
-  if (seen.sd3d && seen.sd3e) vaes.push('taesd3')
-  if (seen.f1d && seen.f1e) vaes.push('taef1')
-  vaes.push('pixel_space')
-  return vaes
-}
-
 // ------------------------------------------------------- the combo tables
 
 /**
- * Model pickers: `Class.input` → the `get_filename_list` folder behind it
- * (plus the literal entries the node appends). Each row was read off the node's
- * own source; `native-object-info.unit.spec.ts` checks every row against the
- * committed baseline so a renamed node or input shows up as a failure.
+ * LoRA pickers: `Class.input` → the `get_filename_list` folder behind it (plus
+ * the literal entries the node appends). Each row was read off the node's own
+ * source (comfy_api_nodes/nodes_replicate.py); `native-object-info.unit.spec.ts`
+ * checks every row against the catalogue so a renamed node or input shows up
+ * as a failure.
  */
-export const MODEL_INPUT_LISTS: Record<string, { folder: string, append?: string[] } | 'vae_list'> = {
-  // nodes.py
-  'CheckpointLoader.config_name': { folder: 'configs' },
-  'CheckpointLoader.ckpt_name': { folder: 'checkpoints' },
-  'CheckpointLoaderSimple.ckpt_name': { folder: 'checkpoints' },
-  'unCLIPCheckpointLoader.ckpt_name': { folder: 'checkpoints' },
-  'LoraLoader.lora_name': { folder: 'loras' },
-  'LoraLoaderModelOnly.lora_name': { folder: 'loras' },
-  'VAELoader.vae_name': 'vae_list',
-  'ControlNetLoader.control_net_name': { folder: 'controlnet' },
-  'DiffControlNetLoader.control_net_name': { folder: 'controlnet' },
-  'UNETLoader.unet_name': { folder: 'diffusion_models' },
-  'CLIPLoader.clip_name': { folder: 'text_encoders' },
-  'DualCLIPLoader.clip_name1': { folder: 'text_encoders' },
-  'DualCLIPLoader.clip_name2': { folder: 'text_encoders' },
-  'CLIPVisionLoader.clip_name': { folder: 'clip_vision' },
-  'StyleModelLoader.style_model_name': { folder: 'style_models' },
-  'GLIGENLoader.gligen_name': { folder: 'gligen' },
-  // comfy_extras
-  'ImageOnlyCheckpointLoader.ckpt_name': { folder: 'checkpoints' },
-  'UpscaleModelLoader.model_name': { folder: 'upscale_models' },
-  'LatentUpscaleModelLoader.model_name': { folder: 'latent_upscale_models' },
-  'CreateHookLora.lora_name': { folder: 'loras' },
-  'CreateHookLoraModelOnly.lora_name': { folder: 'loras' },
-  'CreateHookModelAsLora.ckpt_name': { folder: 'checkpoints' },
-  'CreateHookModelAsLoraModelOnly.ckpt_name': { folder: 'checkpoints' },
-  'TripleCLIPLoader.clip_name1': { folder: 'text_encoders' },
-  'TripleCLIPLoader.clip_name2': { folder: 'text_encoders' },
-  'TripleCLIPLoader.clip_name3': { folder: 'text_encoders' },
-  'QuadrupleCLIPLoader.clip_name1': { folder: 'text_encoders' },
-  'QuadrupleCLIPLoader.clip_name2': { folder: 'text_encoders' },
-  'QuadrupleCLIPLoader.clip_name3': { folder: 'text_encoders' },
-  'QuadrupleCLIPLoader.clip_name4': { folder: 'text_encoders' },
-  'AudioEncoderLoader.audio_encoder_name': { folder: 'audio_encoders' },
-  'LoraLoaderBypass.lora_name': { folder: 'loras' },
-  'LoraLoaderBypassModelOnly.lora_name': { folder: 'loras' },
-  'ModelPatchLoader.name': { folder: 'model_patches' },
-  'PhotoMakerLoader.photomaker_model_name': { folder: 'photomaker' },
-  'HypernetworkLoader.hypernetwork_name': { folder: 'hypernetworks' },
-  'TrainLoraNode.existing_lora': { folder: 'loras', append: ['[None]'] },
-  'LTXVAudioVAELoader.ckpt_name': { folder: 'checkpoints' },
-  'LTXAVTextEncoderLoader.text_encoder': { folder: 'text_encoders' },
-  'LTXAVTextEncoderLoader.ckpt_name': { folder: 'checkpoints' },
-  // comfy_api_nodes/nodes_replicate.py
+export const MODEL_INPUT_LISTS: Record<string, { folder: string, append?: string[] }> = {
   'FluxLoRARemoteNode.lora_name': { folder: 'loras', append: ['[None]'] },
   'FluxMultiLoRARemoteNode.lora_a': { folder: 'loras', append: ['[None]'] },
   'FluxMultiLoRARemoteNode.lora_b': { folder: 'loras', append: ['[None]'] },
@@ -473,13 +407,9 @@ interface InputListing {
   names: string[]
   /** The same names filtered by `os.path.isfile`. */
   files: string[]
-  /** `Load3D`'s rglob of `input/3d`, relative to input/. */
-  load3d: () => string[]
-  /** `folder_paths.get_input_subfolders()`. */
-  subfolders: () => string[]
 }
 
-const EMPTY_INPUT: InputListing = { names: [], files: [], load3d: () => [], subfolders: () => [] }
+const EMPTY_INPUT: InputListing = { names: [], files: [] }
 
 function listInput(inputDir: string): InputListing {
   const entries = listdir(inputDir)
@@ -487,71 +417,23 @@ function listInput(inputDir: string): InputListing {
   return {
     names: entries.map(e => e.name),
     files: entries.filter(e => direntIsFile(inputDir, e)).map(e => e.name),
-    load3d: () => load3dFiles(inputDir),
-    subfolders: () => inputSubfolders(inputDir),
   }
-}
-
-const LOAD_3D_SUFFIXES = new Set(['.gltf', '.glb', '.obj', '.fbx', '.stl', '.spz', '.splat', '.ply', '.ksplat'])
-
-/** `Path.suffix`. */
-function pathSuffix(name: string): string {
-  const i = name.lastIndexOf('.')
-  return i > 0 && i < name.length - 1 ? name.slice(i) : ''
-}
-
-/** Load3D: `Path(input/3d).rglob("*")` (symlinked folders not descended), relative to input/. */
-function load3dFiles(inputDir: string): string[] {
-  const out: string[] = []
-  const walk = (dir: string, rel: string) => {
-    const entries = listdir(dir)
-    if (!entries) return
-    for (const e of entries) {
-      const r = `${rel}/${e.name}`
-      if (LOAD_3D_SUFFIXES.has(pathSuffix(e.name).toLowerCase())) out.push(r)
-      if (e.isDirectory()) walk(path.join(dir, e.name), r)
-    }
-  }
-  walk(path.join(inputDir, '3d'), '3d')
-  return pySorted(out)
-}
-
-/**
- * `folder_paths.get_input_subfolders()`: every folder `os.walk(input_dir)`
- * visits (symlinked folders are not followed; an unreadable one is skipped),
- * relative, `/`-separated, sorted, the input folder itself left out.
- */
-export function inputSubfolders(inputDir: string): string[] {
-  const out: string[] = []
-  const walk = (dir: string, rel: string) => {
-    const entries = listdir(dir)
-    if (!entries) return
-    if (rel) out.push(rel)
-    for (const e of entries) {
-      if (e.isDirectory()) walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name)
-    }
-  }
-  walk(inputDir, '')
-  return pySorted(out)
 }
 
 /**
  * Input-derived combos: `Class.input` → the node's own listing of `input/`,
  * and whether its `default` is seeded from that listing. Ported one by one:
- * nodes.py LoadImage / LoadImageMask, nodes_image.py Image, nodes_audio.py
- * LoadAudio / Audio, nodes_load_3d.py Load3D, nodes_video.py LoadVideo /
- * Video, nodes_video_effects.py LoadVideoFrames / SaveVideoFrames,
- * nodes_timeline.py Timeline, nodes_video_pro.py AudioWaveform, and
- * nodes_dataset.py's two folder pickers (`get_input_subfolders`).
- * (LoadImageOutput and Painter carry the upload flag but no inline list.)
+ * nodes.py LoadImage, nodes_image.py Image, nodes_audio.py LoadAudio / Audio,
+ * nodes_video.py LoadVideo / Video, nodes_video_effects.py LoadVideoFrames /
+ * SaveVideoFrames, nodes_timeline.py Timeline, nodes_video_pro.py
+ * AudioWaveform. (LoadImageOutput and Painter carry the upload flag but no
+ * inline list.)
  */
 export const UPLOAD_INPUT_LISTS: Record<string, { list: (l: InputListing) => string[], seedsDefault?: true }> = {
   'LoadImage.image': { list: l => pySorted(pyFilterFilesContentTypes(l.files, ['image'])) },
-  'LoadImageMask.image': { list: l => pySorted(l.files) },
   'Image.image': { list: l => ['', ...pySorted(pyFilterFilesContentTypes(pySorted(l.files), ['image']))] },
   'LoadAudio.audio': { list: l => pySorted(pyFilterFilesContentTypes(l.names, ['audio', 'video'])) },
   'Audio.audio': { list: l => ['', ...pySorted(pyFilterFilesContentTypes(l.names, ['audio', 'video']))] },
-  'Load3D.model_file': { list: l => l.load3d() },
   'LoadVideo.file': { list: l => pySorted(pyFilterFilesContentTypes(l.files, ['video'])) },
   'Video.file': { list: l => ['', ...pySorted(pyFilterFilesContentTypes(l.files, ['video']))] },
   'LoadVideoFrames.file': { list: l => pySorted(pyFilterFilesContentTypes(l.files, ['video'])) },
@@ -564,16 +446,7 @@ export const UPLOAD_INPUT_LISTS: Record<string, { list: (l: InputListing) => str
     },
     seedsDefault: true,
   },
-  'LoadImageDataSetFromFolder.folder': { list: l => l.subfolders() },
-  'LoadImageTextDataSetFromFolder.folder': { list: l => l.subfolders() },
 }
-
-/**
- * The input-folder combos that are NOT upload-flagged, so the hosted scrub's
- * flag rule misses them: they list `input/`'s subfolders, which are shared
- * across tenants. Hosted empties them (engineGate.ts scrubObjectInfo).
- */
-export const INPUT_FOLDER_INPUTS = ['LoadImageDataSetFromFolder.folder', 'LoadImageTextDataSetFromFolder.folder']
 
 /** Replace a combo's option list in place — legacy `[[...], opts]` or v2 `["COMBO", {options}]`. */
 export function setComboOptions(spec: unknown, options: string[], seedsDefault: boolean): void {
@@ -603,7 +476,7 @@ export function findSpec(catalog: Catalog, key: string): unknown {
 /**
  * Rebuild, in place, every file-list combo in `catalog` that ComfyUI lists
  * from disk and that this module knows how to list: the input-derived ones
- * from `<root>/input`, the model pickers from `<root>/models` (+ extra paths).
+ * from `<root>/input`, the LoRA pickers from `<root>/models` (+ extra paths).
  * A null root lists nothing — exactly what ComfyUI shows for empty folders.
  */
 export function refreshFileLists(catalog: Catalog, root: string | null): Catalog {
@@ -620,102 +493,73 @@ export function refreshFileLists(catalog: Catalog, root: string | null): Catalog
     const spec = findSpec(catalog, key)
     if (spec === undefined) continue
     table ??= root ? modelFolderTable(root) : new Map()
-    const cacheKey = rule === 'vae_list' ? '\0vae_list' : rule.folder
-    let files = lists.get(cacheKey)
+    let files = lists.get(rule.folder)
     if (!files) {
-      files = rule === 'vae_list' ? vaeList(table) : getFilenameList(table, rule.folder)
-      lists.set(cacheKey, files)
+      files = getFilenameList(table, rule.folder)
+      lists.set(rule.folder, files)
     }
-    setComboOptions(spec, rule === 'vae_list' ? [...files] : [...files, ...(rule.append ?? [])], false)
+    setComboOptions(spec, [...files, ...(rule.append ?? [])], false)
   }
   return catalog
 }
 
 /**
  * Every refreshed combo set to what ComfyUI shows for empty folders — the form
- * the baseline is committed in and the saved copy is written in, so neither
- * holds this machine's (or any tenant's) file names.
+ * the catalogue is committed in, so it holds no machine's (or tenant's) file
+ * names.
  */
 export function blankFileLists(catalog: Catalog): Catalog {
   return refreshFileLists(catalog, null)
 }
 
-// ------------------------------------------------------- stored catalogs
+// ------------------------------------------------------- the node catalogue
 
-let cacheFileOverride: string | undefined
-let baselineFileOverride: string | undefined
+let catalogFileOverride: string | undefined
 
-/** Tests: redirect the saved copy (never the real `.data/`). */
-export function __setObjectInfoCacheFileForTests(file: string | undefined): void { cacheFileOverride = file }
-/** Tests: point the committed baseline elsewhere. */
-export function __setObjectInfoBaselineFileForTests(file: string | undefined): void { baselineFileOverride = file }
+/** Tests: point the node catalogue elsewhere. */
+export function __setNodeCatalogFileForTests(file: string | undefined): void { catalogFileOverride = file }
 
-/** Where the engine's last catalog was saved. Null inside a test run that has not redirected it. */
-export function objectInfoCacheFile(): string | null {
-  if (cacheFileOverride !== undefined) return cacheFileOverride
-  if (process.env.VITEST) return null
-  return path.join(storeDir('data'), 'object_info.json')
-}
-
-const BASELINE_REL = path.join('server', 'native', 'objectInfo.baseline.json.gz')
-const warnedMissingBaseline = new Set<string>()
+/** The catalogue file, relative to the frontend folder. */
+export const NODE_CATALOG_REL = path.join('server', 'assets', 'nodeCatalog.json.gz')
+const warnedMissingCatalog = new Set<string>()
 
 /**
- * The committed baseline, first that exists of: `SAILOR_OBJECT_INFO_BASELINE`,
- * `<engine root>/frontend/server/native/…`, `<cwd>/server/native/…`. Null (with
+ * The node catalogue file, first that exists of: `SAILOR_NODE_CATALOG`,
+ * `<data root>/frontend/server/assets/…`, `<cwd>/server/assets/…`. Null (with
  * one warning per set of candidates) when none does.
  */
-export function objectInfoBaselineFile(): string | null {
-  if (baselineFileOverride !== undefined) return baselineFileOverride
+export function nodeCatalogFile(): string | null {
+  if (catalogFileOverride !== undefined) return catalogFileOverride
   const root = resolveEngineRoot()
   const candidates = [
-    process.env.SAILOR_OBJECT_INFO_BASELINE || null,
-    root ? path.join(root, 'frontend', BASELINE_REL) : null,
-    path.join(process.cwd(), BASELINE_REL),
+    process.env.SAILOR_NODE_CATALOG || null,
+    root ? path.join(root, 'frontend', NODE_CATALOG_REL) : null,
+    path.join(process.cwd(), NODE_CATALOG_REL),
   ].filter((c): c is string => Boolean(c))
   const found = candidates.find(c => isFile(c))
   if (found) return found
   const key = candidates.join('\n')
-  if (!warnedMissingBaseline.has(key)) {
-    warnedMissingBaseline.add(key)
-    console.warn(`[native] object_info: no node-list baseline found (looked in ${candidates.join(', ')}); set SAILOR_OBJECT_INFO_BASELINE`)
+  if (!warnedMissingCatalog.has(key)) {
+    warnedMissingCatalog.add(key)
+    console.warn(`[native] object_info: no node catalogue found (looked in ${candidates.join(', ')}); set SAILOR_NODE_CATALOG`)
   }
   return null
 }
 
-let savedMemo: { file: string, mtimeMs: number, size: number, value: Catalog } | null = null
-let baselineMemo: { file: string, value: Catalog } | null = null
+let catalogMemo: { file: string, value: Catalog } | null = null
 
 function isCatalog(v: unknown): v is Catalog {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 }
 
-function readSaved(): Catalog | null {
-  const file = objectInfoCacheFile()
+function readCatalog(): Catalog | null {
+  const file = nodeCatalogFile()
   if (!file) return null
-  let st: fs.Stats
-  try { st = fs.statSync(file) }
-  catch { return null }
-  if (savedMemo && savedMemo.file === file && savedMemo.mtimeMs === st.mtimeMs && savedMemo.size === st.size) return savedMemo.value
-  try {
-    const value = JSON.parse(fs.readFileSync(file, 'utf8'))
-    if (!isCatalog(value)) return null
-    savedMemo = { file, mtimeMs: st.mtimeMs, size: st.size, value }
-    return value
-  }
-  catch {
-    return null
-  }
-}
-
-function readBaseline(): Catalog | null {
-  const file = objectInfoBaselineFile()
-  if (!file) return null
-  if (baselineMemo?.file === file) return baselineMemo.value
+  if (catalogMemo?.file === file) return catalogMemo.value
   try {
     const value = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'))
     if (!isCatalog(value)) return null
-    baselineMemo = { file, value }
+    catalogMemo = { file, value }
     return value
   }
   catch {
@@ -725,16 +569,14 @@ function readBaseline(): Catalog | null {
 
 /**
  * R11.9a fix round 1 (m5): a node class's display name, as the canvas shows it
- * (the saved copy of object_info, else the committed baseline), for naming a
- * node in a refusal when the person gave it no title. Null when unknown.
+ * (from the node catalogue), for naming a node in a refusal when the person
+ * gave it no title. Null when unknown.
  */
 export function objectInfoDisplayName(classType: string): string | null {
-  for (const catalog of [readSaved(), readBaseline()]) {
-    const entry = catalog && Object.prototype.hasOwnProperty.call(catalog, classType) ? (catalog as Record<string, { display_name?: unknown }>)[classType] : undefined
-    const name = typeof entry?.display_name === 'string' ? entry.display_name.trim() : ''
-    if (name) return name
-  }
-  return null
+  const catalog = readCatalog()
+  const entry = catalog && Object.prototype.hasOwnProperty.call(catalog, classType) ? (catalog as Record<string, { display_name?: unknown }>)[classType] : undefined
+  const name = typeof entry?.display_name === 'string' ? entry.display_name.trim() : ''
+  return name || null
 }
 
 // ------------------------------------------------------------ the route
@@ -754,53 +596,46 @@ export function matchObjectInfoRoute(p: string, method: string, decode: (seg: st
   return verb === 'GET' ? { kind: 'route', node } : { kind: 'badMethod' }
 }
 
-export type ObjectInfoBody = { source: 'saved' | 'baseline', body: Catalog }
-
 /**
- * The stored catalog for `node` (all of it when null), refreshed from disk.
- * Null when there is no saved copy and no baseline.
+ * The catalogue's entry for `node` (all of it when null), file lists
+ * refreshed from disk. Null when the catalogue file can't be read.
  */
-export function storedObjectInfoBody(node: string | null): ObjectInfoBody | null {
-  const saved = readSaved()
-  const stored = saved ?? readBaseline()
+export function storedObjectInfoBody(node: string | null): { body: Catalog } | null {
+  const stored = readCatalog()
   if (!stored) return null
   let body: Catalog
   if (node === null) body = structuredClone(stored)
   else body = Object.prototype.hasOwnProperty.call(stored, node) ? { [node]: structuredClone(stored[node]) } : {}
   const root = resolveEngineRoot()
   if (root) refreshFileLists(body, root)
-  return { source: saved ? 'saved' : 'baseline', body }
+  return { body }
 }
 
 /**
- * The stored node catalog as saved (the engine's last full catalog, else the
- * committed baseline), file lists not refreshed; null when there is none.
- * Read-only: the hosted /prompt gate reads each input's type from it
- * (hostedPrompt.ts, Task G1 fix round 1). Memoised by readSaved / readBaseline.
+ * The node catalogue as committed, file lists not refreshed; null when it
+ * can't be read. Read-only: the run checks read each class's outputs from it
+ * (server/utils/blockedModels.ts). Memoised by readCatalog.
  */
 export function storedNodeCatalog(): Readonly<Catalog> | null {
-  return readSaved() ?? readBaseline()
+  return readCatalog()
 }
 
 export const NO_NODE_DEFINITIONS = {
   status: 503,
-  body: { error: 'Sailor can\'t load the node list: no saved copy was found.' },
+  body: { error: 'Sailor can’t load the node list right now.' },
 }
 
 /**
  * Sailor's model menus laid over a body about to be served
  * (shared/runner/modelMenus.ts): each covered dropdown's options, hidden list
  * and default, each gallery's default, for the runner families switched on
- * now. Copy on write: the saved copy and the memoised catalogs stay as they were.
+ * now. Copy on write: the memoised catalogue stays as it was.
  */
 export function withModelOverlay(body: Catalog): Catalog {
   return applyModelOverlay(body, runnerFamilies())
 }
 
-/**
- * The local route: the stored catalog, refreshed from disk and overlaid, else
- * 503 (step 4, C5: no engine to ask).
- */
+/** The local route: the catalogue, refreshed from disk and overlaid, else 503. */
 export async function runObjectInfo(_rawPath: string, _canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown, headers?: Record<string, string> }> {
   const got = storedObjectInfoBody(node)
   if (!got) return NO_NODE_DEFINITIONS

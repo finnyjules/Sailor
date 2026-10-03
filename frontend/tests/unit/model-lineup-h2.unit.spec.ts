@@ -73,7 +73,7 @@ const ALL = new Set<RunnerFamily>(RUNNER_FAMILIES)
 
 /** The committed baseline: ComfyUI's own node definitions, Python's defaults. */
 function baseline(): Record<string, any> {
-  return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+  return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
 }
 const modelSpec = (body: any, cls: string) => body[cls].input.required.model
 const cfg = (body: any, cls: string) => modelSpec(body, cls)[1]

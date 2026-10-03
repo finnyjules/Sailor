@@ -21,7 +21,7 @@ import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
 import { decodeSegment, dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
-import { INPUT_FOLDER_INPUTS, findSpec, matchObjectInfoRoute, setComboOptions, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
+import { matchObjectInfoRoute, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 // Review C2's exact mirror of folder_paths.annotated_filepath() lives in
@@ -236,10 +236,9 @@ export function scrubObjectInfo(catalog: unknown, ownedFilenames: string[] = [])
       }
     }
   }
-  // A5 fix round 1: the dataset folder pickers list input/'s SUBFOLDERS —
-  // shared across tenants, and carrying no upload flag, so the rule above
-  // misses them. Hosted doesn't offer dataset folders; they are emptied.
-  for (const key of INPUT_FOLDER_INPUTS) setComboOptions(findSpec(out, key), [], false)
+  // Step 4, C6: the dataset folder pickers (input/'s subfolders, no upload
+  // flag) left the node catalogue with their classes, so nothing served lists
+  // a folder any more.
   return out
 }
 
@@ -312,8 +311,8 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   const p = nativeEnginePath(event.path)
   const match = p ? matchObjectInfoRoute(p, 'GET', decodeSegment) : null
   if (!p || match?.kind !== 'route') throw createError({ statusCode: 404, message: 'Not Found' })
-  // Step 3, R10.9: hosted never asks the engine — the saved copy, else the
-  // committed baseline, refreshed from disk (objectInfo.ts).
+  // Step 3, R10.9; step 4, C6: hosted never asks the engine — Sailor's node
+  // catalogue, refreshed from disk (objectInfo.ts).
   const owned = await ownedInputFilenames(userId)
   const served = storedObjectInfoBody(match.node)
   if (!served?.body) throw createError({ statusCode: 503, message: 'Sailor can’t load the node list right now.' })

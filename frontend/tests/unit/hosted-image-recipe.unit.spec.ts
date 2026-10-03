@@ -171,7 +171,7 @@ describe('.dockerignore', () => {
       'start.sh',
       'frontend/server/runner/video/fonts/DejaVuSans-Bold.ttf',
       'frontend/server/runner/effects/asciiGlyphs.bin',
-      'frontend/server/native/objectInfo.baseline.json.gz',
+      'frontend/server/assets/nodeCatalog.json.gz',
       'frontend/app/data/house-styles.json',
       'frontend/server/utils/inputUploads.ts',
       'blueprints/Brightness and Contrast.json',

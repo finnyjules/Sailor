@@ -848,7 +848,7 @@ describe('rule 8: the families-off invariant', () => {
   projectsIt('over every saved project graph, what the runner takes and the needs-the-engine lists are as before R5.2', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
     let graphs = 0
     let gates = 0
     for (const uuid of readdirSync(PROJECTS).sort()) {

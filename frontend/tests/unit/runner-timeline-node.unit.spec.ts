@@ -20,7 +20,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { createFakeLedger, makeKit } from './__runner__/kit'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, any>
 const IS_OUTPUT = outputClassesOf(CATALOG)!
 const WORDS = 'Export this timeline from the Timeline editor.'
 

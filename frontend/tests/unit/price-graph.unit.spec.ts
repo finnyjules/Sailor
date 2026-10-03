@@ -867,7 +867,7 @@ describe('Flux Dev + LoRA and Flux Dev + LoRAs on the ComfyUI path (R3.13)', () 
 // R3.8 fix round 2: a node no output node reads is never run by ComfyUI (nor the runner), so the
 // hosted ComfyUI meter prices only what runs — the runner's own closure (validate.ts executedPart).
 describe('only what an output reads is priced (R3.8 fix round 2)', () => {
-  const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { output_node?: boolean }>
+  const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, { output_node?: boolean }>
   const isOutput = outputClassesOf(CATALOG)!
   const gen = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
   const card = { class_type: 'Image', inputs: { image: '', export: false, images: ['g', 0], batch_index: -1 } }

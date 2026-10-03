@@ -251,7 +251,7 @@ describe('fix round 1: the Image card’s export (nodes_image.py Image.process)'
 
 // ── Fix round 1: the Text card showing a LoRA node's log (on NEEDS_LOCAL_ENGINE until step 4, C4) ──
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, never>
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, never>
 /** Flux Dev + LoRAs as saved before slots C and D (de3b2ec3's): its four required settings missing, as Python validates it. */
 const oldMultiLora = () => ({ class_type: 'FluxMultiLoRARemoteNode', inputs: { prompt: 'char_jene_1', lora_a: 'Jene.safetensors', lora_a_url: '', scale_a: 1, lora_b: '[None]', lora_b_url: '', scale_b: 0.95, aspect_ratio: '1:1', num_inference_steps: 28, guidance: 3.5, seed: 6, prompt_strength: 0.8 } })
 const multiLora = () => ({ ...oldMultiLora(), inputs: { ...oldMultiLora().inputs, lora_c: '[None]', lora_c_url: '', scale_c: 0.7, lora_d: '[None]', lora_d_url: '', scale_d: 0.6 } })

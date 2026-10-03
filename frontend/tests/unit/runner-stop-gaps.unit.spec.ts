@@ -179,19 +179,18 @@ describe('R11.9: every named stop-gap, one case per row', () => {
 
   // Row 28 (decision 4): R10.2 closed the canvas route; R10.6 closed the rest; step 4, C5 removed the local
   // engine: a stock class is refused plainly everywhere, and node search offers none, here or hosted, nor a
-  // blueprint. A blueprint is judged class by class like any graph. The cases live in their own specs, which
-  // must keep them.
+  // blueprint; C6 removed the blueprint list (every blueprint holds a class Sailor doesn't run). The cases
+  // live in their own specs, which must keep them.
   it('row 28 (R10.2, R10.6, C5): stock classes and blueprints: never offered, a stock class refused plainly', () => {
     expect(sailorOffersClass('KSampler')).toBe(false)
     expect(sailorOffersClass('GenerateImageNode')).toBe(true)
     expect(runRefusal([{ prompt: { k: { class_type: 'KSampler', inputs: {} } }, titleOf: () => 'Sampler' }], { runnerOn: true, families: EVERY }))
       .toEqual({ title: '“Sampler” can’t run', description: `“Sampler”: ${NOT_RUN_WORDS} Use Generate an image instead.` })
     const proven: [string, string][] = [
-      ['native-global-subgraphs.unit.spec.ts', 'equals ComfyUI’s own list and entries for the repo’s blueprints'],
-      ['native-global-subgraphs.unit.spec.ts', 'each blueprint: on Sailor when the runner takes it; else plain words, here and hosted alike'],
-      ['native-global-subgraphs.unit.spec.ts', 'node search lists only the classes the runner takes, plus the cards, here and hosted'],
-      ['native-global-subgraphs.unit.spec.ts', 'the sidebar fetches no blueprint and shows no blueprint tab or section'],
-      ['engine-path-alias.unit.spec.ts', 'R10.6: the blueprint list is empty in every spelling, and one blueprint is refused, never proxied'],
+      ['blueprints-retired.unit.spec.ts', 'every blueprint in the repo holds a class Sailor doesn’t run'],
+      ['blueprints-retired.unit.spec.ts', 'node search lists only the classes the runner takes, plus the cards, here and hosted'],
+      ['blueprints-retired.unit.spec.ts', 'the sidebar fetches no blueprint and shows no blueprint tab or section'],
+      ['engine-path-alias.unit.spec.ts', 'C6: the blueprint list is gone: a plain 404 in every spelling and verb, never proxied'],
       ['runner-no-silent-engine.unit.spec.ts', 'R10.2'],
     ]
     for (const [file, name] of proven) expect(readFileSync(join(__dirname, file), 'utf8').includes(name), `${file} — “${name}”`).toBe(true)

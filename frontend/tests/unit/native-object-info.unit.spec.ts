@@ -1,11 +1,10 @@
 /**
  * GET /object_info served by Sailor (server/native/objectInfo.ts), driven
- * through the native dispatcher in a real h3 app against a temp engine root.
+ * through the native dispatcher in a real h3 app against a temp data root.
  *
- *   the saved copy (the engine's last full catalog, written while it still
- *   ran), else the committed baseline, with the upload-widget and model-picker
- *   lists rebuilt from disk — step 4, C5: there is no engine to ask;
- *   hosted → the tenant scrub still applies to whichever body is served.
+ *   Sailor's node catalogue (step 4, C6: the only source — no engine, no
+ *   saved engine copy), with the upload-widget and LoRA-picker lists rebuilt
+ *   from disk; hosted → the tenant scrub still applies.
  *
  * `fetch` is stubbed in every test, so nothing here can reach anything.
  */
@@ -19,20 +18,22 @@ import { __setInputUploadsDbForTests, __setInputUploadsEngineRootForTests } from
 import { nativeEngineRoute } from '../../server/native/router'
 import {
   MODEL_INPUT_LISTS,
+  NODE_CATALOG_REL,
   blankFileLists,
-  inputSubfolders,
-  objectInfoBaselineFile,
+  nodeCatalogFile,
   UPLOAD_INPUT_LISTS,
-  __setObjectInfoBaselineFileForTests,
-  __setObjectInfoCacheFileForTests,
+  __setNodeCatalogFileForTests,
   modelFolderTable,
   getFilenameList,
-  objectInfoCacheFile,
+  objectInfoDisplayName,
   parseExtraModelPathsYaml,
   pyFilterFilesContentTypes,
   pyGuessTopType,
 } from '../../server/native/objectInfo'
 import { handleHostedObjectInfo, UPLOAD_FLAG_KEYS } from '../../server/utils/engineGate'
+import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, RUNNER_SPECIAL_CLASSES } from '#shared/runner/eligibility'
+import { EDITOR_ONLY_ADVICE_OF, RETIRED_CLASSES } from '#shared/runner/retired'
+import { CATALOGUED_STOCK_CLASSES, STOCK_CLASSES } from '#shared/runner/stockClasses'
 
 let root: string
 let tmp: string
@@ -57,21 +58,21 @@ async function call(method: string, p: string) {
 
 const engineAnswers = (body: unknown) => engineFetch.mockImplementation(async () => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }))
 
-/** A catalog shaped like ComfyUI's: legacy and v2 combos, stale lists everywhere. */
+/**
+ * A catalog shaped like ComfyUI's: legacy and v2 combos, stale lists
+ * everywhere. LoraLoader, CheckpointLoaderSimple and the dataset folder picker
+ * are classes no refresh row names any more (C6): they are served as written.
+ */
 function staleCatalog(): Record<string, any> {
   return {
     LoadImage: { input: { required: { image: [['gone.png'], { image_upload: true }] } }, output: ['IMAGE', 'MASK'] },
-    LoadImageMask: { input: { required: { image: [['gone.png'], { image_upload: true }], channel: [['alpha', 'red', 'green', 'blue']] } } },
     Image: { input: { required: { image: [['', 'gone.png'], { image_upload: true, default: '' }] } } },
     LoadAudio: { input: { required: { audio: ['COMBO', { multiselect: false, audio_upload: true, options: ['gone.mp3'] }] } } },
     LoadVideo: { input: { required: { file: ['COMBO', { multiselect: false, video_upload: true, options: ['gone.mp4'] }] } } },
     Timeline: { input: { required: { audio_file: ['COMBO', { default: '(none)', multiselect: false, audio_upload: true, options: ['(none)', 'gone.mp3'] }] } } },
     AudioWaveform: { input: { required: { audio_file: ['COMBO', { default: 'gone.mp3', multiselect: false, audio_upload: true, options: ['gone.mp3'] }] } } },
-    Load3D: { input: { required: { model_file: ['COMBO', { multiselect: false, file_upload: true, options: [] }] } } },
     LoraLoader: { input: { required: { model: ['MODEL'], lora_name: [['old.safetensors'], { tooltip: 'The name of the LoRA.' }] } } },
-    CheckpointLoaderSimple: { input: { required: { ckpt_name: [['old.ckpt'], { tooltip: 'x' }] } } },
-    VAELoader: { input: { required: { vae_name: [['pixel_space']] } } },
-    UNETLoader: { input: { required: { unet_name: [[]], weight_dtype: [['default', 'fp8_e4m3fn']] } } },
+    CheckpointLoaderSimple: { input: { required: { ckpt_name: [['old.ckpt'], { tooltip: 'x' }] } }, display_name: 'Load Checkpoint' },
     FluxLoRARemoteNode: { input: { required: { lora_name: ['COMBO', { sailor_widget: 'lora_picker', default: '[None]', multiselect: false, options: ['old.safetensors', '[None]'] }] } } },
     KSampler: { input: { required: { sampler_name: [['euler', 'dpmpp_2m']] } }, output: ['LATENT'] },
     LoadImageDataSetFromFolder: { input: { required: { folder: ['COMBO', { tooltip: 'The folder to load images from.', multiselect: false, options: ['old_dataset'] }] } } },
@@ -84,10 +85,10 @@ function write(rel: string, data = 'x') {
   fs.writeFileSync(p, data)
 }
 
-function writeBaseline(catalog: unknown): string {
-  const file = path.join(tmp, 'baseline.json.gz')
+function writeCatalog(catalog: unknown): string {
+  const file = path.join(tmp, 'nodeCatalog.json.gz')
   fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(catalog)))
-  __setObjectInfoBaselineFileForTests(file)
+  __setNodeCatalogFileForTests(file)
   return file
 }
 
@@ -96,7 +97,6 @@ beforeEach(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'native-object-info-store-')))
   for (const d of ['input', 'output', 'user', 'models']) fs.mkdirSync(path.join(root, d))
   __setInputUploadsEngineRootForTests(root)
-  __setObjectInfoCacheFileForTests(path.join(tmp, 'data', 'object_info.json'))
   vi.stubGlobal('fetch', engineFetch)
   engineFetch.mockReset()
   engineFetch.mockRejectedValue(new TypeError('fetch failed'))
@@ -104,8 +104,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   __setInputUploadsEngineRootForTests(undefined)
-  __setObjectInfoBaselineFileForTests(undefined)
-  __setObjectInfoCacheFileForTests(undefined)
+  __setNodeCatalogFileForTests(undefined)
   fs.rmSync(root, { recursive: true, force: true })
   fs.rmSync(tmp, { recursive: true, force: true })
 })
@@ -127,58 +126,53 @@ function populateDisk() {
 
 // ---------------------------------------------------------------- engine down
 
-describe('the baseline, refreshed from disk (C5: no engine)', () => {
-  it('rebuilds upload and model lists and leaves everything else alone', async () => {
-    writeBaseline(staleCatalog())
+describe('the catalogue, refreshed from disk (C5: no engine; C6: the only source)', () => {
+  it('rebuilds upload and LoRA lists and leaves everything else alone', async () => {
+    writeCatalog(staleCatalog())
     populateDisk()
     const r = await call('GET', '/object_info')
     expect(r.status).toBe(200)
     const b = r.body
     expect(b.LoadImage.input.required.image).toEqual([['a.jpg', 'b.png'], { image_upload: true }])
-    expect(b.LoadImageMask.input.required.image[0]).toEqual(['a.jpg', 'b.png', 'clip.mp4', 'notes.txt', 'song.mp3', '.DS_Store'].sort())
-    expect(b.LoadImageMask.input.required.channel).toEqual([['alpha', 'red', 'green', 'blue']])
     expect(b.Image.input.required.image).toEqual([['', 'a.jpg', 'b.png'], { image_upload: true, default: '' }])
     expect(b.LoadAudio.input.required.audio[1].options).toEqual(['clip.mp4', 'song.mp3'])
     expect(b.LoadVideo.input.required.file[1].options).toEqual(['clip.mp4'])
     expect(b.Timeline.input.required.audio_file[1]).toMatchObject({ default: '(none)', options: ['(none)', 'song.mp3'] })
     expect(b.AudioWaveform.input.required.audio_file[1]).toMatchObject({ default: 'song.mp3', options: ['song.mp3'] })
-    expect(b.Load3D.input.required.model_file[1].options).toEqual(['3d/chair.GLB', '3d/sub/table.obj'])
-    expect(b.LoraLoader.input.required.lora_name).toEqual([['sub/a.pt', 'z.safetensors'], { tooltip: 'The name of the LoRA.' }])
-    expect(b.LoraLoader.input.required.model).toEqual(['MODEL'])
-    expect(b.CheckpointLoaderSimple.input.required.ckpt_name[0]).toEqual(['m.ckpt'])
-    expect(b.UNETLoader.input.required.unet_name[0]).toEqual(['d.sft', 'u.safetensors'])
-    expect(b.UNETLoader.input.required.weight_dtype).toEqual([['default', 'fp8_e4m3fn']])
-    expect(b.VAELoader.input.required.vae_name[0]).toEqual(['v.safetensors', 'taehv.pth', 'taesd', 'pixel_space'])
     expect(b.FluxLoRARemoteNode.input.required.lora_name[1]).toMatchObject({ default: '[None]', options: ['sub/a.pt', 'z.safetensors', '[None]'] })
-    expect(b.LoadImageDataSetFromFolder.input.required.folder[1].options)
-      .toEqual(['3d', '3d/sub', 'folder.png', 'lora_dataset_1', 'lora_dataset_1/nested', 'lora_dataset_2'])
-    expect(b.KSampler).toEqual(staleCatalog().KSampler)
+    // C6: the stock pickers and the dataset folders are no refresh row's: served as written, never listed from disk.
+    for (const c of ['KSampler', 'LoraLoader', 'CheckpointLoaderSimple', 'LoadImageDataSetFromFolder']) expect(b[c], c).toEqual(staleCatalog()[c])
     expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
   })
 
   it('an empty input folder gives the lists ComfyUI gives', async () => {
-    writeBaseline(staleCatalog())
+    writeCatalog(staleCatalog())
     const b = (await call('GET', '/object_info')).body
     expect(b.LoadImage.input.required.image[0]).toEqual([])
     expect(b.Image.input.required.image[0]).toEqual([''])
     expect(b.AudioWaveform.input.required.audio_file[1]).toMatchObject({ default: '(no audio found)', options: ['(no audio found)'] })
-    expect(b.LoraLoader.input.required.lora_name[0]).toEqual([])
-    expect(b.LoadImageDataSetFromFolder.input.required.folder[1].options).toEqual([])
+    expect(b.FluxLoRARemoteNode.input.required.lora_name[1].options).toEqual(['[None]'])
   })
 
-  it('prefers the saved copy over the baseline', async () => {
-    writeBaseline(staleCatalog())
-    const saved = { OnlyInSaved: { input: { required: {} } }, LoraLoader: staleCatalog().LoraLoader }
-    fs.mkdirSync(path.join(tmp, 'data'))
-    fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(saved))
-    write('models/loras/new.safetensors')
+  it('never serves a saved engine copy (C6): the catalogue is the only source', async () => {
+    writeCatalog(staleCatalog())
+    const dataDir = path.join(root, 'frontend', '.data')
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(path.join(dataDir, 'object_info.json'), JSON.stringify({ OnlyInSaved: { input: { required: {} } } }))
     const b = (await call('GET', '/object_info')).body
-    expect(Object.keys(b)).toEqual(['OnlyInSaved', 'LoraLoader'])
-    expect(b.LoraLoader.input.required.lora_name[0]).toEqual(['new.safetensors'])
+    expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
+    expect((await call('GET', '/object_info/OnlyInSaved')).body).toEqual({})
+  })
+
+  it('names a class by the catalogue’s display name, else null', () => {
+    writeCatalog(staleCatalog())
+    expect(objectInfoDisplayName('CheckpointLoaderSimple')).toBe('Load Checkpoint')
+    expect(objectInfoDisplayName('KSampler')).toBeNull()
+    expect(objectInfoDisplayName('Nope')).toBeNull()
   })
 
   it('serves one node, or {} for an unknown one, under every engine spelling', async () => {
-    writeBaseline(staleCatalog())
+    writeCatalog(staleCatalog())
     write('input/b.png')
     for (const p of ['/object_info/LoadImage', '/api/object_info/LoadImage', '/comfyui/object_info/LoadImage', '/comfyui/api/object_info/LoadImage']) {
       const r = await call('GET', p)
@@ -189,28 +183,26 @@ describe('the baseline, refreshed from disk (C5: no engine)', () => {
   })
 
   it('keeps aiohttp\'s route table: 405 on other verbs, 404 below a node', async () => {
-    writeBaseline(staleCatalog())
+    writeCatalog(staleCatalog())
     expect(await call('POST', '/object_info')).toEqual({ status: 405, body: '405: Method Not Allowed' })
     expect(await call('GET', '/object_info/a/b')).toEqual({ status: 404, body: '404: Not Found' })
     expect(await call('GET', '/object_info/')).toEqual({ status: 404, body: '404: Not Found' })
   })
 
-  it('503 when there is no stored catalog at all', async () => {
-    __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
+  it('503 when the catalogue can’t be read', async () => {
+    __setNodeCatalogFileForTests(path.join(tmp, 'missing.gz'))
     const r = await call('GET', '/object_info')
     expect(r.status).toBe(503)
     expect(r.body.error).toMatch(/node list/)
   })
 
   it('never asks an engine, even one that would answer (step 4, C5)', async () => {
-    writeBaseline(staleCatalog())
+    writeCatalog(staleCatalog())
     engineAnswers({ Live: {} })
     const b = (await call('GET', '/object_info')).body
     expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
     expect((await call('GET', '/object_info/KSampler')).body).toEqual({ KSampler: staleCatalog().KSampler })
     expect(engineFetch).not.toHaveBeenCalled()
-    // Nothing is saved any more.
-    expect(fs.existsSync(path.join(tmp, 'data', 'object_info.json'))).toBe(false)
   })
 })
 
@@ -219,8 +211,8 @@ describe('the baseline, refreshed from disk (C5: no engine)', () => {
 describe('hosted: the scrub applies to whichever body is served', () => {
   afterEach(() => { __setInputUploadsDbForTests(null) })
 
-  it('scrubs the refreshed baseline to the caller\'s own uploads', async () => {
-    writeBaseline(staleCatalog())
+  it('scrubs the refreshed catalogue to the caller\'s own uploads', async () => {
+    writeCatalog(staleCatalog())
     populateDisk()
     __setInputUploadsDbForTests({
       async query(sql: string, params: unknown[] = []) {
@@ -230,21 +222,19 @@ describe('hosted: the scrub applies to whichever body is served', () => {
     })
     const out = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any) as any
     expect(out.LoadImage.input.required.image[0]).toEqual(['b.png'])
-    expect(out.LoadImageMask.input.required.image[0]).toEqual(['b.png'])
     expect(out.AudioWaveform.input.required.audio_file[1]).toMatchObject({ default: 'b.png', options: ['b.png'] })
     expect(JSON.stringify(out)).not.toContain('song.mp3')
-    expect(out.LoadImageDataSetFromFolder.input.required.folder[1].options).toEqual([])
-    // Model lists are shared assets and stay refreshed.
-    expect(out.LoraLoader.input.required.lora_name[0]).toEqual(['sub/a.pt', 'z.safetensors'])
+    expect(JSON.stringify(out)).not.toContain('lora_dataset')
+    // LoRA lists are shared assets and stay refreshed.
+    expect(out.FluxLoRARemoteNode.input.required.lora_name[1].options).toEqual(['sub/a.pt', 'z.safetensors', '[None]'])
   })
 
   it('never asks the engine (R10.9): the stored catalog is served and scrubbed even while an engine answers', async () => {
-    writeBaseline(staleCatalog())
+    writeCatalog(staleCatalog())
     write('input/b.png')
     __setInputUploadsDbForTests({ async query() { return { rows: [] } } })
     engineAnswers(staleCatalog())
     const live = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any) as any
-    expect(live.LoadImageDataSetFromFolder.input.required.folder[1].options).toEqual([])
     expect(live.KSampler).toEqual(staleCatalog().KSampler)
 
     engineFetch.mockImplementation(async () => new Response('{"KSampler": NaN}', { status: 200 }))
@@ -255,7 +245,7 @@ describe('hosted: the scrub applies to whichever body is served', () => {
   })
 
   it('503 in plain words only when there is nothing to serve at all — never the engine', async () => {
-    __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
+    __setNodeCatalogFileForTests(path.join(tmp, 'missing.gz'))
     __setInputUploadsDbForTests({ async query() { return { rows: [] } } })
     engineAnswers(staleCatalog())
     const err = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any).catch(e => e)
@@ -328,64 +318,69 @@ function findList(catalog: any, key: string): unknown {
   return Array.isArray(spec[0]) ? spec[0] : spec[1].options
 }
 
-describe('where the baseline is found', () => {
-  const REL = path.join('server', 'native', 'objectInfo.baseline.json.gz')
-  const saved = process.env.SAILOR_OBJECT_INFO_BASELINE
-  beforeEach(() => { __setObjectInfoBaselineFileForTests(undefined) })
+describe('where the catalogue is found', () => {
+  const saved = process.env.SAILOR_NODE_CATALOG
+  beforeEach(() => { __setNodeCatalogFileForTests(undefined) })
   afterEach(() => {
-    if (saved === undefined) delete process.env.SAILOR_OBJECT_INFO_BASELINE
-    else process.env.SAILOR_OBJECT_INFO_BASELINE = saved
+    if (saved === undefined) delete process.env.SAILOR_NODE_CATALOG
+    else process.env.SAILOR_NODE_CATALOG = saved
     vi.restoreAllMocks()
   })
 
-  it('SAILOR_OBJECT_INFO_BASELINE first, then <engine root>/frontend/…, then <cwd>/…', () => {
+  it('SAILOR_NODE_CATALOG first, then <data root>/frontend/…, then <cwd>/…', () => {
+    expect(NODE_CATALOG_REL).toBe(path.join('server', 'assets', 'nodeCatalog.json.gz'))
     const cwd = path.join(tmp, 'cwd')
     vi.spyOn(process, 'cwd').mockReturnValue(cwd)
-    const inCwd = path.join(cwd, REL)
-    const inRoot = path.join(root, 'frontend', REL)
+    const inCwd = path.join(cwd, NODE_CATALOG_REL)
+    const inRoot = path.join(root, 'frontend', NODE_CATALOG_REL)
     const inEnv = path.join(tmp, 'env.json.gz')
     for (const f of [inCwd, inRoot, inEnv]) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x') }
-    process.env.SAILOR_OBJECT_INFO_BASELINE = inEnv
-    expect(objectInfoBaselineFile()).toBe(inEnv)
+    process.env.SAILOR_NODE_CATALOG = inEnv
+    expect(nodeCatalogFile()).toBe(inEnv)
     fs.rmSync(inEnv)
-    expect(objectInfoBaselineFile()).toBe(inRoot)
+    expect(nodeCatalogFile()).toBe(inRoot)
     fs.rmSync(inRoot)
-    expect(objectInfoBaselineFile()).toBe(inCwd)
+    expect(nodeCatalogFile()).toBe(inCwd)
   })
 
   it('warns once, and serves nothing, when none exists', async () => {
-    delete process.env.SAILOR_OBJECT_INFO_BASELINE
+    delete process.env.SAILOR_NODE_CATALOG
     vi.spyOn(process, 'cwd').mockReturnValue(path.join(tmp, 'nowhere'))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(objectInfoBaselineFile()).toBeNull()
-    expect(objectInfoBaselineFile()).toBeNull()
+    expect(nodeCatalogFile()).toBeNull()
+    expect(nodeCatalogFile()).toBeNull()
     expect(warn).toHaveBeenCalledTimes(1)
-    expect(String(warn.mock.calls[0]![0])).toMatch(/SAILOR_OBJECT_INFO_BASELINE/)
+    expect(String(warn.mock.calls[0]![0])).toMatch(/SAILOR_NODE_CATALOG/)
     expect((await call('GET', '/object_info')).status).toBe(503)
   })
 })
 
-describe('get_input_subfolders', () => {
-  it('every real folder under input/, relative and sorted; symlinked folders are not followed', () => {
-    write('input/b/x.png'); write('input/a/c/y.png'); write('input/.hidden/z')
-    fs.symlinkSync(path.join(root, 'models'), path.join(root, 'input', 'link'))
-    expect(inputSubfolders(path.join(root, 'input'))).toEqual(['.hidden', 'a', 'a/c', 'b'])
-    expect(inputSubfolders(path.join(root, 'missing'))).toEqual([])
+describe('the committed catalogue (C6: Sailor’s own)', () => {
+  const real = path.resolve(__dirname, '..', '..', NODE_CATALOG_REL)
+  const catalog = JSON.parse(zlib.gunzipSync(fs.readFileSync(real)).toString('utf8'))
+
+  it('the old engine-derived files are gone', () => {
+    expect(fs.existsSync(path.resolve(__dirname, '..', '..', 'server', 'native', 'objectInfo.catalog.json.gz'))).toBe(false)
+    expect(fs.existsSync(path.resolve(__dirname, '..', '..', 'scripts', 'snapshot_object_info.mjs'))).toBe(false)
   })
-})
 
-describe('the committed baseline', () => {
-  const real = path.resolve(__dirname, '..', '..', 'server', 'native', 'objectInfo.baseline.json.gz')
-  const baseline = JSON.parse(zlib.gunzipSync(fs.readFileSync(real)).toString('utf8'))
+  it('holds exactly the classes the runner takes, the editor-only cards, the retired classes and the catalogued stock ones', () => {
+    const runner = new Set([...RUNNER_NODE_TYPES, ...Object.keys(RUNNER_NODE_RULES), ...RUNNER_SPECIAL_CLASSES])
+    const editorOnly = Object.keys(EDITOR_ONLY_ADVICE_OF)
+    for (const c of [...runner, ...editorOnly, ...CATALOGUED_STOCK_CLASSES]) expect(catalog[c], c).toBeDefined()
+    for (const c of CATALOGUED_STOCK_CLASSES) expect(STOCK_CLASSES.has(c), c).toBe(true)
+    const extra = Object.keys(catalog).filter(c => !runner.has(c) && !editorOnly.includes(c) && !RETIRED_CLASSES.has(c) && !CATALOGUED_STOCK_CLASSES.has(c))
+    expect(extra).toEqual([])
+    // Counts at C6: 225 runner + 1 editor-only + 191 retired + 9 stock (from 862).
+    expect(Object.keys(catalog).length).toBe(426)
+  })
 
-  it('is a full catalog with every refreshed list blanked (what ComfyUI shows for empty folders)', () => {
-    expect(Object.keys(baseline).length).toBeGreaterThan(500)
-    expect(blankFileLists(structuredClone(baseline))).toEqual(baseline)
-    expect(findList(baseline, 'LoraLoader.lora_name')).toEqual([])
-    expect(findList(baseline, 'LoadImageDataSetFromFolder.folder')).toEqual([])
-    expect(findList(baseline, 'AudioWaveform.audio_file')).toEqual(['(no audio found)'])
+  it('every refreshed list is blanked (what ComfyUI shows for empty folders)', () => {
+    expect(blankFileLists(structuredClone(catalog))).toEqual(catalog)
+    expect(findList(catalog, 'FluxLoRARemoteNode.lora_name')).toEqual(['[None]'])
+    expect(findList(catalog, 'AudioWaveform.audio_file')).toEqual(['(no audio found)'])
     // …and so no upload-flagged list carries a file name.
-    for (const node of Object.values<any>(baseline)) {
+    for (const node of Object.values<any>(catalog)) {
       for (const section of Object.values<any>(node.input ?? {})) {
         for (const spec of Object.values<any>(section ?? {})) {
           if (!Array.isArray(spec) || !spec[1] || !UPLOAD_FLAG_KEYS.some(k => spec[1][k])) continue
@@ -399,7 +394,7 @@ describe('the committed baseline', () => {
   it('holds every node input the refresh tables name, as a combo', () => {
     for (const key of [...Object.keys(MODEL_INPUT_LISTS), ...Object.keys(UPLOAD_INPUT_LISTS)]) {
       const [cls, input] = key.split('.') as [string, string]
-      const node = baseline[cls]
+      const node = catalog[cls]
       expect(node, key).toBeTruthy()
       const spec = node.input.required?.[input] ?? node.input.optional?.[input]
       expect(Array.isArray(spec?.[0]) || Array.isArray(spec?.[1]?.options), key).toBe(true)
@@ -407,9 +402,3 @@ describe('the committed baseline', () => {
   })
 })
 
-describe('test isolation', () => {
-  it('the saved copy never points at the real data folder during tests', () => {
-    __setObjectInfoCacheFileForTests(undefined)
-    expect(objectInfoCacheFile()).toBeNull()
-  })
-})

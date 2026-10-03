@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import GeneratorsPanel from '~/components/vue-canvas/GeneratorsPanel.vue'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, any>
 /** A Comfy-billed partner node a newer engine might list (not in the committed catalogue). */
 const LIVE = { ...CATALOG, ZetaPartnerNode: { display_name: 'Zeta partner image', description: '', category: 'api node/image/Zeta', python_module: 'comfy_api_nodes.nodes_zeta' } }
 

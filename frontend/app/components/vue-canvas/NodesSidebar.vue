@@ -8,90 +8,11 @@ const {
   categories, fetchNodeTypes, addNode,
 } = useNodeSearch()
 
-// Blueprints are built from stock classes Sailor doesn't run, so none is
-// offered, here or hosted: no fetch, no tab, no section (step 3, R10.6; step 4,
-// C5 made it the only rule). C6 keeps only the ones whose classes Sailor runs.
-const hosted = true
-
-// Blueprints data
-interface BlueprintEntry {
-  id: string
-  source: string
-  name: string
-  category: string // e.g. "Image Tools/Sharpen" → top segment is the folder
-  info: { node_pack?: string }
-}
-const blueprints = ref<BlueprintEntry[]>([])
-
-async function fetchBlueprints() {
-  if (hosted) return
-  try {
-    const list = await $fetch<Record<string, any>>('/global_subgraphs')
-    // Fetch full data for each blueprint to get category
-    const entries: BlueprintEntry[] = []
-    const ids = Object.keys(list)
-    // Fetch in parallel batches of 10
-    for (let i = 0; i < ids.length; i += 10) {
-      const batch = ids.slice(i, i + 10)
-      const results = await Promise.all(
-        batch.map(async (id) => {
-          try {
-            const full = await $fetch<any>(`/global_subgraphs/${id}`)
-            const data = typeof full?.data === 'string' ? JSON.parse(full.data) : full?.data
-            const subgraph = data?.definitions?.subgraphs?.[0]
-            return {
-              id,
-              source: list[id].source,
-              name: list[id].name,
-              category: subgraph?.category || '',
-              info: list[id].info || {},
-            }
-          } catch { return null }
-        }),
-      )
-      entries.push(...results.filter(Boolean) as BlueprintEntry[])
-    }
-    blueprints.value = entries
-  } catch (err) {
-    console.warn('[NodesSidebar] Failed to fetch blueprints:', err)
-  }
-}
-
-// Group blueprints into a tree: pack → folder → entries
-// category format: "Image Tools/Sharpen" → folder = "Image Tools"
-const blueprintTree = computed(() => {
-  const packs = new Map<string, Map<string, BlueprintEntry[]>>()
-  for (const bp of blueprints.value) {
-    const pack = bp.info.node_pack || 'Other'
-    const packLabel = pack === 'comfyui' ? 'Comfy Blueprints' : pack
-    if (!packs.has(packLabel)) packs.set(packLabel, new Map())
-    const folders = packs.get(packLabel)!
-    // Top segment of category is the folder
-    const folder = bp.category.split('/')[0] || 'Other'
-    if (!folders.has(folder)) folders.set(folder, [])
-    folders.get(folder)!.push(bp)
-  }
-  return packs
-})
-
-async function addBlueprint(bp: BlueprintEntry) {
-  try {
-    const full = await $fetch<any>(`/global_subgraphs/${bp.id}`)
-    if (full?.data) {
-      const workflow = typeof full.data === 'string' ? JSON.parse(full.data) : full.data
-      // Dispatch as addNode with subgraph data
-      window.dispatchEvent(new CustomEvent('sailor:addNode', {
-        detail: { nodeType: bp.name, subgraph: workflow },
-      }))
-    }
-  } catch (err) {
-    console.error('[NodesSidebar] Failed to load blueprint:', err)
-  }
-}
+// Step 4, C6: no blueprint is offered — every one is built from classes
+// Sailor doesn't run — so there is no blueprint list, tab or section.
 
 onMounted(() => {
   fetchNodeTypes()
-  fetchBlueprints()
 })
 
 const expandedCategories = ref<Set<string>>(new Set())
@@ -105,8 +26,6 @@ function toggleCategory(cat: string) {
   }
   expandedCategories.value = next
 }
-
-const activeTab = ref<'all' | 'blueprints'>('all')
 
 // Group categories by source
 const sourceGroups = computed(() => {
@@ -250,25 +169,6 @@ function onNodeDragStart(nodeName: string, event: DragEvent) {
       </div>
     </div>
 
-    <!-- Tabs -->
-    <div class="flex items-center gap-1 px-3 py-2 border-b border-[#2a2a2a] shrink-0">
-      <button
-        class="px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer"
-        :class="activeTab === 'all' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/70'"
-        @click="activeTab = 'all'"
-      >
-        All
-      </button>
-      <button
-        v-if="!hosted"
-        class="px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer"
-        :class="activeTab === 'blueprints' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/70'"
-        @click="activeTab = 'blueprints'"
-      >
-        Blueprints
-      </button>
-    </div>
-
     <!-- Content -->
     <div class="flex-1 overflow-y-auto">
       <!-- Search results -->
@@ -307,56 +207,6 @@ function onNodeDragStart(nodeName: string, event: DragEvent) {
         <div class="px-3 pt-3 pb-2">
           <p class="text-[10px] font-semibold text-white/40 uppercase tracking-wider mb-2">Bookmarked</p>
           <p class="text-[11px] text-white/25 pl-2">No favorites yet</p>
-        </div>
-
-        <!-- Subgraph Blueprints -->
-        <div v-if="!hosted && blueprintTree.size > 0" class="pb-1">
-          <p class="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-3 pt-3 pb-2">
-            Subgraph Blueprints
-          </p>
-          <!-- Pack level (e.g. "Comfy Blueprints") -->
-          <div v-for="[packName, folders] in blueprintTree" :key="packName">
-            <button
-              class="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 transition-colors cursor-pointer"
-              @click="toggleCategory(`bp:${packName}`)"
-            >
-              <ChevronRight
-                class="size-3 text-white/40 transition-transform shrink-0"
-                :class="{ 'rotate-90': expandedCategories.has(`bp:${packName}`) }"
-              />
-              <Folder class="size-3.5 text-white/40 shrink-0" />
-              <span class="text-xs text-white/70">{{ packName }}</span>
-            </button>
-            <!-- Folder level (e.g. "Image Tools", "Video Tools") -->
-            <template v-if="expandedCategories.has(`bp:${packName}`)">
-              <div v-for="[folderName, bps] in folders" :key="folderName">
-                <button
-                  class="w-full flex items-center gap-2 py-1.5 hover:bg-white/5 transition-colors cursor-pointer"
-                  style="padding-left: 28px"
-                  @click="toggleCategory(`bp:${packName}/${folderName}`)"
-                >
-                  <ChevronRight
-                    class="size-3 text-white/40 transition-transform shrink-0"
-                    :class="{ 'rotate-90': expandedCategories.has(`bp:${packName}/${folderName}`) }"
-                  />
-                  <Folder class="size-3.5 text-white/40 shrink-0" />
-                  <span class="text-xs text-white/70">{{ folderName }}</span>
-                </button>
-                <!-- Blueprint entries -->
-                <template v-if="expandedCategories.has(`bp:${packName}/${folderName}`)">
-                  <div
-                    v-for="bp in bps"
-                    :key="bp.id"
-                    class="flex items-center gap-2 py-1.5 hover:bg-white/5 cursor-pointer transition-colors rounded-md"
-                    style="padding-left: 52px"
-                    @click="addBlueprint(bp)"
-                  >
-                    <span class="text-[11px] text-white/60 truncate">{{ bp.name }}</span>
-                  </div>
-                </template>
-              </div>
-            </template>
-          </div>
         </div>
 
         <!-- Source groups with categories -->

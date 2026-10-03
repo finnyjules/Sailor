@@ -619,7 +619,7 @@ describe('with every effects family off, the needs-the-engine lists are as befor
   projectsIt('over every saved project graph (user/sailor/projects), and each with every pilot spliced in after every picture', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
     let graphs = 0
     let spliced = 0
     let pictures = 0

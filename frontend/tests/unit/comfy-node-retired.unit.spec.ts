@@ -20,7 +20,7 @@ import { useVueNodes } from '~/composables/useVueNodes'
 import ComfyNode from '~/components/vue-canvas/ComfyNode.vue'
 import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, any>
 const KLING = 'KlingImage2VideoNode'
 const SG = '5f0c1a2b-0000-4000-8000-00000000abcd'
 

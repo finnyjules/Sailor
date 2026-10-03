@@ -21,10 +21,7 @@ import zlib from 'node:zlib'
 import { createApp, eventHandler, toWebHandler } from 'h3'
 import { __setInputUploadsDbForTests, __setInputUploadsEngineRootForTests } from '../../server/utils/inputUploads'
 import { nativeEngineRoute } from '../../server/native/router'
-import {
-  __setObjectInfoBaselineFileForTests,
-  __setObjectInfoCacheFileForTests,
-} from '../../server/native/objectInfo'
+import { __setNodeCatalogFileForTests } from '../../server/native/objectInfo'
 import { handleHostedObjectInfo } from '../../server/utils/engineGate'
 import {
   __resetModelMenusForTests, applyModelOverlay, comboMenu, galleryEntries, menuDefault, modelMenu,
@@ -104,9 +101,9 @@ const fams = (...f: RunnerFamily[]) => new Set<RunnerFamily>(f)
 
 // ----------------------------------------------------------- the fixture
 
-/** The committed baseline's own node definitions for the classes the overlay covers: an engine body. */
+/** The committed catalogue's own node definitions for the classes the overlay covers: an engine body. */
 function engineFixture(extra: readonly string[] = []): Record<string, any> {
-  const baseline = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+  const baseline = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
   const out: Record<string, any> = {}
   for (const k of ['GenerateImageNode', 'GenerateVideoNode', 'FilmShotNode', 'EditImageNode', 'BlendSceneNode', 'RestyleFromImageNode', 'GenerateFromReferencesNode', 'UpscaleImageNode', 'KSampler', ...extra]) {
     if (baseline[k]) out[k] = baseline[k]
@@ -248,8 +245,7 @@ describe('every /object_info source is overlaid', () => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'model-menus-store-')))
     for (const d of ['input', 'output', 'user', 'models']) fs.mkdirSync(path.join(root, d))
     __setInputUploadsEngineRootForTests(root)
-    __setObjectInfoCacheFileForTests(path.join(tmp, 'data', 'object_info.json'))
-    __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
+    __setNodeCatalogFileForTests(path.join(tmp, 'missing.gz'))
     vi.stubGlobal('fetch', engineFetch)
     engineFetch.mockReset()
     engineFetch.mockRejectedValue(new TypeError('fetch failed'))
@@ -262,36 +258,30 @@ describe('every /object_info source is overlaid', () => {
     vi.unstubAllEnvs()
     __setInputUploadsDbForTests(null)
     __setInputUploadsEngineRootForTests(undefined)
-    __setObjectInfoBaselineFileForTests(undefined)
-    __setObjectInfoCacheFileForTests(undefined)
+    __setNodeCatalogFileForTests(undefined)
     fs.rmSync(root, { recursive: true, force: true })
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
   const engineAnswers = (body: unknown) => engineFetch.mockImplementation(async () => new Response(JSON.stringify(body), { status: 200 }))
   const families = (on: boolean) => vi.stubEnv('NUXT_RUNNER_FAMILIES', on ? 'fal-edit,replicate-image,replicate-video' : '')
+  /** C6: the node catalogue is the only source. */
+  const writeCatalog = (catalog: unknown) => {
+    const file = path.join(tmp, 'nodeCatalog.json.gz')
+    fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(catalog)))
+    __setNodeCatalogFileForTests(file)
+  }
 
-  it('one node\'s body too, from the stored catalog; an engine that would answer is never asked (C5)', async () => {
-    fs.mkdirSync(path.join(tmp, 'data'))
-    fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(engineFixture()))
+  it('one node\'s body too, from the node catalogue; an engine that would answer is never asked (C5)', async () => {
+    writeCatalog(engineFixture())
     engineAnswers({ EditImageNode: {} })
     const one = (await get('/object_info/EditImageNode')).body
     expect(one.EditImageNode.input.required.model[1]).toMatchObject({ default: 'Nano Banana 2', hidden_options: ['Flux Kontext Pro', 'Flux 2 Pro'] })
     expect(engineFetch).not.toHaveBeenCalled()
   })
 
-  it('saved copy', async () => {
-    fs.mkdirSync(path.join(tmp, 'data'))
-    fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(engineFixture()))
-    expectOverlaid((await get('/object_info')).body, false)
-    families(true)
-    expectOverlaid((await get('/object_info')).body, true)
-  })
-
-  it('committed baseline (nothing saved)', async () => {
-    const file = path.join(tmp, 'baseline.json.gz')
-    fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(engineFixture())))
-    __setObjectInfoBaselineFileForTests(file)
+  it('the node catalogue (C6: the only source)', async () => {
+    writeCatalog(engineFixture())
     expectOverlaid((await get('/object_info')).body, false)
     families(true)
     expectOverlaid((await get('/object_info')).body, true)
@@ -301,8 +291,7 @@ describe('every /object_info source is overlaid', () => {
     __setInputUploadsDbForTests({ async query() { return { rows: [] } } })
     const stored = engineFixture()
     stored.LoadImage = { input: { required: { image: [['someone-else.png'], { image_upload: true }] } } }
-    fs.mkdirSync(path.join(tmp, 'data'))
-    fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(stored))
+    writeCatalog(stored)
     engineAnswers(engineFixture())
     const out = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any) as any
     expect(engineFetch).not.toHaveBeenCalled()

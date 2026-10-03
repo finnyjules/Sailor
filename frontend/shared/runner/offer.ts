@@ -6,9 +6,9 @@
  * Sailor offers only the classes the runner takes (in some setting: a family
  * row, a runner type, Film a shot for the models it films) plus the cards made
  * in their own editor (the Timeline). Never a stock class Sailor doesn't run
- * (./stockClasses.ts), a custom node, or a retired one. Blueprints are built
- * from stock classes, so none is offered either (`/global_subgraphs` answers
- * an empty list).
+ * (./stockClasses.ts), a custom node, or a retired one. Every blueprint is
+ * built from classes Sailor doesn't run, so none is offered either (step 4,
+ * C6: the blueprint list `/global_subgraphs` is gone).
  *
  * Pure; relative imports only.
  */

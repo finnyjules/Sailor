@@ -517,7 +517,7 @@ describe('with film-shot off (rule 15)', () => {
   projectsIt('over every saved project graph (with a preset shot → Video card spliced in beside each)', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
     const extra = shown(caseNamed('model kling-v3 · with image'))
     const spliced = Object.fromEntries(Object.entries(extra).map(([id, n]) => [`f_${id}`, { ...n, inputs: Object.fromEntries(Object.entries(n.inputs).map(([k, v]) => [k, Array.isArray(v) && v.length === 2 ? [`f_${String(v[0])}`, v[1]] : v])) }])) as ApiPrompt
     let graphs = 0

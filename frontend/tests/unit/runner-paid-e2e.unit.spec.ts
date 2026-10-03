@@ -907,7 +907,7 @@ let graphsCache: SavedGraph[] | null = null
 async function savedGraphs(): Promise<SavedGraph[]> {
   if (graphsCache) return graphsCache
   const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-  const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+  const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
   const out: SavedGraph[] = []
   for (const uuid of readdirSync(PROJECTS).sort()) {
     let wf: { canvases?: { workflow: unknown }[] } | undefined
@@ -1074,7 +1074,7 @@ describe('R3.18 · every R3 family off', () => {
       for (const [id, n] of Object.entries(g.prompt)) add(n.class_type, a[id] ?? null, b[id] ?? null, 'saved projects')
     }
     // Every class of the node catalogue, alone, at its default settings (its pictures unwired).
-    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { input?: Record<string, Record<string, [unknown, Record<string, unknown>?]>> }>
+    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, { input?: Record<string, Record<string, [unknown, Record<string, unknown>?]>> }>
     for (const [ct, def] of Object.entries(catalog)) {
       if (unpriced(ct)) continue
       const inputs: Record<string, unknown> = {}

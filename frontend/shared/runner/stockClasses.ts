@@ -5,11 +5,14 @@
  * by the node's title ("Sailor doesn’t run this node."), with what to use
  * instead where Sailor has an equivalent (STOCK_CLASS_ADVICE). Saved projects
  * holding one still load: the node draws as a plain card from the node
- * catalogue. Node search, the toolbox and the menus never offer one
- * (./offer.ts).
+ * catalogue when it holds the class (CATALOGUED_STOCK_CLASSES), else from
+ * the project's own saved ports. Node search, the toolbox and the menus never
+ * offer one (./offer.ts).
  *
- * They are the stock ComfyUI classes in the committed node catalogue
- * (server/native/objectInfo.baseline.json.gz) that the runner doesn't take,
+ * They are the stock ComfyUI classes in ComfyUI's node catalogue as last
+ * read (2026-09; before step 4, C6 cut Sailor's own catalogue,
+ * server/assets/nodeCatalog.json.gz, down to the classes Sailor runs) that
+ * the runner doesn't take,
  * with every family on, and that aren't retired (./retired.ts): the local
  * diffusion stack (loaders, samplers, latents, conditioning, model patches),
  * training and datasets, and the few stock utilities nothing in Sailor
@@ -18,9 +21,9 @@
  * and SaveGLB moved file upstream). Until C5 they were decision 4's
  * "local-only" classes, the only ones a run could send to the local engine.
  *
- * Held to the catalogue by tests/unit/runner-no-silent-engine.unit.spec.ts:
- * a class added to the catalogue that the runner doesn't take must be listed
- * here or named there as Sailor's own.
+ * Held by tests/unit/runner-no-silent-engine.unit.spec.ts: a class in the
+ * catalogue that the runner doesn't take must be retired, editor-only, or one
+ * of CATALOGUED_STOCK_CLASSES.
  *
  * Pure; relative imports only.
  */
@@ -268,6 +271,19 @@ export const STOCK_CLASSES: ReadonlySet<string> = new Set([
   'LoadImageOutput', 'LoadLatent', 'LoraLoader', 'LoraLoaderModelOnly', 'RepeatLatentBatch', 'SaveLatent',
   'SetLatentNoiseMask', 'StyleModelApply', 'StyleModelLoader', 'UNETLoader', 'VAEDecode', 'VAEDecodeTiled',
   'VAEEncode', 'VAEEncodeForInpaint', 'VAEEncodeTiled', 'VAELoader', 'unCLIPCheckpointLoader', 'unCLIPConditioning',
+])
+
+/**
+ * Step 4, C6: the stock classes Sailor's node catalogue still holds: the ones
+ * saved projects hold (every canvas of user/sailor/projects and its migration
+ * backup, 2026-10-03). Their cards keep their names and settings, and a run
+ * holding one is built and refused naming each node, with what to use instead
+ * (without the entry, the build couldn't read the node and the refusal
+ * couldn't name it). Every other stock class left the catalogue.
+ */
+export const CATALOGUED_STOCK_CLASSES: ReadonlySet<string> = new Set([
+  'CLIPTextEncode', 'CLIPTextEncodeSDXLRefiner', 'CheckpointLoaderSimple', 'EmptyLatentImage', 'ImageCompare', 'ImageScale',
+  'KSampler', 'KSamplerAdvanced', 'VAEDecode',
 ])
 
 /** Whether a class is a stock ComfyUI class Sailor doesn't run (STOCK_CLASSES). */

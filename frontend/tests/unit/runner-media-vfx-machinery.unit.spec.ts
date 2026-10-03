@@ -785,7 +785,7 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
   projectsIt('over every saved project graph (made into prompts as the app makes them): the answers pinned from before R6.1', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-    const catalog = JSON.parse(gunzipSync(readFileSync(fileURLToPath(new URL('../../server/native/objectInfo.baseline.json.gz', import.meta.url)))).toString('utf8'))
+    const catalog = JSON.parse(gunzipSync(readFileSync(fileURLToPath(new URL('../../server/assets/nodeCatalog.json.gz', import.meta.url)))).toString('utf8'))
     const pin = rule12Pin()
     let graphs = 0
     let matched = 0

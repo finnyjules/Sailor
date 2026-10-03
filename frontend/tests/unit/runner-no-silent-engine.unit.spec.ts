@@ -6,7 +6,8 @@
  * hosted alike: a stock class or a custom node as one Sailor doesn't run
  * (shared/runner/stockClasses.ts), with what to use instead where Sailor has it.
  *
- * Also the guard over the stock list (held to the committed catalogue) and
+ * Also the guard over the stock list (C6: the catalogue holds only the stock
+ * classes saved projects hold) and
  * over layouts/default.vue's run route: a run the runner didn't take is
  * refused, and nothing is sent anywhere else.
  */
@@ -18,13 +19,13 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { EVERY_KNOWN_FAMILY, type RunnerFamily } from '#shared/runner/families'
 import { FILM_SHOT_DIRECTED_MODEL_WORDS, FILM_SHOT_MODEL_WORDS, FILM_SHOT_SOUND_WORDS, RUNNER_NODE_RULES, RUNNER_NODE_TYPES, SWITCHED_CLASSES, runnerRuleFor } from '#shared/runner/eligibility'
 import { C4_RETIRED_CLASSES, RETIRED_CLASSES, retiredAdviceOf } from '#shared/runner/retired'
-import { NOT_RUN_WORDS, STOCK_CLASSES, STOCK_CLASS_ADVICE, isStockClass } from '#shared/runner/stockClasses'
+import { CATALOGUED_STOCK_CLASSES, NOT_RUN_WORDS, STOCK_CLASSES, STOCK_CLASS_ADVICE, isStockClass } from '#shared/runner/stockClasses'
 import { NOT_TAKEN_NODE_WORDS, oddSettingWords, switchedOffWords, wiredSettingWords } from '#shared/runner/messages'
 import { SHADER_ENGINE_WORDS, SHADER_NEEDS_PICTURE_FIRST, shaderBakedText } from '#shared/runner/shaderBakeKey'
 import { MISSING_OUTPUT_WORDS, RUNNER_OFF_WORDS, WORKFLOW_CANT_RUN_WORDS, blockedRunRefusal, engineRunPrompt, isCustomClass, leftOutNotice, notRunWords, runRefusal, unknownClassRefusal, type RunRefusal } from '~/lib/runner/needsEngine'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, runnerTakesWorkflow } from '#shared/runner/validate'
 
-const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { output?: string[]; output_node?: boolean; input?: { required?: Record<string, unknown> } }>
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/assets/nodeCatalog.json.gz'))).toString('utf8')) as Record<string, { output?: string[]; output_node?: boolean; input?: { required?: Record<string, unknown> } }>
 const EVERY: ReadonlySet<RunnerFamily> = EVERY_KNOWN_FAMILY
 type Link = [string, number]
 
@@ -70,13 +71,14 @@ const route = (prompt: ApiPrompt, over: Partial<Parameters<typeof runRefusal>[1]
   runRefusal([{ prompt, titleOf }], { ...OPTS, ...over })
 
 describe('the stock set (C5: Sailor doesn’t run these) is held to the node catalogue', () => {
-  it('every listed class is in the catalogue, not retired, and not one the runner takes', () => {
+  it('no listed class is retired or one the runner takes; the catalogue holds only the catalogued ones (C6)', () => {
     expect(STOCK_CLASSES.size).toBe(445)
     for (const ct of STOCK_CLASSES) {
-      expect(CATALOG[ct], ct).toBeDefined()
       expect(RETIRED_CLASSES.has(ct), ct).toBe(false)
       expect(runnerTakesClass(ct), ct).toBe(false)
+      expect(ct in CATALOG, ct).toBe(CATALOGUED_STOCK_CLASSES.has(ct))
     }
+    expect([...CATALOGUED_STOCK_CLASSES].sort()).toEqual(['CLIPTextEncode', 'CLIPTextEncodeSDXLRefiner', 'CheckpointLoaderSimple', 'EmptyLatentImage', 'ImageCompare', 'ImageScale', 'KSampler', 'KSamplerAdvanced', 'VAEDecode'])
   })
 
   it('every class the runner doesn’t take is stock, retired, or named here as Sailor’s own', () => {
@@ -299,10 +301,14 @@ describe('fix round 3 (I-1), C5: a class the committed catalogue doesn’t hold 
   it('Sailor doesn’t run it, whatever the catalogue lists', () => {
     for (const catalog of [LISTED, CATALOG, {}, undefined]) expect(route(custom, { catalog })).toEqual(named)
   })
-  it('the builder’s unknown class gets the same words; a class Sailor knows keeps the builder’s own error', () => {
+  it('the builder’s unknown class gets the same words; a class Sailor runs keeps the builder’s own error', () => {
     expect(unknownClassRefusal('MyCustomUpscaler', 'My node')).toEqual(named)
-    expect(unknownClassRefusal('KSampler', 'KSampler')).toBeNull()
+    // C6: a stock class the catalogue no longer lists is refused the same way, with what to use instead.
+    expect(unknownClassRefusal('SamplerCustom', 'Sampler')).toEqual({ title: '“Sampler” can’t run', description: `“Sampler”: ${NOT_RUN_WORDS} Use Generate an image instead.` })
+    expect(unknownClassRefusal('LoraLoader', 'LoRA')).toEqual({ title: '“LoRA” can’t run', description: `“LoRA”: ${NOT_RUN_WORDS}` })
     expect(unknownClassRefusal('SaveImage', 'Save')).toBeNull()
+    expect(unknownClassRefusal('FluxProRemoteNode', 'Flux')).toBeNull()
+    expect(unknownClassRefusal('Timeline', 'Timeline')).toBeNull()
   })
   it('a Sailor class missing from the served catalogue (empty until it loads) is refused: C4\'s classes too', () => {
     for (const catalog of [{}, undefined]) {

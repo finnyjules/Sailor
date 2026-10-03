@@ -889,7 +889,7 @@ describe('rule 8: with media-video off, every answer is as before R5.4', () => {
   projectsIt('over every saved project graph (made into prompts as the app makes them)', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
-    const catalog = JSON.parse(gunzipSync(readFileSync(fileURLToPath(new URL('../../server/native/objectInfo.baseline.json.gz', import.meta.url)))).toString('utf8'))
+    const catalog = JSON.parse(gunzipSync(readFileSync(fileURLToPath(new URL('../../server/assets/nodeCatalog.json.gz', import.meta.url)))).toString('utf8'))
     let graphs = 0
     let video = 0
     for (const uuid of readdirSync(PROJECTS).sort()) {

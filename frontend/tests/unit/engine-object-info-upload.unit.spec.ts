@@ -276,15 +276,17 @@ describe('ownedInputFilenames — flat top-level input:: keys, prefix stripped',
 
 // --------------------------------------------------------------- F2 handler
 
-// Step 3, R10.9: hosted never asks the engine — the stored catalog (saved
-// copy, else the committed baseline) is served, scrubbed, even with an engine
+// Step 3, R10.9: hosted never asks the engine — Sailor's node catalogue
+// (step 4, C6: the only source) is served, scrubbed, even with an engine
 // answering.
 describe('handleHostedObjectInfo', () => {
   it('scrubs the stored catalog, and never asks the engine', async () => {
     fetchMock.mockImplementation(async () => engineOk(catalog()))
     const out = await handleHostedObjectInfo(ev('/object_info')) as any
     expect(out.LoadImage.input.required.image[0]).toEqual([])
-    expect(out.LatentUpscale).toEqual(catalog().LatentUpscale)
+    // C6: LatentUpscale (stock, in no saved project) left the catalogue; CLIP Text Encode stayed, untouched.
+    expect(out.LatentUpscale).toBeUndefined()
+    expect(out.CLIPTextEncode).toEqual(catalog().CLIPTextEncode)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -305,8 +307,8 @@ describe('handleHostedObjectInfo', () => {
 
   it('requires a session, and still scrubs when the engine fails (A5: stored catalog served)', async () => {
     await expect(handleHostedObjectInfo(ev('/object_info', null))).rejects.toMatchObject({ statusCode: 401 })
-    // Engine-free Phase A: an engine failure no longer 502s — the committed
-    // baseline is served (native-object-info.unit.spec.ts covers the 503 when
+    // Engine-free Phase A: an engine failure no longer 502s — the node
+    // catalogue is served (native-object-info.unit.spec.ts covers the 503 when
     // nothing at all is stored), and the scrub still applies to it.
     fetchMock.mockResolvedValue({ ok: false })
     const out = await handleHostedObjectInfo(ev('/object_info')) as any

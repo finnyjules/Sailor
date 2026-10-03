@@ -291,7 +291,7 @@ describe('blockedModelUses', () => {
 
 describe('the Blend scene menu', () => {
   afterEach(() => __resetModelMenusForTests())
-  const baseline = () => JSON.parse(zlib.gunzipSync(readFileSync(join(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+  const baseline = () => JSON.parse(zlib.gunzipSync(readFileSync(join(__dirname, '../../server/assets/nodeCatalog.json.gz'))).toString('utf8'))
   const cfg = (body: any) => body.BlendSceneNode.input.required.model[1]
 
   it('the options: Python\'s three in its order, Nano Banana 2 last, runner-only in its family; the first Nano Banana and Kontext hidden', () => {

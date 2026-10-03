@@ -119,7 +119,6 @@ export function normalizeEnginePath(path: string): string {
 
 export type EngineDecision =
   | { kind: 'objectInfo' }
-  | { kind: 'emptySubgraphs' }
   | { kind: 'outputListing' }
   | { kind: 'upload' }
   | { kind: 'sailorProjects' }
@@ -134,7 +133,7 @@ export type EngineDecision =
  * its history and file mirrors, its internals, gate resume, its stats,
  * front-end extensions, per-user settings and userdata); hosted answers each
  * with a plain 404, in every spelling and verb. The routes hosted still
- * answers are Sailor's own (the node list from the saved copy, uploads,
+ * answers are Sailor's own (the node list from its catalogue, uploads,
  * projects and files, the shader/preset/font routes, LoadImageOutput's
  * picker from graph_runs), and none of them asks ComfyUI.
  */
@@ -149,6 +148,9 @@ export const HOSTED_ENGINE_ONLY = [
   '/gate',
   '/system_stats',
   '/extensions',
+  // Step 4, C6: no blueprint is offered (none is built only from classes
+  // Sailor runs), so the blueprint list is gone, here and locally.
+  '/global_subgraphs',
   ...USER_SCOPED_PREFIXES,
 ]
 
@@ -292,19 +294,11 @@ export function hostedEngineDecision(enginePath: string, method: string): Engine
   // F2: needed by the canvas (graphToPrompt reads the node schemas) but the
   // upload-widget combos embed the shared input directory listing, so the
   // response is scrubbed on the way out instead of proxied raw.
-  // Step 3, R10.9: served from the saved copy (or the committed baseline),
+  // Step 3, R10.9; step 4, C6: served from Sailor's node catalogue,
   // never from ComfyUI; any other verb is the engine's alone.
   if (match(p, '/object_info')) {
     if (verb === 'GET') return { kind: 'objectInfo' }
     return { kind: 'notFound' }
-  }
-
-  // Step 3, R10.6 (decision 4): blueprints run only on the local engine, so
-  // hosted offers none. The list answers empty here (the canvas then shows no
-  // blueprint section); one blueprint by id is refused. ComfyUI is never asked.
-  if (match(p, '/global_subgraphs')) {
-    if (p === '/global_subgraphs' && (verb === 'GET' || verb === 'HEAD')) return { kind: 'emptySubgraphs' }
-    return { kind: 'forbid', message: 'Blueprints are not available in hosted mode' }
   }
 
   // F4: the upload sink itself stays open, but ComfyUI's image_upload() honours
