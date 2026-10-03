@@ -1,6 +1,7 @@
 import { historyEntryToRecord, type GenOutput } from '~/lib/generations'
 import { isRunnerPromptId } from '#shared/runner/messages'
 import { buildPreviewImages } from '~/lib/projectCover'
+import { createTaskQueue } from '~/lib/coverBackfill'
 
 export interface RecentProject {
   workflowId: string
@@ -11,6 +12,31 @@ export interface RecentProject {
   runCount: number
   /** Generation thumbnails alone, kept so a new cover can be re-mixed in. */
   rendered?: RecentProject['images']
+  /** LC8 (B4): its generation records aren't read yet (read when its card comes into view: observeProjectCard). */
+  generationsPending?: boolean
+}
+
+/**
+ * LC8 (B4): Home read every saved project's generation records at once
+ * (about 1,500 fetches); Chromium failed hundreds with ERR_INSUFFICIENT_RESOURCES
+ * and those cards lost their pictures. Now at most GENERATIONS_CONCURRENCY
+ * are in flight, only the GENERATIONS_EAGER most recently saved projects are
+ * read before the list shows, and every other card's are read when it comes
+ * into view in the All projects grid.
+ */
+export const GENERATIONS_CONCURRENCY = 6
+export const GENERATIONS_EAGER = 24
+const generationsQueue = createTaskQueue(GENERATIONS_CONCURRENCY)
+/** Projects whose records were asked for this load (each once). */
+let generationsAsked = new Set<string>()
+/** Each pending project's cover (re-mixed with its records when they come). */
+let pendingCovers = new Map<string, RecentProject['images']>()
+/** Runs /history holds for a project whose records aren't read yet: recorded once they are, if missing. */
+let pendingHistory = new Map<string, { promptId: string; record: NonNullable<ReturnType<typeof historyEntryToRecord>>['record'] }[]>()
+
+/** Run a task in the shared generations queue (at most GENERATIONS_CONCURRENCY at once). */
+function queued<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => generationsQueue.push(() => task().then(resolve, reject)))
 }
 
 /** Interleave renders with the canvas's own content (cover) so a project that
@@ -86,12 +112,35 @@ export function useRecentProjects() {
       const durableIds = new Set<string>()
       const recordedPromptIds = new Set<string>()
 
+      generationsAsked = new Set()
+      pendingCovers = new Map()
+      pendingHistory = new Map()
       // 1) Durable projects are the primary list — names + thumbnails from
       // their generation records, which survive ComfyUI restarts.
-      const durable = await listProjects()
-      await Promise.all(durable.map(async (d) => {
+      // LC8 (B4): the most recently saved first; only the first GENERATIONS_EAGER read now, a few at a time.
+      const durable = [...await listProjects()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      const coverOf = (d: (typeof durable)[number]): GenOutput[] => Array.isArray(d.cover)
+        ? d.cover.filter((c): c is GenOutput => !!c && typeof c.filename === 'string' && (!c.kind || c.kind === 'image'))
+            .map((c) => ({ kind: c.kind || 'image', filename: c.filename, subfolder: c.subfolder || '', type: c.type || 'input', ...(c.v ? { v: c.v } : {}) }))
+        : []
+      for (const d of durable.slice(GENERATIONS_EAGER)) {
         durableIds.add(d.uuid)
-        const gens = await listGenerations(d.uuid)
+        const cover = coverOf(d)
+        pendingCovers.set(d.uuid, cover)
+        projects.push({
+          workflowId: d.uuid,
+          name: d.name || savedNames[d.uuid] || 'Untitled project',
+          promptIds: [],
+          images: mixPreview([], cover),
+          lastTimestamp: d.updatedAt || 0,
+          runCount: 0,
+          generationsPending: true,
+        })
+      }
+      await Promise.all(durable.slice(0, GENERATIONS_EAGER).map(async (d) => {
+        durableIds.add(d.uuid)
+        generationsAsked.add(d.uuid)
+        const gens = await queued(() => listGenerations(d.uuid))
         // Paid renders (type 'output') and studio/Frame assets recorded as
         // generations (type 'input' — recordAsset), mixed below with the
         // doc-derived cover (stamped at save time: node previews and canvas
@@ -106,10 +155,7 @@ export function useRecentProjects() {
             else inputAssets.push(o)
           }
         }
-        const cover: GenOutput[] = Array.isArray(d.cover)
-          ? d.cover.filter((c): c is GenOutput => !!c && typeof c.filename === 'string' && (!c.kind || c.kind === 'image'))
-              .map((c) => ({ kind: c.kind || 'image', filename: c.filename, subfolder: c.subfolder || '', type: c.type || 'input', ...(c.v ? { v: c.v } : {}) }))
-          : []
+        const cover = coverOf(d)
         const rendered = [...outputImages, ...inputAssets]
         projects.push({
           workflowId: d.uuid,
@@ -135,6 +181,13 @@ export function useRecentProjects() {
           const parsed = historyEntryToRecord(promptId, entry)
           if (!parsed) continue
           if (parsed.projectUuid && durableIds.has(parsed.projectUuid)) {
+            // LC8 (B4): its records aren't read yet: checked (and recorded if missing) once they are.
+            if (pendingCovers.has(parsed.projectUuid)) {
+              const list = pendingHistory.get(parsed.projectUuid) ?? []
+              list.push({ promptId, record: parsed.record })
+              pendingHistory.set(parsed.projectUuid, list)
+              continue
+            }
             if (!recordedPromptIds.has(promptId)) {
               // Lazy migration: persist this run before history forgets it.
               saveGeneration(parsed.projectUuid, parsed.record)
@@ -186,6 +239,67 @@ export function useRecentProjects() {
     fetchRecentProjects()
   }
 
+  /**
+   * LC8 (B4): read a pending project's generation records (once per load, in
+   * the shared queue) and fill its card in both lists: its pictures, run
+   * count and last run. Runs /history holds for it that it hasn't recorded
+   * are recorded then, as the eager ones are.
+   */
+  async function ensureGenerations(workflowId: string): Promise<void> {
+    if (!pendingCovers.has(workflowId) || generationsAsked.has(workflowId)) return
+    generationsAsked.add(workflowId)
+    const { listGenerations, saveGeneration } = useProjects()
+    let gens: Awaited<ReturnType<typeof listGenerations>>
+    try { gens = await queued(() => listGenerations(workflowId)) }
+    catch { generationsAsked.delete(workflowId); return }
+    const cover = pendingCovers.get(workflowId) ?? []
+    pendingCovers.delete(workflowId)
+    const recorded = new Set<string>()
+    const outputImages: GenOutput[] = []
+    const inputAssets: GenOutput[] = []
+    for (const g of gens) {
+      if (g.promptId) recorded.add(g.promptId)
+      for (const o of g.outputs || []) {
+        if (o.kind !== 'image') continue
+        if (o.type === 'output') outputImages.push(o)
+        else inputAssets.push(o)
+      }
+    }
+    const rendered = [...outputImages, ...inputAssets]
+    for (const list of [recentProjects.value, allProjects.value]) {
+      const project = list.find((p) => p.workflowId === workflowId)
+      if (!project || !project.generationsPending) continue
+      project.generationsPending = false
+      project.rendered = rendered
+      project.images = mixPreview(rendered, cover)
+      project.promptIds = gens.map((g) => g.promptId).filter(Boolean)
+      project.runCount = gens.length
+      project.lastTimestamp = Math.max(project.lastTimestamp, gens[0]?.ts || 0)
+    }
+    for (const run of pendingHistory.get(workflowId) ?? []) {
+      if (!recorded.has(run.promptId)) saveGeneration(workflowId, run.record)
+    }
+    pendingHistory.delete(workflowId)
+  }
+
+  // LC8 (B4): a pending card's records are read when it comes into view (or is about to).
+  let generationsObserver: IntersectionObserver | null = null
+  const observedProject = new WeakMap<Element, string>()
+  function observeProjectCard(el: Element | null | undefined, project: RecentProject): void {
+    if (!el || !project.generationsPending || generationsAsked.has(project.workflowId)) return
+    if (typeof IntersectionObserver === 'undefined') { void ensureGenerations(project.workflowId); return }
+    generationsObserver ??= new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        generationsObserver!.unobserve(entry.target)
+        const id = observedProject.get(entry.target)
+        if (id) void ensureGenerations(id)
+      }
+    }, { rootMargin: '400px' })
+    observedProject.set(el, project.workflowId)
+    generationsObserver.observe(el)
+  }
+
   function setProjectName(workflowId: string, name: string) {
     const names = getSavedNames()
     names[workflowId] = name
@@ -230,6 +344,8 @@ export function useRecentProjects() {
     timeAgo,
     fetchRecentProjects,
     refresh,
+    ensureGenerations,
+    observeProjectCard,
     setProjectName,
     applyBackfilledImages,
     applyProjectCover,

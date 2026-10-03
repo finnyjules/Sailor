@@ -328,7 +328,7 @@ describe('fix round 1: what ComfyUI would drop doesn’t decide the route', () =
 
 describe('layouts/default.vue: the run route', () => {
   const src = readFileSync(join(process.cwd(), 'app/layouts/default.vue'), 'utf8')
-  const start = src.indexOf('async function runVueWorkflow(')
+  const start = src.indexOf('async function runVueWorkflowBody(') // LC8 (B5): runVueWorkflow wraps this body
   const body = src.slice(start, src.indexOf('\n}\n', start))
 
   it('refuses before any /prompt unless the engine route says so', () => {

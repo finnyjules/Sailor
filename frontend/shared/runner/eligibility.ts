@@ -356,6 +356,15 @@ export interface RunnerEligibilityOptions {
    */
   afterPruning?: boolean
   /**
+   * LC8 (F1): an output node of the prompt reads another of its nodes
+   * (./validate.ts showsMadeResult): a cards-only workflow (an Empty image or
+   * a 3D Studio's picture into an Image card) shows or saves what it makes,
+   * with nothing to call or charge, as ComfyUI ran it. Only with `cards` on
+   * (off, exactly as before). A card alone, or a card showing another card,
+   * still isn't taken (nothing to run).
+   */
+  showsMadeResult?: boolean
+  /**
    * R11.9a (ruling (e)): a node the runner refuses plainly before the hold
    * (`stopGapRefusal`, ./stopGaps.ts) counts as taken: a refusing input check
    * (PLAIN_REFUSAL_CHECKS) failing, a widget wired that is read as typed, or a
@@ -604,6 +613,9 @@ export const VIDEO_OUTPUTS: readonly (readonly [string, number])[] = [['LoadVide
  */
 export const PAID_VIDEO_OUTPUTS: readonly (readonly [string, number])[] = [
   ['GenerateVideoNode', 0], ['FilmShotNode', 0], ['LipSyncNode', 0], ['LipsyncNode', 0], ['LipsyncRemoteNode', 0],
+  // LC8 (F2): Enhance a video's Topaz upscale (a provider video, like Generate a video's): Save video takes
+  // it as it takes theirs, sized after it runs (held at the place's caps).
+  ['EnhanceVideoNode', 0],
 ]
 
 /**
@@ -2679,5 +2691,5 @@ export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families:
     const ct = prompt[id]!.class_type
     if (PROVIDER_TYPES.has(ct) || rendersLocally(ct, prompt[id]!.inputs ?? {}, families)) work++
   }
-  return work > 0 || !!opts.afterPruning
+  return work > 0 || !!opts.afterPruning || (!!opts.showsMadeResult && families.has('cards'))
 }

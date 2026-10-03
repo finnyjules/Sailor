@@ -10,6 +10,7 @@ import { serializeDoc } from '~/lib/scene3d/config'
 import { starterSceneDoc } from '~/lib/startModal/scene3dStill'
 import { starterShaderConfig } from '~/lib/startModal/shaderStill'
 import { ARTIFACT_NODE_COMPONENTS, ARTIFACT_NODE_FOR_OUTPUT, fetchObjectInfo, getVueFlowType, getWidgetDefs, isSubgraphType, subgraphToLiteGraph, useVueNodes } from '~/composables/useVueNodes'
+import { autoSinkSlotType } from '~/lib/canvas/autoSinkSlot'
 import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
 import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFrame'
@@ -7987,7 +7988,9 @@ function materializeAutoImageSinks(targetIds: string[]): string[] {
 
     let stacked = 0
     for (let i = 0; i < outputs.length; i++) {
-      const outType = String(outputs[i].type).toUpperCase()
+      // LC8 (B3): judged by what the run reads at this index (the catalogue's type), never a drifted label.
+      const outType = autoSinkSlotType(String(outputs[i].type), objectInfo.value[src.data?.nodeType]?.output, i)
+      if (!outType) continue
       const artifactNodeType = ARTIFACT_NODE_FOR_OUTPUT[outType]
       if (!artifactNodeType) continue
       // Layerize's (and Seedream's) layers_json is machine data for "Edit as
@@ -8471,6 +8474,12 @@ defineExpose({
   injectSmartLayoutCollectionVars,
   injectAssetRegistry,
   materializeAutoImageSinks,
+  // LC8 (B5): take back the auto-sinks a refused Run added (and their wires), so a refused Run leaves the canvas as it was.
+  removeAutoSinks: (ids: string[]) => {
+    const gone = new Set(ids.map(String))
+    const present = (nodes.value as any[]).filter((n: any) => gone.has(String(n.id))).map((n: any) => String(n.id))
+    if (present.length) removeNodes(present)
+  },
   bakeUpstreamStudios,
   getNodes: () => nodes.value,
   selectedNode,

@@ -10,7 +10,7 @@
 import { isLink, type ApiNode, type ApiPrompt } from './graph'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, isRunnerEligible, nodeValidationErrors, runnerTakesNode, svgReaderProblems } from './eligibility'
 import { NEEDS_LOCAL_ENGINE, NEEDS_LOCAL_ENGINE_SHADER_CASES, NEEDS_LOCAL_ENGINE_WORDS, isLocalOnlyClass } from './localOnly'
-import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, prunedAny, pruneInvalidOutputs, readByOutputs } from './validate'
+import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, prunedAny, pruneInvalidOutputs, readByOutputs, showsMadeResult } from './validate'
 import { EVERY_KNOWN_FAMILY, NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
@@ -54,7 +54,7 @@ function blockedNodes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): {
   // R11.9a: a node the runner refuses in plain words (./stopGaps.ts) doesn't need the engine: the runner says why.
   const lenient = { plainRefusals: true }
   const blocked = ids.filter(id => !runnerTakesNode(run, id, families, lenient))
-  if (!blocked.length && !isRunnerEligible(run, families, { ...lenient, afterPruning: prunedAny(pruned) })) return { run, ids }
+  if (!blocked.length && !isRunnerEligible(run, families, { ...lenient, afterPruning: prunedAny(pruned), showsMadeResult: showsMadeResult(run) })) return { run, ids }
   return { run, ids: blocked }
 }
 
@@ -100,7 +100,7 @@ const STAND_IN_SOURCES: Readonly<Record<string, { node: ApiNode; slot: number }>
 
 /** The node catalogue as /object_info gives it (only what the engine route reads). */
 export type NodeCatalog = Readonly<Record<string, {
-  input?: { required?: Readonly<Record<string, unknown>> }
+  input?: { required?: Readonly<Record<string, unknown>>; optional?: Readonly<Record<string, unknown>> }
   output?: readonly string[]
   output_node?: unknown
 } | undefined>>
@@ -122,6 +122,39 @@ function requiredWires(catalog: NodeCatalog | null | undefined, ct: string): str
     // (`images.image0`…): not counted as a missing wire.
     return typeof t === 'string' && !WIDGET_TYPES.has(t) && !/^COMFY_.*_V3$/.test(t)
   }).map(([name]) => name)
+}
+
+/**
+ * LC8 (B3): ComfyUI's `return_type_mismatch` (execution.py validate_inputs,
+ * comfy_execution/validation.py validate_node_input): a wire whose source
+ * output's type (RETURN_TYPES) shares no type with the input's. Judged only
+ * where the catalogue gives both as plain types: a COMBO or list input, '*',
+ * the V3 meta-types (COMFY_…_V3), and an input or class the catalogue doesn't
+ * list are left alone, as the safe side (the node isn't dropped for them).
+ * An Image card wired from Load video frames' rate (FLOAT into IMAGE) is one.
+ */
+export function wireTypeMismatch(prompt: ApiPrompt, id: string, catalog: NodeCatalog | null | undefined): boolean {
+  if (!catalog) return false
+  const node = prompt[id]
+  if (!node) return false
+  const def = catalogEntry(catalog, node.class_type)
+  if (!def) return false
+  const plain = (t: unknown): t is string => typeof t === 'string' && t !== '' && t !== 'COMBO' && !/^COMFY_.*_V3$/.test(t)
+  const types = (t: string) => new Set(t.split(',').map(x => x.trim()))
+  for (const [name, v] of Object.entries(node.inputs ?? {})) {
+    if (!isLink(v)) continue
+    const from = prompt[v[0]]
+    if (!from) continue
+    const spec = def.input?.required?.[name] ?? def.input?.optional?.[name]
+    const want = Array.isArray(spec) ? spec[0] : undefined
+    const got = catalogEntry(catalog, from.class_type)?.output?.[v[1]]
+    if (!plain(want) || !plain(got) || got === want) continue
+    const a = types(got)
+    const b = types(want)
+    if (a.has('*') || b.has('*')) continue
+    if (![...a].some(t => b.has(t))) return true
+  }
+  return false
 }
 
 /**
@@ -165,13 +198,9 @@ const runnerKnowsClass = (ct: string) => RUNNER_NODE_TYPES.has(ct) || Object.pro
  * doesn't list counts as one: the safe side). 'failed': every output fails;
  * 'no-outputs': nothing shows or saves a result ("Prompt has no outputs").
  */
-function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | 'failed' | 'no-outputs' {
+function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null, o: { wireTypes?: boolean } = {}): ApiPrompt | 'failed' | 'no-outputs' {
   const ids = Object.keys(prompt)
-  const isOutput = (ct: string) => {
-    if (runnerKnowsClass(ct)) return RUNNER_OUTPUT_CLASSES.has(ct)
-    const def = catalogEntry(catalog, ct)
-    return !def || def.output_node === true
-  }
+  const isOutput = outputTest(catalog)
   const outputs = ids.filter(id => isOutput(prompt[id]!.class_type))
   if (!outputs.length) return ids.length ? 'no-outputs' : prompt
   const valid = new Map<string, boolean>()
@@ -183,6 +212,9 @@ function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiProm
     seen.add(id)
     let ok = !nodeValidationErrors(node.class_type, node.inputs ?? {}).length
       && requiredWires(catalog, node.class_type).every(name => node.inputs?.[name] !== undefined)
+      // LC8 (B3): a wire of the wrong type, as ComfyUI's validate_inputs refuses it (the output is dropped, the
+      // rest runs). Only for the runner's hand-off (engineRunPrompt): engineRoute still names such a node.
+      && !(o.wireTypes && wireTypeMismatch(prompt, id, catalog))
     for (const v of Object.values(node.inputs ?? {})) if (isLink(v) && !check(v[0], seen)) ok = false
     valid.set(id, ok)
     return ok
@@ -194,15 +226,42 @@ function engineRunPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiProm
   return Object.fromEntries(ids.filter(id => keep.has(id)).map(id => [id, prompt[id]!]))
 }
 
+/** Whether a class is an output node: the runner's own list for a class it knows, else the catalogue (one it doesn't list counts as one: the safe side). */
+function outputTest(catalog?: NodeCatalog | null): (ct: string) => boolean {
+  return (ct) => {
+    if (runnerKnowsClass(ct)) return RUNNER_OUTPUT_CLASSES.has(ct)
+    const def = catalogEntry(catalog, ct)
+    return !def || def.output_node === true
+  }
+}
+
+/**
+ * LC8 (B2): a prompt whose every output fails validation, judged again for the
+ * local engine: the outputs that read a local-only class (./localOnly.ts) and
+ * what they read, or null when none does. The engine judges its own nodes'
+ * settings (a Load Checkpoint's model list is empty with the engine off), so
+ * these are judged as local-only nodes first, not as failed settings.
+ */
+function localOnlyOutputsPart(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
+  const isOutput = outputTest(catalog)
+  const ids = Object.keys(prompt)
+  const outputs = ids.filter(id => isOutput(prompt[id]!.class_type))
+    .filter(o => [...readByOutputs(prompt, [o])].some(id => isLocalOnlyClass(prompt[id]!.class_type)))
+  if (!outputs.length) return null
+  const keep = readByOutputs(prompt, outputs)
+  return Object.fromEntries(ids.filter(id => keep.has(id)).map(id => [id, prompt[id]!]))
+}
+
 /**
  * Fix round 1: what ComfyUI would run of a prompt (engineRunPart), or null
  * when nothing of it would run. The canvas hands this to the runner when the
  * runner won't take the prompt as it is but takes this (a result missing a
  * wire it needs, with what only it reads, no longer keeps the rest off the
- * runner: ComfyUI would have dropped it and run the rest).
+ * runner: ComfyUI would have dropped it and run the rest). LC8 (B3): so is a
+ * result wired from an output of the wrong type (wireTypeMismatch).
  */
 export function engineRunPrompt(prompt: ApiPrompt, catalog?: NodeCatalog | null): ApiPrompt | null {
-  const part = engineRunPart(prompt, catalog)
+  const part = engineRunPart(prompt, catalog, { wireTypes: true })
   return typeof part === 'string' ? null : part
 }
 
@@ -275,13 +334,30 @@ export function engineRoute(
   const listed = new Map<string, string>()
   let allFailed = false
   let noOutputs = false
+  /** LC8 (B2): local-only nodes in a take nothing would run (no output reads them, or none is valid), by title. */
+  const localOnlyAside = new Set<string>()
+  /** LC8 (F1): a take of nodes the runner takes one by one, with nothing to do (no work, no output reading anything). */
+  let nothingToRun = false
   for (const take of takes) {
     if (!take.prompt) continue
-    const part = engineRunPart(take.prompt, opts.catalog)
-    if (part === 'failed') { allFailed = true; continue }
-    if (part === 'no-outputs') { noOutputs = true; continue }
+    let part = engineRunPart(take.prompt, opts.catalog)
+    // LC8 (B2): local-only classes are judged before setting validation: an output reading one is the
+    // local engine's to judge (it knows its own nodes' settings), and goes there named, or is refused
+    // where the engine can't be reached, in its words.
+    if (part === 'failed' || part === 'no-outputs') {
+      const sub = part === 'failed' ? localOnlyOutputsPart(take.prompt, opts.catalog) : null
+      if (!sub) {
+        for (const [id, node] of Object.entries(take.prompt)) if (isLocalOnlyClass(node.class_type)) localOnlyAside.add(take.titleOf(id))
+        if (part === 'failed') allFailed = true
+        else noOutputs = true
+        continue
+      }
+      part = sub
+    }
     const { run, ids } = blockedNodes(part, families)
     if (!ids.length) continue
+    // LC8 (F1): every node taken on its own, the whole still not: there is nothing to do.
+    if (ids.length === Object.keys(run).length && ids.every(id => runnerTakesNode(run, id, families, lenient))) nothingToRun = true
     const toEngine = (id: string) => isLocalOnlyClass(run[id]!.class_type)
     for (const id of ids) if (toEngine(id)) localOnly.add(take.titleOf(id))
     const blocked = new Set(ids)
@@ -307,9 +383,19 @@ export function engineRoute(
     return { to: 'refused', title: titles.length === 1 ? `“${titles[0]}” can’t run` : `${titles.length} nodes can’t run`, description: namedWords(refused) }
   }
   if (!localOnly.size && !listed.size) {
+    // LC8 (B2): local-only nodes nothing would run, where the engine can't be reached: they are why.
+    if (localOnlyAside.size && (opts.hosted || !opts.engineUp)) {
+      const aside = [...localOnlyAside]
+      return opts.hosted
+        ? { to: 'refused', title: 'This workflow can’t run here', description: localOnlyHostedWords(aside) }
+        : { to: 'refused', title: 'This workflow needs the local engine', description: needsEngineDescription(aside) }
+    }
     if (allFailed) return { to: 'refused', title: 'This workflow can’t run', description: `${NO_VALID_OUTPUTS_MESSAGE}.` }
     if (noOutputs) return { to: 'refused', title: 'This workflow can’t run', description: NO_OUTPUTS_MESSAGE }
-    return { to: 'refused', title: 'This workflow can’t run', description: opts.declined?.trim() || WORKFLOW_CANT_RUN_WORDS }
+    const declined = opts.declined?.trim()
+    // LC8 (F1): nothing refused and nothing to do: say so, unless the runner gave words of its own.
+    if (nothingToRun && (!declined || declined === WORKFLOW_CANT_RUN_WORDS)) return { to: 'refused', title: 'Nothing to run', description: NOTHING_TO_RUN_WORDS }
+    return { to: 'refused', title: 'This workflow can’t run', description: declined || WORKFLOW_CANT_RUN_WORDS }
   }
   const titles = [...localOnly, ...[...listed.keys()].filter(t => !localOnly.has(t))]
   if (opts.hosted) {
@@ -375,6 +461,24 @@ export const RUNNER_OFF_WORDS = 'Running workflows in Sailor is switched off on 
 /** A run the runner declined though no node of it is refused here (the server's families differ), with no words of its own. */
 export const WORKFLOW_CANT_RUN_WORDS = 'Sailor can’t run this workflow yet.'
 
+/** LC8 (F1): a workflow of cards that make nothing (an Image card alone): nothing to run. */
+export const NOTHING_TO_RUN_WORDS = 'No node here makes or changes anything. Wire a node that makes a result into a card, then run.'
+
+/**
+ * LC8 (F4): the refusal for a class neither the node catalogue the app holds
+ * nor Sailor knows (the build can't read it), before anything is built or
+ * sent, by its title: a custom node installed for the local engine. Hosted:
+ * it runs only there. Locally with the engine off: the local-engine words.
+ * With the engine up it isn't installed there either. Null for a class
+ * Sailor knows (the builder's own error stands).
+ */
+export function unknownClassRefusal(classType: string, title: string, opts: { hosted: boolean; engineUp: boolean }): { title: string; description: string } | null {
+  if (!isCustomClass(classType)) return null
+  if (opts.hosted) return { title: 'This workflow can’t run here', description: `“${title}”: ${CUSTOM_NODE_WORDS}` }
+  if (!opts.engineUp) return { title: 'This workflow needs the local engine', description: `${needsEngineDescription([title])} ${CUSTOM_NODE_WORDS}` }
+  return { title: `“${title}” isn’t installed`, description: 'This node isn’t part of Sailor, and the local engine doesn’t have it. Install it there, or remove it.' }
+}
+
 /** In hosted, a run whose only refused nodes are local-only: they run only on the local engine, on one's own computer. */
 export function localOnlyHostedWords(titles: string[]): string {
   return `${quotedList(titles)} ${titles.length === 1 ? 'runs' : 'run'} only on the local engine, on your own computer.`
@@ -429,6 +533,49 @@ export function needsEngineDescription(titles: string[], reasons: readonly strin
   return [`Only the engine can run ${quotedList(titles)}.`, ...reasons.map(r => (/[.!?]$/.test(r) ? r : `${r}.`))].join(' ')
 }
 
+/**
+ * LC8 (F2): why a runner-only model's workflow wasn't taken, naming the other
+ * nodes the runner refused: never the engine, which can't run that model.
+ * `“Save video” can’t take this as it’s set up. Change what it’s wired to, or show the result in a card.`
+ */
+export function cantTakeItWords(titles: string[]): string {
+  return `${quotedList(titles)} can’t take this as ${titles.length === 1 ? 'it’s' : 'they’re'} set up. Change what ${titles.length === 1 ? 'it’s' : 'they’re'} wired to, or show the result in a card.`
+}
+
+/**
+ * LC8 (F2): why a workflow with a runner-only model wasn't taken, by the
+ * other nodes the runner refused (nodesNeedingEngine's), or null when none
+ * is: a class only the local engine runs (local-only, or a custom node) is
+ * named as needing the engine, since it does; a node whose family is off,
+ * as switched off; any other Sailor node, in cantTakeItWords. A Sailor node
+ * is never said to need the engine: the engine can't run the model either.
+ */
+function notTakenReason(
+  prompt: ApiPrompt,
+  opts: { runnerOn: boolean; families: ReadonlySet<RunnerFamily>; titleOf: (id: string) => string },
+  except: string,
+): string | null {
+  const { run, ids } = opts.runnerOn ? blockedNodes(prompt, opts.families) : { run: prompt, ids: Object.keys(prompt) }
+  const off = new Set(opts.runnerOn ? switchedOffNodes(run, opts.families) : [])
+  const engine: string[] = []
+  const switched: string[] = []
+  const other: string[] = []
+  for (const id of ids) {
+    const title = opts.titleOf(id)
+    if (title === except || engine.includes(title) || switched.includes(title) || other.includes(title)) continue
+    const ct = run[id]?.class_type ?? ''
+    if (isLocalOnlyClass(ct) || isCustomClass(ct)) engine.push(title)
+    else if (off.has(id)) switched.push(title)
+    else other.push(title)
+  }
+  const parts = [
+    ...(engine.length ? [needsEngineDescription(engine)] : []),
+    ...switched.map(t => switchedOffWords(t)),
+    ...(other.length ? [cantTakeItWords(other)] : []),
+  ]
+  return parts.length ? parts.join(' ') : null
+}
+
 /** “A”, “B” and “C” (at most MAX_NAMED, then "and N more"); "this workflow" when empty. */
 function quotedList(titles: string[]): string {
   const quoted = titles.slice(0, MAX_NAMED).map(t => `“${t}”`)
@@ -481,11 +628,11 @@ export function blockedRunRefusal(
     const use = blockedModelUses(prompt, { families })[0]
     if (!use) continue
     const title = take.titleOf(use.nodeId)
-    const needs = nodesNeedingEngine(prompt, { runnerOn: opts.runnerOn, families, titleOf: take.titleOf }).filter(t => t !== title)
+    const reason = notTakenReason(prompt, { runnerOn: opts.runnerOn, families, titleOf: take.titleOf }, title)
     return blockedModelRefusal(use, {
       title,
       families,
-      ...(needs.length ? { engineReason: needsEngineDescription(needs) } : {}),
+      ...(reason ? { engineReason: reason } : {}),
     })
   }
   return null
@@ -517,6 +664,6 @@ export function blockedPromptBody(
   const titleOf = (id: string) => promptNodeTitle(prompt, id)
   const title = titleOf(uses[0]!.nodeId)
   // Only read when the first model's switch is on (the runner is on): why the runner left it.
-  const needs = families.size ? nodesNeedingEngine(prompt, { runnerOn: true, families, titleOf }).filter(t => t !== title) : []
-  return blockedModelsResponse(prompt, uses, { families, titleOf, ...(needs.length ? { engineReason: needsEngineDescription(needs) } : {}) })
+  const reason = families.size ? notTakenReason(prompt, { runnerOn: true, families, titleOf }, title) : null
+  return blockedModelsResponse(prompt, uses, { families, titleOf, ...(reason ? { engineReason: reason } : {}) })
 }

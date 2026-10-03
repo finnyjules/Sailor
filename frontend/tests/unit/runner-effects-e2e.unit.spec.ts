@@ -63,6 +63,7 @@ import { EFFECT_CLASSES_PORTED, EFFECT_FAMILIES, EFFECT_FAMILY_OF, effectSchemaO
 import { IMAGE_OUTPUT_CLASSES, PICTURE_OUTPUTS, runnerTakesNode } from '#shared/runner/eligibility'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { pruneInvalidOutputs } from '#shared/runner/validate'
+import { takenOnlyByLc8CardsRule } from './__runner__/lc8CardsOnly'
 import { SHADER_CATALOG_VERSION, shaderBakeKeySync, shaderBakedText } from '#shared/runner/shaderBakeKey'
 import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -648,6 +649,8 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
           // R3.8 fix round 2: a prompt with no output node (every class known) is refused by the runner in
           // plain words ("Nothing here shows or saves a result"); nothing of it needs the engine.
           else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).noOutputs) outside.push(`${line} (R3.8: no output node)`)
+          // LC8 (F1): cards that show what a card made are taken, free (__runner__/lc8CardsOnly.ts).
+          else if (now.length === 0 && takenOnlyByLc8CardsRule(g.prompt, families)) outside.push(`${line} (LC8: cards showing what a card made)`)
           else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).unread.length
             && JSON.stringify(before) === JSON.stringify(Object.keys(withoutUnread(g.prompt, families)))) outside.push(`${line} (R3.8: cards left after unread nodes)`)
           else diffs.push(line)
@@ -768,13 +771,18 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
       return r.unread.length > 0 || !!r.noOutputs
     })).map(g => g.key))
     const unreadChanged: string[] = []
+    // LC8 (F1): cards that show what a card made, now taken with `cards` on (__runner__/lc8CardsOnly.ts).
+    const lc8Keys = new Set((await savedGraphs()).filter(g => Object.values(sets).some(f => takenOnlyByLc8CardsRule(g.prompt, f))).map(g => g.key))
+    const lc8Changed: string[] = []
     for (const [key, row] of Object.entries(now)) {
       const p = pinned.graphs[key]
       if (!p) { unpinned++; continue }
       if (p.prompt !== row.prompt) { changed++; continue }
       same++
-      if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) (unreadKeys.has(key) ? unreadChanged : differ).push(key)
+      if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) (unreadKeys.has(key) ? unreadChanged : lc8Keys.has(key) ? lc8Changed : differ).push(key)
     }
+    console.info(`R2.12 pinned: ${lc8Changed.length} graphs differ only as LC8's cards rule takes them: ${lc8Changed.join(', ')}`)
+    expect(lc8Changed.length).toBeLessThanOrEqual(20)
     console.info(`R2.12 pinned: ${unreadChanged.length} graphs differ only where a node no output reads is now left out, or there is no output node: ${unreadChanged.join(', ')}`)
     expect(unreadChanged.length).toBeLessThanOrEqual(130)
     console.info(`R2.12 pinned needs-engine: ${same} graphs as pinned, ${changed} edited since, ${unpinned} new, ${Object.keys(pinned.graphs).length - same - changed} gone`)

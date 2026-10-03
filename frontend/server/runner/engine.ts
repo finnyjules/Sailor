@@ -15,7 +15,7 @@ import { bakedPngSize } from './cards/shaderEffect'
 import { bakeFoldersOf, claimShaderBakes, releaseInactiveShaderBakes, releaseShaderBakes, sweepShaderBakes } from './shaderBakeFiles'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
-import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
+import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, showsMadeResult, type ComfyNodeError } from '#shared/runner/validate'
 import { blockedModelUses, blockedModelsResponse, promptNodeTitle } from '#shared/runner/blockedModels'
 import { retiredPromptRefusal } from '../utils/blockedModels'
 import {
@@ -2313,7 +2313,8 @@ export function createEngine(deps: EngineDeps) {
       }
       const svgReader = svgReaderProblems(run, families)[0]
       if (svgReader) throw refuse(svgReader.message, 400, { nodeId: svgReader.nodeId, classType: svgReader.classType })
-      const eligibility = { hosted: deps.hosted(), afterPruning: prunedAny(pruned), plainRefusals: true }
+      // LC8 (F1): a cards-only workflow whose output reads one of its nodes runs too, free (showsMadeResult).
+      const eligibility = { hosted: deps.hosted(), afterPruning: prunedAny(pruned), showsMadeResult: showsMadeResult(run), plainRefusals: true }
       if (!isRunnerEligible(run, families, eligibility)) {
         // R11.9a (row 24): a family switched on whose tools or model aren't installed: refused plainly.
         const missing = deps.uninstalled?.() ?? NO_FAMILIES

@@ -11,8 +11,10 @@ import type { GenOutput } from '~/lib/generations'
 /** A card qualifies when it has no images and its id is a real server uuid —
  *  history-fingerprint cards (comma-joined class types, pre-uuid runs) have
  *  no durable doc to fetch. */
-export function isBackfillCandidate(p: { workflowId?: string | null; images?: unknown[] | null }): boolean {
+export function isBackfillCandidate(p: { workflowId?: string | null; images?: unknown[] | null; generationsPending?: boolean }): boolean {
   if (!p.workflowId || p.workflowId.includes(',')) return false
+  // LC8 (B4): its generation records aren't read yet (they may hold its pictures): not blank yet.
+  if (p.generationsPending) return false
   return !p.images || p.images.length === 0
 }
 

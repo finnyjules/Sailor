@@ -301,5 +301,18 @@ export function runnerTakesWorkflow(
   if (r.failed) return true
   // R11.9a: a node the runner refuses in plain words (./stopGaps.ts) goes to it, to be refused there,
   // never to the engine (`plainRefusals` unless the caller says otherwise).
-  return isRunnerEligible(r.prompt, families, { plainRefusals: true, ...opts, afterPruning: prunedAny(r) })
+  return isRunnerEligible(r.prompt, families, { plainRefusals: true, ...opts, afterPruning: prunedAny(r), showsMadeResult: showsMadeResult(r.prompt) })
+}
+
+/**
+ * LC8 (F1): whether an output node (RUNNER_OUTPUT_CLASSES) reads a node of
+ * the prompt that isn't itself one, so the run shows or saves something made
+ * in it (an Empty image or a 3D Studio's picture in an Image card). Such a
+ * workflow runs with nothing to call or charge, as ComfyUI ran it, while
+ * `cards` is on (isRunnerEligible). A card alone, or a card showing another
+ * card, makes nothing new.
+ */
+export function showsMadeResult(prompt: ApiPrompt): boolean {
+  return Object.values(prompt).some(n => RUNNER_OUTPUT_CLASSES.has(n.class_type)
+    && linksOf(n).some(l => l.from in prompt && !RUNNER_OUTPUT_CLASSES.has(prompt[l.from]!.class_type)))
 }

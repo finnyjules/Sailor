@@ -68,14 +68,14 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { workflowNodeTitles, blockedRunRefusal, engineRoute, engineRunPrompt, leftOutNotice, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
+import { workflowNodeTitles, blockedRunRefusal, engineRoute, engineRunPrompt, leftOutNotice, unknownClassRefusal, RUNNER_OFF_WORDS } from '~/lib/runner/needsEngine'
 import { outputClassesOf } from '#shared/runner/validate'
-import { bakeShaderEffectsForRun, stopShaderBakes } from '~/lib/runner/shaderBake'
+import { bakeShaderEffectsForRun, stopShaderBakes, takeWantsShaderBake } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { RUNNER_STAGE_STALL_MS } from '#shared/runner/timeouts'
-import { useDirectExecution } from '~/composables/useDirectExecution'
+import { useDirectExecution, engineSocketAllowed } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
 import { useVueNodes } from '~/composables/useVueNodes'
 
@@ -529,14 +529,28 @@ function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { s
 // style_block write) lives in ~/lib/graph/styleInject.ts so it's unit-testable
 // — the run path calls it on the outgoing workflow copy only (see assembleTake).
 
-async function runVueWorkflow(
-  targetIds?: string[],
-  opts: {
-    rerollScope?: 'self' | 'variation', direction?: 'downstream', live?: boolean, skipCostConfirm?: boolean, costConfirmIterations?: number, takes?: number
-    /** Called with each prompt id this call actually queued (registered), as it is queued. */
-    onQueued?: (promptId: string) => void
-  } = {},
-): Promise<boolean> {
+type RunVueWorkflowOpts = {
+  rerollScope?: 'self' | 'variation', direction?: 'downstream', live?: boolean, skipCostConfirm?: boolean, costConfirmIterations?: number, takes?: number
+  /** Called with each prompt id this call actually queued (registered), as it is queued. */
+  onQueued?: (promptId: string) => void
+  /** LC8 (B5): auto-sinks the caller added for this run (materializeRunSinks): taken back if the run is refused. */
+  autoSinks?: string[]
+}
+
+// LC8 (B5): a refused Run must not change or save the project. The Image cards a Run adds to show its
+// results (materializeAutoImageSinks) are kept only once the run is accepted (a runner run started, or the
+// local engine queued it); a refused run takes them back. While a run is being judged, the autosave waits,
+// so a refused run never saves them in between.
+async function runVueWorkflow(targetIds?: string[], opts: RunVueWorkflowOpts = {}): Promise<boolean> {
+  const sinks = beginRunSinks(opts.autoSinks)
+  try {
+    return await runVueWorkflowBody(targetIds, opts, sinks)
+  } finally {
+    await settleRunSinks(sinks)
+  }
+}
+
+async function runVueWorkflowBody(targetIds: string[] | undefined, opts: RunVueWorkflowOpts, sinks: RunSinks): Promise<boolean> {
   if (!vueCanvasRef.value?.getWorkflow) {
     console.warn('[Run] no getWorkflow on vueCanvasRef')
     toast.error('Canvas not ready', { description: 'Give it a moment and try again.' })
@@ -563,7 +577,7 @@ async function runVueWorkflow(
     const activeIds = all
       .filter((n: any) => (n.data?.mode ?? 0) !== 2)
       .map((n: any) => n.id)
-    vueCanvasRef.value.materializeAutoImageSinks?.(activeIds)
+    sinks.ids.push(...materializeRunSinks(activeIds).added)
   }
 
   const useDirect = directExecutionEnabled.value
@@ -827,7 +841,19 @@ async function runVueWorkflow(
           ? err.message
           : String((err as any)?.message || err)
         console.error('[Run] direct prompt build failed', err)
-        toast.error("Couldn't build workflow", { description: msg.slice(0, 200) })
+        // LC8 (F4): a custom node the app's catalogue doesn't hold (the engine off, or hosted) is refused in
+        // the local-engine words, by its title, before anything is built or sent; never a builder error.
+        const unknownNode = err instanceof UnknownNodeTypeError
+          ? (plainWorkflow.nodes as any[]).find((n: any) => n?.type === err.classType)
+          : undefined
+        const custom = err instanceof UnknownNodeTypeError
+          ? unknownClassRefusal(err.classType, unknownNode ? workflowNodeTitles(plainWorkflow, objectInfo.value)(String(unknownNode.id)) : err.classType, {
+              hosted: hostedShell,
+              engineUp: engineUp.value || direct.isMainSocketOpen(),
+            })
+          : null
+        if (custom) toast.error(custom.title, { description: custom.description })
+        else toast.error("Couldn't build workflow", { description: msg.slice(0, 200) })
         // Abort cleanly — nothing was dispatched, so just clear run state.
         if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
         currentRunSilent.value = false
@@ -877,7 +903,14 @@ async function runVueWorkflow(
   if (useDirect && runnerEnabled && runnerFamilies.has('shader-bake')) {
     // R11.9c fix round 1 (m2): say that frames are being drawn while they are.
     let drawing: string | number | undefined
-    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies, {
+    // LC8 (B3): a take the runner takes only once what ComfyUI would drop is dropped (an Image card wired to a
+    // rate) is baked as that pruned take: it shares the node objects, so the bake lands on the take as built too.
+    const toBake = [firstTake, ...extraTakes].map((tk) => {
+      const p = tk.directPrompt
+      if (!p || takeWantsShaderBake(p, runnerFamilies)) return p
+      return engineRunPrompt(p, objectInfo.value) ?? p
+    })
+    const bake = await bakeShaderEffectsForRun(toBake, runnerFamilies, {
       hosted: hostedShell,
       tabId: runTabId,
       onStart: () => { drawing = toast.loading('Drawing the shader’s frames…') },
@@ -912,6 +945,8 @@ async function runVueWorkflow(
         // canvasId (Part B) lets per-run event routing find this run's canvas
         // even on terminal events.
         registerRun({ promptId: res.prompt_id, tabId: runTabId, live: !!opts.live, worker: res.worker ?? workerIdx, canvasId: runCanvasId })
+        // LC8 (B5): accepted: the auto-sinks this run added stay (they show its results).
+        sinks.accepted = true
         // Stash the run's OWN node catalog (captured at dispatch) so its cost
         // tally at execution_complete prices against these, not the active tab's
         // displayed nodes (which collide by id across canvases). Registered runs
@@ -1088,13 +1123,13 @@ async function handleRunFiltered(e: Event) {
   // Scoped dispatches (e.g. the prompt-bar sketch pad) can opt out of the cost
   // gate — the sketch tier is cheap and confirms would break the instant flow.
   const skipCostConfirm = detail?.skipCostConfirm === true
-  const expanded = vueCanvasRef.value?.materializeAutoImageSinks?.(targetIds) ?? targetIds
+  const { expanded, added } = materializeRunSinks(targetIds)
   // Bake any frontend-only studio upstream of the targets first: the run strips
   // studios (no backend class_type), so without this the downstream image node
   // runs with a null input and renders nothing ("studio doesn't render").
   await vueCanvasRef.value?.bakeUpstreamStudios?.(expanded)
   if (!live && !skipCostConfirm && await maybeRunWithTextAutofill(expanded, { rerollScope, direction })) return
-  runVueWorkflow(expanded, { rerollScope, live, direction, takes, skipCostConfirm })
+  runVueWorkflow(expanded, { rerollScope, live, direction, takes, skipCostConfirm, autoSinks: added })
 }
 async function handleRunAll() {
   // Auto-sink materialization lives inside runVueWorkflow now (so the
@@ -1299,10 +1334,10 @@ async function handleRunTextIterator(e: Event) {
       node.data.widgetsValues[textIdx] = entries[i]
       // Materialize downstream sinks before queuing — same dance as
       // handleRunFiltered. Iterator only ever runs from this one node.
-      const expanded = canvas.materializeAutoImageSinks?.([nodeId]) ?? [nodeId]
+      const { expanded, added } = materializeRunSinks([nodeId])
       const queued = await runVueWorkflow(expanded, i === 0
-        ? { costConfirmIterations: entries.length }
-        : { skipCostConfirm: true })
+        ? { costConfirmIterations: entries.length, autoSinks: added }
+        : { skipCostConfirm: true, autoSinks: added })
       if (queued === false) break // user declined the cost confirm
       // Small breather so the bridge / queue settles before the next.
       await new Promise(r => setTimeout(r, 250))
@@ -1341,9 +1376,10 @@ async function handleRunVariations(e: Event) {
       cancelled: () => variationsCancelled,
       runOne: async (i) => {
         const ids: string[] = []
-        const expanded = vueCanvasRef.value?.materializeAutoImageSinks?.([nodeId]) ?? [nodeId]
+        const { expanded, added } = materializeRunSinks([nodeId])
         const queued = await runVueWorkflow(expanded, {
           ...(i === 0 ? { rerollScope: 'variation' as const, costConfirmIterations: count } : { rerollScope: 'variation' as const, skipCostConfirm: true }),
+          autoSinks: added,
           onQueued: (promptId: string) => {
             ids.push(promptId)
             promptIds.push(promptId)
@@ -2027,6 +2063,16 @@ function autosaveCurrentWorkflow() {
 // the run-tracking sets.
 const AUTOSAVE_DEBOUNCE_MS = 3000
 let autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
+// LC8 (B5): an autosave that came due while a Run with auto-sinks was being judged, saved once it is settled.
+let autosaveDeferredForRun = false
+function armAutosave() {
+  if (autosaveDebounceTimer) clearTimeout(autosaveDebounceTimer)
+  autosaveDebounceTimer = setTimeout(() => {
+    autosaveDebounceTimer = null
+    if (autosaveHeldForRun()) { autosaveDeferredForRun = true; return }
+    autosaveCurrentWorkflow()
+  }, AUTOSAVE_DEBOUNCE_MS)
+}
 function onCanvasDirty() {
   // Follower windows are read-only mirrors: the overlay swallows pointer
   // events, but stray keyboard-driven canvas mutations could still land here.
@@ -2037,11 +2083,70 @@ function onCanvasDirty() {
   // real canvas mutations of the active tab (suppressed while a workflow is
   // being applied), so this is the canonical "user touched the canvas" signal.
   markDocEdited()
-  if (autosaveDebounceTimer) clearTimeout(autosaveDebounceTimer)
-  autosaveDebounceTimer = setTimeout(() => {
-    autosaveDebounceTimer = null
-    autosaveCurrentWorkflow()
-  }, AUTOSAVE_DEBOUNCE_MS)
+  armAutosave()
+}
+
+/** LC8 (B5): one Run's auto-sinks, while it is judged. */
+interface RunSinks {
+  /** The auto-sinks added for this run (node ids). */
+  ids: string[]
+  /** The run was accepted (registered): the sinks stay. */
+  accepted: boolean
+  /** The tab, and whether it had unsaved edits, when the run began. */
+  tabId: string | undefined
+  dirtyBefore: boolean
+  editedAtBefore: number | undefined
+}
+const runsJudging = new Set<RunSinks>()
+/** Whether a run that added auto-sinks is still being judged: the autosave waits for it. */
+function autosaveHeldForRun(): boolean {
+  for (const r of runsJudging) if (r.ids.length) return true
+  return false
+}
+function beginRunSinks(ids: string[] = []): RunSinks {
+  const tabId = activeTab.value?.id
+  const r: RunSinks = {
+    ids: [...ids],
+    accepted: false,
+    tabId,
+    dirtyBefore: autosaveDebounceTimer !== null || autosaveDeferredForRun,
+    editedAtBefore: tabId ? docEditedAt[tabId] : undefined,
+  }
+  runsJudging.add(r)
+  return r
+}
+/** Add the auto-sinks a Run needs to show its results; returns the run's ids and the new sinks' ids. */
+function materializeRunSinks(ids: string[]): { expanded: string[]; added: string[] } {
+  const canvas = vueCanvasRef.value
+  const before = new Set(((canvas?.getNodes?.() ?? []) as any[]).map((n: any) => String(n.id)))
+  const expanded = canvas?.materializeAutoImageSinks?.(ids) ?? ids
+  const added = ((canvas?.getNodes?.() ?? []) as any[]).map((n: any) => String(n.id)).filter(id => !before.has(id))
+  return { expanded, added }
+}
+/**
+ * The run is settled. Accepted: its sinks stay and a save that waited goes now. Refused: its sinks are taken
+ * back, and when they were the only change since the last save, nothing is saved (the project is as it was).
+ */
+async function settleRunSinks(r: RunSinks): Promise<void> {
+  if (r.ids.length && !r.accepted) {
+    vueCanvasRef.value?.removeAutoSinks?.(r.ids)
+    // The removal dirties the canvas on the next tick (the graph watch): let it, then drop that save.
+    await nextTick()
+    await nextTick()
+    if (!r.dirtyBefore && activeTab.value?.id === r.tabId) {
+      if (autosaveDebounceTimer) { clearTimeout(autosaveDebounceTimer); autosaveDebounceTimer = null }
+      autosaveDeferredForRun = false
+      if (r.tabId) {
+        if (r.editedAtBefore === undefined) delete docEditedAt[r.tabId]
+        else docEditedAt[r.tabId] = r.editedAtBefore
+      }
+    }
+  }
+  runsJudging.delete(r)
+  if (autosaveDeferredForRun && !autosaveHeldForRun()) {
+    autosaveDeferredForRun = false
+    armAutosave()
+  }
 }
 
 // Prompts queued by live-run should not surface "started" / "completed" toasts
@@ -2248,13 +2353,17 @@ function forceReloadCanvas() {
 // Probes Sailor's own same-origin `/api/engine/health` (local and hosted
 // alike): `backendUp` = Sailor answers; `engineUp` = the local engine does.
 // onRecovered fires when the engine comes (back) up.
-const { backendUp, engineUp, start: startHealthPoll, stop: stopHealthPoll } =
+const { backendUp, engineUp, engineKnown, start: startHealthPoll, stop: stopHealthPoll } =
   useBackendHealth('', {
     onRecovered: () => forceReloadCanvas(),
     suppressRecovery: () => runningCount.value > 0,
   })
-// Engine off: the run socket stops retrying; it reconnects when the engine answers.
-watch(engineUp, (up) => direct.setEngineAvailable(up), { immediate: true })
+// The run socket opens only after a health poll says the engine is up, and
+// never in hosted (LC8 B1). Engine off: it stops retrying; it reconnects when
+// the engine answers.
+watch([engineUp, engineKnown], ([up, known]) => direct.setEngineAvailable(
+  engineSocketAllowed({ engineKnown: known, engineUp: up, hosted: hostedShell }),
+), { immediate: true })
 
 // Ready = Sailor answers. The engine is optional: without it only the runs
 // that need it are refused (runVueWorkflow).

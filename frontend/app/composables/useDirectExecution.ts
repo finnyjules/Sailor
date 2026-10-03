@@ -76,6 +76,13 @@ export function mayReconnect(engineAvailable: boolean): boolean {
   return engineAvailable
 }
 
+/** Pure decision: may the run socket to the local engine be open at all? Only
+ *  once Sailor has answered a health poll (`engineKnown`) and said the engine
+ *  is up, and never in hosted, which has no engine. Exported for unit testing. */
+export function engineSocketAllowed(s: { engineKnown: boolean; engineUp: boolean; hosted: boolean }): boolean {
+  return !s.hosted && s.engineKnown && s.engineUp
+}
+
 function getClientId(): string {
   if (!import.meta.client) return ''
   let id = sessionStorage.getItem('sailor:clientId')
@@ -94,9 +101,12 @@ interface SocketState {
 }
 
 const main: SocketState = { ws: null, wantConnected: false, reconnectAttempt: 0, reconnectTimer: null }
-// Whether the local engine answers, per the app's health poll. Optimistic:
-// until the first poll says otherwise, the socket connects as it always has.
-let engineAvailable = true
+// Whether the local engine answers, per the app's health poll. Starts false
+// (LC8 B1): the socket opens only once a health poll has said the engine is
+// up — never before the first answer, and never in hosted (the caller passes
+// engineSocketAllowed()). In local dev an early /ws would make the Nuxt
+// upgrade proxy dial :8188 with the engine off.
+let engineAvailable = false
 let cachedClientId: string | null = null
 const listeners = new Set<(e: BridgeShapedEvent) => void>()
 

@@ -142,7 +142,7 @@ describe('browser: refused before any /prompt', () => {
 
   it('runVueWorkflow checks after the runner declined or was skipped, and returns before any /prompt', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../app/layouts/default.vue'), 'utf8')
-    const start = src.indexOf('async function runVueWorkflow(')
+    const start = src.indexOf('async function runVueWorkflowBody(') // LC8 (B5): runVueWorkflow wraps this body
     const body = src.slice(start, src.indexOf('\n}\n', start))
     const runner = body.indexOf('sentToRunner = true')
     const check = body.indexOf('blockedRunRefusal(')

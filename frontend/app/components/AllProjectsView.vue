@@ -2,7 +2,7 @@
 import { Pin, PinOff, EyeOff, Eye, LayoutGrid } from 'lucide-vue-next'
 import type { RecentProject } from '~/composables/useRecentProjects'
 
-const { allProjects, loading, thumbnailUrl, timeAgo, refresh } = useRecentProjects()
+const { allProjects, loading, thumbnailUrl, timeAgo, refresh, observeProjectCard } = useRecentProjects()
 const { isPinned, isHidden, togglePin, hide, unhide } = useProjectPrefs()
 const { tabs, openTab, setActiveTab } = useTabs()
 const { observeCard, disconnect } = useCoverBackfill()
@@ -143,7 +143,7 @@ function openProject(project: RecentProject) {
         v-for="project in filtered"
         :key="project.workflowId"
         class="cursor-pointer group"
-        :ref="(el) => observeCard(el as unknown as Element | null, project)"
+        :ref="(el) => { observeProjectCard(el as unknown as Element | null, project); observeCard(el as unknown as Element | null, project) }"
         @click="openProject(project)"
       >
         <!-- Thumbnail mosaic -->

@@ -69,6 +69,7 @@ import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs } from '#shared/runner/validate'
+import { takenOnlyByLc8CardsRule } from './__runner__/lc8CardsOnly'
 import { parsePyJson, pyJsonDumps, type PyJson } from '#shared/runner/pyJson'
 import { LORA_BY_NAME_HOSTED } from '#shared/runner/lora'
 import { SPEECH_VOICE_NOT_OFFERED } from '#shared/runner/audioGen'
@@ -968,6 +969,7 @@ describe('R3.18 · every R3 family off', () => {
     for (const [, f] of sets) for (const r3 of R3_FAMILIES) expect(f.has(r3)).toBe(false)
     const graphs = await savedGraphs()
     const raw: string[] = []
+    const lc8: string[] = []
     const byPruning: string[] = []
     /** Each differing list: the nodes that moved, and whether every one of them is a node no output reads. */
     const differing: { key: string; families: string; moved: string[] }[] = []
@@ -980,6 +982,8 @@ describe('R3.18 · every R3 family off', () => {
         if (JSON.stringify(now) === JSON.stringify(before)) continue
         const moved = [...now.filter(x => !before.includes(x)), ...before.filter(x => !now.includes(x))]
         const line = `${g.key} (${label}): now ${JSON.stringify(now)} before ${JSON.stringify(before)}; classes ${[...new Set(moved.map(id => g.prompt[id]?.class_type ?? '?'))].join(', ')}`
+        // LC8 (F1): cards that show what a card made, now taken with `cards` on (__runner__/lc8CardsOnly.ts).
+        if (now.length === 0 && takenOnlyByLc8CardsRule(g.prompt, families)) { lc8.push(line); continue }
         raw.push(line)
         // Every node that moved is one no output reads (with no output node at all, no node is read).
         const readers = pruneInvalidOutputs(g.prompt, families)
@@ -1009,6 +1013,8 @@ describe('R3.18 · every R3 family off', () => {
     expect(graphs.length).toBeGreaterThanOrEqual(800)
     // Not explained by R3.8's accepted, family-independent pruning: none.
     expect(unexplained.slice(0, 20), `${unexplained.length} graphs differ from ${BEFORE_R3} beyond R3.8's pruning`).toEqual([])
+    console.info(`R3.18: ${lc8.length} lists differ only as LC8's cards rule takes the graph:\n${lc8.join('\n')}`)
+    expect(lc8.length).toBeLessThanOrEqual(40)
     // Controller ruling on R3.18 (as R2.12's baseline ruling): R3.8's pruning is an accepted difference. Every
     // differing list differs only by nodes no output reads, and the set of them is the pinned one.
     differing.sort((a, b) => a.key.localeCompare(b.key) || a.families.localeCompare(b.families))

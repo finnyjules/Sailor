@@ -7,6 +7,10 @@ export interface BackendHealth {
   everUp: Ref<boolean>
   /** The local engine (ComfyUI) answers, as Sailor reports it (debounced). Optimistic at start. */
   engineUp: Ref<boolean>
+  /** True once Sailor has answered a poll, so `engineUp` is Sailor's word and
+   *  no longer the optimistic start value. The run socket waits for this
+   *  (LC8 B1: no `/ws` before the first answer). */
+  engineKnown: Ref<boolean>
   start: () => void
   stop: () => void
 }
@@ -53,6 +57,7 @@ export function useBackendHealth(origin: string, opts: BackendHealthOpts = {}): 
   const backendUp = ref(true)   // optimistic; the debounce flips it on real failures
   const everUp = ref(false)
   const engineUp = ref(true)    // optimistic, same debounce
+  const engineKnown = ref(false)
   let sailorFailures = 0
   let engineFailures = 0
   let engineEverUp = false
@@ -86,6 +91,7 @@ export function useBackendHealth(origin: string, opts: BackendHealthOpts = {}): 
     if (stopped) return
     const sailorAnsweredBefore = everUp.value
     if (r.sailor) {
+      engineKnown.value = true
       sailorFailures = 0
       backendUp.value = true
       everUp.value = true
@@ -125,5 +131,5 @@ export function useBackendHealth(origin: string, opts: BackendHealthOpts = {}): 
     if (timer) { clearTimeout(timer); timer = null }
   }
 
-  return { backendUp, everUp, engineUp, start, stop }
+  return { backendUp, everUp, engineUp, engineKnown, start, stop }
 }

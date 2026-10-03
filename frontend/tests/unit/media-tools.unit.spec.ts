@@ -546,11 +546,13 @@ describe('the pins', () => {
     expect(df).not.toMatch(/^[^#\n]*\b(meson|ninja-build|ninja)\b[^\n]*\\$/m)
   })
 
-  it('the Dockerfile builds the media-tools stage on the pinned runtime base, copies it and points the server at it', () => {
+  it('the Dockerfile builds the media-tools stage on the pinned Python base, copies it into the Node runtime and points the server at it', () => {
     const df = readFileSync(join(REPO, 'Dockerfile'), 'utf8')
     expect(df).toMatch(/^ARG PYTHON_BASE=python:3\.12-slim@sha256:[0-9a-f]{64}$/m)
     expect(df).toMatch(/^FROM \$\{PYTHON_BASE\} AS media-tools$/m)
-    expect(df).toMatch(/^FROM \$\{PYTHON_BASE\} AS runtime$/m)
+    // The hosted image runs on Node alone since R10.10 (no Python, no ComfyUI); only the build stages use Python.
+    expect(df).toMatch(/^ARG NODE_BASE=node:[0-9a-z.-]+@sha256:[0-9a-f]{64}$/m)
+    expect(df).toMatch(/^FROM \$\{NODE_BASE\} AS runtime$/m)
     expect(df.indexOf('AS media-tools')).toBeLessThan(df.indexOf('AS runtime'))
     expect(df).toContain('scripts/media-tools/build.sh /opt/media-tools')
     expect(df).toMatch(/^COPY --from=media-tools \/opt\/media-tools \/opt\/media-tools$/m)
