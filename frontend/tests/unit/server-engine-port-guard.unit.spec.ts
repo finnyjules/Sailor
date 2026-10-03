@@ -7,7 +7,9 @@
  *      local-only proxy (server/middleware/comfyui-proxy.ts).
  *   2. The engine's port reaches a file only through engineHealth.ts, and only
  *      the files listed here import it — each a local-only engine path (decision
- *      4) or one R10.9 removes for hosted. A new importer must be added here,
+ *      4); since R10.9 none of them is reachable from hosted (each returns
+ *      before asking the engine there — tests/unit/hosted-never-reaches-engine
+ *      .unit.spec.ts drives every one). A new importer must be added here,
  *      with its reason, on purpose.
  *   3. The routes R10.8 moved off the engine never ask it for anything but a
  *      local-only run (the history routes, behind engineHealth).
@@ -42,15 +44,13 @@ const ADDRESS_OK = new Set([
 /** May import the engine's port or origin, and why. */
 const PORT_IMPORTERS: Record<string, string> = {
   'server/middleware/comfyui-proxy.ts': 'the local-only proxy (/prompt, /ws for decision 4’s classes)',
-  // R10.8 fix round 1 (M1): reachable from hosted through dispatchNative / handleHostedObjectInfo.
-  'server/native/media.ts': 'HOSTED reaches the engine here (forwardToEngine while it is up) until R10.9 — R10.9 must remove it for hosted',
-  'server/native/objectInfo.ts': 'HOSTED reaches the engine here (fromEngine while it is up) until R10.9 — R10.9 must remove it for hosted',
+  // R10.8 fix round 1 (M1) named these hosted-reachable; R10.9 made both local only.
+  'server/native/media.ts': 'local only: forwardToEngine returns null in hosted before any request (R10.9)',
+  'server/native/objectInfo.ts': 'local only: fromEngine returns null in hosted before any request; hosted serves the saved copy (R10.9)',
   'server/routes/history/index.get.ts': 'local only: the engine’s local-only runs, while it is up',
   'server/routes/history/[promptId].get.ts': 'local only: one local-only run, while it is up',
   'server/api/admin/console.get.ts': 'a link to the engine, shown only while it is up (never fetched)',
   'server/templates/safeFetch.ts': 'the port number Python’s /view URLs carry; the file is read off disk, never fetched',
-  'server/utils/engineGate.ts': 'hosted engine paths — R10.9 removes them',
-  'server/utils/meterGraphRun.ts': 'hosted engine-run metering — R10.9 removes it',
 }
 
 describe('the server stops calling the engine’s port (R10.8)', () => {
@@ -81,9 +81,9 @@ describe('the server stops calling the engine’s port (R10.8)', () => {
     expect(importers).toEqual(Object.keys(PORT_IMPORTERS).sort())
   })
 
-  it('only the listed files forward to the engine through media.ts (hosted-reachable until R10.9)', () => {
+  it('only the listed files forward to the engine through media.ts (local only since R10.9)', () => {
     const FORWARDERS: Record<string, string> = {
-      'server/native/smallRoutes.ts': 'HOSTED reaches the engine here (font subset forward while it is up) until R10.9 — R10.9 must remove it for hosted',
+      'server/native/smallRoutes.ts': 'local only: the font subset forward is skipped in hosted (the font comes back whole, R10.9)',
     }
     const importers = files
       .filter(f => f.rel !== 'server/native/media.ts')
@@ -115,5 +115,24 @@ describe('the server stops calling the engine’s port (R10.8)', () => {
       // Hosted returns before the engine is ever asked.
       expect(text.indexOf("deployMode() === 'hosted'"), rel).toBeLessThan(gateAt)
     }
+  })
+
+  it('hosted returns before every engine forward that is left (R10.9)', () => {
+    const text = (rel: string) => files.find(f => f.rel === rel)!.text
+    const before = (rel: string, guard: RegExp, fetchAt: string) => {
+      const t = text(rel)
+      const g = t.search(guard)
+      const f = t.indexOf(fetchAt, g)
+      expect(g, `${rel}: hosted guard`).toBeGreaterThan(0)
+      expect(f, `${rel}: the engine request after the guard`).toBeGreaterThan(g)
+    }
+    before('server/native/media.ts', /export async function forwardToEngine[^]*?if \(isHosted\(\)\) return null/, 'await fetch(')
+    before('server/native/objectInfo.ts', /async function fromEngine[^]*?if \(isHosted\(\)\) return null/, 'await fetch(')
+    before('server/native/smallRoutes.ts', /if \(isHosted\(\)\) return native/, 'forwardToEngine(event')
+    // The hosted engine handlers are gone, not just unreached.
+    expect(text('server/utils/engineGate.ts')).not.toMatch(/\bfetch\(|ENGINE_MAIN_PORT|8188/)
+    expect(text('server/utils/meterGraphRun.ts')).not.toMatch(/\bfetch\(|ENGINE_MAIN_PORT|8188|handleMeteredPrompt/)
+    // engineHealth answers down in hosted before probing.
+    expect(text('server/native/engineHealth.ts')).toMatch(/if \(hosted\(\)\) return Promise\.resolve\('down'\)/)
   })
 })

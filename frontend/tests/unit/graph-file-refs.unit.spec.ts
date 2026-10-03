@@ -18,9 +18,8 @@ import {
   validateGraphFileRefs,
   shortUserHash,
   injectOutputSubfolder,
-  loadUploadFlaggedInputs,
-  __resetUploadFlagMapForTests,
 } from '../../server/utils/meterGraphRun'
+import { collectUploadFlaggedInputs } from '../../server/utils/engineGate'
 import { MeterRefusalError } from '../../server/utils/requestMeter'
 
 /** A ctx whose ownership answers are fully controlled by the test. */
@@ -296,7 +295,9 @@ describe('validateGraphFileRefs — Task 7b folder readers (per-FOLDER ownership
   })
 })
 
-describe('loadUploadFlaggedInputs — derived from the live object_info catalog', () => {
+// Step 3, R10.9: the cached fetch of the engine's catalog (loadUploadFlaggedInputs)
+// went with the hosted /prompt path; the catalog walk itself stays.
+describe('collectUploadFlaggedInputs — derived from an object_info catalog', () => {
   const catalog = {
     // legacy shape: [ ["file", ...], { image_upload: true } ]
     LoadImage: { input: { required: { image: [['a.png', 'b.png'], { image_upload: true }] } } },
@@ -307,9 +308,7 @@ describe('loadUploadFlaggedInputs — derived from the live object_info catalog'
   }
 
   it('collects every upload-flagged (ClassType.inputName) pair PLUS the hardcoded LoadImageOutput.image', async () => {
-    __resetUploadFlagMapForTests()
-    const fetchCatalog = vi.fn(async () => catalog)
-    const set = await loadUploadFlaggedInputs(fetchCatalog)
+    const set = collectUploadFlaggedInputs(catalog)
     expect(set.has('LoadImage.image')).toBe(true)
     expect(set.has('LoadAudio.audio')).toBe(true)
     expect(set.has('CheckpointLoaderSimple.ckpt_name')).toBe(false)
@@ -317,14 +316,6 @@ describe('loadUploadFlaggedInputs — derived from the live object_info catalog'
     // it is never object_info-flagged AND no longer added here — the
     // GRAPH_FILE_READERS map covers it explicitly (semantics: output).
     expect(set.has('LoadImageOutput.image')).toBe(false)
-  })
-
-  it('caches per process (does not refetch the catalog within the TTL)', async () => {
-    __resetUploadFlagMapForTests()
-    const fetchCatalog = vi.fn(async () => catalog)
-    await loadUploadFlaggedInputs(fetchCatalog)
-    await loadUploadFlaggedInputs(fetchCatalog)
-    expect(fetchCatalog).toHaveBeenCalledTimes(1)
   })
 })
 

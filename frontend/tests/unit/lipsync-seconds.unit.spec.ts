@@ -273,11 +273,10 @@ describe('the /prompt gate measures lip-sync media', () => {
     await meterGraphSubmit('u', { prompt }, { ...deps, measureInputSeconds: undefined })
     await meterGraphSubmit('u', { prompt }, { ...deps, measureInputSeconds: async () => { throw new Error('boom') } })
     expect(held).toEqual([180 + 1, 1350 + 1, 1350 + 1])
-    // The live wiring shares one read budget between pictures and lengths.
+    // Step 3, R10.9: the live hosted /prompt wiring (handleMeteredPrompt) is gone — hosted never reaches
+    // the engine — so there is no live wiring left to pin here; the runner measures its own inputs.
     const src = readFileSync(`${REPO}frontend/server/utils/meterGraphRun.ts`, 'utf8')
-    // (G1 fix round 1: one walk gives the picture sizes and their refusals.)
-    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads)')
-    expect(src).toContain('measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads)')
+    expect(src).not.toContain('handleMeteredPrompt')
   })
 
   it('the Studio’s /view links are ownership-checked before anything is read or priced', async () => {

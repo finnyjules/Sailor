@@ -8,10 +8,10 @@
  * - `input`: checked against `input_uploads` (who wrote a top-level input),
  *   the `moodboards/refs.post.ts` pattern. An unrecorded input passes.
  * - `output`: gated exactly as hosted /view gates it (server/routes/view.get.ts)
- *   — the caller's owned output keys (graph_runs), with one harvest of their
- *   pending runs and a re-check for the race window where the client saw a
- *   run finish before its outputs were recorded. A WIRED layer's image is an
- *   execution output, so without this hosted wired layers got no depth.
+ *   — the caller's owned output keys (graph_runs), which the runner records
+ *   as each file is saved (no engine history harvest since step 3, R10.9).
+ *   A WIRED layer's image is an execution output, so without this hosted
+ *   wired layers got no depth.
  * - `temp`: ungated, as /view leaves it (the documented gap) — this route
  *   discloses nothing /view does not already serve.
  *
@@ -24,7 +24,6 @@ import type { H3Event } from 'h3'
 import { isHosted } from './deployMode'
 import { canonicalUploadKey, uploadOwner } from './inputUploads'
 import { ownedOutputKeys, outputKey } from './graphRuns'
-import { harvestPendingOutputs } from './engineGate'
 import { safeAssetRelPath } from './depthCache'
 
 const notFound = () => createError({ statusCode: 404, statusMessage: 'not found' })
@@ -51,8 +50,7 @@ export async function assertInputOwned(
       subfolder: cut < 0 ? '' : rel.slice(0, cut),
       type: 'output',
     })
-    if ((await ownedOutputKeys(userId)).has(key)) return
-    await harvestPendingOutputs(userId)
+    // The runner records each output as it is saved; no engine harvest (R10.9).
     if (!(await ownedOutputKeys(userId)).has(key)) throw notFound()
     return
   }

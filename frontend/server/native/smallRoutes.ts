@@ -6,8 +6,9 @@
  * `/sailor/models` stays claimed with no route in it (step 3, R10.5): Sailor
  * no longer downloads or reports model bundles, and a request there answers
  * 404 here rather than reaching the engine's downloader.
- * `/sailor/font_subset` is checked here and still subset by the engine while
- * it runs; without it the font comes back whole (fontSubset.ts says why).
+ * `/sailor/font_subset` is checked here and, locally, still subset by the
+ * engine while it runs; without it, and always in hosted (R10.9), the font
+ * comes back whole (fontSubset.ts says why).
  */
 import type { H3Event } from 'h3'
 import { getRequestHeader } from 'h3'
@@ -24,6 +25,7 @@ import {
 import { fontSubsetRoute } from './fontSubset'
 import { cleanupFramesRoute, clearDatasetRoute, saveCaptionsRoute } from './inputHousekeeping'
 import { ENGINE_FORWARD_TIMEOUT_MS, forwardToEngine } from './media'
+import { isHosted } from '../utils/deployMode'
 
 export interface SmallResult {
   status: number
@@ -135,6 +137,8 @@ export async function runSmallRoute(h: SmallHandler, event: H3Event, read: BodyR
       if (!parsed.ok) return parsed.result
       const native = fontSubsetRoute(parsed.value)
       if (native.status !== 200) return native
+      // Hosted never reaches the engine (step 3, R10.9): the font comes back whole.
+      if (isHosted()) return native
       return (await forwardToEngine(event, '/sailor/font_subset', parsed.raw, ENGINE_FORWARD_TIMEOUT_MS)) ?? native
     }
     case 'saveCaptions':

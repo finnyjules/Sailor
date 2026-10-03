@@ -52,7 +52,6 @@ export const ENGINE_ROUTE_PREFIXES = [
 ]
 
 /** Verbs the settings/userdata aiohttp routes serve (POST covers /userdata/{file}/move/{dest}). */
-const USER_SCOPED_METHODS = new Set(['GET', 'POST', 'DELETE'])
 
 function splitQuery(path: string): [string, string] {
   const i = path.indexOf('?')
@@ -118,63 +117,61 @@ export function normalizeEnginePath(path: string): string {
 }
 
 export type EngineDecision =
-  | { kind: 'meterPrompt' }
-  | { kind: 'queueGet' }
-  | { kind: 'interrupt' }
   | { kind: 'objectInfo' }
   | { kind: 'emptySubgraphs' }
   | { kind: 'outputListing' }
   | { kind: 'upload' }
   | { kind: 'sailorProjects' }
   | { kind: 'sailorData' }
-  | { kind: 'userScoped' }
   | { kind: 'proxy' }
+  | { kind: 'notFound' }
   | { kind: 'forbid', message: string }
 
 /**
- * Engine paths a hosted tenant may reach RAW, with no per-user filtering.
- *
- * ROUND-2 LESSON — an entry here is a claim about what the HANDLER does, not
- * about what the path looks like. Being static-sounding is not evidence.
- * Adding a prefix to this list REQUIRES reading the upstream handler in
- * ComfyUI's server.py and answering: what does it read, what does it write,
- * and whose data is in scope? Round 2 found two entries that failed that
- * audit despite looking inert:
- *
- *   F1 `/gate`        — POST /gate/resume rebuilds a STORED graph from a
- *                       client-supplied prompt_id and re-queues it under a
- *                       fresh uuid: unmetered arbitrary re-execution, and it
- *                       pops another tenant's paused-gate context on the way.
- *   F2 `/object_info` — the LoadImage-family combos embed a listing of the
- *                       shared input directory, i.e. every tenant's uploaded
- *                       filenames. The canvas genuinely needs this endpoint,
- *                       so it is scrubbed rather than refused.
- *
- * Both now have explicit branches below and are deliberately NOT in this list.
- *
- * `/global_subgraphs` left this list in step 3, R10.6: blueprints are built
- * from local-only classes, so hosted answers an empty list itself
- * (`emptySubgraphs`) and refuses a single blueprint, never asking ComfyUI.
- *
- * `/ws` is deliberately here: WebSocket gating is Task 7's job and this is a
- * plain HTTP middleware; refusing it would break the canvas without closing
- * anything (the upgrade is dispatched in nuxt.config, not here).
- *
- * STAGE 6 — `/sailor` WAS on this list and is the worked example of the lesson
- * above. It looked like Sailor's own namespace, so nobody read the handlers:
- * `comfy_extras/nodes_sailor_projects.py` takes the project uuid off the path,
- * checks `_is_safe_id` (traversal only) and serves it. Zero identity, in the
- * request or on disk. So the entry silently published every tenant's saved
- * work, and the install-wide spend ledger, to every signed-in user. Projects
- * and spend now have explicit branches below; the REMAINING `/sailor/*`
- * extension routes are still un-audited and keep today's raw behaviour via a
- * deliberate, named branch rather than an unexamined allowlist entry.
+ * A POST to `/prompt` in any spelling (`/api/prompt`, `/comfyui/prompt`, …),
+ * taken on the NORMALIZED path: the local proxy's model check (local only —
+ * hosted answers every `/prompt` 404, step 3 R10.9).
  */
-const HOSTED_RAW_ALLOW = [
+export function isEnginePromptPost(enginePath: string, method: string): boolean {
+  const [p] = splitQuery(enginePath)
+  return match(p, '/prompt') && (method || 'GET').toUpperCase() === 'POST'
+}
+
+/**
+ * Step 3, R10.9 — hosted never reaches the engine. Each of these is an engine
+ * route only ComfyUI serves (running a graph, its queue, Stop, its socket,
+ * its history and file mirrors, its internals, gate resume, its stats,
+ * front-end extensions, per-user settings and userdata); hosted answers each
+ * with a plain 404, in every spelling and verb. The routes hosted still
+ * answers are Sailor's own (the node list from the saved copy, uploads,
+ * projects and files, the shader/preset/font routes, LoadImageOutput's
+ * picker from graph_runs), and none of them asks ComfyUI.
+ */
+export const HOSTED_ENGINE_ONLY = [
+  '/prompt',
+  '/queue',
+  '/interrupt',
+  '/ws',
+  '/history',
+  '/view',
+  '/internal',
+  '/gate',
   '/system_stats',
   '/extensions',
-  '/ws',
+  ...USER_SCOPED_PREFIXES,
 ]
+
+/**
+ * Engine paths a hosted tenant may reach RAW, with no per-user filtering:
+ * none (step 3, R10.9). Hosted never reaches the engine, so `/system_stats`,
+ * `/extensions` and `/ws` left this list and answer 404 (HOSTED_ENGINE_ONLY).
+ * Kept, empty, as the record of that rule: an entry here would be a path the
+ * hosted proxy forwards to ComfyUI, and there is no such path any more.
+ *
+ * ROUND-2 LESSON (still the rule for anything ever added) — an entry here is
+ * a claim about what the HANDLER does, not about what the path looks like.
+ */
+export const HOSTED_RAW_ALLOW: readonly string[] = []
 
 function match(pathNoQuery: string, prefix: string): boolean {
   return pathNoQuery === prefix || pathNoQuery.startsWith(prefix + '/')
@@ -295,49 +292,20 @@ export function hostedEngineDecision(enginePath: string, method: string): Engine
   const [p] = splitQuery(enginePath)
   const verb = (method || 'GET').toUpperCase()
 
-  if (match(p, '/prompt')) {
-    if (verb === 'POST') return { kind: 'meterPrompt' }
-    // F8: this used to carry the /queue message verbatim. GET /prompt returns
-    // the engine's global exec info, and DELETE /prompt is an alias for the
-    // queue wipe — both are refused, but say which endpoint refused.
-    return { kind: 'forbid', message: 'Only POST /prompt is available in hosted mode' }
-  }
-  if (match(p, '/queue')) {
-    if (verb === 'GET') return { kind: 'queueGet' }
-    // ComfyUI's clear/delete — one user must never be able to wipe another's
-    // pending queue. No per-user queue management endpoint exists yet, so
-    // this is a hard refusal rather than a partial implementation.
-    return { kind: 'forbid', message: 'Queue management is per-user in hosted mode' }
-  }
-  if (match(p, '/interrupt')) {
-    if (verb === 'POST') return { kind: 'interrupt' }
-    return { kind: 'forbid', message: 'Interrupt is per-user in hosted mode' }
-  }
-  if (match(p, '/history')) return { kind: 'forbid', message: 'Use /history — the engine mirror is not tenant-scoped' }
-  if (match(p, '/view')) return { kind: 'forbid', message: 'Use /view — the engine mirror is not tenant-scoped' }
-  // Stage 6 Task 7: LoadImageOutput's picker is remote-routed to
-  // GET /internal/files/output. That one route is served per-user (the
-  // caller's OWN outputs from graph_runs) so the combo renders; every OTHER
-  // /internal path — and every non-GET verb on this one — stays forbidden
-  // below, since the raw route lists the shared output directory: a filename
-  // enumeration oracle that hands an attacker exactly the keys /view checks.
+  // Step 3, R10.9: an engine-only route is a plain 404 — every verb, every
+  // spelling. LoadImageOutput's picker (GET /internal/files/output) is the one
+  // `/internal` route hosted answers, from graph_runs, never from ComfyUI.
   if (p === '/internal/files/output' && verb === 'GET') return { kind: 'outputListing' }
-  if (match(p, '/internal')) return { kind: 'forbid', message: 'Engine internals are not exposed in hosted mode' }
-
-  // F1: POST /gate/resume takes a client-supplied prompt_id, deep-copies the
-  // STORED prompt + extra_data for it, and re-queues the graph under a fresh
-  // uuid — no credit hold, no price, no graph_runs row, and it pops the
-  // paused-gate context out from under whichever tenant owns that prompt_id.
-  // Metering gate-resume is a future task; until a hold is taken and
-  // ownership is checked, the whole prefix fails closed.
-  if (match(p, '/gate')) return { kind: 'forbid', message: 'Gate resume is not available in hosted mode' }
+  if (HOSTED_ENGINE_ONLY.some(a => match(p, a))) return { kind: 'notFound' }
 
   // F2: needed by the canvas (graphToPrompt reads the node schemas) but the
   // upload-widget combos embed the shared input directory listing, so the
   // response is scrubbed on the way out instead of proxied raw.
+  // Step 3, R10.9: served from the saved copy (or the committed baseline),
+  // never from ComfyUI; any other verb is the engine's alone.
   if (match(p, '/object_info')) {
     if (verb === 'GET') return { kind: 'objectInfo' }
-    return { kind: 'forbid', message: 'Only GET /object_info is available in hosted mode' }
+    return { kind: 'notFound' }
   }
 
   // Step 3, R10.6 (decision 4): blueprints run only on the local engine, so
@@ -355,19 +323,6 @@ export function hostedEngineDecision(enginePath: string, method: string): Engine
   if (match(p, '/upload')) {
     if (verb === 'POST') return { kind: 'upload' }
     return { kind: 'forbid', message: 'Only POST /upload is available in hosted mode' }
-  }
-
-  // Stage 6 Task 8 — ComfyUI's per-user settings + userdata. Forwarded with a
-  // server-set `comfy-user` header (the authenticated caller) so the engine,
-  // running --multi-user, files each tenant's data under user/<id>/. The verbs
-  // the aiohttp routes serve are GET/POST/DELETE (POST also covers
-  // /userdata/{file}/move/{dest}); every other verb is refused. This decision
-  // is PURE — whether the userScoped path is actually ACTIVATED (vs left 403)
-  // is the middleware's env gate, since the engine must be --multi-user for it
-  // to be safe (single-user would make /userdata a shared cross-tenant dir).
-  if (USER_SCOPED_PREFIXES.some(a => match(p, a))) {
-    if (USER_SCOPED_METHODS.has(verb)) return { kind: 'userScoped' }
-    return { kind: 'forbid', message: 'This method is not available on per-user engine data in hosted mode' }
   }
 
   // Stage 6 Task 2 — the durable-projects extension trusts its path uuid with
@@ -393,6 +348,7 @@ export function hostedEngineDecision(enginePath: string, method: string): Engine
     return { kind: 'forbid', message: 'This Sailor engine route is not available in hosted mode' }
   }
 
+  // R10.9: HOSTED_RAW_ALLOW is empty — nothing else is forwarded to ComfyUI.
   if (HOSTED_RAW_ALLOW.some(a => match(p, a))) return { kind: 'proxy' }
-  return { kind: 'forbid', message: 'This engine endpoint is not available in hosted mode' }
+  return { kind: 'notFound' }
 }

@@ -75,7 +75,7 @@ describe('the probe (final re-review finding 1)', () => {
     expect(forwarded).toHaveLength(0)
   })
 
-  it('a picture the gate can\'t size (Recraft Crisp → Flux 2 Pro): refused before any hold, and the live handler asks', async () => {
+  it('a picture the gate can\'t size (Recraft Crisp → Flux 2 Pro): refused before any hold', async () => {
     const p: P = { 1: load('photo.jpg'), 2: upscale('1', { model: 'Recraft Crisp' }), 3: flux2Edit('2'), 4: SINK }
     const read = files({ 'photo.jpg': MP })
     const held: number[] = []
@@ -92,9 +92,8 @@ describe('the probe (final re-review finding 1)', () => {
     expect(res.status).toBe(400)
     expect(res.body.error.message).toBe(unsizedInputWords('EditImageNode'))
     expect(held).toEqual([])
+    // Step 3, R10.9: the live hosted /prompt handler that wired this up is gone (hosted never reaches the engine).
     const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
-    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads)')
-    expect(src).toContain('normalizePrompt: prompt => normalizeHostedPrompt(prompt, storedNodeCatalog())')
     expect(src).not.toContain('measureInputPixels: prompt')
   })
 
@@ -988,15 +987,9 @@ describe('the run reads exactly the bytes it was priced on (fix round 3, R3 + R4
     expect(n[1]).toEqual({ class_type: 'LoadImage', inputs: { image: 'a.png' }, _meta: { title: 'Photo' } })
   })
 
-  it('the live handler measures from the copies and forwards them', () => {
+  it('the live hosted handler that forwarded the copies to the engine is gone (step 3, R10.9)', () => {
     const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
-    expect(src).toContain('const snaps = createGateSnapshots()')
-    expect(src).toContain('referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true, reads })')
-    expect(src).toContain('inputsRefusal: () => (snaps.overBudget() ? INPUTS_TOO_LARGE : null)')
-    expect(src).toContain('availableBeforeMeasuring: u => ledger.getAvailable(u)')
-    expect(src).toContain('finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps)')
-    expect(src).toContain('releaseInputs: () => snaps.release()')
-    expect(src).toContain('.finally(() => { void snaps.release() })')
+    expect(src).not.toMatch(/handleMeteredPrompt|createGateSnapshots\(\)|\bfetch\(/)
   })
 })
 

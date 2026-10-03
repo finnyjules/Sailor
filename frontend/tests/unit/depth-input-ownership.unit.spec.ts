@@ -2,8 +2,9 @@
  * Relight stage 2 final-review fix 3: the depth routes (free /api/depth/estimate and paid
  * /api/depth/surfaces) share assertInputOwned. In hosted mode it used to refuse every
  * `output`/`temp` source, which broke depth for WIRED layers (their image is an execution
- * output). It now gates `output` exactly as /view does — the caller's owned output keys, with
- * one harvest-and-recheck for the race window — and leaves `temp` ungated like /view.
+ * output). It now gates `output` exactly as /view does — the caller's owned output keys — and
+ * leaves `temp` ungated like /view. Step 3, R10.9: no harvest of the engine's history any more
+ * (the runner records each output as it is saved; hosted never asks the engine).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -21,17 +22,12 @@ vi.mock('../../server/utils/deployMode', () => ({
 }))
 
 let owned = new Set<string>()
-let ownedAfterHarvest: Set<string> | null = null
 vi.mock('../../server/utils/graphRuns', async (orig) => {
   const actual = await orig() as any
   return { ...actual, ownedOutputKeys: async () => owned }
 })
 
-const harvestPendingOutputs = vi.fn(async () => { if (ownedAfterHarvest) owned = ownedAfterHarvest })
-vi.mock('../../server/utils/engineGate', async (orig) => {
-  const actual = await orig() as any
-  return { ...actual, harvestPendingOutputs: (...a: any[]) => harvestPendingOutputs(...(a as [])) }
-})
+const fetchSpy = vi.fn(async () => new Response('{}'))
 
 import { assertInputOwned } from '../../server/utils/inputOwnership'
 import { __setInputUploadsDbForTests } from '../../server/utils/inputUploads'
@@ -41,17 +37,16 @@ const ev = (userId: string | null) => ({ context: { userId } }) as any
 beforeEach(() => {
   mode = 'hosted'
   owned = new Set()
-  ownedAfterHarvest = null
-  harvestPendingOutputs.mockClear()
+  fetchSpy.mockClear()
+  vi.stubGlobal('fetch', fetchSpy)
   __setInputUploadsDbForTests({ query: async () => ({ rows: [] }) })
 })
-afterEach(() => { __setInputUploadsDbForTests(null) })
+afterEach(() => { __setInputUploadsDbForTests(null); vi.unstubAllGlobals() })
 
 describe('assertInputOwned — hosted output sources', () => {
   it('an output the caller owns passes', async () => {
     owned = new Set(['output::render_0001.png'])
     await expect(assertInputOwned(ev('u1'), 'output', '', 'render_0001.png')).resolves.toBeUndefined()
-    expect(harvestPendingOutputs).not.toHaveBeenCalled()
   })
 
   it('an output in a subfolder is keyed with that subfolder', async () => {
@@ -59,16 +54,10 @@ describe('assertInputOwned — hosted output sources', () => {
     await expect(assertInputOwned(ev('u1'), 'output', 'runs/a', 'render_0001.png')).resolves.toBeUndefined()
   })
 
-  it('a foreign output 404s after one harvest-and-recheck', async () => {
+  it('a foreign output 404s, and the engine is never asked (R10.9: no history harvest)', async () => {
     owned = new Set(['output::mine.png'])
     await expect(assertInputOwned(ev('u1'), 'output', '', 'theirs.png')).rejects.toMatchObject({ statusCode: 404 })
-    expect(harvestPendingOutputs).toHaveBeenCalledTimes(1)
-  })
-
-  it('an output recorded only by the harvest (race window) passes', async () => {
-    ownedAfterHarvest = new Set(['output::fresh.png'])
-    await expect(assertInputOwned(ev('u1'), 'output', '', 'fresh.png')).resolves.toBeUndefined()
-    expect(harvestPendingOutputs).toHaveBeenCalledTimes(1)
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('the key names the file actually read: a slash in filename cannot borrow an owned basename', async () => {
@@ -90,7 +79,6 @@ describe('assertInputOwned — hosted output sources', () => {
   it('local mode never checks', async () => {
     mode = 'local'
     await expect(assertInputOwned(ev(null), 'output', '', 'anything.png')).resolves.toBeUndefined()
-    expect(harvestPendingOutputs).not.toHaveBeenCalled()
   })
 })
 

@@ -399,13 +399,17 @@ describe('the timeline-asset library is per-user', () => {
     expect(r.body.assets.map((a: any) => a.id)).toEqual(['a-mine'])
   })
 
-  it('POST /sailor/asset_import records ownership from the engine\'s returned asset.id', async () => {
+  it('POST /sailor/asset_import of a video records ownership of the id stored natively — never the engine (R10.9)', async () => {
     uploads.set('input::clip.mp4', 'u1') // the caller owns the input file being imported
     file(inDir('clip.mp4'))
     upstream({ asset: { id: 'a-new', name: 'clip.mp4' }, created: true })
     const r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
-    expect(r.body.asset.id).toBe('a-new')
-    expect(owners.get(okey(SAILOR_ASSET_KIND, 'a-new'))).toBe('u1')
+    expect(r.status).toBe(200)
+    const id = r.body.asset.id
+    expect(id).not.toBe('a-new')
+    expect(readAssets().map((a: any) => a.id)).toEqual([id])
+    expect(owners.get(okey(SAILOR_ASSET_KIND, id))).toBe('u1')
+    expect(fetchMock, 'hosted never asks the engine').not.toHaveBeenCalled()
   })
 
   it('POST /sailor/asset_import served natively records ownership of the id it stored', async () => {
@@ -419,13 +423,14 @@ describe('the timeline-asset library is per-user', () => {
     expect(fetchMock, 'an image never needs the engine').not.toHaveBeenCalled()
   })
 
-  it('asset_import of a nested (subfolder) input the caller owns forwards + records', async () => {
+  it('asset_import of a nested (subfolder) input the caller owns is recorded natively', async () => {
     uploads.set('input:sub:clip.mp4', 'u1')
     file(inDir('sub', 'clip.mp4'))
     upstream({ asset: { id: 'a-nested', name: 'clip.mp4' }, created: true })
     const r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'sub/clip.mp4' })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(owners.get(okey(SAILOR_ASSET_KIND, 'a-nested'))).toBe('u1')
+    expect(r.status).toBe(200)
+    expect(fetchMock, 'hosted never asks the engine').not.toHaveBeenCalled()
+    expect(owners.get(okey(SAILOR_ASSET_KIND, r.body.asset.id))).toBe('u1')
   })
 
   it('asset_import ownership is first-writer-wins on a duplicate path import', async () => {
@@ -534,13 +539,14 @@ describe('the timeline-asset library is per-user', () => {
     }
   })
 
-  it('asset_thumbnails of the caller\'s own (video) asset goes to the engine', async () => {
+  it('asset_thumbnails of the caller\'s own video, without the media tools, is refused in plain words — never the engine (R10.9)', async () => {
     owners.set(okey(SAILOR_ASSET_KIND, 'a-mine'), 'u1')
     writeAssets([{ id: 'a-mine', path: inDir('mine.mp4'), kind: 'video' }])
     upstream({ thumbnails: ['data:...'], asset_id: 'a-mine' })
     const r = await call('/sailor/asset_thumbnails?asset_id=a-mine&count=5', 'GET', 'u1')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(r.body.asset_id).toBe('a-mine')
+    expect(fetchMock, 'hosted never asks the engine').not.toHaveBeenCalled()
+    expect(r.status).toBe(503)
+    expect(JSON.stringify(r.body)).not.toMatch(/engine|ComfyUI/i)
   })
 })
 

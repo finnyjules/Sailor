@@ -3,13 +3,16 @@
  * filters + thin h3 handlers. Local mode never reaches any of this —
  * comfyui-proxy and the history/view routes call these ONLY under
  * deployMode() === 'hosted'.
+ *
+ * Step 3, R10.9: hosted never reaches the engine. The handlers that asked it
+ * (the /queue filter, /interrupt, per-user settings/userdata, the /view
+ * race-window harvest of the engine's history) are gone; every one left here
+ * answers from Sailor's own files and records.
  */
 import path from 'node:path'
 import type { H3Event } from 'h3'
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus } from 'h3'
-import { ownedOutputKeys, ownedPromptIds, ownsPrompt, outputKey, pendingRuns } from './graphRuns'
-import { ENGINE_MAIN_PORT } from '../native/engineHealth'
-import { settleGraphSuccess } from './meterGraphRun'
+import { ownedOutputKeys, outputKey } from './graphRuns'
 import { assertCanonicalMultipart, parseUploadForm } from './multipart'
 import { canonicalUploadKey, engineDirForType, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { bakeFolderAbandoned } from '../runner/shaderBakeFiles'
@@ -17,7 +20,7 @@ import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
 import { decodeSegment, dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
-import { INPUT_FOLDER_INPUTS, findSpec, matchObjectInfoRoute, objectInfoBody, setComboOptions, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
+import { INPUT_FOLDER_INPUTS, findSpec, matchObjectInfoRoute, setComboOptions, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 // Review C2's exact mirror of folder_paths.annotated_filepath() lives in
@@ -50,68 +53,6 @@ export function viewGateDecision(q: { filename: string, type?: string, subfolder
   // checked is the file served — `x\mine.png` is its own file, not `mine.png`.
   const basename = pyBasename(name)
   return { kind: 'check', key: outputKey({ filename: basename, subfolder: q.subfolder || '', type: 'output' }) }
-}
-
-/**
- * Review M5: allowlist, don't spread. The old `{ ...queue, ... }` forwarded
- * every OTHER top-level key ComfyUI puts on /queue — and every key a future
- * ComfyUI adds — to every tenant unfiltered. Only the two filtered arrays
- * leave this function.
- */
-export function filterQueuePayload(queue: any, owned: Set<string>): any {
-  const keep = (entries: any[]) => (Array.isArray(entries) ? entries : []).filter(e => owned.has(String(e?.[1])))
-  return { queue_running: keep(queue?.queue_running), queue_pending: keep(queue?.queue_pending) }
-}
-
-/**
- * Review M4: prompt ids are keys here, and a key of `__proto__` assigned onto
- * a `{}` literal walks the prototype setter instead of adding a property —
- * mutating Object.prototype for the whole process. Null-prototype output plus
- * an explicit skip of the three magic names.
- */
-const HOSTILE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
-
-export function filterHistoryPayload(hist: Record<string, any>, owned: Set<string>): Record<string, any> {
-  const out: Record<string, any> = Object.create(null)
-  for (const [id, entry] of Object.entries(hist ?? {})) {
-    if (HOSTILE_KEYS.has(id)) continue
-    if (owned.has(id)) out[id] = entry
-  }
-  return out
-}
-
-export async function handleHostedQueueGet(event: H3Event): Promise<any> {
-  const userId = event.context.userId
-  if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-  const res = await fetch(`http://127.0.0.1:${ENGINE_MAIN_PORT}/queue`)
-  if (!res.ok) throw createError({ statusCode: 502, message: 'Engine queue unavailable' })
-  return filterQueuePayload(await res.json(), await ownedPromptIds(userId))
-}
-
-export async function handleHostedInterrupt(event: H3Event): Promise<any> {
-  const userId = event.context.userId
-  if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
-  const qres = await fetch(`${target}/queue`)
-  const queue = qres.ok ? await qres.json() : {}
-  const running = Array.isArray(queue?.queue_running) ? queue.queue_running : []
-  const runningId = running.length ? String(running[0]?.[1]) : null
-  if (!runningId || !(await ownsPrompt(userId, runningId))) {
-    throw createError({ statusCode: 403, message: 'No interruptible run of yours is active' })
-  }
-  // Review M2: between the read above and this POST the running job can turn
-  // over to a victim's run, and a bare /interrupt cancels whatever is running
-  // NOW. ComfyUI's interrupt accepts a prompt_id and no-ops unless that id is
-  // the executing one, which closes the window.
-  const res = await fetch(`${target}/interrupt`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', origin: target },
-    body: JSON.stringify({ prompt_id: runningId }),
-  })
-  setResponseStatus(event, res.status)
-  // Review M3: `null` makes h3 send an empty body, so a client doing
-  // res.json() on a 200 gets a parse error instead of a success.
-  return { ok: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,18 +217,11 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   const p = nativeEnginePath(event.path)
   const match = p ? matchObjectInfoRoute(p, 'GET', decodeSegment) : null
   if (!p || match?.kind !== 'route') throw createError({ statusCode: 404, message: 'Not Found' })
-  // Engine-free Phase A (A5): the engine's catalog while it answers, else the
-  // saved copy / committed baseline refreshed from disk (objectInfo.ts).
-  // The ownership lookup and the catalog are independent, so they run in
-  // parallel.
-  const [owned, got] = await Promise.all([
-    ownedInputFilenames(userId),
-    objectInfoBody(event.path, p, match.node),
-  ])
-  // An engine answer JSON.parse refuses (Python's NaN/Infinity) can't be
-  // scrubbed, so hosted serves the stored catalog instead of the raw text.
-  const served = got?.body ? got : storedObjectInfoBody(match.node)
-  if (!served?.body) throw createError({ statusCode: 502, message: 'Engine object_info unavailable' })
+  // Step 3, R10.9: hosted never asks the engine — the saved copy, else the
+  // committed baseline, refreshed from disk (objectInfo.ts).
+  const owned = await ownedInputFilenames(userId)
+  const served = storedObjectInfoBody(match.node)
+  if (!served?.body) throw createError({ statusCode: 503, message: 'Sailor can’t load the node list right now.' })
   // Sorted for a stable `default` (ComfyUI itself seeds default from the
   // alphabetically-first directory entry — this mirrors that ordering scoped
   // to the caller's own files) and for deterministic tests.
@@ -499,61 +433,6 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
     }
   }
   return parsed
-}
-
-const MAIN_ENGINE = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
-const HARVEST_CAP = 20
-
-/**
- * Review I5: /view calls harvestPendingOutputs on EVERY ownership miss. One
- * page of 40 not-yet-settled thumbnails fired 40 harvests, each polling up to
- * HARVEST_CAP history endpoints — ~800 engine requests from a single page
- * load, all racing to do the identical work. One harvest per user per window
- * is enough: the second caller's answer would be the first's anyway.
- */
-const HARVEST_TTL_MS = 3000
-const lastHarvest = new Map<string, number>()
-
-export function __resetHarvestMemoForTests(): void { lastHarvest.clear() }
-
-/** Pure: has this user been harvested inside the window ending at `now`? */
-export function harvestIsFresh(last: number | undefined, now: number): boolean {
-  return last !== undefined && now - last < HARVEST_TTL_MS
-}
-
-/**
- * /view race-window fallback: the client saw the WS 'executed' event a beat
- * before the settle watcher (settleOnCompletion, polling every 2s) recorded
- * this run's outputs into graph_runs. Rather than reimplement settlement,
- * this re-polls the same main-engine history endpoint the watcher uses and
- * calls the SAME settleGraphSuccess exported from meterGraphRun.ts — one
- * settlement implementation, two callers.
- */
-export async function harvestPendingOutputs(userId: string): Promise<void> {
-  const now = Date.now()
-  if (harvestIsFresh(lastHarvest.get(userId), now)) return
-  lastHarvest.set(userId, now)
-
-  // Ordering and the cap both live in SQL now (review I3) — an unordered
-  // LIMIT picked an arbitrary 20, so a user with a backlog of stale pendings
-  // could have their just-finished run fall outside the harvest window.
-  const pending = await pendingRuns(userId, HARVEST_CAP)
-  for (const { promptId, holdId, credits, target } of pending) {
-    // Review I4: poll the engine this run was DISPATCHED to. Pre-migration
-    // rows carry no target and are main-engine runs by construction.
-    const engine = target ?? MAIN_ENGINE
-    try {
-      const res = await fetch(`${engine}/history/${encodeURIComponent(promptId)}`)
-      if (!res.ok) continue
-      const hist = await res.json() as Record<string, any>
-      const status = hist[promptId]?.status
-      if (status?.status_str === 'success' && status.completed) {
-        await settleGraphSuccess(engine, promptId, holdId, credits)
-      }
-    } catch (e) {
-      console.error('[engineGate] harvest failed for pending run', { promptId, error: e })
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -989,71 +868,4 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
   }
   // Unreachable — sailorDataRoute returns a reject for everything else.
   throw notFound()
-}
-
-// ---------------------------------------------------------------------------
-// Stage 6 Task 8 — per-user engine settings + userdata (ComfyUI --multi-user).
-// ---------------------------------------------------------------------------
-
-/**
- * The buffer ceiling for a settings/userdata write. Same reasoning as the
- * upload and sailor gates: the body is held to forward the identical bytes, so
- * it needs an explicit cap (proxyRequest streamed and never had one).
- */
-export const MAX_USERSCOPED_BYTES = 100 * 1024 * 1024
-
-/** The verbs that carry a body onto these routes (POST /userdata/{file}, its /move, POST /settings). */
-const USERSCOPED_BODY_METHODS = new Set(['POST', 'PUT', 'PATCH'])
-
-/**
- * Forward a settings/userdata request to the engine with a SERVER-SET
- * `comfy-user` header — the authenticated caller's id — and NOTHING
- * client-supplied. The middleware has already stripped any inbound
- * `comfy-user` (the spoof rule), and this is the ONE place the real one is
- * set, so a client can never inject another tenant's id.
- *
- * The response is returned byte-verbatim (a Buffer + the engine's
- * content-type), not round-tripped through JSON: userdata GET serves a raw
- * FileResponse that JSON.parse would mangle, and settings GET is already JSON
- * that survives as bytes. The `/comfyui`-prefixed path is normalized the way
- * the raw proxy would.
- *
- * NOTE this only yields per-user isolation when the engine runs `--multi-user`
- * AND the caller's id is a registered engine user (users.json). Without that,
- * ComfyUI returns "default" (single-user) or 401s (multi-user, unregistered).
- * The middleware gates activation on engineMultiUser(); registration is a
- * documented follow-up (see the Task 8 report).
- */
-export async function handleHostedUserScoped(event: H3Event): Promise<unknown> {
-  const userId = event.context.userId
-  if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-
-  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
-  const enginePath = normalizeEnginePath(event.path)
-  const method = (event.method || 'GET').toUpperCase()
-
-  // origin override for the engine's origin-check middleware; comfy-user is the
-  // authenticated caller, NEVER anything from the inbound request.
-  const headers: Record<string, string> = { origin: target, 'comfy-user': userId }
-  let body: Buffer | undefined
-
-  if (USERSCOPED_BODY_METHODS.has(method)) {
-    const declared = Number(getRequestHeader(event, 'content-length'))
-    if (Number.isFinite(declared) && declared > MAX_USERSCOPED_BYTES) {
-      throw createError({ statusCode: 413, message: 'Request body exceeds the 100 MB limit' })
-    }
-    const raw = await readRawBody(event, false)
-    if (raw && raw.length > MAX_USERSCOPED_BYTES) {
-      throw createError({ statusCode: 413, message: 'Request body exceeds the 100 MB limit' })
-    }
-    body = raw ?? undefined
-    const contentType = getRequestHeader(event, 'content-type')
-    if (contentType) headers['content-type'] = contentType
-  }
-
-  const res = await fetch(`${target}${enginePath}`, { method, headers, body: body as any })
-  setResponseStatus(event, res.status)
-  const ct = res.headers?.get?.('content-type')
-  if (ct) setResponseHeader(event, 'content-type', ct)
-  return Buffer.from(await res.arrayBuffer())
 }

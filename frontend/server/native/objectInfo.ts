@@ -28,6 +28,7 @@ import { storeDir } from '../utils/dataDir'
 import { PY_ENCODING_SUFFIXES, PY_MIME_TOP, PY_SUFFIX_MAP } from './pyMimeTypes'
 import { isDir, isFile } from './paths'
 import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
+import { isHosted } from '../utils/deployMode'
 import { applyModelOverlay } from '../../shared/runner/modelMenus'
 import { runnerFamilies } from '../runner/config'
 
@@ -814,6 +815,8 @@ export function __resetObjectInfoEngineStateForTests(): void { engineDownUntil.c
  * one timeout, not one per request.
  */
 async function fromEngine(rawPath: string, canonicalPath: string): Promise<{ text: string, body: Catalog | null, port: number } | null> {
+  // Hosted never reaches the engine (step 3, R10.9): the stored catalog only.
+  if (isHosted()) return null
   const port = MAIN_ENGINE_PORT
   if ((engineDownUntil.get(port) ?? 0) > Date.now()) return null
   if (await engineHealth() === 'down') return null
@@ -873,7 +876,7 @@ export function storedNodeCatalog(): Readonly<Catalog> | null {
 
 /**
  * The body for `canonicalPath` (`/object_info` or `/object_info/{node}`):
- * the engine's own while it answers, else the stored catalog refreshed from
+ * locally the engine's own while it answers (hosted never asks it, R10.9), else the stored catalog refreshed from
  * disk. Null only when there is no engine and no stored catalog at all.
  */
 export async function objectInfoBody(rawPath: string, canonicalPath: string, node: string | null): Promise<ObjectInfoBody | null> {

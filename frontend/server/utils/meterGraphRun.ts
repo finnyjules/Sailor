@@ -1,7 +1,12 @@
 /**
- * Stage 5 Task 4: the metered graph submission path. In hosted mode the
- * comfyui-proxy middleware routes POST /prompt here instead of raw-proxying
- * (local mode falls through to the raw proxy unchanged). Invariants:
+ * Stage 5 Task 4: the metered graph submission rules. Step 3, R10.9: hosted
+ * never reaches the engine, so no route sends a prompt here any more — the
+ * hosted /prompt handler, its engine forward and its engine-history
+ * settlement are gone, and hosted /prompt answers 404 (comfyui-proxy.ts).
+ * What stays is the dependency-injected gate (meterGraphSubmit, the
+ * file-reference checks, the failure settlement) the unit suites pin, and
+ * shortUserHash, which the runner uses for per-user output folders.
+ * Invariants:
  * (1) hold BEFORE forward — an underfunded run never reaches the engine;
  * (2) ComfyUI's response body passes through VERBATIM (clients parse
  *     prompt_id / node_errors from the real shape);
@@ -11,32 +16,21 @@
  *     Refusals cost nothing.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import type { H3Event } from 'h3'
-import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
-import { createGateReads, graphInputSizes, pictureSize } from './graphInputPixels'
-import { INPUTS_TOO_LARGE, createGateSnapshots, rewriteMeasuredInputs } from './gateSnapshots'
-import { normalizeHostedPrompt } from './hostedPrompt'
-import { storedNodeCatalog } from '../native/objectInfo'
-import { graphInputSeconds, mediaSeconds, seedanceReferenceSeconds, type MediaFile, type MediaKind } from './graphInputSeconds'
+import { pictureSize } from './graphInputPixels'
 import { MeterRefusalError } from './requestMeter'
-import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys, RUNNER_SAVED_INPUT } from './graphRuns'
+import { outputKey, RUNNER_SAVED_INPUT } from './graphRuns'
 import { partialCharge, settleOnCompletion, type HistoryEntry, type RunChargePlan } from './settleWatcher'
 import { FRAME_RENDER_TYPES } from '#shared/runner/eligibility'
 import { outputReadsOf } from './renderCredit'
-import { stripForeignComfyOrgCreds } from './spikeAuth'
-import { ENGINE_MAIN_PORT } from '../native/engineHealth'
-import { getLiveLedger } from './ledgerLive'
 import { captureError } from './observe'
-import { annotatedFilepath, collectUploadFlaggedInputs } from './engineGate'
-import { canonicalUploadKey, uploadOwner } from './inputUploads'
+import { annotatedFilepath } from './engineGate'
 import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extractFileRefs, graphFolderOwnedBy, type FileRefSemantics } from './engineFileSurface'
 import { extractGraphPromptTexts } from './graphPromptText'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { extraPromptTexts } from '../runner/metering'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { moderatePrompt, moderateTexts, moderationRefusal, type ModerationResult } from './moderation'
-import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal, retiredPromptRefusal } from './blockedModels'
 import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
 import { executedPart, outputClassesOf } from '#shared/runner/validate'
@@ -233,74 +227,6 @@ export async function validateGraphFileRefs(prompt: Record<string, any>, ctx: Gr
       await checkFileOwnership(ct, inputName, value, 'either', ctx)
     }
   }
-}
-
-// The upload-flag map is derived from the live engine's object_info catalog —
-// the SAME source the /object_info scrubber reads — and cached per process so a
-// graph submission doesn't refetch a large catalog on every run.
-const FLAG_MAP_TTL_MS = 60000
-let flagMapCache: { at: number, set: Set<string> } | null = null
-
-export function __resetUploadFlagMapForTests(): void { flagMapCache = null }
-
-export async function loadUploadFlaggedInputs(fetchCatalog: () => Promise<unknown>): Promise<Set<string>> {
-  const now = Date.now()
-  if (flagMapCache && now - flagMapCache.at < FLAG_MAP_TTL_MS) return flagMapCache.set
-  const set = collectUploadFlaggedInputs(await fetchCatalog())
-  // LoadImageOutput.image is remote-routed, not upload-flagged (nodes.py:1951-
-  // 1959), so the catalog walk never yields it — but GRAPH_FILE_READERS now
-  // covers it explicitly (semantics: output), so it no longer needs adding here.
-  flagMapCache = { at: now, set }
-  return set
-}
-
-/**
- * The live wiring of validateGraphFileRefs for a hosted submission: build the
- * ownership ctx against input_uploads / graph_runs for `userId`, pull the
- * upload-flag map from `target`'s object_info, and validate. Short-circuits
- * BEFORE touching the catalog or the DB when the graph carries no candidate
- * file reference at all (no string-valued input, no LoadImageOutput) — a graph
- * that references no file can leak nothing.
- */
-export async function runGraphFileValidation(prompt: Record<string, any>, userId: string, target: string): Promise<void> {
-  if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return
-  const hasCandidate = Object.values(prompt).some((n: any) =>
-    (typeof n?.class_type === 'string' && (GRAPH_FILE_READERS[n.class_type] || GRAPH_FOLDER_READERS[n.class_type]))
-    || (n?.inputs && typeof n.inputs === 'object' && !Array.isArray(n.inputs)
-      && Object.values(n.inputs).some(v => typeof v === 'string' && v !== '')))
-  if (!hasCandidate) return
-
-  const uploadFlagged = await loadUploadFlaggedInputs(async () => {
-    const r = await fetch(`${target}/object_info`, { headers: { origin: target } })
-    if (!r.ok) throw new MeterRefusalError('could not resolve engine catalog to validate file references', 502)
-    return r.json()
-  })
-
-  const splitRef = (raw: string): { subfolder: string, filename: string } => {
-    const cleaned = raw.replace(/\\/g, '/')
-    const slash = cleaned.lastIndexOf('/')
-    return slash >= 0
-      ? { subfolder: cleaned.slice(0, slash), filename: cleaned.slice(slash + 1) }
-      : { subfolder: '', filename: cleaned }
-  }
-
-  let ownedOutputs: Set<string> | null = null
-  await validateGraphFileRefs(prompt, {
-    uploadFlagged,
-    callerHash: shortUserHash(userId),
-    ownsInput: async (name) => {
-      const { subfolder, filename } = splitRef(name)
-      if (!filename) return false
-      return (await uploadOwner(canonicalUploadKey('input', subfolder, filename))) === userId
-    },
-    ownsOutput: async (annotated) => {
-      if (!ownedOutputs) ownedOutputs = await ownedOutputKeys(userId)
-      const { name } = annotatedFilepath(annotated)
-      const { subfolder, filename } = splitRef(name)
-      if (!filename) return false
-      return ownedOutputs.has(outputKey({ filename, subfolder, type: 'output' }))
-    },
-  })
 }
 
 /**
@@ -731,112 +657,6 @@ export async function savedPosesLoading(prompt: unknown, copyOf: (value: string)
 export { outputClassesOf }
 
 /**
- * settleOnCompletion's default (120 polls @ 1s = 2min) is too short for
- * video-model graph runs, which can run well past 2 minutes. 30 minutes at a
- * 2s cadence covers any real run while staying well under the ledger's 2h
- * hold-sweep TTL, so a slow-but-completing run is never voided out from
- * under itself before it has a chance to settle.
- */
-const SETTLE_INTERVAL_MS = 2000
-const SETTLE_MAX_POLLS = 900
-
-export async function handleMeteredPrompt(event: H3Event): Promise<any> {
-  const userId = event.context.userId ?? null
-  const body = await readBody(event)
-  const target = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
-  const ledger = getLiveLedger()
-
-  // One read budget for the prompt: pictures and media lengths share it.
-  const reads = createGateReads()
-  // G1 fix round 3: every file measured is measured from this run's own copy.
-  const snaps = createGateSnapshots()
-  const pictureOfCopy = async (value: string) => {
-    const copy = await snaps.take({ value, literalInput: false })
-    return copy ? pictureSize(copy.path) : null
-  }
-  const mediaOfCopy = async (file: MediaFile, kind: MediaKind) => {
-    const copy = await snaps.take(file)
-    return copy ? mediaSeconds(copy.path, kind) : null
-  }
-  const result = await meterGraphSubmit(userId, body, {
-    priceGraph,
-    // Only what ComfyUI executes is priced: output nodes from the stored node catalog (R3.8 fix round 2).
-    isOutputClass: outputClassesOf(storedNodeCatalog()),
-    // Hosted: the prompt ComfyUI will run, from the stored node catalog (G1 fix round 1).
-    normalizePrompt: prompt => normalizeHostedPrompt(prompt, storedNodeCatalog()),
-    // One walk: the sizes the price reads and the refusals (G1 fix round 1, R7).
-    measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads),
-    measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads),
-    // A saved pose is free only when its copy decodes fully (R3.15 fix rounds 1 and 2).
-    measureSavedPoses: prompt => savedPosesLoading(prompt, async value => (await snaps.take({ value, literalInput: false }))?.path ?? null),
-    // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
-    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true, reads }),
-    finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps),
-    releaseInputs: () => snaps.release(),
-    inputsRefusal: () => (snaps.overBudget() ? INPUTS_TOO_LARGE : null),
-    availableBeforeMeasuring: u => ledger.getAvailable(u),
-    // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
-    // the SAME way moderatePrompt (Task 3) is — the real implementation passed
-    // in here, stubbed in the unit tests. Local mode is a no-op inside
-    // assertSpendAllowed itself, so this is inert off the hosted path.
-    spendGuard: assertSpendAllowed,
-    // Stage 6 Task 7: refuse a graph that references a file the caller doesn't
-    // own, before any hold. userId is non-null here (meterGraphSubmit's 401
-    // fires first), but guard anyway so a null can never widen ownership.
-    validateFileRefs: prompt => userId ? runGraphFileValidation(prompt, userId, target) : Promise.resolve(),
-    moderatePrompt,
-    hold: (u, credits) => holdWithRefusal(ledger, u, credits),
-    getAvailable: u => ledger.getAvailable(u),
-    forward: async (b) => {
-      // Review I2: ComfyUI honours a client-supplied `prompt_id`. Left in
-      // place, an attacker who learns a victim's id can submit their own
-      // graph under it — ComfyUI runs it, and this request's settle watcher
-      // then UPDATEs graph_runs WHERE prompt_id = <victim's>, replacing the
-      // victim's recorded outputs with the attacker's. The engine assigns
-      // ids; clients don't get to.
-      const { prompt_id: _clientChosenPromptId, ...rest } = (b ?? {}) as Record<string, unknown>
-      const safe: Record<string, unknown> = { ...rest, extra_data: stripForeignComfyOrgCreds((b as any)?.extra_data, null) }
-      // Stage 6 Task 7: every SaveImage-family node writes under the caller's
-      // own u_<hash>/ subfolder — outputs land in output/u_<hash>/... and can
-      // never clobber another tenant's tree. Operates on a clone (the original
-      // body is left untouched).
-      if (userId && safe.prompt && typeof safe.prompt === 'object' && !Array.isArray(safe.prompt)) {
-        safe.prompt = injectOutputSubfolder(safe.prompt as Record<string, any>, userId)
-      }
-      const res = await fetch(`${target}/prompt`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: target },
-        body: JSON.stringify(safe),
-      })
-      return { status: res.status, body: await res.json().catch(() => ({})) }
-    },
-    // Review I4: record WHICH engine ran this prompt, for the /view
-    // race-window harvest.
-    registerRun: r => createGraphRun({ ...r, target }),
-    startSettle: (r) => {
-      // The run's copies go when its watcher ends (success, error or timeout).
-      void watchGraphRun(r, {
-        pollHistory: async (id) => {
-          const res = await fetch(`${target}/history/${encodeURIComponent(id)}`)
-          if (!res.ok) return null
-          const hist = await res.json() as Record<string, any>
-          return hist[id] ?? null
-        },
-        settleSuccess: id => settleGraphSuccess(target, id, r.holdId, r.credits),
-        ledger,
-        resolve: resolveGraphRun,
-        intervalMs: SETTLE_INTERVAL_MS,
-        maxPolls: SETTLE_MAX_POLLS,
-      }).catch(() => {}).finally(() => { void snaps.release() })
-    },
-    releaseHold: id => ledger.release(id),
-  })
-
-  setResponseStatus(event, result.status)
-  return result.body
-}
-
-/**
  * Task G2: the charge plan for a graph — priceGraph's per-node credits and
  * render credit (the figures the hold is the sum of), the nodes that are
  * local renders (the Frame), and what each output node reads: on a failure
@@ -943,31 +763,4 @@ function historyOutputKeys(entry: { outputs?: unknown } | null | undefined): str
     }
   }
   return outputs
-}
-
-// Exported (Stage 5 Task 5): engineGate.ts's harvestPendingOutputs calls this
-// SAME function for the /view race-window fallback, so there is exactly one
-// settlement implementation rather than a second copy drifting from this one.
-export async function settleGraphSuccess(target: string, promptId: string, holdId: number | null, credits: number): Promise<void> {
-  let outputs: string[] = []
-  try {
-    const r = await fetch(`${target}/history/${encodeURIComponent(promptId)}`)
-    if (r.ok) {
-      const hist = await r.json() as Record<string, any>
-      outputs = historyOutputKeys(hist[promptId])
-    }
-  } catch (e) { console.error('[graphMeter] output harvest failed', { promptId, e }) }
-
-  if (holdId !== null) {
-    try {
-      const s = await getLiveLedger().settle(holdId, credits, `graph:${promptId}`)
-      if (!s.settled) {
-        console.error('[graphMeter] SETTLE ON RELEASED HOLD — run shipped uncharged', { promptId, holdId, credits })
-        captureError(new Error('graphMeter: settle on released hold — run shipped uncharged'), { site: 'meterGraphRun', promptId, holdId, credits })
-      }
-    } catch (e) {
-      console.error('[graphMeter] SETTLE FAILED after successful run', { promptId, holdId, credits, e })
-    }
-  }
-  await resolveGraphRun(promptId, 'settled', outputs).catch(e => console.error('[graphMeter] resolve failed', { promptId, e }))
 }

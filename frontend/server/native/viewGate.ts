@@ -5,7 +5,7 @@
  */
 import { createError } from 'h3'
 import { ownedOutputKeys } from '../utils/graphRuns'
-import { harvestPendingOutputs, viewGateDecision } from '../utils/engineGate'
+import { viewGateDecision } from '../utils/engineGate'
 import type { ViewQuery } from './view'
 
 /**
@@ -25,13 +25,10 @@ export async function hostedViewGate(userId: string | null | undefined, query: V
   const gate = viewGateDecision({ filename, type: query.type || 'output', subfolder: query.subfolder || '' })
   if (gate.kind === 'reject') throw createError({ statusCode: gate.status, message: gate.message })
   if (gate.kind === 'check') {
-    let owned = await ownedOutputKeys(userId)
-    if (!owned.has(gate.key)) {
-      // The run may have finished a beat before its outputs were recorded.
-      await harvestPendingOutputs(userId)
-      owned = await ownedOutputKeys(userId)
-      if (!owned.has(gate.key)) throw createError({ statusCode: 404, message: 'Image not found' })
-    }
+    // The runner records each output the moment it is saved; hosted no longer
+    // harvests the engine's history for a late one (step 3, R10.9).
+    const owned = await ownedOutputKeys(userId)
+    if (!owned.has(gate.key)) throw createError({ statusCode: 404, message: 'Image not found' })
   }
 }
 

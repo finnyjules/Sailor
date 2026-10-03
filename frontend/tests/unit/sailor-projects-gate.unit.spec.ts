@@ -557,7 +557,8 @@ describe('hosted middleware: every alias reaches the gate, none reach the raw pr
     for (const p of ['/api/sailor/projects', '/api/sailor/projects/p-theirs', '/comfyui/api/sailor/projects/p-theirs']) {
       proxyRequest.mockClear()
       const r = await via(p, 'GET')
-      expect(r.status, p).toBe(403)
+      // Step 3, R10.9: the deny-by-default tail is a plain 404.
+      expect(r.status, p).toBe(404)
       expect(proxyRequest, p).not.toHaveBeenCalled()
     }
   })

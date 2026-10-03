@@ -63,6 +63,11 @@ export const THUMB_HEIGHT_PX = 48
 export type { NativeMedia }
 
 export const NEEDS_ENGINE: MediaResult = { status: 503, body: { error: 'This needs the local engine' } }
+/**
+ * Hosted, where the engine is never asked (step 3, R10.9): a video or sound
+ * Sailor's own media tools can't read right now is refused in plain words.
+ */
+export const HOSTED_MEDIA_UNAVAILABLE: MediaResult = { status: 503, body: { error: 'Sailor can’t read this file right now. Try again in a moment.' } }
 
 // --------------------------------------------------------------- Python-isms
 
@@ -628,7 +633,8 @@ export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
 
 /**
  * Hand the request to the local engine, exactly as the proxy would (same
- * path and query, same body). Null when the
+ * path and query, same body). Local only: hosted gets null without a request
+ * (R10.9). Null when the
  * engine is not reachable OR does not answer within `timeoutMs` — a timed-out
  * abort is a network failure from this route's point of view, so it takes the
  * same "engine down" path as a connection refusal (the caller's existing 503
@@ -636,6 +642,8 @@ export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
  * back parsed, anything else as bytes with its content type.
  */
 export async function forwardToEngine(event: H3Event, canonicalPath: string, rawBody?: Buffer, timeoutMs?: number): Promise<MediaResult | null> {
+  // Hosted never reaches the engine (step 3, R10.9): local only from here on.
+  if (isHosted()) return null
   // The engine already known down (cached health check): don't wait out a doomed fetch.
   if (await engineHealth() === 'down') return null
   const q = event.path.indexOf('?')
@@ -739,8 +747,11 @@ export async function runMediaRoute(ctx: MediaContext, h: MediaHandler, event: H
   const query = new URLSearchParams(q === -1 ? '' : event.path.slice(q + 1))
   // Thumbnails/waveforms are a UI call waiting on the response; asset_import
   // can be probing/transcoding a whole media file, so it gets a longer leash.
-  const engine = () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_FORWARD_TIMEOUT_MS)
-  const engineForImport = () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_ASSET_IMPORT_TIMEOUT_MS)
+  // Hosted never reaches the engine (R10.9): a thumbnail or waveform the media tools can't make is refused in
+  // plain words; an import is recorded without its length and size, as with the engine down.
+  const hosted = isHosted()
+  const engine = hosted ? async () => HOSTED_MEDIA_UNAVAILABLE : () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_FORWARD_TIMEOUT_MS)
+  const engineForImport = hosted ? async () => null : () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_ASSET_IMPORT_TIMEOUT_MS)
   // R5.6 (no family, ruling l): the four video/sound routes read with Sailor's own tools once they're ready.
   const reads = h.name === 'assetImport' || h.name === 'inputThumbnail' || h.name === 'assetThumbnails' || h.name === 'assetWaveform'
   const native = reads ? await nativeMediaFor(ctx, event) : null

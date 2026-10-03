@@ -1,12 +1,13 @@
-// Proxy ComfyUI API paths to the backend.
-// The ComfyUI iframes load directly from the engine, but the Nuxt frontend
-// still makes fetch() calls to these paths (e.g. /queue, /comfyui/settings).
+// Proxy ComfyUI API paths to the backend — LOCAL ONLY.
+// Locally the app still sends decision 4's local-only runs to the engine
+// (/prompt, /queue, /interrupt, the socket). Hosted never reaches the engine
+// (step 3, R10.9): every engine path there is answered by Sailor itself or
+// refused with a plain 404, and nothing falls through to the proxy below.
 
 import { PROXY_PREFIXES } from '../utils/authGuard'
-import { deployMode, engineMultiUser } from '../utils/deployMode'
-import { handleMeteredPrompt } from '../utils/meterGraphRun'
-import { handleHostedQueueGet, handleHostedInterrupt, handleHostedObjectInfo, handleHostedUpload, handleHostedSailor, handleHostedSailorData, handleHostedOutputListing, handleHostedUserScoped } from '../utils/engineGate'
-import { normalizeEnginePath, hostedEngineDecision } from '../utils/enginePath'
+import { deployMode } from '../utils/deployMode'
+import { handleHostedObjectInfo, handleHostedUpload, handleHostedSailor, handleHostedSailorData, handleHostedOutputListing } from '../utils/engineGate'
+import { normalizeEnginePath, hostedEngineDecision, isEnginePromptPost } from '../utils/enginePath'
 import { NITRO_API_PATHS, NITRO_API_PREFIXES } from '../lib/nitroApiPaths'
 import { nativeEngineRoute } from '../native/router'
 import { ENGINE_MAIN_PORT, engineHealth } from '../native/engineHealth'
@@ -56,8 +57,8 @@ export default defineEventHandler(async (event) => {
   // settings + userdata. Strip it here, before ANY branch or proxy, in EVERY
   // mode. Local is single-user so the header is inert there, but stripping
   // uniformly guarantees no raw-proxy or forward can ever carry a
-  // client-injected id to the engine. The one legitimate `comfy-user` is set
-  // server-side in handleHostedUserScoped, downstream of this strip.
+  // client-injected id to the engine. (Hosted no longer forwards settings or
+  // userdata at all since step 3, R10.9, so no `comfy-user` is ever set.)
   const reqHeaders = event.node?.req?.headers as Record<string, unknown> | undefined
   if (reqHeaders && 'comfy-user' in reqHeaders) delete reqHeaders['comfy-user']
 
@@ -89,58 +90,52 @@ export default defineEventHandler(async (event) => {
   // computed but never consulted", which described code that no longer runs.)
   if (deployMode() === 'hosted' && PROXY_PREFIXES.some(p => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'))) {
     const decision = hostedEngineDecision(normalizeEnginePath(path), event.method)
-    if (decision.kind === 'meterPrompt') return handleMeteredPrompt(event)
-    if (decision.kind === 'queueGet') return handleHostedQueueGet(event)
-    if (decision.kind === 'interrupt') return handleHostedInterrupt(event)
-    // F2: the canvas needs the node schemas, so this passes through a scrubber
-    // that empties the shared input-directory listings instead of 403-ing.
+    // F2: the canvas needs the node schemas — served from the saved copy (or
+    // the committed baseline) with the shared input-directory listings
+    // scrubbed; ComfyUI is never asked (step 3, R10.9).
     if (decision.kind === 'objectInfo') return handleHostedObjectInfo(event)
     // Step 3, R10.6: hosted offers no blueprint (they are built from local-only
     // classes) — the list is empty, answered here without the engine.
     if (decision.kind === 'emptySubgraphs') return {}
-    // F4: refuses an `overwrite` field, then forwards the identical bytes.
+    // F4: refuses an `overwrite` field, then writes the identical bytes natively.
     if (decision.kind === 'upload') return handleHostedUpload(event)
     // Stage 6 Task 7: LoadImageOutput's remote picker — the caller's OWN
     // outputs (from graph_runs), matching the engine's flat-array shape, in
     // place of the shared /internal enumeration oracle.
     if (decision.kind === 'outputListing') return handleHostedOutputListing(event)
     // Stage 6 Task 2: the projects extension has no identity of its own, so
-    // ownership is checked here against resource_owners before the engine is
-    // asked anything — a project that isn't yours 404s, list included.
+    // ownership is checked here against resource_owners — a project that
+    // isn't yours 404s, list included.
     if (decision.kind === 'sailorProjects') return handleHostedSailor(event)
     // Stage 6 Task 2b: the per-user /sailor DATA routes (input/output file
     // listings + deletes + thumbnails, and the timeline-asset library). Reads
     // are filtered to owned rows and deletes 404 when the file/asset isn't the
-    // caller's — the engine is never touched on an ownership miss.
+    // caller's.
     if (decision.kind === 'sailorData') return handleHostedSailorData(event)
-    // Stage 6 Task 8: ComfyUI's per-user settings + userdata, forwarded with a
-    // server-set `comfy-user`. Gated on engineMultiUser() — the engine must be
-    // running --multi-user for these to be per-user (single-user would make
-    // /userdata a SHARED cross-tenant dir). With the switch off (the default)
-    // they stay 403, exactly as before this task.
-    if (decision.kind === 'userScoped') {
-      if (!engineMultiUser()) throw createError({ statusCode: 403, message: 'Per-user engine data is not enabled in hosted mode' })
-      return handleHostedUserScoped(event)
-    }
-    // Deny by default: an engine path that isn't explicitly allowlisted for
-    // hosted raw proxying is refused, so a route nobody has audited can
-    // never become a cross-tenant surface merely by existing upstream.
+    // A refused /sailor route (or upload verb, or one blueprint) keeps its words.
     if (decision.kind === 'forbid') throw createError({ statusCode: 403, message: decision.message })
     // Engine-free Phase A (A3): the audited stateless /sailor routes (shader
-    // catalog, Space Type preset reads, font subset, model status) keep their
-    // hosted 'proxy' classification but are answered by Sailor itself, from
-    // the same folders. Everything else classified 'proxy' is not native and
-    // falls through to the raw proxy below.
+    // catalog, Space Type preset reads, font subset) are answered by Sailor
+    // itself, from the same folders.
     if (decision.kind === 'proxy') {
       const native = await nativeEngineRoute(event)
       if (native !== undefined) return native
     }
+    // Step 3, R10.9: everything else — /prompt, /queue, /interrupt, /ws, the
+    // engine's /history and /view mirrors, /object_info writes, stats,
+    // extensions, settings, userdata, anything unaudited — is a plain 404.
+    // Hosted never falls through to the proxy below.
+    throw createError({ statusCode: 404, message: 'Not found' })
   }
+
+  // Hosted never reaches the engine (R10.9): a hosted path that is not an
+  // engine path is not this middleware's to answer.
+  if (deployMode() === 'hosted') return
 
   // Local /prompt (any spelling): a discontinued or runner-only model can't
   // run on ComfyUI, so it is refused here in ComfyUI's own 400 shape
-  // (server/utils/blockedModels.ts). Hosted checks the same in meterGraphSubmit.
-  if (deployMode() !== 'hosted' && hostedEngineDecision(normalizeEnginePath(path), event.method).kind === 'meterPrompt') {
+  // (server/utils/blockedModels.ts). Hosted never gets here (R10.9).
+  if (isEnginePromptPost(normalizeEnginePath(path), event.method)) {
     // The proxy below buffers the same body (h3 caches it), so reading it here
     // costs no second copy; only parsing it does. Over the cap the check is
     // skipped: the browser has already checked, and ComfyUI's own "Value not
@@ -184,8 +179,7 @@ export default defineEventHandler(async (event) => {
       // Spec ruling 4: with the main engine known down (the cached health
       // check, server/native/engineHealth.ts), an engine-only route (/prompt, …)
       // answers a plain 503 rather than h3's 502 from a refused proxy. Local
-      // and hosted alike (hosted gets here only for what its gate classified
-      // 'proxy').
+      // only: hosted returned above (R10.9).
       if (!isWsPath(backendPath) && await engineHealth() === 'down') {
         setResponseStatus(event, 503)
         return { error: NEEDS_LOCAL_ENGINE_MESSAGE }

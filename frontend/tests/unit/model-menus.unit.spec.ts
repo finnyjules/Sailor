@@ -321,12 +321,15 @@ describe('every /object_info source is overlaid', () => {
     expectOverlaid((await get('/object_info')).body, true)
   })
 
-  it('hosted: overlaid after the tenant scrub, which still applies', async () => {
+  it('hosted: the stored catalog, overlaid after the tenant scrub, which still applies — never the engine (R10.9)', async () => {
     __setInputUploadsDbForTests({ async query() { return { rows: [] } } })
-    const live = engineFixture()
-    live.LoadImage = { input: { required: { image: [['someone-else.png'], { image_upload: true }] } } }
-    engineAnswers(live)
+    const stored = engineFixture()
+    stored.LoadImage = { input: { required: { image: [['someone-else.png'], { image_upload: true }] } } }
+    fs.mkdirSync(path.join(tmp, 'data'))
+    fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(stored))
+    engineAnswers(engineFixture())
     const out = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any) as any
+    expect(engineFetch).not.toHaveBeenCalled()
     expectOverlaid(out, false)
     expect(out.LoadImage.input.required.image[0]).toEqual([])
     families(true)

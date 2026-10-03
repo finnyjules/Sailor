@@ -56,9 +56,10 @@ describe('R10.3: the worker pool is gone', () => {
 })
 
 describe('R10.3: the engine Gate resume is local-only', () => {
-  it('only the Gate card (local branch) and the hosted refusal name /gate/resume', () => {
+  it('only the Gate card (local branch) names /gate/resume', () => {
+    // R10.9: hosted refuses the whole /gate prefix as an engine-only route (404), without naming resume.
     const hits = sources.filter(s => s.text.includes('/gate/resume')).map(s => s.file).sort()
-    expect(hits).toEqual(['app/components/vue-canvas/ComfyGateNode.vue', 'server/utils/enginePath.ts'])
+    expect(hits).toEqual(['app/components/vue-canvas/ComfyGateNode.vue'])
   })
 
   it('the Gate card sends it only after the runner and hosted have been turned away', () => {
@@ -80,9 +81,9 @@ describe('R10.3: the engine Gate resume is local-only', () => {
     expect(gateResumeRoute(undefined, { runner: false, hosted: false })).toBe('none')
   })
 
-  it('hosted refuses /gate/resume at the proxy', () => {
+  it('hosted refuses /gate/resume at the proxy (a plain 404 since R10.9)', () => {
     for (const p of ['/gate/resume', '/comfyui/gate/resume', '/api/gate/resume']) {
-      expect(hostedEngineDecision(normalizeEnginePath(p), 'POST').kind, p).toBe('forbid')
+      expect(hostedEngineDecision(normalizeEnginePath(p), 'POST').kind, p).toBe('notFound')
     }
   })
 })

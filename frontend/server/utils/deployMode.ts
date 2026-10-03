@@ -18,6 +18,10 @@ export function isHosted(): boolean {
 }
 
 /**
+ * Step 3, R10.9: the hosted proxy no longer forwards settings or userdata to
+ * the engine at all (they answer 404), so this switch no longer opens any
+ * route; it is read only by the engine's own launch flags.
+ *
  * Stage 6 Task 8 — the per-user engine settings/userdata switch. OFF unless
  * `SAILOR_ENGINE_MULTI_USER` is explicitly set truthy. It gates BOTH the
  * engine's `--multi-user` flag (start.sh) and the proxy's userScoped

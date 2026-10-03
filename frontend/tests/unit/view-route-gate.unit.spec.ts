@@ -48,12 +48,6 @@ vi.mock('../../server/utils/graphRuns', async (orig) => {
   return { ...actual, ownedOutputKeys: async () => owned }
 })
 
-const harvestPendingOutputs = vi.fn(async () => {})
-vi.mock('../../server/utils/engineGate', async (orig) => {
-  const actual = await orig() as any
-  return { ...actual, harvestPendingOutputs: (...a: any[]) => harvestPendingOutputs(...(a as [])) }
-})
-
 // Keep the disk cache out of the test run entirely.
 vi.mock('node:fs/promises', async (orig) => {
   const actual = await orig() as any
@@ -80,7 +74,6 @@ beforeEach(() => {
   mode = 'hosted'
   owned = new Set()
   fetchMock.mockClear()
-  harvestPendingOutputs.mockClear()
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'view-route-gate-'))
   for (const f of ['output/mine.png', 'output/victim.png', 'output/whatever.png', 'output/anything.png',
     'output/sub/mine.png', 'output/other/mine.png', 'temp/scratch.png']) {
@@ -149,7 +142,8 @@ describe('hosted /view — annotation resolves the EFFECTIVE type', () => {
 
   it('still gates plain type=output reads (no regression)', async () => {
     expect(await code({ type: 'output', filename: 'victim.png' })).toBe(404)
-    expect(harvestPendingOutputs, 'race-window harvest still runs').toHaveBeenCalled()
+    // Step 3, R10.9: no race-window harvest of the engine's history — hosted never asks it.
+    expect(fetchMock, 'the unowned file is never opened').not.toHaveBeenCalled()
   })
 
   it('leaves genuinely-temp reads ungated (documented Stage 5 gap, unchanged)', async () => {
@@ -210,7 +204,6 @@ describe('local mode is ungated', () => {
   it('serves annotated filenames with no ownership check', async () => {
     expect(await code({ type: 'temp', filename: 'anything.png [output]' })).toBe('served')
     expect(await code({ type: 'output', filename: 'whatever.png' })).toBe('served')
-    expect(harvestPendingOutputs).not.toHaveBeenCalled()
   })
 
   it('answers blake3 hashes 404, as the engine did without --enable-assets', async () => {

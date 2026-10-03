@@ -276,31 +276,37 @@ describe('ownedInputFilenames — flat top-level input:: keys, prefix stripped',
 
 // --------------------------------------------------------------- F2 handler
 
+// Step 3, R10.9: hosted never asks the engine — the stored catalog (saved
+// copy, else the committed baseline) is served, scrubbed, even with an engine
+// answering.
 describe('handleHostedObjectInfo', () => {
-  it('scrubs what the engine returns', async () => {
+  it('scrubs the stored catalog, and never asks the engine', async () => {
     fetchMock.mockImplementation(async () => engineOk(catalog()))
     const out = await handleHostedObjectInfo(ev('/object_info')) as any
     expect(out.LoadImage.input.required.image[0]).toEqual([])
     expect(out.LatentUpscale).toEqual(catalog().LatentUpscale)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('scrubs the single-node form too (/object_info/LoadImage)', async () => {
+  it('scrubs the single-node form too (/object_info/LoadImage), from the stored catalog', async () => {
     fetchMock.mockImplementation(async () => engineOk({ LoadImage: catalog().LoadImage }))
     const out = await handleHostedObjectInfo(ev('/object_info/LoadImage')) as any
+    expect(Object.keys(out)).toEqual(['LoadImage'])
     expect(out.LoadImage.input.required.image[0]).toEqual([])
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info/LoadImage')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('strips the /comfyui base like the raw proxy did', async () => {
+  it('reads every spelling (/comfyui base included) without asking the engine', async () => {
     fetchMock.mockImplementation(async () => engineOk(catalog()))
-    await handleHostedObjectInfo(ev('/comfyui/object_info'))
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info')
+    const out = await handleHostedObjectInfo(ev('/comfyui/object_info')) as any
+    expect(out.LoadImage.input.required.image[0]).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('requires a session, and still scrubs when the engine fails (A5: stored catalog served)', async () => {
     await expect(handleHostedObjectInfo(ev('/object_info', null))).rejects.toMatchObject({ statusCode: 401 })
     // Engine-free Phase A: an engine failure no longer 502s — the committed
-    // baseline is served (native-object-info.unit.spec.ts covers the 502 when
+    // baseline is served (native-object-info.unit.spec.ts covers the 503 when
     // nothing at all is stored), and the scrub still applies to it.
     fetchMock.mockResolvedValue({ ok: false })
     const out = await handleHostedObjectInfo(ev('/object_info')) as any

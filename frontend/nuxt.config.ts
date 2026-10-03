@@ -2,12 +2,6 @@ import tailwindcss from '@tailwindcss/vite'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
 
-// Cache for the hosted-mode /ws upgrade auth Clerk client (see the inline WS
-// proxy module below). Module-scope so repeat upgrades don't reconstruct it.
-// Typed loosely — @clerk/backend is dynamically imported, never statically,
-// so config-eval in local mode never pays for (or resolves) this import.
-let wsAuthClerkClient: { authenticateRequest: (req: Request) => Promise<{ toAuth: () => { userId: string | null } | null }> } | null = null
-
 // img-fx bundles an optional React component alongside its framework-agnostic
 // core. We only use the core, so `react` + `react/jsx-runtime` are aliased to a
 // no-op stub — React never installs and never ships. See app/lib/imgfx/react-stub.ts.
@@ -94,7 +88,8 @@ export default defineNuxtConfig({
     ...(process.env.NUXT_PUBLIC_SENTRY_DSN ? ['@sentry/nuxt/module'] : []),
     '@nuxtjs/color-mode',
     '@nuxt/fonts',
-    // Inline module: proxy WebSocket upgrades on /ws to ComfyUI (dev only).
+    // Inline module: proxy WebSocket upgrades on /ws to ComfyUI (dev, local
+    // mode only — hosted answers 404, step 3 R10.9).
     //
     // WHY NOT `server.on('upgrade', …)`: Nuxt's dev CLI registers its OWN
     // upgrade listener on the listhen server BEFORE our `listen` hook fires
@@ -193,33 +188,17 @@ export default defineNuxtConfig({
             proxyReq.end()
           }
 
-          // Stage 5: hosted dev servers authenticate the WS upgrade — the
-          // session cookie rides on the upgrade request's headers. Local mode
-          // (no Clerk key) proceeds exactly as before, synchronously, and
-          // never evaluates the @clerk/backend import.
-          const clerkKey = process.env.NUXT_CLERK_SECRET_KEY
-          if (!clerkKey) { proceed(); return }
-          void (async () => {
-            try {
-              if (!wsAuthClerkClient) {
-                const { createClerkClient } = await import('@clerk/backend')
-                wsAuthClerkClient = createClerkClient({
-                  secretKey: clerkKey,
-                  publishableKey: process.env.NUXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-                })
-              }
-              const headers = new Headers()
-              for (const [k, v] of Object.entries(req.headers)) {
-                if (typeof v === 'string') headers.set(k, v)
-                else if (Array.isArray(v)) headers.set(k, v.join(', '))
-              }
-              const state = await wsAuthClerkClient.authenticateRequest(
-                new Request(`http://127.0.0.1${req.url}`, { method: 'GET', headers }))
-              if (state.toAuth()?.userId) { proceed(); return }
-            } catch { /* fall through to reject — fail closed */ }
-            socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+          // Step 3, R10.9: hosted never reaches the engine — a hosted dev
+          // server (a Clerk key set, deployMode()'s own test) answers the
+          // upgrade with a plain 404 and opens no socket to ComfyUI. Local
+          // mode proceeds exactly as before.
+          const key = process.env.NUXT_CLERK_SECRET_KEY
+          if (typeof key === 'string' && key.trim().length > 0) {
+            socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
             socket.destroy()
-          })()
+            return
+          }
+          proceed()
         })
         console.log('[comfy-ws-proxy] WebSocket proxy for /ws → ComfyUI:8188 ready')
       })

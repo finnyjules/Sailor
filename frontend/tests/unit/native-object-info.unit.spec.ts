@@ -330,7 +330,7 @@ describe('hosted: the scrub applies to whichever body is served', () => {
     expect(out.LoraLoader.input.required.lora_name[0]).toEqual(['sub/a.pt', 'z.safetensors'])
   })
 
-  it('empties the dataset folder pickers on a live body too, and serves the stored catalog for unparseable text', async () => {
+  it('never asks the engine (R10.9): the stored catalog is served and scrubbed even while an engine answers', async () => {
     writeBaseline(staleCatalog())
     write('input/b.png')
     __setInputUploadsDbForTests({ async query() { return { rows: [] } } })
@@ -343,12 +343,17 @@ describe('hosted: the scrub applies to whichever body is served', () => {
     const fallback = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any) as any
     expect(Object.keys(fallback)).toEqual(Object.keys(staleCatalog()))
     expect(fallback.LoadImage.input.required.image[0]).toEqual([])
+    expect(engineFetch).not.toHaveBeenCalled()
   })
 
-  it('502 only when there is nothing to serve at all', async () => {
+  it('503 in plain words only when there is nothing to serve at all — never the engine', async () => {
     __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
     __setInputUploadsDbForTests({ async query() { return { rows: [] } } })
-    await expect(handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any)).rejects.toMatchObject({ statusCode: 502 })
+    engineAnswers(staleCatalog())
+    const err = await handleHostedObjectInfo({ path: '/object_info', context: { userId: 'u1' } } as any).catch(e => e)
+    expect(err).toMatchObject({ statusCode: 503 })
+    expect(String(err.message)).not.toMatch(/engine|ComfyUI/i)
+    expect(engineFetch).not.toHaveBeenCalled()
   })
 })
 

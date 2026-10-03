@@ -217,15 +217,16 @@ describe('F6: a dot-segment path is REFUSED, not proxied', () => {
     // Stage 6 Task 7: /internal/files/OUTPUT GET is now the per-user listing,
     // so the dot-fold probe uses /internal/files/INPUT — still forbidden — to
     // prove folding onto a gated route is refused.
+    // Step 3, R10.9: an engine-only route is a plain 404.
     for (const p of ['/extensions/../history', '/extensions/%2e%2e/history', '/comfyui/extensions/../history', '/extensions/../internal/files/input', '/extensions/../gate/resume']) {
-      expect(await status(p), p).toBe(403)
+      expect(await status(p), p).toBe(404)
     }
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
-  it('still gates — not proxies — a dot-segment path that folds onto /queue', async () => {
-    await middleware(ev('/extensions/../queue', 'GET'))
-    expect(handleHostedQueueGet).toHaveBeenCalledTimes(1)
+  it('still refuses — not proxies — a dot-segment path that folds onto /queue', async () => {
+    expect(await status('/extensions/../queue', 'GET')).toBe(404)
+    expect(handleHostedQueueGet).not.toHaveBeenCalled()
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 })
@@ -235,50 +236,40 @@ describe('F6: a dot-segment path is REFUSED, not proxied', () => {
 describe('hosted mode: alias forms hit the same gates as canonical paths', () => {
   beforeEach(() => { mode = 'hosted' })
 
-  it('routes every /prompt alias through the METER, never the raw proxy', async () => {
+  // Step 3, R10.9: hosted never reaches the engine. Running a graph, its
+  // queue, Stop, and the engine's /history and /view mirrors are engine-only
+  // routes: a plain 404 in every spelling and verb, never a handler, never
+  // the raw proxy.
+  it('answers every /prompt alias 404, any verb — never metered onto the engine, never proxied', async () => {
     for (const p of ['/prompt', '/api/prompt', '/comfyui/prompt', '/comfyui/api/prompt', '/prompt?x=1', '/api/prompt?x=1']) {
-      proxyRequest.mockClear(); handleMeteredPrompt.mockClear()
-      await middleware(ev(p, 'POST'))
-      expect(handleMeteredPrompt, `POST ${p} must be metered`).toHaveBeenCalledTimes(1)
-      expect(proxyRequest, `POST ${p} must not raw-proxy`).not.toHaveBeenCalled()
-    }
-  })
-
-  it('routes every GET /queue alias through the ownership filter', async () => {
-    for (const p of ['/queue', '/api/queue', '/comfyui/queue', '/comfyui/api/queue', '/queue?x=0']) {
-      proxyRequest.mockClear(); handleHostedQueueGet.mockClear()
-      await middleware(ev(p, 'GET'))
-      expect(handleHostedQueueGet, `GET ${p} must be filtered`).toHaveBeenCalledTimes(1)
-      expect(proxyRequest, `GET ${p} must not raw-proxy`).not.toHaveBeenCalled()
-    }
-  })
-
-  it('refuses EVERY non-GET verb on every /queue alias (clear/delete wipe other tenants)', async () => {
-    for (const p of ['/queue', '/api/queue', '/comfyui/queue', '/comfyui/api/queue']) {
-      for (const m of ['POST', 'DELETE', 'PUT', 'PATCH']) {
-        expect(await status(p, m), `${m} ${p}`).toBe(403)
+      for (const m of ['POST', 'GET', 'DELETE']) {
+        expect(await status(p, m), `${m} ${p}`).toBe(404)
       }
     }
+    expect(handleMeteredPrompt).not.toHaveBeenCalled()
+    expect(proxyRequest).not.toHaveBeenCalled()
   })
 
-  it('routes every POST /interrupt alias through the ownership gate', async () => {
-    for (const p of ['/interrupt', '/api/interrupt', '/comfyui/interrupt', '/comfyui/api/interrupt']) {
-      proxyRequest.mockClear(); handleHostedInterrupt.mockClear()
-      await middleware(ev(p, 'POST'))
-      expect(handleHostedInterrupt, `POST ${p} must be gated`).toHaveBeenCalledTimes(1)
-      expect(proxyRequest, `POST ${p} must not raw-proxy`).not.toHaveBeenCalled()
+  it('answers every /queue and /interrupt alias 404, any verb', async () => {
+    for (const p of ['/queue', '/api/queue', '/comfyui/queue', '/comfyui/api/queue', '/queue?x=0', '/interrupt', '/api/interrupt', '/comfyui/interrupt', '/comfyui/api/interrupt']) {
+      for (const m of ['GET', 'POST', 'DELETE', 'PUT', 'PATCH']) {
+        expect(await status(p, m), `${m} ${p}`).toBe(404)
+      }
     }
+    expect(handleHostedQueueGet).not.toHaveBeenCalled()
+    expect(handleHostedInterrupt).not.toHaveBeenCalled()
+    expect(proxyRequest).not.toHaveBeenCalled()
   })
 
-  it('refuses /history aliases — the canonical /history Nitro route serves the UI', async () => {
+  it('answers /history aliases 404 — the canonical /history Nitro route serves the UI', async () => {
     for (const p of ['/api/history', '/comfyui/history', '/comfyui/api/history', '/api/history/abc-123', '/comfyui/history/abc-123']) {
-      expect(await status(p), p).toBe(403)
+      expect(await status(p), p).toBe(404)
     }
   })
 
-  it('refuses /view aliases — the canonical /view Nitro route serves the UI', async () => {
+  it('answers /view aliases 404 — the canonical /view Nitro route serves the UI', async () => {
     for (const p of ['/api/view?filename=a.png', '/comfyui/view?filename=a.png', '/comfyui/api/view?filename=a.png&type=output']) {
-      expect(await status(p), p).toBe(403)
+      expect(await status(p), p).toBe(404)
     }
   })
 
@@ -297,30 +288,36 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     // /internal/files/input, other /internal subpaths, and any non-GET verb on
     // the output listing all stay forbidden.
     for (const p of ['/comfyui/internal/files/input', '/api/internal/files/temp', '/comfyui/internal/logs']) {
-      expect(await status(p), p).toBe(403)
+      expect(await status(p), p).toBe(404)
     }
     for (const m of ['POST', 'DELETE', 'PUT']) {
-      expect(await status('/comfyui/internal/files/output', m), m).toBe(403)
+      expect(await status('/comfyui/internal/files/output', m), m).toBe(404)
     }
   })
 
-  it('denies unlisted engine paths by default', async () => {
+  it('denies unlisted engine paths by default (a plain 404)', async () => {
     for (const p of ['/comfyui/models/checkpoints', '/comfyui/free', '/comfyui/api/free']) {
-      expect(await status(p), p).toBe(403)
+      expect(await status(p), p).toBe(404)
     }
+    expect(proxyRequest).not.toHaveBeenCalled()
   })
 
-  // STAGE 6 TASK 8 — /settings + /userdata are userScoped, and gated on the
-  // engineMultiUser() switch. OFF (the shipping default) they 403 exactly like
-  // an unlisted path — no shared-dir leak. ON they route to the per-user gate.
-  it('T8: settings + userdata 403 while the multi-user switch is off (every guarded alias)', async () => {
-    // The guarded spellings — reachable via the /comfyui or /api PROXY_PREFIX —
-    // reach the hosted decision and are refused 403 with the switch off.
-    for (const p of ['/comfyui/settings', '/api/settings', '/comfyui/api/settings',
-      '/comfyui/userdata/x', '/api/userdata/x', '/comfyui/api/v2/userdata']) {
-      expect(await status(p), p).toBe(403)
-      expect(handleHostedUserScoped, p).not.toHaveBeenCalled()
+  // STAGE 6 TASK 8, as changed by R10.9 — /settings + /userdata are
+  // engine-only routes: 404 in every guarded spelling, whatever the
+  // multi-user switch says, never forwarded.
+  it('T8: settings + userdata 404 in every guarded alias, switch on or off', async () => {
+    for (const on of [false, true]) {
+      multiUser = on
+      for (const [p, m] of [
+        ['/comfyui/settings', 'GET'], ['/api/settings', 'GET'], ['/comfyui/api/settings', 'GET'],
+        ['/comfyui/userdata/x', 'GET'], ['/api/userdata/x', 'DELETE'], ['/comfyui/api/v2/userdata', 'GET'],
+        ['/comfyui/settings/Comfy.Locale', 'POST'], ['/comfyui/userdata/a.json/move/b.json', 'POST'], ['/comfyui/settings', 'PUT'],
+      ] as const) {
+        expect(await status(p, m), `${on} ${m} ${p}`).toBe(404)
+      }
     }
+    expect(handleHostedUserScoped).not.toHaveBeenCalled()
+    expect(proxyRequest).not.toHaveBeenCalled()
   })
 
   it('T8: the BARE canonical spellings are not proxy-prefixed — they pass through to Nitro, never the engine', async () => {
@@ -334,27 +331,6 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     }
   })
 
-  it('T8: with the switch on, every alias routes to the userScoped gate, never the raw proxy', async () => {
-    multiUser = true
-    for (const [p, m] of [
-      ['/comfyui/settings', 'GET'], ['/comfyui/settings/Comfy.Locale', 'POST'],
-      ['/api/settings', 'GET'], ['/comfyui/api/settings', 'GET'],
-      ['/comfyui/userdata/x', 'GET'], ['/api/userdata/x', 'DELETE'],
-      ['/comfyui/api/v2/userdata', 'GET'], ['/comfyui/userdata/a.json/move/b.json', 'POST'],
-    ] as const) {
-      handleHostedUserScoped.mockClear(); proxyRequest.mockClear()
-      await middleware(ev(p, m))
-      expect(handleHostedUserScoped, `${m} ${p} must be user-scoped`).toHaveBeenCalledTimes(1)
-      expect(proxyRequest, `${m} ${p} must not raw-proxy`).not.toHaveBeenCalled()
-    }
-  })
-
-  it('T8: a verb the routes do not serve is refused, switch on or off', async () => {
-    multiUser = true
-    expect(await status('/comfyui/settings', 'PUT')).toBe(403)
-    expect(handleHostedUserScoped).not.toHaveBeenCalled()
-  })
-
   // ROUND 2 — these expectations MOVED, and the move is the lesson.
   //
   // This block used to assert that /object_info, /upload and /gate raw-proxy,
@@ -366,11 +342,13 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   // So: an allowlist entry is a claim about a HANDLER, and adding one requires
   // reading that handler in ComfyUI's server.py — what does it read, what does
   // it write, whose data is in scope? "It's a static GET" is not an audit.
-  it('still raw-proxies the engine paths that survived the round-2 handler audit', async () => {
-    for (const [p, m] of [['/system_stats', 'GET'], ['/extensions/foo.js', 'GET']] as const) {
+  // Step 3, R10.9: the raw allowlist is empty — the two survivors of that
+  // audit (/system_stats, /extensions) are engine-only routes now, a 404.
+  it('raw-proxies nothing: the round-2 survivors answer 404 (R10.9)', async () => {
+    for (const [p, m] of [['/system_stats', 'GET'], ['/extensions/foo.js', 'GET'], ['/api/system_stats', 'GET'], ['/comfyui/extensions', 'GET']] as const) {
       proxyRequest.mockClear()
-      await middleware(ev(p, m))
-      expect(proxyRequest, `${m} ${p} must still proxy`).toHaveBeenCalledTimes(1)
+      expect(await status(p, m), `${m} ${p}`).toBe(404)
+      expect(proxyRequest, `${m} ${p} must not proxy`).not.toHaveBeenCalled()
     }
   })
 
@@ -437,8 +415,9 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     // extensions included. `/sailor` is deliberately NOT in
     // ENGINE_ROUTE_PREFIXES, so the mirror never normalizes and the
     // deny-by-default tail refuses it — fail closed, no engine contact.
+    // R10.9: the deny-by-default tail is a plain 404.
     for (const p of ['/api/sailor/projects', '/api/sailor/projects/abc', '/comfyui/api/sailor/projects/abc']) {
-      expect(await status(p), p).toBe(403)
+      expect(await status(p), p).toBe(404)
     }
     expect(proxyRequest).not.toHaveBeenCalled()
   })
@@ -523,7 +502,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   it('T2b: the /api mirror of a data route fails closed, not proxied (/sailor not in ENGINE_ROUTE_PREFIXES)', async () => {
     for (const [p, m] of [['/api/sailor/assets', 'GET'], ['/api/sailor/input_file?filename=a.png', 'DELETE'], ['/comfyui/api/sailor/assets', 'GET']] as const) {
       proxyRequest.mockClear()
-      expect(await status(p, m), `${m} ${p}`).toBe(403)
+      expect(await status(p, m), `${m} ${p}`).toBe(404)
       expect(proxyRequest).not.toHaveBeenCalled()
       expect(handleHostedSailorData).not.toHaveBeenCalled()
     }
@@ -536,15 +515,15 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
   it('F1: refuses EVERY /gate alias — unmetered re-execution of a stored graph', async () => {
     for (const p of ['/gate', '/gate/resume', '/comfyui/gate/resume', '/api/gate/resume', '/comfyui/api/gate/resume']) {
       for (const m of ['POST', 'GET']) {
-        expect(await status(p, m), `${m} ${p}`).toBe(403)
+        expect(await status(p, m), `${m} ${p}`).toBe(404)
       }
     }
     expect(proxyRequest, '/gate must never reach the engine').not.toHaveBeenCalled()
   })
 
-  it('F1: the decision itself forbids /gate, canonical and aliased', () => {
+  it('F1: the decision itself refuses /gate (404 since R10.9), canonical and aliased', () => {
     for (const p of ['/gate/resume', '/comfyui/gate/resume', '/api/gate/resume']) {
-      expect(hostedEngineDecision(normalizeEnginePath(p), 'POST').kind, p).toBe('forbid')
+      expect(hostedEngineDecision(normalizeEnginePath(p), 'POST').kind, p).toBe('notFound')
     }
   })
 
@@ -560,9 +539,9 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     }
   })
 
-  it('F2: refuses non-GET verbs on /object_info', async () => {
+  it('F2: refuses non-GET verbs on /object_info (404 since R10.9)', async () => {
     for (const m of ['POST', 'DELETE', 'PUT']) {
-      expect(await status('/object_info', m), m).toBe(403)
+      expect(await status('/object_info', m), m).toBe(404)
     }
   })
 
@@ -583,12 +562,9 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     }
   })
 
-  // F8: this 403 used to be handed the /queue message verbatim.
-  it('F8: the non-POST /prompt refusal names /prompt, not the queue', () => {
-    const d = hostedEngineDecision('/prompt', 'GET') as { kind: string, message: string }
-    expect(d.kind).toBe('forbid')
-    expect(d.message).toContain('/prompt')
-    expect(d.message).not.toContain('queue')
+  // F8, as changed by R10.9: every /prompt verb is the same plain 404.
+  it('F8: /prompt is notFound for every verb', () => {
+    for (const m of ['GET', 'POST', 'DELETE']) expect(hostedEngineDecision('/prompt', m).kind, m).toBe('notFound')
   })
 
   it('never diverts Nitro\'s own /api routes into the engine gates', async () => {
@@ -805,15 +781,14 @@ describe('engine down: engine-only routes answer 503, not a failed proxy', () =>
     }
   })
 
-  it('hosted mode: a route the gate proxies answers 503 when the engine is down; the forbid still wins', async () => {
+  it('hosted mode: an engine route is a plain 404 whether the engine is up or down (R10.9); a refused /sailor route stays 403', async () => {
     mode = 'hosted'
-    engineHealthState.value = 'down'
-    const { event, res } = evWithRes('/system_stats', 'GET')
-    expect(await middleware(event)).toEqual({ error: 'This needs the local engine' })
-    expect(res.statusCode).toBe(503)
+    for (const state of ['down', 'up'] as const) {
+      engineHealthState.value = state
+      expect(await status('/system_stats', 'GET'), state).toBe(404)
+      expect(await status('/sailor/render_timeline', 'POST'), state).toBe(403)
+    }
     expect(proxyRequest).not.toHaveBeenCalled()
-    // A refused route stays refused (403), not turned into a 503.
-    expect(await status('/sailor/render_timeline', 'POST')).toBe(403)
   })
 
   it('the socket (/api/ws, /comfyui/ws) is left to its own handling, not answered 503', async () => {

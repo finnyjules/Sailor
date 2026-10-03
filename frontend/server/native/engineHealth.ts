@@ -5,7 +5,11 @@
  *
  * One check at a time, a 1.5 s timeout, and the answer cached for 3 s, so
  * every open tab can poll without each poll reaching the engine.
+ *
+ * Hosted never reaches the engine (step 3, R10.9): there the answer is
+ * "down", given without a request.
  */
+import { isHosted } from '../utils/deployMode'
 
 export type EngineState = 'up' | 'down'
 
@@ -22,6 +26,7 @@ export const ENGINE_ORIGIN = `http://127.0.0.1:${ENGINE_MAIN_PORT}`
 
 /** True when the engine answers /system_stats at all (any status), false on refusal or timeout. */
 export async function probeEngine(fetchFn: typeof fetch = (...a) => fetch(...a)): Promise<boolean> {
+  if (isHosted()) return false
   try {
     const res = await fetchFn(`${ENGINE_ORIGIN}/system_stats`, {
       headers: { origin: ENGINE_ORIGIN },
@@ -36,13 +41,16 @@ export async function probeEngine(fetchFn: typeof fetch = (...a) => fetch(...a))
   }
 }
 
-export function createEngineHealth(deps: { probe?: () => Promise<boolean>; now?: () => number } = {}): () => Promise<EngineState> {
+export function createEngineHealth(deps: { probe?: () => Promise<boolean>; now?: () => number; hosted?: () => boolean } = {}): () => Promise<EngineState> {
   const probe = deps.probe ?? (() => probeEngine())
   const now = deps.now ?? Date.now
+  const hosted = deps.hosted ?? isHosted
   let cached: { state: EngineState; at: number } | null = null
   let inFlight: Promise<EngineState> | null = null
 
   return function engineHealth(): Promise<EngineState> {
+    // Hosted: down, with no request (R10.9). Read per call, as deployMode is.
+    if (hosted()) return Promise.resolve('down')
     if (cached && now() - cached.at < ENGINE_HEALTH_CACHE_MS) return Promise.resolve(cached.state)
     if (inFlight) return inFlight
     inFlight = (async () => {
