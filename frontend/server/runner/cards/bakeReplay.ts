@@ -148,6 +148,13 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       // Fix round 5 (M4): a LoadImage APNG in the words every batch reader uses ("Save it as a GIF or WebP").
       if (behind) out.push({ ...behind, oneFrame: true, ...(behind.classType === 'LoadImage' ? { loaderBatch: true as const, animated: LOADER_APNG_WORDS } : {}) })
     }
+    // LC9 fix round 1: an Image card with `export` on saves what it shows as Save image does; Python's card loads
+    // every frame of an animation (its own file's or a loader's behind it) and exports them all, so the file must
+    // be one frame (the runner's card hands on one picture).
+    if (n.class_type === 'Image' && pyTruthy(inputs.export ?? false)) {
+      const behind = loaderFileBehind(prompt, [nodeId, 0])
+      if (behind) out.push({ ...behind, oneFrame: true })
+    }
     // R11.9c fix round 3 (B1): readers that take a LoadImage's batch: the Shader effect (a frame each) and the
     // local-model picture nodes (a call each, counted before the hold): an APNG it can't make a batch of is refused.
     // Fix round 5 (M4): Image to mask and Text mask with a source (with a render) take the batch too, as Python's do.

@@ -71,7 +71,8 @@ import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectStartProblems, nearLimit, waveformStartProblems } from './video/start'
 import { clipAtCaps, frameShapes, videoSourceShapeOf } from './video/shapes'
 import { paidVideoSaveProblem } from './video/paidVideoSave'
-import { SAVE_FRAMES_TOO_MUCH, saveFramesKeptBytes, saveSize } from './cards/saveImage'
+import { SAVE_FRAMES_TOO_MUCH, imageCardExports, imageExportNameProblem, saveFramesKeptBytes, saveSize } from './cards/saveImage'
+import { IMAGE_EXPORT_TOO_MUCH, imageExportKeptBytes } from './cards/imageExport'
 import { loaderBatchStartProblems } from './cards/loaderBatch'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
 import { lensNodesNeedingDepthModel, lensStartRefusal } from './cards/lensBlur'
@@ -2714,9 +2715,24 @@ export function createEngine(deps: EngineDeps) {
     const framesSaved = (p: ApiPrompt) => Object.values(p).some(n => (n.class_type === 'SaveImage' || n.class_type === 'PreviewImage')
       && isLink(n.inputs?.images) && outputKind(p, n.inputs.images as ApiLink, outputKindsFor(families)) === 'frames')
     const room = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
-    if (Number.isFinite(room) && prompts.some(framesSaved)) {
+    // LC9 fix round 1: an Image card with `export` on: its file name judged before anything is held (the name
+    // alone, never the disk), and what it writes to the output folder counted in the same kept room (hosted).
+    let exported = 0
+    let exportFirst: { nodeId: string; classType: string } | null = null
+    for (const p of prompts) {
+      for (const [nodeId, n] of Object.entries(p)) {
+        if (n.class_type !== 'Image' || !imageCardExports(n.inputs ?? {})) continue
+        const badName = imageExportNameProblem(n.inputs ?? {})
+        if (badName) throw refuse(named(nodeId, badName), 400, { nodeId, classType: 'Image' })
+      }
+      if (!Number.isFinite(room)) continue
+      const ex = await imageExportKeptBytes(p, families, { read: f => files.read(f), workflow: storableWorkflow(i.workflow) })
+      exported += ex.bytes
+      exportFirst ??= ex.first
+    }
+    if (Number.isFinite(room) && (prompts.some(framesSaved) || exportFirst)) {
       const caps = deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
-      let total = localKept + soundKept + bakeBytes
+      let total = localKept + soundKept + bakeBytes + exported
       let first: { nodeId: string; classType: string } | null = null
       for (const p of prompts) {
         const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
@@ -2730,6 +2746,7 @@ export function createEngine(deps: EngineDeps) {
         first ??= saved.first
       }
       if (first && total > room) throw stopGap({ message: SAVE_FRAMES_TOO_MUCH, ...first })
+      if (exportFirst && total > room) throw stopGap({ message: IMAGE_EXPORT_TOO_MUCH, ...exportFirst })
     }
     // LC8 round 2 (F2 money): a paid maker's video into Save video, in hosted, bounded from its settings (Enhance a
     // video: its measured clip × its upscale and rate) before the hold: past the caps Save video re-encodes within,

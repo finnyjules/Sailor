@@ -435,7 +435,7 @@ export function pixelsCore() {
    * for JPEG (`flatten`), an RGBA picture pasted onto white with its alpha as
    * the mask (Paste.c BLEND: DIV255(255·(255 − a) + c·a)), leaving RGB.
    */
-  function savePixels(p: PixelsPicture, ow: number, oh: number, flatten: boolean, stop?: () => boolean): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
+  function savePixels(p: PixelsPicture, ow: number, oh: number, flatten: boolean, stop?: () => boolean): { w: number; h: number; channels: 3 | 4; px: Uint8Array; flattened?: true } {
     const t = saveBytes(p)
     let px = t.px
     const c = t.channels
@@ -450,7 +450,8 @@ export function pixelsCore() {
         rgb[i * 3 + b] = ((x >> 8) + x) >> 8
       }
     }
-    return { w: ow, h: oh, channels: 3, px: rgb }
+    // `flattened`: the tensor had four channels (the Image card's export reads it as Python's `is_rgba`, LC9 fix round 1).
+    return { w: ow, h: oh, channels: 3, px: rgb, flattened: true }
   }
 
   return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, clipPlanar, saveBytes, pilResize, pilResizeRgba, savePixels }

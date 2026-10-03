@@ -64,6 +64,7 @@ import { IMAGE_OUTPUT_CLASSES, PICTURE_OUTPUTS, runnerTakesNode } from '#shared/
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { pruneInvalidOutputs } from '#shared/runner/validate'
 import { takenOnlyByLc8CardsRule } from './__runner__/lc8CardsOnly'
+import { hasLc9SmartLayoutCard, onlyLc9SmartLayoutsMoved } from './__runner__/lc9SmartLayoutCard'
 import { SHADER_CATALOG_VERSION, shaderBakeKeySync, shaderBakedText } from '#shared/runner/shaderBakeKey'
 import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -651,6 +652,8 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
           else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).noOutputs) outside.push(`${line} (R3.8: no output node)`)
           // LC8 (F1): cards that show what a card made are taken, free (__runner__/lc8CardsOnly.ts).
           else if (now.length === 0 && takenOnlyByLc8CardsRule(g.prompt, families)) outside.push(`${line} (LC8: cards showing what a card made)`)
+          // LC9: Smart Layout read by an Image card is the runner's with `cards` on (__runner__/lc9SmartLayoutCard.ts).
+          else if (onlyLc9SmartLayoutsMoved(g.prompt, families, now, before)) outside.push(`${line} (LC9: Smart Layout into an Image card)`)
           else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).unread.length
             && JSON.stringify(before) === JSON.stringify(Object.keys(withoutUnread(g.prompt, families)))) outside.push(`${line} (R3.8: cards left after unread nodes)`)
           else diffs.push(line)
@@ -774,13 +777,18 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
     // LC8 (F1): cards that show what a card made, now taken with `cards` on (__runner__/lc8CardsOnly.ts).
     const lc8Keys = new Set((await savedGraphs()).filter(g => Object.values(sets).some(f => takenOnlyByLc8CardsRule(g.prompt, f))).map(g => g.key))
     const lc8Changed: string[] = []
+    // LC9: graphs holding a Smart Layout read by an Image card, the runner's with `cards` on.
+    const lc9Keys = new Set((await savedGraphs()).filter(g => hasLc9SmartLayoutCard(g.prompt, FRAME_CARDS)).map(g => g.key))
+    const lc9Changed: string[] = []
     for (const [key, row] of Object.entries(now)) {
       const p = pinned.graphs[key]
       if (!p) { unpinned++; continue }
       if (p.prompt !== row.prompt) { changed++; continue }
       same++
-      if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) (unreadKeys.has(key) ? unreadChanged : lc8Keys.has(key) ? lc8Changed : differ).push(key)
+      if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) (unreadKeys.has(key) ? unreadChanged : lc8Keys.has(key) ? lc8Changed : lc9Keys.has(key) ? lc9Changed : differ).push(key)
     }
+    console.info(`R2.12 pinned: ${lc9Changed.length} graphs differ only as LC9 takes Smart Layout into an Image card: ${lc9Changed.join(', ')}`)
+    expect(lc9Changed.length).toBeLessThanOrEqual(20)
     console.info(`R2.12 pinned: ${lc8Changed.length} graphs differ only as LC8's cards rule takes them: ${lc8Changed.join(', ')}`)
     expect(lc8Changed.length).toBeLessThanOrEqual(20)
     console.info(`R2.12 pinned: ${unreadChanged.length} graphs differ only where a node no output reads is now left out, or there is no output node: ${unreadChanged.join(', ')}`)

@@ -130,7 +130,7 @@ import { textCardUi } from './cards/text'
 import { planScene3D, planTextMask, planTextOnPath } from './cards/bakeReplay'
 import { planLoadImageCard } from './cards/loadImage'
 import { planEmptyImage, planGetImageSize, planImageToMask, planTextMaskWithSource } from './cards/utilities'
-import { imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/saveImage'
+import { imageCardExporting, imageCardExports, imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/saveImage'
 import { planSmartLayout } from './cards/smartLayout'
 import { planShaderEffect } from './cards/shaderEffect'
 import { effectSpec } from './effects/table'
@@ -1438,6 +1438,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         const f = parseInputFileRef(inputs.image)
         files = f ? [f] : []
       }
+      // LC9 fix round 1: `export` on saves a copy to the output folder as Python's card does (nothing wired
+      // and no file: Python's placeholder, nothing exported).
+      if (imageCardExports(inputs) && (isLink(inputs.images) || files.length)) return imageCardExporting(ctx, files, list)
       // A picture the runner made (kept bytes) is never served by /view: the
       // card hands the kept file on and shows a copy in temp (R1.5).
       if (files.some(f => f.type === 'kept')) return imageCardShowingKept(files, list)

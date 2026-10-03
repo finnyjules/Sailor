@@ -318,13 +318,26 @@ const EXT: Readonly<Record<Format, string>> = { png: 'png', webp: 'webp', jpeg: 
  * file per picture with the counter moving on.
  */
 async function saveAll(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { folder: 'output' | 'temp'; prefixAppend: string; now: Date }): Promise<Derived> {
+  const { images } = await saveBatches(io, batches, s, o)
+  return { values: {}, ui: { images: images.flat().map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type })) } }
+}
+
+/**
+ * saveAll's files, batch by batch, and whether each batch's tensor has four
+ * channels (Python's `is_rgba`: what the Image card's export reads to choose
+ * which file it shows).
+ */
+async function saveBatches(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { folder: 'output' | 'temp'; prefixAppend: string; now: Date }): Promise<{ images: OutputFile[][]; rgba: boolean[] }> {
   const text: [string, string][] = []
   if (s.embed) {
     text.push(['prompt', asciiJson(io.runPrompt)])
     if (io.runWorkflow != null) text.push(['workflow', asciiJson(io.runWorkflow)])
   }
-  const images: OutputFile[] = []
+  const images: OutputFile[][] = []
+  const rgba: boolean[] = []
   for (const batch of batches) {
+    const saved: OutputFile[] = []
+    let four = false
     const known = await sizes(io, batch, true)
     const first = batch.files.length ? known.get(keyOf(batch.files[0]!))! : { w: 1, h: 1 }
     const out = saveSize(first.w, first.h, s.scale, s.maxDimension)
@@ -337,6 +350,7 @@ async function saveAll(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { fol
         if (made.has(key)) continue
         if (io.signal.aborted) throw new Error('Stopped')
         const p = await worker.savePixels(await decoded(io, batch.source, file), out.w, out.h, s.format === 'jpeg')
+        if (p.channels === 4 || p.flattened) four = true
         made.set(key, await encode(p, s, text))
       }
       return made
@@ -347,7 +361,7 @@ async function saveAll(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { fol
       const bytes = encoded.get(files[i] ? keyOf(files[i]!) : 'blank')!
       const named = filename.replaceAll('%batch_num%', String(i))
       try {
-        images.push(await io.saveAsset(bytes, {
+        saved.push(await io.saveAsset(bytes, {
           prefix: named, ext: EXT[s.format], subfolder, folder: o.folder,
           ...(named !== filename ? { counter: { prefix: filename, offset: i } } : {}),
         }))
@@ -358,8 +372,10 @@ async function saveAll(io: DeriveIO, batches: Wired[], s: SaveSettings, o: { fol
         throw new Error(SAVE_FAILED)
       }
     }
+    images.push(saved)
+    rgba.push(four)
   }
-  return { values: {}, ui: { images: images.map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type })) } }
+  return { images, rgba }
 }
 
 // ── A clip's frames (R11.9a, row 15) ─────────────────────────────────────────
@@ -618,6 +634,84 @@ export function imageCardShowingKept(files: OutputFile[], list = false): NodePla
       // Slot 1 reads the files too, as a pass-through card's outputs always did.
       const value = list ? { kind: 'files' as const, files, list: true as const } : { kind: 'files' as const, files }
       return { values: { 0: value, 1: value }, ui: { images } }
+    },
+  }
+}
+
+// ── The Image card's export (LC9 fix round 1) ────────────────────────────────
+
+/** The Image card's `export` as Python reads it (a BOOLEAN widget). */
+export function imageCardExports(inputs: Record<string, unknown>): boolean {
+  return pyTruthy(inputs.export ?? false)
+}
+
+/** An exporting Image card's file name outside the output folder (the name alone, never the disk). */
+export function imageExportNameProblem(inputs: Record<string, unknown>, now = new Date()): string | null {
+  if (isLink(inputs.filename_prefix)) return null
+  try { saveImagePrefix(pyStr(inputs.filename_prefix ?? 'ComfyUI'), 1, 1, now) }
+  catch (e) { return e instanceof Error && e.message === SAVE_OUTSIDE ? SAVE_OUTSIDE : SAVE_FAILED }
+  return null
+}
+
+/** Backstop for the start-of-run check: Python's card loads every frame of an animation, and exports them all. */
+async function refuseExportAnimation(io: DeriveIO, prompt: ApiPrompt, nodeId: string): Promise<void> {
+  const behind = loaderFileBehind(prompt, [nodeId, 0])
+  if (!behind) return
+  let bytes: Uint8Array
+  try { bytes = await io.read(behind.file) }
+  catch { return }
+  let frames = false
+  try { frames = pictureHasFrames(await pictureMeta(bytes), bytes) }
+  catch { return }
+  if (frames) throw new Error(PICTURE_ANIMATED)
+}
+
+/**
+ * nodes_image.py Image.process with `export` on: the picture the card shows,
+ * saved as well to the output folder by SaveImage.save_images with the card's
+ * own settings (`filename_prefix`, format, quality, scale, largest side,
+ * metadata), as the run's assets, exactly as Save image saves it here
+ * (saveBatches: the same names, counter and pixels). A list (Smart Layout's
+ * pictures) is saved item by item, as Python runs the card once per item; a
+ * batch (after `batch_index`) as one save. The card then shows the saved
+ * files, as Python points its preview at them, except a batch whose tensor
+ * has four channels (`is_rgba`): Python keeps the live preview for those,
+ * the picture as the card shows it without export. It hands on the same
+ * values as without export. A card with nothing wired and no file exports
+ * nothing (Python returns its placeholder first).
+ */
+export function imageCardExporting(ctx: PlanContext, files: OutputFile[], list: boolean): NodePlan {
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const settings = saveSettings(inputs)
+  const link = isLink(inputs.images) ? inputs.images as ApiLink : null
+  let source: PictureSource = 'card'
+  if (link) {
+    const found = pictureSourceOf(ctx.prompt, link)
+    source = found === 'card' && fromTextMask(ctx.prompt, link) ? 'made' : found
+  }
+  if (source !== 'blank' && !files.length) throw new Error(PICTURE_NOT_MADE)
+  const batches: Wired[] = source === 'blank' ? [{ source, files: [] }] : list ? files.map(f => ({ source, files: [f] })) : [{ source, files }]
+  const now = new Date()
+  // The name, before anything is read or saved (also checked at the start of the run).
+  const named = imageExportNameProblem(inputs, now)
+  if (named) throw new Error(named)
+  return {
+    kind: 'derive',
+    async derive(io) {
+      await refuseExportAnimation(io, ctx.prompt, ctx.nodeId)
+      const { images, rgba } = await saveBatches(io, batches, settings, { folder: 'output', prefixAppend: '', now })
+      const shown: OutputFile[] = []
+      for (let b = 0; b < batches.length; b++) {
+        if (!rgba[b]) {
+          shown.push(...images[b]!.map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type })))
+          continue
+        }
+        for (const f of batches[b]!.files) {
+          shown.push(f.type === 'kept' ? await io.savePreviewAs(await io.read(f), { filename: `sailor_${f.filename}` }) : f)
+        }
+      }
+      const value = list ? { kind: 'files' as const, files, list: true as const } : { kind: 'files' as const, files }
+      return { values: { 0: value, 1: value }, ui: { images: shown } }
     },
   }
 }
