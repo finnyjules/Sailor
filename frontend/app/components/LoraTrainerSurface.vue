@@ -2,24 +2,15 @@
 /**
  * Train LoRA — top-level surface for training SDXL/SD1.5/Flux LoRAs.
  *
- * The trainer engine is the existing TrainLoraNode in comfy_extras/nodes_train.py.
- * This page builds the workflow graph in code and submits it to /prompt, the
- * same pattern the Apps use.
- *
- * Flow:
- *   1. Upload images to input/<sessionFolder>/  via /upload/image
- *   2. Post captions to /sailor/lora/save_captions  → writes .txt sidecars
- *   3. Build graph: CheckpointLoaderSimple → LoadImageTextDataSetFromFolder
- *      → MakeTrainingDataset → TrainLoraNode → SaveLoRA
- *   4. POST /prompt, poll /history/<id>
+ * Training runs in the cloud only (step 3, R10.7): the dataset is zipped in
+ * the browser, uploaded through /api/cloud-train/upload, and handed to the
+ * durable training queue (/api/training-queue), which trains on Replicate.
  */
-import { ArrowRight, Check, ChevronDown, ChevronRight, Cloud, Cpu, Download, Drama, Loader2, Plus, RefreshCcw, Sparkles, Upload, Wand, X } from 'lucide-vue-next'
+import { ArrowRight, Check, ChevronRight, Cloud, Drama, Loader2, Plus, RefreshCcw, Sparkles, Upload, Wand, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { assembleAesthetic } from '~/lib/lora/aesthetic'
 import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
 import JSZip from 'jszip'
-import { defaultComputeMode, localTrainingAvailable, probeEngineUp, LOCAL_NEEDS_ENGINE, type ComputeMode } from '~/lib/lora/trainerCompute'
-import { hostedModeEnabled } from '~/lib/hostedMode'
 import {
   CHARACTER_SHOT_SCENES,
   pickScenes,
@@ -28,19 +19,7 @@ import {
   type CharacterShotScene,
 } from '~/data/character-shot-scenes'
 
-// ----- Compute mode (Local vs Cloud) ------------------------------------
-
-const trainerHosted = hostedModeEnabled(useRuntimeConfig().public)
-const trainerEngineUp = ref(true)
-const computeMode = ref<ComputeMode>(defaultComputeMode({ hosted: trainerHosted, engineUp: true }))
-const localAvailable = computed(() => localTrainingAvailable({ hosted: trainerHosted, engineUp: trainerEngineUp.value }))
-onMounted(async () => {
-  trainerEngineUp.value = await probeEngineUp()
-  if (!localAvailable.value) computeMode.value = 'cloud'
-})
-
-// Cloud family — what Replicate trainer to use. Independent of the local
-// checkpoint picker (which is moot in cloud mode).
+// Cloud family — what Replicate trainer to use.
 type CloudFamily = 'flux' | 'sdxl_sd15'
 const cloudFamily = ref<CloudFamily>('flux')
 
@@ -55,141 +34,6 @@ interface CloudJob {
   replicateModel?: string | null
 }
 const cloudJob = ref<CloudJob | null>(null)
-
-// ----- Downloadable base checkpoints -------------------------------------
-
-interface DownloadableCheckpoint {
-  key: string         // matches the server-side bundle key
-  label: string
-  family: 'SDXL' | 'SD1.5' | 'Flux'
-  sizeBytes: number
-  blurb: string
-}
-
-const DOWNLOADABLE_CHECKPOINTS: DownloadableCheckpoint[] = [
-  {
-    key: 'lora-base-sdxl',
-    label: 'SDXL Base 1.0',
-    family: 'SDXL',
-    sizeBytes: 6_938_078_334,
-    blurb: 'Best default for characters and styles. 1024×1024 native.',
-  },
-  {
-    key: 'lora-base-sd15',
-    label: 'Stable Diffusion 1.5',
-    family: 'SD1.5',
-    sizeBytes: 4_265_146_304,
-    blurb: 'Faster to train, smaller VRAM footprint. 512×512 native.',
-  },
-  {
-    key: 'lora-base-flux-schnell',
-    label: 'Flux.1 Schnell',
-    family: 'Flux',
-    sizeBytes: 23_782_506_688 + 335_304_388 + 246_144_152 + 4_893_934_904,
-    blurb: 'Open-license Flux. Heavy download (~29 GB across 4 files), high VRAM. Enable CPU offload in Advanced.',
-  },
-]
-
-// Synthetic option value the picker uses to represent the Flux multi-file
-// setup. Detected by buildTrainingPrompt to switch workflow shape.
-const FLUX_OPTION_VALUE = '__flux_schnell__'
-const FLUX_FILES = {
-  unet: 'flux1-schnell.safetensors',
-  vae: 'ae.safetensors',
-  clipL: 'clip_l.safetensors',
-  t5: 't5xxl_fp8_e4m3fn.safetensors',
-}
-const fluxReady = ref(false)
-
-async function probeFluxReady() {
-  try {
-    const r = await fetch('/sailor/models/status?key=lora-base-flux-schnell')
-    if (r.ok) {
-      const status = await r.json()
-      fluxReady.value = !!status.ready
-    }
-  } catch { /* silent — surface will just hide the option */ }
-}
-
-interface CheckpointDownloadState {
-  phase: 'idle' | 'checking' | 'downloading' | 'preparing' | 'done' | 'error'
-  downloaded: number
-  total: number
-  message?: string
-}
-const downloadStates = reactive<Record<string, CheckpointDownloadState>>({})
-for (const c of DOWNLOADABLE_CHECKPOINTS) {
-  downloadStates[c.key] = { phase: 'idle', downloaded: 0, total: c.sizeBytes }
-}
-
-function fmtGB(bytes: number): string {
-  return (bytes / 1024 / 1024 / 1024).toFixed(1)
-}
-function downloadPct(key: string): number {
-  const s = downloadStates[key]
-  if (!s?.total) return 0
-  return Math.round((s.downloaded / s.total) * 100)
-}
-
-async function downloadCheckpoint(key: string) {
-  const state = downloadStates[key]
-  if (!state || state.phase === 'downloading' || state.phase === 'preparing') return
-  state.phase = 'checking'
-  state.message = undefined
-  state.downloaded = 0
-
-  try {
-    // Quick status probe first — if already on disk we can skip the stream.
-    const probe = await fetch(`/sailor/models/status?key=${key}`)
-    if (probe.ok) {
-      const status = await probe.json()
-      if (status.ready) {
-        state.phase = 'done'
-        state.downloaded = state.total
-        await loadCheckpoints()
-        return
-      }
-    }
-  } catch {
-    state.phase = 'error'
-    state.message = 'Could not reach the model server. Is ComfyUI running?'
-    return
-  }
-
-  await new Promise<void>((resolve) => {
-    const es = new EventSource(`/sailor/models/download?key=${key}`)
-    es.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data)
-        if (msg.phase === 'downloading') {
-          state.phase = 'downloading'
-          state.downloaded = msg.downloaded ?? 0
-          state.total = msg.total ?? state.total
-        } else if (msg.phase === 'preparing') {
-          state.phase = 'preparing'
-        } else if (msg.phase === 'done') {
-          state.phase = 'done'
-          state.downloaded = state.total
-          es.close()
-          loadCheckpoints().finally(() => resolve())
-        } else if (msg.phase === 'error') {
-          state.phase = 'error'
-          state.message = msg.message || 'Download failed.'
-          es.close()
-          resolve()
-        }
-      } catch {}
-    }
-    es.onerror = () => {
-      if (state.phase !== 'done' && state.phase !== 'error') {
-        state.phase = 'error'
-        state.message = 'Lost connection to the model server.'
-      }
-      es.close()
-      resolve()
-    }
-  })
-}
 
 // ----- Dataset state -----------------------------------------------------
 
@@ -266,34 +110,15 @@ const showBodyHint = computed(
 
 // ----- Hyperparameters ---------------------------------------------------
 
-const checkpoints = ref<string[]>([])
-const checkpointsLoading = ref(false)
-const checkpointsError = ref<string | null>(null)
-
 const form = reactive({
-  checkpoint: '',
   outputName: 'my_style',
   triggerWord: '',
   steps: 1000,
   learningRate: 0.0004,
   rank: DEFAULT_LORA_RANK,
-  // Advanced
   batchSize: 1,
-  gradAccumulationSteps: 1,
-  optimizer: 'AdamW',
-  lossFunction: 'MSE',
-  trainingDtype: 'bf16',
-  loraDtype: 'bf16',
-  algorithm: 'lora',
-  gradientCheckpointing: true,
-  checkpointDepth: 1,
-  offloading: false,
   seed: 0,
-  bucketMode: false,
-  bypassMode: false,
 })
-
-const advancedOpen = ref(false)
 
 // Open a fresh workflow with a Flux generator preloaded to use the trained LoRA.
 // FluxLoRARemoteNode resolves the local filename to its CDN url via the sidecar
@@ -348,36 +173,6 @@ function useTrainedLoraInWorkflow() {
     detail: { tabId: tab.id, workflow },
   }))
 }
-
-// Load checkpoint list from /object_info
-async function loadCheckpoints() {
-  checkpointsLoading.value = true
-  checkpointsError.value = null
-  try {
-    const res = await fetch('/object_info/CheckpointLoaderSimple')
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    const data = await res.json()
-    const ckptList = data?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] ?? []
-    checkpoints.value = Array.isArray(ckptList) ? ckptList : []
-  } catch (e: any) {
-    checkpointsError.value = e?.message ?? 'Failed to load checkpoints. Is ComfyUI running?'
-  } finally {
-    checkpointsLoading.value = false
-  }
-}
-
-// Combined picker options: real SDXL/SD1.5 checkpoints + synthetic Flux entry.
-interface CheckpointOption { value: string; label: string; family: 'sdxl_sd15' | 'flux' }
-const checkpointOptions = computed<CheckpointOption[]>(() => {
-  const opts: CheckpointOption[] = checkpoints.value.map(c => ({ value: c, label: c, family: 'sdxl_sd15' as const }))
-  if (fluxReady.value) opts.push({ value: FLUX_OPTION_VALUE, label: 'Flux.1 Schnell (multi-file)', family: 'flux' as const })
-  return opts
-})
-
-const selectedFamily = computed<'sdxl_sd15' | 'flux'>(() => {
-  const opt = checkpointOptions.value.find(o => o.value === form.checkpoint)
-  return opt?.family ?? 'sdxl_sd15'
-})
 
 // Cloud cost + time estimate. Numbers based on Replicate's ostris trainers
 // running on H100 80GB ($0.001525/sec = $5.49/hr). Step times are observed
@@ -438,20 +233,6 @@ const totalEstimate = computed(() => {
   }
 })
 
-// Auto-select the first option (SDXL/SD1.5 checkpoint first; Flux if it's the
-// only choice). Runs whenever the option list changes.
-watch(checkpointOptions, (opts) => {
-  if (!form.checkpoint && opts.length > 0) {
-    form.checkpoint = opts[0]!.value
-  }
-}, { immediate: true })
-
-// After a Flux download finishes, mark Flux as ready and refresh the picker.
-watch(downloadStates, () => {
-  const flux = downloadStates['lora-base-flux-schnell']
-  if (flux?.phase === 'done') fluxReady.value = true
-}, { deep: true })
-
 // Set when the trainer opens pre-seeded from a draft character with fewer
 // than 3 reference photos (via "Train identity" in the Characters panel) —
 // shown inline near the dataset so the user knows why it's thin.
@@ -479,8 +260,6 @@ async function consumePendingSeed() {
 }
 
 onMounted(() => {
-  loadCheckpoints()
-  probeFluxReady()
   consumePendingSeed()
 })
 
@@ -673,7 +452,7 @@ async function importKreaBoard(board: KreaBoardMeta) {
       } catch { /* skip this image */ }
     }
     if (!files.length) { kreaError.value = 'Could not download any images from that board.'; return }
-    await addFiles(files) // reuse: uploads to ComfyUI + builds previews/state
+    await addFiles(files) // reuse: uploads + builds previews/state
 
     // Make it an ORIGINAL derivative: AI renames the board + rewords the
     // aesthetic (similar direction, not a copy). Non-fatal — keeps originals on error.
@@ -999,7 +778,6 @@ async function regenerateShot(idx: number) {
 
 const canRun = computed(() =>
   images.value.length >= 2
-  && (computeMode.value === 'cloud' || form.checkpoint)
   && form.outputName.trim().length > 0
   && status.value !== 'uploading'
   && status.value !== 'submitting'
@@ -1007,224 +785,9 @@ const canRun = computed(() =>
   && status.value !== 'captioning',
 )
 
-function onStartClicked() {
-  if (computeMode.value === 'cloud') startCloudTraining()
-  else startTraining()
-}
-
-// Cloud trainings are queued (server-side, survive window close); local ones run
-// in-process. The button reflects which.
-const submitButtonLabel = computed(() => {
-  if (computeMode.value === 'cloud') {
-    return (status.value === 'submitting' || status.value === 'uploading') ? 'Adding…' : 'Add to queue'
-  }
-  return status.value === 'training' ? 'Training…' : 'Start training'
-})
-
-function buildTrainingPrompt() {
-  const safeName = form.outputName.trim().replace(/[^a-zA-Z0-9_-]+/g, '_') || 'my_style'
-  const prefix = `loras/${safeName}`
-
-  // Model loading branch: SDXL/SD1.5 use one all-in-one node; Flux uses three.
-  const isFlux = selectedFamily.value === 'flux'
-
-  const modelNodes = isFlux
-    ? {
-        '1a': {
-          class_type: 'UNETLoader',
-          inputs: { unet_name: FLUX_FILES.unet, weight_dtype: 'default' },
-        },
-        '1b': {
-          class_type: 'DualCLIPLoader',
-          inputs: { clip_name1: FLUX_FILES.t5, clip_name2: FLUX_FILES.clipL, type: 'flux' },
-        },
-        '1c': {
-          class_type: 'VAELoader',
-          inputs: { vae_name: FLUX_FILES.vae },
-        },
-      }
-    : {
-        '1': {
-          class_type: 'CheckpointLoaderSimple',
-          inputs: { ckpt_name: form.checkpoint },
-        },
-      }
-
-  // Output socket refs differ between the two paths.
-  const modelRef: [string, number] = isFlux ? ['1a', 0] : ['1', 0]
-  const clipRef: [string, number]  = isFlux ? ['1b', 0] : ['1', 1]
-  const vaeRef: [string, number]   = isFlux ? ['1c', 0] : ['1', 2]
-
-  return {
-    ...modelNodes,
-    '2': {
-      class_type: 'LoadImageTextDataSetFromFolder',
-      inputs: { folder: sessionFolder },
-    },
-    '3': {
-      class_type: 'MakeTrainingDataset',
-      inputs: {
-        images: ['2', 0],
-        vae: vaeRef,
-        clip: clipRef,
-        texts: ['2', 1],
-      },
-    },
-    '4': {
-      class_type: 'TrainLoraNode',
-      inputs: {
-        model: modelRef,
-        latents: ['3', 0],
-        positive: ['3', 1],
-        batch_size: form.batchSize,
-        grad_accumulation_steps: form.gradAccumulationSteps,
-        steps: form.steps,
-        learning_rate: form.learningRate,
-        rank: form.rank,
-        optimizer: form.optimizer,
-        loss_function: form.lossFunction,
-        seed: form.seed,
-        training_dtype: form.trainingDtype,
-        lora_dtype: form.loraDtype,
-        algorithm: form.algorithm,
-        gradient_checkpointing: form.gradientCheckpointing,
-        checkpoint_depth: form.checkpointDepth,
-        offloading: form.offloading,
-        existing_lora: '[None]',
-        bucket_mode: form.bucketMode,
-        bypass_mode: form.bypassMode,
-      },
-    },
-    '5': {
-      class_type: 'SaveLoRA',
-      inputs: {
-        lora: ['4', 0],
-        prefix,
-        steps: ['4', 2],
-      },
-    },
-    '6': {
-      class_type: 'LossGraphNode',
-      inputs: {
-        loss_map: ['4', 1],
-        filename_prefix: `loss_${safeName}`,
-      },
-    },
-  }
-}
-
-async function saveCaptionsToDisk() {
-  const captions: Record<string, string> = {}
-  for (const img of images.value) {
-    captions[img.filename] = img.caption ?? ''
-  }
-  const res = await fetch('/sailor/lora/save_captions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folder: sessionFolder, captions }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Saving captions failed: ${text || res.status}`)
-  }
-}
-
-async function startTraining() {
-  if (!canRun.value) return
-  errorMessage.value = null
-  outputFilename.value = null
-  lossGraphUrl.value = null
-  progressPct.value = 0
-
-  try {
-    status.value = 'submitting'
-    progressLabel.value = 'Writing captions to disk…'
-    await saveCaptionsToDisk()
-
-    progressLabel.value = 'Submitting training workflow…'
-    const res = await fetch('/prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: buildTrainingPrompt() }),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `Comfy returned ${res.status}`)
-    }
-    const data = await res.json()
-    const promptId: string | undefined = data?.prompt_id
-    if (!promptId) throw new Error('No prompt_id in response — is ComfyUI running?')
-
-    status.value = 'training'
-    progressLabel.value = `Training (0 / ${form.steps} steps)…`
-    const result = await pollForTrainingResult(promptId)
-    if (!result) throw new Error('Training finished but produced no output.')
-
-    outputFilename.value = result.loraFilename
-    lossGraphUrl.value = result.lossGraphUrl
-    status.value = 'done'
-    progressLabel.value = 'Done.'
-    progressPct.value = 100
-  } catch (e: any) {
-    errorMessage.value = humanizeError(e?.message ?? String(e))
-    status.value = 'error'
-  }
-}
-
-async function pollForTrainingResult(
-  promptId: string,
-): Promise<{ loraFilename: string | null; lossGraphUrl: string | null } | null> {
-  // No fine-grained step progress from /history — TrainLoraNode runs in one
-  // execute() call. We do show a coarse running/done state via /queue.
-  const deadline = Date.now() + 6 * 60 * 60 * 1000 // 6 hours
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 1500))
-    try {
-      // Bump the progress bar so the user knows we're alive
-      if (progressPct.value < 95) progressPct.value = Math.min(95, progressPct.value + 0.5)
-
-      const r = await fetch(`/history/${promptId}`)
-      if (!r.ok) continue
-      const data = await r.json()
-      const entry = data?.[promptId]
-      if (!entry) continue
-      if (entry?.status?.status_str === 'error') {
-        throw new Error(extractComfyError(entry))
-      }
-      const outputs = entry?.outputs
-      if (!outputs) continue
-
-      let lossGraphUrl: string | null = null
-      // LossGraphNode produces an image output
-      for (const node of Object.values(outputs) as any[]) {
-        if (Array.isArray(node?.images) && node.images.length > 0) {
-          const img = node.images[0]
-          lossGraphUrl = `/view?${new URLSearchParams({
-            filename: img.filename,
-            type: img.type,
-            ...(img.subfolder ? { subfolder: img.subfolder } : {}),
-            t: String(Date.now()),
-          })}`
-          break
-        }
-      }
-      // We can't read the SaveLoRA filename from /history (no output declared),
-      // but we know the prefix → just report the safe name.
-      const safeName = form.outputName.trim().replace(/[^a-zA-Z0-9_-]+/g, '_') || 'my_style'
-      return { loraFilename: safeName, lossGraphUrl }
-    } catch (e) {
-      if (e instanceof Error && (e.message.startsWith('Comfy:') || e.message.includes('LoRA'))) throw e
-    }
-  }
-  return null
-}
-
-function extractComfyError(entry: any): string {
-  const messages: any[] = entry?.status?.messages ?? []
-  const errMsg = messages.find((m) => m[0] === 'execution_error')?.[1]
-  if (errMsg?.exception_message) return `Comfy: ${errMsg.exception_message}`
-  return 'Comfy: execution failed.'
-}
+// Trainings are queued server-side and survive the window closing.
+const submitButtonLabel = computed(() =>
+  (status.value === 'submitting' || status.value === 'uploading') ? 'Adding…' : 'Add to queue')
 
 // ----- Cloud training (Replicate) ---------------------------------------
 
@@ -1333,7 +896,7 @@ async function autoFillAesthetic(): Promise<void> {
     importedAesthetic.value = out
     aestheticSource.value = 'images'
   } catch (e: any) {
-    aestheticError.value = humanizeError(e?.message ?? String(e))
+    aestheticError.value = e?.message ?? String(e)
   } finally {
     aestheticGenerating.value = false
   }
@@ -1408,24 +971,9 @@ async function startCloudTraining() {
     queuedName.value = displayName
     progressLabel.value = ''
   } catch (e: any) {
-    errorMessage.value = humanizeError(e?.message ?? String(e))
+    errorMessage.value = e?.message ?? String(e)
     status.value = 'error'
   }
-}
-
-// ----- Error message normalization --------------------------------------
-
-function humanizeError(msg: string): string {
-  if (msg.includes('out of memory') || msg.includes('CUDA out of memory')) {
-    return 'Out of GPU memory. Try enabling Offloading or lowering rank/batch size in Advanced.'
-  }
-  if (msg.includes('No prompt_id')) {
-    return "Couldn't reach the engine. Is ComfyUI running on port 8188?"
-  }
-  if (msg.includes('LoadImageTextDataSetFromFolder')) {
-    return "Couldn't load the dataset. Check that images uploaded successfully."
-  }
-  return msg
 }
 
 // ----- Cleanup ----------------------------------------------------------
@@ -1506,44 +1054,10 @@ onBeforeUnmount(() => {
       <VoiceTrainerSurface v-if="trainingKind === 'voice'" />
       <template v-else>
 
-      <!-- Compute mode -->
-      <section class="mb-8">
+      <!-- Base model (trains on Replicate) -->
+      <section class="mb-10">
         <div class="flex items-center justify-between mb-2">
-          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em]">Compute</label>        </div>
-        <div class="inline-flex rounded-lg bg-white/[0.03] border border-white/[0.06] p-0.5">
-          <button
-            class="inline-flex items-center gap-2 h-9 px-4 rounded-md text-[12.5px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            :class="computeMode === 'local'
-              ? 'bg-white/[0.08] text-white'
-              : 'text-white/55 hover:text-white/80'"
-            :disabled="!localAvailable"
-            :title="localAvailable ? undefined : LOCAL_NEEDS_ENGINE"
-            @click="localAvailable && (computeMode = 'local')"
-          >
-            <Cpu class="size-3.5" />
-            Local
-          </button>
-          <button
-            class="inline-flex items-center gap-2 h-9 px-4 rounded-md text-[12.5px] font-medium transition-colors cursor-pointer"
-            :class="computeMode === 'cloud'
-              ? 'bg-white/[0.08] text-white'
-              : 'text-white/55 hover:text-white/80'"
-            @click="computeMode = 'cloud'"
-          >
-            <Cloud class="size-3.5" />
-            Cloud (Replicate)
-          </button>
-        </div>
-        <p class="text-[11px] text-white/40 mt-2 leading-relaxed">
-          <span v-if="computeMode === 'local'">Runs on this machine. Free, but slow on Apple Silicon (Flux ~8–16 hours).</span>
-          <span v-else>Runs on a Replicate GPU. ~$3–5 per Flux style, ~20–40 min wall time. Requires a Replicate token (Settings → AI).</span>
-        </p>
-      </section>
-
-      <!-- Cloud family picker (cloud mode only) -->
-      <section v-if="computeMode === 'cloud'" class="mb-10">
-        <div class="flex items-center justify-between mb-2">
-          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em]">Base model</label>        </div>
+          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em]" title="Trains on a Replicate GPU. Needs a Replicate token in Settings.">Base model</label>        </div>
         <div class="grid grid-cols-2 gap-3">
           <button
             class="text-left rounded-lg border p-4 transition-colors cursor-pointer"
@@ -1571,82 +1085,6 @@ onBeforeUnmount(() => {
             </div>
             <p class="text-[11px] text-white/45 leading-snug">Faster + cheaper. ~$0.50–1 per style, ~10–15 min.</p>
           </button>
-        </div>
-      </section>
-
-      <!-- Local base-model picker (local mode only) -->
-      <section v-if="computeMode === 'local'" class="mb-10">
-        <div class="flex items-center justify-between mb-2">
-          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em]">Base model</label>        </div>
-        <div v-if="checkpointsLoading" class="h-10 rounded-md bg-white/[0.04] border border-white/[0.06] flex items-center px-3 text-[12px] text-white/40">
-          <Loader2 class="size-3.5 animate-spin mr-2" />
-          Loading checkpoints…
-        </div>
-        <div v-else-if="checkpointsError" class="h-10 rounded-md bg-rose-500/[0.08] border border-rose-500/30 flex items-center px-3 text-[12px] text-rose-300">
-          {{ checkpointsError }}
-        </div>
-        <select
-          v-if="checkpointOptions.length > 0"
-          v-model="form.checkpoint"
-          class="w-full h-10 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-3 text-[13px] text-white/85 transition-colors"
-        >
-          <option v-for="o in checkpointOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-        <div v-else>
-          <div class="text-[12px] text-white/55 mb-3 leading-relaxed">
-            No checkpoints found in <code class="text-white/75 bg-white/[0.04] px-1.5 py-0.5 rounded">models/checkpoints/</code>. Download one to get started — or drop your own .safetensors file in.
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div
-              v-for="c in DOWNLOADABLE_CHECKPOINTS"
-              :key="c.key"
-              class="rounded-lg bg-white/[0.02] border border-white/[0.06] p-4 flex flex-col gap-3"
-            >
-              <div>
-                <div class="flex items-center justify-between gap-2 mb-1">
-                  <span class="text-[13px] text-white font-medium truncate">{{ c.label }}</span>
-                  <span class="shrink-0 text-[11px] text-white/45 tabular-nums">{{ fmtGB(c.sizeBytes) }} GB</span>
-                </div>
-                <div class="flex items-center gap-2 mb-1.5">
-                  <span class="text-[10px] uppercase tracking-wider text-white/40 px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">{{ c.family }}</span>
-                </div>
-                <div class="text-[11px] text-white/45 leading-snug">{{ c.blurb }}</div>
-              </div>
-
-              <!-- Progress bar (downloading / preparing) -->
-              <div v-if="downloadStates[c.key]?.phase === 'downloading' || downloadStates[c.key]?.phase === 'preparing' || downloadStates[c.key]?.phase === 'checking'" class="flex flex-col gap-1.5">
-                <div class="h-1 rounded-full bg-white/[0.06] overflow-hidden">
-                  <div class="h-full bg-white/70 transition-[width] duration-300" :style="{ width: `${downloadPct(c.key)}%` }" />
-                </div>
-                <div class="flex items-center justify-between text-[10.5px] text-white/45 tabular-nums">
-                  <span v-if="downloadStates[c.key]?.phase === 'checking'">Checking…</span>
-                  <span v-else-if="downloadStates[c.key]?.phase === 'preparing'">Finishing up…</span>
-                  <span v-else>{{ fmtGB(downloadStates[c.key]?.downloaded ?? 0) }} / {{ fmtGB(downloadStates[c.key]?.total ?? 0) }} GB</span>
-                  <span>{{ downloadPct(c.key) }}%</span>
-                </div>
-              </div>
-
-              <!-- Error -->
-              <div v-else-if="downloadStates[c.key]?.phase === 'error'" class="text-[11px] text-rose-300 leading-snug">
-                {{ downloadStates[c.key]?.message }}
-              </div>
-
-              <!-- Done -->
-              <div v-else-if="downloadStates[c.key]?.phase === 'done'" class="text-[11px] text-emerald-400">
-                Downloaded — ready to use.
-              </div>
-
-              <!-- Download button -->
-              <button
-                v-if="downloadStates[c.key]?.phase === 'idle' || downloadStates[c.key]?.phase === 'error'"
-                class="inline-flex items-center justify-center gap-1.5 h-8 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-[12px] text-white/85 hover:text-white transition-colors cursor-pointer"
-                @click="downloadCheckpoint(c.key)"
-              >
-                <Download class="size-3.5" />
-                {{ downloadStates[c.key]?.phase === 'error' ? 'Retry' : 'Download' }}
-              </button>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -2180,8 +1618,8 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- Cost + time estimate (cloud mode only) -->
-      <section v-if="computeMode === 'cloud'" class="mb-6">
+      <!-- Cost + time estimate -->
+      <section class="mb-6">
         <div class="rounded-lg bg-gradient-to-br from-white/[0.05] to-white/[0.02] border border-white/15 p-4 flex items-center gap-4">
           <div class="size-9 rounded-full bg-white/[0.12] flex items-center justify-center shrink-0">
             <Cloud class="size-4 text-white/70" :stroke-width="1.75" />
@@ -2199,81 +1637,6 @@ onBeforeUnmount(() => {
               Billed to your Replicate account. {{ costEstimate.note }}
             </p>
           </div>
-        </div>
-      </section>
-
-      <!-- Advanced disclosure (local mode only — Replicate doesn't expose these knobs) -->
-      <section v-if="computeMode === 'local'" class="mb-10">
-        <button
-          class="inline-flex items-center gap-1.5 text-[12px] text-white/55 hover:text-white/85 transition-colors cursor-pointer mb-3"
-          @click="advancedOpen = !advancedOpen"
-        >
-          <ChevronDown v-if="advancedOpen" class="size-3.5" />
-          <ChevronRight v-else class="size-3.5" />
-          Local engine settings
-          <span class="text-white/30 ml-1">optimizer · loss · dtype</span>
-        </button>
-        <div v-if="advancedOpen" class="grid grid-cols-3 gap-3 p-4 rounded-lg bg-white/[0.02] border border-white/[0.05]">
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Optimizer</label>
-            <select v-model="form.optimizer" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85">
-              <option>AdamW</option><option>Adam</option><option>SGD</option><option>RMSprop</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Loss function</label>
-            <select v-model="form.lossFunction" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85">
-              <option>MSE</option><option>L1</option><option>Huber</option><option>SmoothL1</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Algorithm</label>
-            <input v-model="form.algorithm" type="text" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85" />
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Batch size</label>
-            <input v-model.number="form.batchSize" type="number" min="1" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85" />
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Grad accum steps</label>
-            <input v-model.number="form.gradAccumulationSteps" type="number" min="1" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85" />
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Seed</label>
-            <input v-model.number="form.seed" type="number" min="0" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85" />
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Training dtype</label>
-            <select v-model="form.trainingDtype" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85">
-              <option>bf16</option><option>fp32</option><option>none</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Weights dtype</label>
-            <select v-model="form.loraDtype" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85">
-              <option>bf16</option><option>fp32</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] text-white/50 mb-1.5">Checkpoint depth</label>
-            <input v-model.number="form.checkpointDepth" type="number" min="1" max="5" class="w-full h-9 rounded-md bg-white/[0.04] border border-white/[0.08] hover:border-white/15 focus:border-white/25 focus:outline-none px-2 text-[12px] text-white/85" />
-          </div>
-          <label class="flex items-center gap-2 col-span-3 text-[12px] text-white/70 mt-2">
-            <input v-model="form.gradientCheckpointing" type="checkbox" class="accent-white" />
-            Gradient checkpointing (slower per step, much less VRAM)
-          </label>
-          <label class="flex items-center gap-2 col-span-3 text-[12px] text-white/70">
-            <input v-model="form.offloading" type="checkbox" class="accent-white" />
-            CPU offload model weights (saves VRAM, slower)
-          </label>
-          <label class="flex items-center gap-2 col-span-3 text-[12px] text-white/70">
-            <input v-model="form.bucketMode" type="checkbox" class="accent-white" />
-            Resolution bucket mode
-          </label>
-          <label class="flex items-center gap-2 col-span-3 text-[12px] text-white/70">
-            <input v-model="form.bypassMode" type="checkbox" class="accent-white" />
-            Bypass mode (for quantized models)
-          </label>
         </div>
       </section>
 
@@ -2300,11 +1663,7 @@ onBeforeUnmount(() => {
             {{
               images.length < 2
                 ? 'Add at least 2 images to start.'
-                : computeMode === 'local' && !form.checkpoint
-                  ? 'Select a base model.'
-                  : computeMode === 'cloud'
-                    ? `Ready to queue on Replicate (${cloudFamily === 'flux' ? 'Flux Dev' : 'SDXL'}).`
-                    : 'Ready to train.'
+                : `Ready to queue on Replicate (${cloudFamily === 'flux' ? 'Flux Dev' : 'SDXL'}).`
             }}
           </span>
         </div>
@@ -2320,24 +1679,13 @@ onBeforeUnmount(() => {
           <button
             class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
             :disabled="!canRun"
-            @click="onStartClicked"
+            @click="startCloudTraining"
           >
             <span>{{ submitButtonLabel }}</span>
             <ArrowRight v-if="status !== 'training' && status !== 'submitting' && status !== 'uploading'" class="size-4" />
             <Loader2 v-else class="size-4 animate-spin" />
           </button>
         </div>
-      </div>
-
-      <!-- Progress bar (during training) -->
-      <div v-if="status === 'training'" class="mb-12">
-        <div class="h-1 rounded-full bg-white/[0.06] overflow-hidden">
-          <div class="h-full bg-white/70 transition-[width] duration-700" :style="{ width: `${progressPct}%` }" />
-        </div>
-        <p class="text-[11px] text-white/35 mt-2">
-          <span v-if="computeMode === 'local'">Training runs in-process and can take many minutes. Leave this tab open.</span>
-          <span v-else>Training is running on Replicate's GPUs (~20–40 min for Flux, ~10–15 min for SDXL). Keep this tab open so we can auto-download the Style when it's done.</span>
-        </p>
       </div>
 
       <!-- Output -->
@@ -2351,11 +1699,8 @@ onBeforeUnmount(() => {
             <span v-if="cloudJob?.localFilename">{{ cloudJob.localFilename }}</span>
             <span v-else>{{ outputFilename }}_*.safetensors</span>
           </div>
-          <div v-if="computeMode === 'cloud' && cloudJob?.localFilename" class="text-[11px] text-white/45">
+          <div v-if="cloudJob?.localFilename" class="text-[11px] text-white/45">
             Saved to <code class="text-white/65 bg-white/[0.04] px-1 py-0.5 rounded">models/loras/</code> — ready to use in workflows.
-          </div>
-          <div v-else class="text-[11px] text-white/45">
-            Saved under output/loras/. Move or symlink to models/loras/ to use in workflows.
           </div>
           <a
             v-if="cloudJob?.replicateUrl"
@@ -2386,7 +1731,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Replicate logs tail (cloud mode) -->
-        <details v-if="computeMode === 'cloud' && cloudJob?.logs" class="mt-3">
+        <details v-if="cloudJob?.logs" class="mt-3">
           <summary class="text-[11px] text-white/45 hover:text-white/70 cursor-pointer">View Replicate logs</summary>
           <pre class="mt-2 text-[10.5px] text-white/55 bg-black/40 border border-white/[0.06] rounded p-3 max-h-[240px] overflow-auto font-mono whitespace-pre-wrap">{{ cloudJob.logs }}</pre>
         </details>

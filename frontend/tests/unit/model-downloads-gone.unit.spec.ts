@@ -29,20 +29,12 @@ function filesUnder(dir: string): string[] {
   return out
 }
 
-/**
- * The LoRA trainer's Local branch still probes and downloads its base
- * checkpoints; Task R10.7 deletes that branch (decision 6). Until then those
- * calls answer 404 and its Local base downloads fail plainly.
- */
-const PINNED_TO_R10_7 = new Set(['app/components/LoraTrainerSurface.vue'])
-
 describe('model downloads go (R10.5)', () => {
   it('nothing in the app, server or shared code names models/status or models/download', () => {
     const hits: string[] = []
     for (const top of ['app', 'server', 'shared']) {
       for (const f of filesUnder(join(ROOT, top))) {
         const rel = relative(ROOT, f)
-        if (PINNED_TO_R10_7.has(rel)) continue
         if (/models\/(status|download)/.test(readFileSync(f, 'utf8'))) hits.push(rel)
       }
     }
