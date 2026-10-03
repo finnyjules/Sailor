@@ -44,6 +44,7 @@ import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, withRunCap, type KeptBytes, type KeptExt } from './keptBytes'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
+import { LENS_BLUR_CLASS } from '#shared/runner/lensBlur'
 import { TURNTABLE_CLASS } from '#shared/runner/turntable'
 import { turntableKeptBytes } from './generators/turntable'
 import { createFileAccess } from './fileAccess'
@@ -72,7 +73,8 @@ import { clipAtCaps, frameShapes, videoSourceShapeOf } from './video/shapes'
 import { SAVE_FRAMES_TOO_MUCH, saveFramesKeptBytes, saveSize } from './cards/saveImage'
 import { loaderBatchStartProblems } from './cards/loaderBatch'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
-import { lensStartRefusal } from './cards/lensBlur'
+import { lensNodesNeedingDepthModel, lensStartRefusal } from './cards/lensBlur'
+import { DepthModelUnavailable } from '../utils/depthModel'
 import { keepStartRefusal } from './compositor/keep'
 import { vocalsStemMaxBytes } from './generators/localModels'
 import {
@@ -214,6 +216,13 @@ export interface EngineDeps {
    * A workflow that needs one is refused plainly. Absent: none.
    */
   uninstalled?(): ReadonlySet<RunnerFamily>
+  /**
+   * R10.5 fix round 1: locally, put the depth model's files in their folder
+   * (server/utils/depthModel.ts fillDepthModel; at once when they are there).
+   * Fails with DepthModelUnavailable's plain words; `signal` ends the wait.
+   * Absent (hosted: the image ships the files): nothing to fill.
+   */
+  depthModel?(signal?: AbortSignal): Promise<void>
   /** The backup-service switch (config.ts runnerBackup). Absent: never switch. */
   backup?(): BackupSettings
   webhookUrl(): string | null
@@ -2842,6 +2851,19 @@ export function createEngine(deps: EngineDeps) {
     }))
   }
 
+  async function depthModelAtStart(prompts: ApiPrompt[], signal?: AbortSignal): Promise<void> {
+    if (!deps.depthModel || deps.hosted()) return
+    const families = deps.families?.() ?? NO_FAMILIES
+    const [nodeId] = prompts.flatMap(p => lensNodesNeedingDepthModel(p, families))
+    if (nodeId === undefined) return
+    try { await deps.depthModel(signal) }
+    catch (e) {
+      if (signal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400)
+      const words = e instanceof DepthModelUnavailable ? e.message : 'Sailor couldn’t get the depth model ready. Try again.'
+      throw refuse(words, 400, { nodeId, classType: LENS_BLUR_CLASS })
+    }
+  }
+
   /** The input folder (where the browser's bakes are), or null when the store can't say. */
   function inputRoot(): string | null {
     try { return deps.results.pathOf ? dirname(deps.results.pathOf({ type: 'input', subfolder: '', filename: 'probe' })) : null }
@@ -2851,6 +2873,9 @@ export function createEngine(deps: EngineDeps) {
   async function startRun(i: StartRunInput): Promise<LegStarted> {
     const prep = await prepareStart(i)
     const { prompts, chosenAtStart, nodeErrors } = prep
+    // R10.5 fix round 1: Lens · Depth of field's depth model, fetched now if it is missing (locally), before
+    // anything is held or any paid node runs; a fetch that fails refuses the run in its own plain words.
+    await depthModelAtStart(prompts, i.signal)
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))
 
     const now = deps.now()

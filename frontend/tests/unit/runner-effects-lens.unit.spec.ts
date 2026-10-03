@@ -22,10 +22,10 @@ import {
 import { effectCores } from '~~/server/runner/effects/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { decodeRaw, type PictureSource } from '~~/server/runner/compositor/decode'
-import { __setLensDepthModelForTests, __setLensWorkBudgetForTests, LENS_MAX_SCALE, lensFocusOf, lensParamsOf, lensScale, lensStartRefusal, lensWork } from '~~/server/runner/cards/lensBlur'
+import { __setLensDepthModelForTests, __setLensWorkBudgetForTests, LENS_DEPTH_FAILED, LENS_MAX_SCALE, lensFocusOf, lensParamsOf, lensScale, lensStartRefusal, lensWork } from '~~/server/runner/cards/lensBlur'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { runnerFamilies } from '~~/server/runner/config'
-import { DEPTH_MODEL, DEPTH_MODEL_FILES, DEPTH_MODEL_MAX_SIDE, depthModelReady } from '~~/server/utils/depthModel'
+import { DEPTH_MODEL, DEPTH_MODEL_FILES, DEPTH_MODEL_MAX_SIDE, DepthModelUnavailable, depthModelReady } from '~~/server/utils/depthModel'
 import { GRAPH_NODE_CREDITS, priceGraph } from '~~/server/utils/priceBook'
 import { EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_PICTURE_TOO_LARGE_HOSTED, EFFECT_TOO_MUCH_WORK } from '#shared/runner/effects'
 import { EFFECT_TIMEOUT_MESSAGE } from '~~/server/runner/compositor/worker'
@@ -324,6 +324,19 @@ describe('Lens · Depth of field through the runner', () => {
       expect(spy).not.toHaveBeenCalled()
     }
     finally { __setLensWorkBudgetForTests(null) }
+  })
+
+  it('a depth model that can\'t be fetched fails the node in the fill\'s own plain words (R10.5 fix round 1)', async () => {
+    const c = caseNamed('the model\'s depth, resized and normalised')
+    const words = 'Sailor couldn’t download the depth model (config.json, no answer). Check the connection and try again.'
+    const model = vi.fn(async (_rgb: Uint8Array, _w: number, _h: number, signal?: AbortSignal) => {
+      expect(signal).toBeInstanceOf(AbortSignal) // the run's Stop reaches the download
+      throw new DepthModelUnavailable(words)
+    })
+    __setLensDepthModelForTests(model)
+    await expect(runPlan(c)).rejects.toThrow(words)
+    __setLensDepthModelForTests(async () => { throw new Error('onnx exploded') })
+    await expect(runPlan(c)).rejects.toThrow(LENS_DEPTH_FAILED)
   })
 
   it('Stop: nothing is kept, the model is not asked', async () => {

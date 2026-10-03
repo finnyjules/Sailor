@@ -26,7 +26,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream, existsSync, statSync } from 'node:fs'
-import { mkdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { isHosted } from './deployMode'
@@ -87,79 +87,192 @@ export function depthModelFileUrl(path: string): string {
   return `https://huggingface.co/${DEPTH_MODEL}/resolve/${DEPTH_MODEL_REVISION}/${path}`
 }
 
+/** No bytes for this long: the download has stalled and is given up. */
+export const DEPTH_FILL_STALL_MS = 30_000
+/** The whole download (99.1 MB) may take at most this long. */
+export const DEPTH_FILL_OVERALL_MS = 15 * 60_000
+/** A `*.part` older than this is left from a process that died mid-download, and is swept. */
+export const DEPTH_FILL_STALE_PART_MS = 60 * 60_000
+
 export interface DepthModelFill {
-  fetch: (url: string) => Promise<Response>
+  fetch: (url: string, init: { signal: AbortSignal }) => Promise<Response>
   files: readonly { path: string; bytes: number; sha256: string }[]
+  stallMs: number
+  overallMs: number
 }
 
-const DEFAULT_FILL: DepthModelFill = { fetch: url => globalThis.fetch(url), files: DEPTH_MODEL_FILES }
+const DEFAULT_FILL: DepthModelFill = {
+  fetch: (url, init) => globalThis.fetch(url, init),
+  files: DEPTH_MODEL_FILES,
+  stallMs: DEPTH_FILL_STALL_MS,
+  overallMs: DEPTH_FILL_OVERALL_MS,
+}
 let fillDeps: DepthModelFill = DEFAULT_FILL
 
-/** Tests only: fetch and file list `depthPipeline` fills with (undefined = the real ones). */
+/** Tests only: fetch, file list and limits `depthPipeline` fills with (undefined = the real ones). */
 export function setDepthModelFillForTests(deps?: Partial<DepthModelFill>): void {
   fillDeps = { ...DEFAULT_FILL, ...deps }
   pipePromise = null
-  filling = null
+  shared = null
   readyAt = null
 }
 
-async function fetchOne(dir: string, f: DepthModelFill['files'][number], doFetch: DepthModelFill['fetch']): Promise<void> {
-  const dest = join(dir, DEPTH_MODEL, f.path)
-  await mkdir(dirname(dest), { recursive: true })
-  const res = await doFetch(depthModelFileUrl(f.path))
-  if (!res.ok || !res.body) throw new Error(`Sailor couldn’t download the depth model (${f.path}, ${res.status}). Check the connection and try again.`)
-  // Written beside the file and renamed in only once whole and checked: a cut
-  // download never leaves a file the loader would read.
-  const part = `${dest}.${randomUUID()}.part`
-  const hash = createHash('sha256')
-  let bytes = 0
-  try {
-    const out = createWriteStream(part)
-    const done = new Promise<void>((resolve, reject) => { out.on('finish', () => resolve()); out.on('error', reject) })
-    const reader = res.body.getReader()
-    for (;;) {
-      const { done: end, value } = await reader.read()
-      if (end) break
-      bytes += value.byteLength
-      if (bytes > f.bytes) { await reader.cancel().catch(() => {}); throw new Error(`The depth model Sailor downloaded was damaged (${f.path} too large). Try again.`) }
-      hash.update(value)
-      if (!out.write(value)) await new Promise<void>(r => out.once('drain', () => r()))
-    }
-    out.end()
-    await done
-    if (bytes !== f.bytes || hash.digest('hex') !== f.sha256) throw new Error(`The depth model Sailor downloaded was damaged (${f.path} didn’t match its checksum). Try again.`)
-    await rename(part, dest)
-  }
-  catch (err) {
-    await rm(part, { force: true })
-    throw err
+/** Why the depth model can't be had: its message is plain words, shown as is (the depth route, Lens · Depth of field). */
+export class DepthModelUnavailable extends Error {}
+
+const NOT_DOWNLOADED = (why: string) => new DepthModelUnavailable(`Sailor couldn’t download the depth model (${why}). Check the connection and try again.`)
+const DAMAGED = (why: string) => new DepthModelUnavailable(`The depth model Sailor downloaded was damaged (${why}). Try again.`)
+const stopped = () => new Error('Stopped')
+
+function present(dir: string, f: DepthModelFill['files'][number]): boolean {
+  const p = join(dir, DEPTH_MODEL, f.path)
+  try { return existsSync(p) && statSync(p).size === f.bytes }
+  catch { return false }
+}
+
+/** `*.part` files under the model's folder older than an hour: a process killed mid-download left them. */
+async function sweepStaleParts(dir: string, now = Date.now()): Promise<void> {
+  const root = join(dir, DEPTH_MODEL)
+  let names: string[]
+  try { names = (await readdir(root, { recursive: true })).map(String) }
+  catch { return }
+  for (const name of names) {
+    if (!name.endsWith('.part')) continue
+    const p = join(root, name)
+    try { if (now - statSync(p).mtimeMs > DEPTH_FILL_STALE_PART_MS) await rm(p, { force: true }) }
+    catch {}
   }
 }
 
-let filling: Promise<void> | null = null
+async function fetchOne(dir: string, f: DepthModelFill['files'][number], deps: DepthModelFill, signal: AbortSignal): Promise<void> {
+  const dest = join(dir, DEPTH_MODEL, f.path)
+  await mkdir(dirname(dest), { recursive: true })
+  // Written beside the file and renamed in only once whole and checked: a cut
+  // download, a Stop or a stall never leaves a file the loader would read.
+  const part = `${dest}.${randomUUID()}.part`
+  const ctl = new AbortController()
+  let why: 'stall' | 'overall' | null = null
+  const onStop = () => ctl.abort()
+  signal.addEventListener('abort', onStop, { once: true })
+  if (signal.aborted) ctl.abort()
+  const overall = setTimeout(() => { why ??= 'overall'; ctl.abort() }, deps.overallMs)
+  let stall: ReturnType<typeof setTimeout> | undefined
+  const kick = () => { clearTimeout(stall); stall = setTimeout(() => { why ??= 'stall'; ctl.abort() }, deps.stallMs) }
+  let out: ReturnType<typeof createWriteStream> | null = null
+  try {
+    kick()
+    let res: Response
+    try { res = await deps.fetch(depthModelFileUrl(f.path), { signal: ctl.signal }) }
+    catch (err) { if (ctl.signal.aborted) throw err; throw NOT_DOWNLOADED(`${f.path}, no answer`) }
+    if (ctl.signal.aborted) throw new Error('aborted')
+    if (!res.ok || !res.body) throw NOT_DOWNLOADED(`${f.path}, ${res.status}`)
+    const reader = res.body.getReader()
+    // A body that ignores the signal is cancelled by hand, so a read never outlives Stop or a stall.
+    ctl.signal.addEventListener('abort', () => { reader.cancel().catch(() => {}) }, { once: true })
+    const hash = createHash('sha256')
+    let bytes = 0
+    const stream = createWriteStream(part)
+    out = stream
+    const done = new Promise<void>((resolve, reject) => { stream.on('finish', () => resolve()); stream.on('error', reject) })
+    for (;;) {
+      const { done: end, value } = await reader.read()
+      if (ctl.signal.aborted) throw new Error('aborted')
+      if (end) break
+      kick()
+      bytes += value.byteLength
+      if (bytes > f.bytes) { await reader.cancel().catch(() => {}); throw DAMAGED(`${f.path} too large`) }
+      hash.update(value)
+      if (!stream.write(value)) await new Promise<void>(r => stream.once('drain', () => r()))
+    }
+    stream.end()
+    await done
+    if (bytes !== f.bytes || hash.digest('hex') !== f.sha256) throw DAMAGED(`${f.path} didn’t match its checksum`)
+    await rename(part, dest)
+  }
+  catch (err) {
+    out?.destroy()
+    await rm(part, { force: true })
+    if (signal.aborted) throw stopped()
+    if (why === 'stall') throw NOT_DOWNLOADED(`${f.path}, nothing arrived for ${Math.round(deps.stallMs / 1000)} s`)
+    if (why === 'overall') throw NOT_DOWNLOADED(`${f.path}, it took too long`)
+    if (err instanceof DepthModelUnavailable) throw err
+    throw NOT_DOWNLOADED(`${f.path}, the download broke off`)
+  }
+  finally {
+    clearTimeout(overall)
+    clearTimeout(stall)
+    signal.removeEventListener('abort', onStop)
+  }
+}
+
+/** The one download in flight, shared by every caller waiting on it. */
+interface SharedFill { promise: Promise<void>; controller: AbortController; waiters: number }
+let shared: SharedFill | null = null
+
+/** `p`, or a Stop error as soon as `signal` aborts (`p` itself goes on). */
+function untilStopped<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p
+  if (signal.aborted) return Promise.reject(stopped())
+  return new Promise<T>((resolve, reject) => {
+    const on = () => reject(stopped())
+    signal.addEventListener('abort', on, { once: true })
+    p.then(
+      (v) => { signal.removeEventListener('abort', on); resolve(v) },
+      (e) => { signal.removeEventListener('abort', on); reject(e) },
+    )
+  })
+}
+
+/** Whether every depth model file is in `depthModelDir()` at its size (locally, before a run is held: engine.ts). */
+export function depthModelFilesPresent(deps: DepthModelFill = fillDeps): boolean {
+  const dir = depthModelDir()
+  return !!dir && deps.files.every(f => present(dir, f))
+}
 
 /**
  * Locally, put every depth model file that is missing or the wrong size into
  * `depthModelDir()`, from the pinned revision, each checked against its
- * sha256 (step 3, R10.5). One fill at a time; a failure lets the next call
- * retry. Hosted never downloads: the image ships the files.
+ * sha256 (step 3, R10.5). Stale `*.part` files are swept first.
+ *   - One download at a time, shared by every caller; a failure lets the next
+ *     call retry.
+ *   - `signal` (a run's Stop) ends this caller's wait at once. The download
+ *     itself is cancelled, its `.part` deleted, only when no caller is left
+ *     waiting on it: one run's Stop never breaks another run's fill.
+ *   - It gives up when nothing arrives for `stallMs` (30 s) or the whole takes
+ *     longer than `overallMs` (15 min).
+ * Failures are DepthModelUnavailable, in plain words. Hosted never
+ * downloads: the image ships the files.
  */
-export function fillDepthModel(deps: DepthModelFill = fillDeps): Promise<void> {
-  if (isHosted()) return Promise.reject(new Error('The depth model isn\'t installed on this server.'))
+export async function fillDepthModel(deps: DepthModelFill = fillDeps, signal?: AbortSignal): Promise<void> {
+  if (isHosted()) throw new DepthModelUnavailable('The depth model isn\'t installed on this server.')
   const dir = depthModelDir()
-  if (!dir) return Promise.reject(new Error('Sailor can\'t find a folder for the depth model. Set NUXT_DEPTH_MODEL_DIR.'))
-  if (!filling) {
-    filling = (async () => {
+  if (!dir) throw new DepthModelUnavailable('Sailor can\'t find a folder for the depth model. Set NUXT_DEPTH_MODEL_DIR.')
+  if (deps.files.every(f => present(dir, f))) return
+  if (signal?.aborted) throw stopped()
+  if (!shared) {
+    const s: SharedFill = { controller: new AbortController(), waiters: 0, promise: Promise.resolve() }
+    s.promise = (async () => {
+      await sweepStaleParts(dir)
       for (const f of deps.files) {
-        const p = join(dir, DEPTH_MODEL, f.path)
-        let have = false
-        try { have = existsSync(p) && statSync(p).size === f.bytes }
-        catch {}
-        if (!have) await fetchOne(dir, f, deps.fetch)
+        if (!present(dir, f)) await fetchOne(dir, f, deps, s.controller.signal)
       }
-    })().finally(() => { filling = null })
+    })().finally(() => { if (shared === s) shared = null })
+    s.promise.catch(() => {}) // every waiter may have left: never an unhandled rejection
+    shared = s
   }
-  return filling
+  const s = shared
+  s.waiters++
+  try {
+    await untilStopped(s.promise, signal)
+  }
+  finally {
+    s.waiters--
+    // The last caller stopped: cancel the download (its `.part` is deleted), and let the next caller start afresh.
+    if (s.waiters === 0 && signal?.aborted) {
+      s.controller.abort()
+      if (shared === s) shared = null
+    }
+  }
 }
 
 let pipePromise: Promise<any> | null = null
@@ -167,12 +280,13 @@ let pipePromise: Promise<any> | null = null
 /**
  * The depth-estimation pipeline, loaded once, always from the files on disk
  * (transformers.js never downloads: `allowRemoteModels` off). Locally the
- * files are first filled by `fillDepthModel`; hosted they ship in the image.
+ * files are first filled by `fillDepthModel` (at once when they are there);
+ * hosted they ship in the image.
  */
-export function depthPipeline(): Promise<any> {
+export async function depthPipeline(signal?: AbortSignal): Promise<any> {
+  if (!isHosted()) await fillDepthModel(fillDeps, signal)
   if (!pipePromise) {
-    pipePromise = (isHosted() ? Promise.resolve() : fillDepthModel())
-      .then(() => import('@huggingface/transformers'))
+    pipePromise = import('@huggingface/transformers')
       .then(({ env, pipeline }) => {
         const dir = depthModelDir()
         if (dir) env.localModelPath = dir
@@ -194,8 +308,8 @@ export interface RawDepth { w: number; h: number; data: Float32Array }
  * rescale and normalise, then the model), without the resize back: the
  * runner resizes it to the picture itself (bicubic, as _depth.py does).
  */
-export async function depthOfRgb(rgb: Uint8Array, w: number, h: number): Promise<RawDepth> {
-  const pipe = await depthPipeline()
+export async function depthOfRgb(rgb: Uint8Array, w: number, h: number, signal?: AbortSignal): Promise<RawDepth> {
+  const pipe = await depthPipeline(signal)
   const { RawImage } = await import('@huggingface/transformers')
   const image = new RawImage(rgb, w, h, 3)
   const inputs = await pipe.processor(image)

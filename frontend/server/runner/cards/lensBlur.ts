@@ -49,7 +49,7 @@ import { PICTURE_UNREAD, keyOf, wired, type Wired } from '../effects/io'
 import { effectParams, pictureHeader, plain, png8 } from '../effects/plan'
 import { floatReadBy, keptTensorsBehind } from '../effects/tensorFiles'
 import { effectCores } from '../effects/cores'
-import { DEPTH_MODEL_MAX_SIDE, depthOfRgb, type RawDepth } from '../../utils/depthModel'
+import { DEPTH_MODEL_MAX_SIDE, DepthModelUnavailable, depthOfRgb, type RawDepth } from '../../utils/depthModel'
 import { linkPictureBound, pictureSize } from '../../utils/graphInputPixels'
 import { parseInputFileRef } from '../inputs'
 
@@ -182,7 +182,7 @@ export function lensParamsOf(inputs: Record<string, unknown>): Record<string, un
 /** At most this many depths kept (_depth.py keeps six). */
 const DEPTH_CACHE_MAX = 6
 const depthCache = new Map<string, RawDepth>()
-type DepthModel = (rgb: Uint8Array, w: number, h: number) => Promise<RawDepth>
+type DepthModel = (rgb: Uint8Array, w: number, h: number, signal?: AbortSignal) => Promise<RawDepth>
 let model: DepthModel = depthOfRgb
 
 /** Tests: the model (a stand-in or a spy), and the cache emptied; null puts the real one back. */
@@ -213,8 +213,13 @@ async function rawDepthOf(bytes: Uint8Array, source: Wired['source'], signal: Ab
     .removeAlpha().raw().toBuffer({ resolveWithObject: true })
   if (signal.aborted) throw new Error('Stopped')
   let depth: RawDepth
-  try { depth = await model(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), info.width, info.height) }
-  catch { throw new Error(LENS_DEPTH_FAILED) }
+  try { depth = await model(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), info.width, info.height, signal) }
+  catch (err) {
+    if (signal.aborted) throw new Error('Stopped')
+    // R10.5 fix round 1: the model's own plain words ("couldn't download … check the connection").
+    if (err instanceof DepthModelUnavailable) throw err
+    throw new Error(LENS_DEPTH_FAILED)
+  }
   if (!(depth.w > 0 && depth.h > 0 && depth.data.length === depth.w * depth.h)) throw new Error(LENS_DEPTH_FAILED)
   // An answer that arrives after Stop is kept (it is the picture's own depth), but nothing else is done.
   if (depthCache.size >= DEPTH_CACHE_MAX) depthCache.delete(depthCache.keys().next().value!)
@@ -348,6 +353,16 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
 }
 
 // ── Before the hold (R7.9 fix round 1: never start a run that fails at this node's turn) ──
+
+/**
+ * R10.5 fix round 1: the Lens · Depth of field nodes that read the depth model
+ * (no depth wired). Locally the run fills the model's folder before anything
+ * is held, so a run never pays upstream and then fails for want of the model.
+ */
+export function lensNodesNeedingDepthModel(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): string[] {
+  if (!familyOn('lens-blur', families)) return []
+  return Object.entries(prompt).filter(([, n]) => n.class_type === LENS_BLUR_CLASS && !isLink(n.inputs?.depth)).map(([id]) => id)
+}
 
 /**
  * Every Lens · Depth of field the runner takes in a prompt, checked before

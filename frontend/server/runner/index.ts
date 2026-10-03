@@ -22,6 +22,7 @@ import { assertSpendAllowed } from '../utils/systemControls'
 import { moderatePrompt } from '../utils/moderation'
 import { ownerOf, recordOwner } from '../utils/resourceOwners'
 import { isHosted } from '../utils/deployMode'
+import { depthModelFilesPresent, fillDepthModel } from '../utils/depthModel'
 import { captureError } from '../utils/observe'
 import { nativeGenerationPost } from '../native/router'
 import { storeDir } from '../utils/dataDir'
@@ -85,6 +86,8 @@ export function getEngine(): Engine {
     hosted: isHosted,
     families: runnerFamilies,
     uninstalled: runnerFamiliesUninstalled,
+    // R10.5 fix round 1: locally the depth model is fetched at a run's start, before any hold (hosted: shipped).
+    depthModel: signal => (isHosted() || depthModelFilesPresent() ? Promise.resolve() : fillDepthModel(undefined, signal)),
     backup: runnerBackup,
     webhookUrl: () => {
       const base = webhookBaseUrl()
