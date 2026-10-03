@@ -59,6 +59,18 @@ const savedSwitch = process.env.NUXT_RELIGHT_SURFACES
 function setHosted(): void { process.env[CLERK_KEY] = 'sk_test_hosted' }
 function setLocal(): void { delete process.env[CLERK_KEY] }
 
+// A real hosted upload always records an input_uploads row for its owner (LC11:
+// hosted reads are owner-checked). Fixture files written straight to disk need the same row.
+function recordOwnedInput(userId: string, filename = 'photo.png'): void {
+  const key = canonicalUploadKey('input', '', filename)
+  __setInputUploadsDbForTests({
+    query: async (sql: string, params?: unknown[]) =>
+      sql.includes('SELECT user_id FROM input_uploads') && params?.[0] === key
+        ? { rows: [{ user_id: userId }] }
+        : { rows: [] },
+  })
+}
+
 function jsonResponse(body: unknown, ok = true, status = 200): any {
   return { ok, status, json: async () => body, text: async () => JSON.stringify(body), statusText: ok ? 'OK' : 'Error' }
 }
@@ -280,6 +292,7 @@ describe('POST /api/depth/surfaces', () => {
     bindMeterContext({ userId: 'u1' })
     fakeLedger.setAvailable(100)
     await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    recordOwnedInput('u1')
     const fetchMock = makeFalFetchMock('result-fetch-fails')
     vi.stubGlobal('fetch', fetchMock)
 
@@ -296,6 +309,7 @@ describe('POST /api/depth/surfaces', () => {
     bindMeterContext({ userId: 'u1' })
     fakeLedger.setAvailable(100)
     await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    recordOwnedInput('u1')
     const fetchMock = makeFalFetchMock('no-normal-map')
     vi.stubGlobal('fetch', fetchMock)
 
@@ -464,6 +478,7 @@ describe('POST /api/depth/surfaces — final-review fixes', () => {
     bindMeterContext({ userId: 'u1' })
     fakeLedger.setAvailable(0)
     await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    recordOwnedInput('u1')
     const fetchMock = makeFalFetchMock('ok')
     vi.stubGlobal('fetch', fetchMock)
     const event = makeEvent({ filename: 'photo.png', type: 'input' }, 'u1')
@@ -476,9 +491,10 @@ describe('POST /api/depth/surfaces — final-review fixes', () => {
   it('hosted, unmetered spend refused: 503 { off: true }, fal never called', async () => {
     setHosted()                                   // no bindMeterContext → no meter context
     await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    recordOwnedInput('u1')
     const fetchMock = makeFalFetchMock('ok')
     vi.stubGlobal('fetch', fetchMock)
-    const event = makeEvent({ filename: 'photo.png', type: 'input' })
+    const event = makeEvent({ filename: 'photo.png', type: 'input' }, 'u1')
     const res = await handler(event)
     expect(event.node.res.statusCode).toBe(503)
     expect(res).toMatchObject({ off: true })
